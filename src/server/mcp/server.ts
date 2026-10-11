@@ -271,7 +271,9 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     version: "1.3.0",
   });
 
-  const writable = access.write;
+  // This deployment is a read-only research replica, including for API keys
+  // and previously issued OAuth tokens that might carry a write scope.
+  const writable: boolean = false;
   // Nothing is registered for a credential that cannot even read. serveMcp
   // refuses those before reaching this, so this is the second lock rather than
   // the first — but the first lock is exactly what was missing: `read` was
@@ -689,9 +691,11 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         case "path":
           return text(dailyNotePath(date));
         case "append":
+          if (!writable) return err("This deployment is read-only.");
           if (!content) return err("content is required for append");
           return text(`Appended to ${w(dailyAppend(content, date), "daily_note")}`);
         case "prepend":
+          if (!writable) return err("This deployment is read-only.");
           if (!content) return err("content is required for prepend");
           return text(`Prepended to ${w(dailyPrepend(content, date), "daily_note")}`);
         default:

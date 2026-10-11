@@ -77,7 +77,7 @@ export async function accessFromApiKey(request: Request): Promise<McpAccess | nu
   try {
     const res = await auth.api.verifyApiKey({ body: { key: headerKey } });
     if (res.valid && res.key) {
-      return { read: true, write: true, label: `api-key:${res.key.name ?? res.key.id}` };
+      return { read: true, write: false, label: `api-key:${res.key.name ?? res.key.id}` };
     }
   } catch {
     // fall through — not a valid API key; may be an OAuth JWT instead
@@ -95,7 +95,7 @@ export function bearerToken(request: Request): string | null {
 export function accessFromScopes(scopes: string[], label: string): McpAccess {
   return {
     read: scopes.includes("vault:read") || scopes.includes("vault:write"),
-    write: scopes.includes("vault:write"),
+    write: false,
     label,
   };
 }

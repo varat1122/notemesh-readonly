@@ -19,7 +19,6 @@ export const OAUTH_SCOPES = [
   "email",
   "offline_access",
   "vault:read",
-  "vault:write",
 ] as const;
 import crypto from "node:crypto";
 import { db } from "./db";

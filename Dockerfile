@@ -6,6 +6,7 @@ RUN corepack enable && apt-get update && apt-get install -y --no-install-recomme
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
+RUN pnpm exec vitest run src/server/mcp/readonly-deployment.test.ts && pnpm exec tsc --noEmit
 RUN pnpm build
 
 # Runtime stage
@@ -25,6 +26,9 @@ RUN apt-get update \
 RUN npm install -g obsidian-headless@0.0.14
 COPY --from=build /app/.output ./.output
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY scripts/ob-readonly.mjs /app/ob-readonly.mjs
+RUN chmod 755 /app/ob-readonly.mjs
+ENV OB_BIN=/app/ob-readonly.mjs
 # The server runs as the image's unprivileged `node` user (see the
 # entrypoint), so a compromise of the process — the class of thing the
 # frontmatter parser fix in 1.2.0 closed — does not hand out root in the

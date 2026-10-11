@@ -88,7 +88,7 @@ function unauthorized(): Response {
         // metadata document and asks for whatever is listed there.
         "WWW-Authenticate":
           `Bearer resource_metadata="${env.baseUrl}/.well-known/oauth-protected-resource", ` +
-          `scope="vault:read vault:write"`,
+          `scope="vault:read"`,
       },
     },
   );
