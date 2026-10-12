@@ -1,0 +1,15 @@
+import { afterAll, beforeAll, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+const root=fs.mkdtempSync(path.join(os.tmpdir(),"intake-test-"));process.env.DATA_DIR=root;
+const input={sourceChat:"SYNTHETIC TEST",notes:[{title:"Test",eventDate:null,userInput:"Synthetic input",analysis:"Synthetic interpretation",relatedNotes:[]}]};
+let client:Client;let server:Awaited<ReturnType<typeof import("./mcp/server")["createMcpServer"]>>;
+beforeAll(async()=>{const {createMcpServer}=await import('./mcp/server');server=createMcpServer({read:true,write:false,intake:true,label:'test'});client=new Client({name:'intake-test',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(b);await client.connect(a);});
+afterAll(async()=>{await client.close();await server.close();const {db}=await import('./db');db().close();delete process.env.DATA_DIR;});
+it('offers only additive submission, no vault mutations, with write annotation',async()=>{const {tools}=await client.listTools();expect(tools.find(t=>t.name==='submit_investment_notes')?.annotations).toMatchObject({readOnlyHint:false,destructiveHint:false,idempotentHint:true});expect(tools.map(x=>x.name)).not.toContain('create_note');expect(tools.map(x=>x.name)).not.toContain('update_note');expect(tools.map(x=>x.name)).not.toContain('delete_note');});
+it('submits through MCP, deduplicates retries, leaves vault empty',async()=>{const a=await client.callTool({name:'submit_investment_notes',arguments:input});const b=await client.callTool({name:'submit_investment_notes',arguments:input});expect(a.isError).not.toBe(true);expect(a.content).toEqual(b.content);expect(fs.readdirSync(path.join(root,'vault'))).toEqual([]);});
+it('rejects malformed and oversized input',async()=>{const {enqueue}=await import('./intake');expect(()=>enqueue({...input,notes:[]})).toThrow();expect(()=>enqueue({...input,notes:[{...input.notes[0],analysis:'x'.repeat(30001)}]})).toThrow();expect(()=>enqueue({...input,extra:'forbidden'})).toThrow();});
+it('persists queue and acknowledges without touching vault',async()=>{const {enqueue,nextIntake,acknowledge,intakeStatus}=await import('./intake');const r=enqueue(input);expect(nextIntake()?.id).toBe(r.id);expect(intakeStatus(r.id).status).toBe('queued');acknowledge({id:r.id,status:'imported',paths:['00_Inbox/test.md'],message:'fixture'});expect(nextIntake()).toBe(null);expect(enqueue(input).status).toBe('imported');expect(()=>intakeStatus('0'.repeat(64))).toThrow();expect(fs.readdirSync(path.join(root,'vault'))).toEqual([]);});

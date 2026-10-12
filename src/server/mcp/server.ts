@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { registerIntakeTools } from "./intake-tools";
 import { getSetting } from "../db";
 import { withBoundary, fenceEach, fenceDeep } from "./boundary";
 import { signAttachmentUrl } from "../vault/attachment-url";
@@ -53,6 +54,7 @@ import {
 } from "../vault/queries";
 
 export interface McpAccess {
+  intake?: boolean;
   read: boolean;
   write: boolean;
   label: string; // e.g. "api-key:xyz" or "oauth:<client name>"
@@ -280,6 +282,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
   // computed from the token's scopes and then never consulted here, so every
   // read tool below registered for any credential at all.
   if (!access.read) return server;
+  if (access.intake === true) registerIntakeTools(server);
 
   // ---- Files ----
   server.registerTool(

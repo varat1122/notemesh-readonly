@@ -96,6 +96,7 @@ export function accessFromScopes(scopes: string[], label: string): McpAccess {
   return {
     read: scopes.includes("vault:read") || scopes.includes("vault:write"),
     write: false,
+    intake: scopes.includes("inbox:submit"),
     label,
   };
 }

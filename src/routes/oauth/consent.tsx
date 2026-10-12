@@ -5,6 +5,7 @@ import { authClient } from "~/lib/auth-client";
 import { RepoFooter } from "~/components/AdminShell";
 
 const SCOPE_DESCRIPTIONS: Record<string, string> = {
+  "inbox:submit": "Submit new analysis to the Investment OS intake queue for automatic addition by your computer. Cannot edit or delete existing notes.",
   "vault:read": "Read your notes: search, list, and open any note in the vault",
   "vault:write": "Edit your vault: create, modify, and organize notes",
   openid: "Confirm your identity",
