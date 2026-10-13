@@ -965,7 +965,12 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         "warn (under 100 MB free) or critical (under 50 MB; writes that would not leave the reserve are refused).",
       inputSchema: {},
     },
-    safe(() => json({ ...vaultInfo(), sync: syncBackend().status() })),
+    safe(() => json({ ...vaultInfo(), sync: syncBackend().status(), connection: {
+      build: "intake-diagnostics-20261013",
+      read: access.read, submitAnalysis: access.intake === true,
+      editExistingNotes: false, deleteNotes: false,
+      submissionRequires: "vault:read inbox:submit",
+    } })),
   );
 
   server.registerTool(

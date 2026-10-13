@@ -38,6 +38,7 @@ export interface ToolDoc {
   params: ToolParam[];
   /** Needs a write-scoped credential. Derived, not declared — see listMcpTools. */
   write: boolean;
+  intake: boolean;
   /** What the tool declares about itself to clients. Declared, unlike `write`; the test checks the two agree. */
   annotations?: ToolAnnotationsDoc;
 }
@@ -85,7 +86,7 @@ function paramsOf(schema: unknown): ToolParam[] {
  */
 export async function listMcpTools(): Promise<ToolDoc[]> {
   const [all, readOnly] = await Promise.all([
-    toolsFor({ read: true, write: true, label: "admin-catalog" }),
+    toolsFor({ read: true, write: false, intake: true, label: "admin-catalog" }),
     toolsFor({ read: true, write: false, label: "admin-catalog" }),
   ]);
   const readNames = new Set(readOnly.map((t) => t.name));
@@ -96,7 +97,8 @@ export async function listMcpTools(): Promise<ToolDoc[]> {
       title: t.title ?? (t.annotations?.title as string | undefined),
       description: t.description,
       params: paramsOf(t.inputSchema),
-      write: !readNames.has(t.name),
+      write: t.annotations?.readOnlyHint !== true,
+      intake: !readNames.has(t.name),
       annotations: t.annotations
         ? {
             readOnlyHint: t.annotations.readOnlyHint,
