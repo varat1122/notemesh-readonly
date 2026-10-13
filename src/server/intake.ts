@@ -6,12 +6,12 @@ import { env } from "./env";
 
 export const intakeSchema = z.object({
   sourceChat: z.string().min(1).max(120).describe("Exact chat title, e.g. Micro 121026"),
-  sourceUrl: z.string().url().max(500).optional().describe("Actual chat/source URL only if known; never invent"),
+  sourceUrl: z.string().url().max(500).optional().describe("Optional original chat or source URL"),
   notes: z.array(z.object({
     title: z.string().min(1).max(160),
     eventDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().describe("Event date if known, otherwise null; do not substitute import date"),
-    userInput: z.string().min(1).max(30000).describe("Relevant user-provided material, separate from model analysis; do not dump entire chat"),
-    analysis: z.string().min(1).max(30000).describe("Completed analysis in Markdown: separate Fact/Guidance/Analyst View/Interpretation, mechanism, risks, evidence gaps and thesis impact; no invented facts"),
+    userInput: z.string().min(1).max(30000).describe("Relevant user-provided source material, stored separately from analysis"),
+    analysis: z.string().min(1).max(30000).describe("Completed analysis in Markdown, including evidence categories, mechanisms, risks, evidence gaps and thesis impact"),
     relatedNotes: z.array(z.string().min(1).max(350)).max(30).describe("Exact existing vault-relative Markdown paths found by search, for company/theme/concept/thesis backlinks"),
   }).strict()).min(1).max(20),
 }).strict();
