@@ -282,7 +282,11 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
   // computed from the token's scopes and then never consulted here, so every
   // read tool below registered for any credential at all.
   if (!access.read) return server;
-  if (access.intake === true) registerIntakeTools(server);
+  // OAuth clients must be able to discover the scoped tool before approving
+  // its scope. The handlers enforce the grant on every invocation.
+  if (access.intake === true || access.label.startsWith("oauth:")) {
+    registerIntakeTools(server, access.intake === true);
+  }
 
   // ---- Files ----
   server.registerTool(
@@ -966,7 +970,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       inputSchema: {},
     },
     safe(() => json({ ...vaultInfo(), sync: syncBackend().status(), connection: {
-      build: "intake-diagnostics-20261013",
+      build: "intake-oauth-discovery-20261014",
       read: access.read, submitAnalysis: access.intake === true,
       editExistingNotes: false, deleteNotes: false,
       submissionRequires: "vault:read inbox:submit",
