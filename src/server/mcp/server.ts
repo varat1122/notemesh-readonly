@@ -54,6 +54,7 @@ import {
 } from "../vault/queries";
 
 export interface McpAccess {
+  scopes?: string[];
   intake?: boolean;
   read: boolean;
   write: boolean;
@@ -970,7 +971,9 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       inputSchema: {},
     },
     safe(() => json({ ...vaultInfo(), sync: syncBackend().status(), connection: {
-      build: "intake-oauth-discovery-20261014",
+      build: "intake-tool-auth-wire-20261014",
+      credentialType: access.label.startsWith("oauth:") ? "oauth" : access.label.startsWith("api-key:") ? "api-key" : "other",
+      requestScopes: access.scopes ?? [],
       read: access.read, submitAnalysis: access.intake === true,
       editExistingNotes: false, deleteNotes: false,
       submissionRequires: "vault:read inbox:submit",

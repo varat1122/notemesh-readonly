@@ -3,6 +3,7 @@ import { toReqRes, toFetchResponse } from "fetch-to-node";
 import { createMcpServer, type McpAccess } from "./server";
 import { ensureIndexerStarted } from "../vault/indexer";
 import { startLoopLagMonitor, timed } from "./instrument";
+import { withToolAuthMetadata } from "./tool-auth";
 
 export const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
@@ -89,6 +90,8 @@ export async function serveMcp(request: Request, access: McpAccess): Promise<Res
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   });
+  const send = transport.send.bind(transport);
+  transport.send = (message, options) => send(withToolAuthMetadata(message), options);
   const { req, res } = toReqRes(request);
   await server.connect(transport);
 

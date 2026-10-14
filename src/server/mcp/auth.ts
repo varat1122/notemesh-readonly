@@ -94,6 +94,7 @@ export function bearerToken(request: Request): string | null {
 
 export function accessFromScopes(scopes: string[], label: string): McpAccess {
   return {
+    scopes: [...scopes],
     read: scopes.includes("vault:read") || scopes.includes("vault:write"),
     write: false,
     intake: scopes.includes("inbox:submit"),
