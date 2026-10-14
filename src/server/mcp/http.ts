@@ -4,6 +4,8 @@ import { createMcpServer, type McpAccess } from "./server";
 import { ensureIndexerStarted } from "../vault/indexer";
 import { startLoopLagMonitor, timed } from "./instrument";
 import { withToolAuthMetadata } from "./tool-auth";
+import { canSaveAnalysis, saveScopeRequired, type McpEndpoint } from "./endpoint";
+import { createSaveMcpServer } from "./save-server";
 
 export const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
@@ -70,7 +72,8 @@ function forbidden(message: string): Response {
 
 // Stateless Streamable HTTP: a fresh server + transport per request. All state
 // lives in the vault/database, so nothing needs to persist between calls.
-export async function serveMcp(request: Request, access: McpAccess): Promise<Response> {
+export async function serveMcp(request: Request, access: McpAccess, endpoint: McpEndpoint = "research"): Promise<Response> {
+  if (endpoint === "save-analysis" && !canSaveAnalysis(access)) return saveScopeRequired();
   // A credential that carries neither vault scope gets nothing. The read flag
   // used to be computed and then ignored — every read tool registered whatever
   // the token said — so a token with no scopes at all could list and open every
@@ -82,8 +85,8 @@ export async function serveMcp(request: Request, access: McpAccess): Promise<Res
   }
 
   startLoopLagMonitor();
-  ensureIndexerStarted();
-  const server = createMcpServer(access, {
+  if (endpoint === "research") ensureIndexerStarted();
+  const server = endpoint === "save-analysis" ? createSaveMcpServer(access) : createMcpServer(access, {
     host: request.headers.get("host"),
     forwardedProto: request.headers.get("x-forwarded-proto"),
   });

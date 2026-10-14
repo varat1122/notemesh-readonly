@@ -223,6 +223,7 @@ export const auth = betterAuth({
       // endpoint, which is what closed GHSA-p2fr-6hmx-4528 (#55).
       resources: [
         { identifier: `${env.baseUrl}/api/mcp`, allowedScopes: [...OAUTH_SCOPES] },
+        { identifier: `${env.baseUrl}/api/save-analysis`, allowedScopes: [...OAUTH_SCOPES] },
         { identifier: env.baseUrl, allowedScopes: [...OAUTH_SCOPES] },
       ],
       // 1.7 also links each client to the resources it may request, and
@@ -233,7 +234,7 @@ export const auth = betterAuth({
       // linking can tell apart, so it is off; what closed the advisory is the
       // grant-bound audience above, which stays on.
       enforcePerClientResources: false,
-      clientRegistrationDefaultResources: [`${env.baseUrl}/api/mcp`, env.baseUrl],
+      clientRegistrationDefaultResources: [`${env.baseUrl}/api/mcp`, `${env.baseUrl}/api/save-analysis`, env.baseUrl],
       silenceWarnings: {
         // The plugin warns on every boot that
         // /.well-known/oauth-authorization-server/api/auth may not exist. It

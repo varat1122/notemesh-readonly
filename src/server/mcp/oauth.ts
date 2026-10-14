@@ -3,6 +3,7 @@ import type { JWTPayload } from "jose";
 import { env } from "../env";
 import { serveMcp } from "./http";
 import { accessFromScopes, bearerToken, oauthClientExists } from "./auth";
+import { mcpResourceUrl, type McpEndpoint } from "./endpoint";
 
 function scopesFromJwt(jwt: JWTPayload): string[] {
   if (typeof jwt.scope === "string") return jwt.scope.split(" ").filter(Boolean);
@@ -30,14 +31,14 @@ function refused(message: string): Response {
 // in step with that list.
 const { verifyBearerToken } = oauthProviderResourceClient().getActions();
 
-async function verify(token: string): Promise<JWTPayload | null> {
+async function verify(token: string, endpoint: McpEndpoint): Promise<JWTPayload | null> {
   try {
     return await verifyBearerToken(token, {
       jwksUrl: `${env.baseUrl}/api/auth/jwks`,
       verifyOptions: {
         // Matches the oauth-provider's issuer: baseURL + basePath.
         issuer: `${env.baseUrl}/api/auth`,
-        audience: [env.baseUrl, `${env.baseUrl}/api/mcp`],
+        audience: [env.baseUrl, mcpResourceUrl(endpoint)],
       },
     });
   } catch {
@@ -48,10 +49,10 @@ async function verify(token: string): Promise<JWTPayload | null> {
 // Returns a Response when the request carries a bearer token (valid → MCP
 // response; invalid → 401), or null when there is no token at all so the
 // caller can fall through.
-export async function handleMcpWithOAuth(request: Request): Promise<Response | null> {
+export async function handleMcpWithOAuth(request: Request, endpoint: McpEndpoint = "research"): Promise<Response | null> {
   const token = bearerToken(request);
   if (!token) return null;
-  const jwt = await verify(token);
+  const jwt = await verify(token, endpoint);
   if (!jwt) return refused("Unauthorized");
 
   // Signature, issuer and audience are what the verifier checked, which is
@@ -71,5 +72,5 @@ export async function handleMcpWithOAuth(request: Request): Promise<Response | n
     return refused("This connector's access has been revoked.");
   }
 
-  return serveMcp(request, accessFromScopes(scopesFromJwt(jwt), `oauth:${clientId}`));
+  return serveMcp(request, accessFromScopes(scopesFromJwt(jwt), `oauth:${clientId}`), endpoint);
 }

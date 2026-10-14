@@ -7,7 +7,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN node scripts/patch-oauth-refresh-scopes.mjs
-RUN pnpm exec vitest run src/server/oauth-refresh-scopes.test.ts src/server/oauth-diagnostics.test.ts src/server/mcp/readonly-deployment.test.ts src/server/mcp/tool-auth.test.ts src/server/intake.test.ts src/routes/api/intake-worker.test.ts && pnpm exec tsc --noEmit
+RUN pnpm exec vitest run src/server/oauth-refresh-scopes.test.ts src/server/oauth-diagnostics.test.ts src/server/mcp/readonly-deployment.test.ts src/server/mcp/tool-auth.test.ts src/server/intake.test.ts src/routes/api/intake-worker.test.ts src/server/mcp/save-server.test.ts src/server/mcp/oauth-endpoint.test.ts src/routes/api/save-analysis.test.ts src/server/discovery.test.ts && pnpm exec tsc --noEmit
 RUN pnpm build
 
 # Runtime stage

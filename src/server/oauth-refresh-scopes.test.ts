@@ -29,19 +29,19 @@ async function post(endpoint: string, body: Record<string, unknown>, form = fals
     body:form ? new URLSearchParams(body as Record<string,string>) : JSON.stringify(body),
   }));
 }
-async function connect(scopes: string) {
+async function connect(scopes: string, resource = `${origin}/api/mcp`) {
   const reg = await (await post("register", {client_name:"synthetic-refresh-test", redirect_uris:["https://example.com/cb"], grant_types:["authorization_code","refresh_token"], response_types:["code"], token_endpoint_auth_method:"none"})).json();
   expect(typeof reg.client_id).toBe("string");
-  const params = new URLSearchParams({client_id:reg.client_id, response_type:"code", redirect_uri:"https://example.com/cb", scope:scopes, resource:`${origin}/api/mcp`, code_challenge:"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", code_challenge_method:"S256", state:"synthetic-test"});
+  const params = new URLSearchParams({client_id:reg.client_id, response_type:"code", redirect_uri:"https://example.com/cb", scope:scopes, resource, code_challenge:"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", code_challenge_method:"S256", state:"synthetic-test"});
   const res = await auth.handler(new Request(`${origin}/api/auth/oauth2/authorize?${params}`, {headers:{Cookie:cookie}}));
   const dest = res.headers.get("location") ?? (await res.json()).url;
   expect(dest).toContain("/oauth/consent");
   const consent = await (await post("consent", {accept:true, oauth_query:dest.split("?")[1]})).json();
   const code = new URL(consent.url ?? consent.redirectURI).searchParams.get("code");
   expect(code).toBeTruthy();
-  const token = await (await post("token", {grant_type:"authorization_code", client_id:reg.client_id, code, redirect_uri:"https://example.com/cb", code_verifier:"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", resource:`${origin}/api/mcp`}, true)).json();
+  const token = await (await post("token", {grant_type:"authorization_code", client_id:reg.client_id, code, redirect_uri:"https://example.com/cb", code_verifier:"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", resource}, true)).json();
   expect(typeof token.refresh_token).toBe("string");
-  return {clientId:reg.client_id as string, refreshToken:token.refresh_token as string};
+  return {clientId:reg.client_id as string, refreshToken:token.refresh_token as string, accessToken:token.access_token as string};
 }
 async function refresh(clientId: string, refreshToken: string, scope: string) {
   const res = await post("token", {grant_type:"refresh_token", client_id:clientId, refresh_token:refreshToken, scope, resource:`${origin}/api/mcp`}, true);
@@ -66,4 +66,11 @@ it("never gives a read-only grant the submission scope", async () => {
   const escalation = await refresh(c.clientId, read.body.refresh_token, "vault:read inbox:submit");
   expect(escalation.status).toBe(400);
   expect(escalation.body.error).toBe("invalid_scope");
+});
+it("issues an explicitly approved grant for the dedicated save resource", async () => {
+  const resource = `${origin}/api/save-analysis`;
+  const connection = await connect("openid email offline_access vault:read inbox:submit", resource);
+  const jwt = decodeJwt(connection.accessToken);
+  expect([jwt.aud].flat()).toContain(resource);
+  expect(String(jwt.scope).split(" ")).toEqual(expect.arrayContaining(["vault:read", "inbox:submit"]));
 });

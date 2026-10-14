@@ -11,7 +11,7 @@
 // because it only knows about routes it registered itself and cannot see this
 // middleware. Silencing that warning removes the only thing watching these
 // paths, so the tests against this function take over the job.
-export type DiscoveryEndpoint = "auth-server" | "openid" | "protected-resource" | null;
+export type DiscoveryEndpoint = "auth-server" | "openid" | "protected-resource" | "save-protected-resource" | null;
 
 // The issuer is <base>/api/auth, i.e. it has a path component. RFC 8414 says the
 // metadata URL for such an issuer inserts that path *after* the well-known
@@ -30,11 +30,12 @@ const OPENID = [
   "/api/auth/.well-known/openid-configuration",
 ];
 
-const PROTECTED_RESOURCE = ["/.well-known/oauth-protected-resource"];
+const PROTECTED_RESOURCE = ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/api/mcp"];
 
 export function discoveryEndpoint(pathname: string): DiscoveryEndpoint {
   if (AUTH_SERVER.includes(pathname)) return "auth-server";
   if (OPENID.includes(pathname)) return "openid";
   if (PROTECTED_RESOURCE.includes(pathname)) return "protected-resource";
+  if (pathname === "/.well-known/oauth-protected-resource/api/save-analysis") return "save-protected-resource";
   return null;
 }

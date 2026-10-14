@@ -5,6 +5,7 @@ import { discoveryEndpoint } from "./server/discovery";
 import { pageAccess } from "./server/pages";
 import { announceResetFlow } from "./server/reset";
 import { applySecurityHeaders } from "./server/headers";
+import { protectedResourceMetadata } from "./server/mcp/endpoint";
 
 function redirectTo(path: string): Response {
   return new Response(null, { status: 302, headers: { Location: path } });
@@ -12,7 +13,7 @@ function redirectTo(path: string): Response {
 
 // Routes that legitimately exist under /api. Anything else under /api — and
 // any JSON-shaped request to an unknown path — must fail loudly.
-const API_PREFIXES = ["/api/health", "/api/mcp", "/api/intake-worker", "/api/auth/", "/api/rpc/", "/api/attachment"];
+const API_PREFIXES = ["/api/health", "/api/mcp", "/api/save-analysis", "/api/intake-worker", "/api/auth/", "/api/rpc/", "/api/attachment"];
 
 function isKnownApiPath(pathname: string): boolean {
   return API_PREFIXES.some((p) => (p.endsWith("/") ? pathname.startsWith(p) : pathname === p));
@@ -127,24 +128,9 @@ export default createMiddleware({
         await runAuthMigrations();
         return stripIssParamSupport(await oauthProviderOpenIdConfigMetadata(auth)(event.request));
       }
-      if (discovery === "protected-resource") {
-        const { env } = await import("./server/env");
+      if (discovery === "protected-resource" || discovery === "save-protected-resource") {
         return new Response(
-          JSON.stringify({
-            resource: `${env.baseUrl}/api/mcp`,
-            authorization_servers: [`${env.baseUrl}/api/auth`],
-            // Only what this resource actually gates on. The MCP spec says a
-            // protected resource SHOULD NOT advertise offline_access, since a
-            // refresh token is not a resource requirement — a client that wants
-            // one asks for it off the *authorization server's* metadata, which
-            // still offers it. openid goes for the same reason: it authenticates
-            // a user, it does not grant access to a vault.
-            //
-            // Not cosmetic. Codex prefers server-advertised scopes over its own
-            // config, so anything listed here is what it asks a user to approve.
-            scopes_supported: ["vault:read", "inbox:submit"],
-            bearer_methods_supported: ["header"],
-          }),
+          JSON.stringify(protectedResourceMetadata(discovery === "save-protected-resource" ? "save-analysis" : "research")),
           { headers: { "Content-Type": "application/json" } },
         );
       }
