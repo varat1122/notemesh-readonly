@@ -3,6 +3,7 @@ import { z } from "zod";
 import { registerIntakeTools } from "./intake-tools";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
 import { getSetting } from "../db";
+import { cloudIntakeStatus } from "../cloud-intake";
 import { withBoundary, fenceEach, fenceDeep } from "./boundary";
 import { signAttachmentUrl } from "../vault/attachment-url";
 import { syncBackend } from "../sync";
@@ -972,7 +973,8 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       inputSchema: {},
     },
     safe(() => json({ ...vaultInfo(), sync: syncBackend().status(), connection: {
-      build: "intake-dedicated-save-endpoint-20261014",
+      build: "intake-cloud-receiver-20261015",
+      saving: cloudIntakeStatus(),
       credentialType: access.label.startsWith("oauth:") ? "oauth" : access.label.startsWith("api-key:") ? "api-key" : "other",
       requestScopes: access.scopes ?? [],
       read: access.read, submitAnalysis: access.intake === true,

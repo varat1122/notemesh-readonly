@@ -7,7 +7,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN node scripts/patch-oauth-refresh-scopes.mjs
-RUN pnpm exec vitest run src/server/oauth-refresh-scopes.test.ts src/server/oauth-diagnostics.test.ts src/server/mcp/readonly-deployment.test.ts src/server/mcp/tool-auth.test.ts src/server/intake.test.ts src/routes/api/intake-worker.test.ts src/server/mcp/save-server.test.ts src/server/mcp/oauth-endpoint.test.ts src/routes/api/save-analysis.test.ts src/server/discovery.test.ts && pnpm exec tsc --noEmit
+RUN pnpm exec vitest run src/server/cloud-intake.test.ts src/server/cloud-preflight.test.ts src/server/oauth-refresh-scopes.test.ts src/server/oauth-diagnostics.test.ts src/server/mcp/readonly-deployment.test.ts src/server/mcp/tool-auth.test.ts src/server/intake.test.ts src/routes/api/intake-worker.test.ts src/server/mcp/save-server.test.ts src/server/mcp/oauth-endpoint.test.ts src/routes/api/save-analysis.test.ts src/server/discovery.test.ts && pnpm exec tsc --noEmit
 RUN pnpm build
 
 # Runtime stage
@@ -28,8 +28,11 @@ RUN npm install -g obsidian-headless@0.0.14
 COPY --from=build /app/.output ./.output
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 COPY scripts/ob-readonly.mjs /app/ob-readonly.mjs
+COPY scripts/cloud-sync-preflight.mjs /app/cloud-sync-preflight.mjs
+COPY scripts/intake-importer.cjs /app/scripts/intake-importer.cjs
 RUN chmod 755 /app/ob-readonly.mjs
 ENV OB_BIN=/app/ob-readonly.mjs
+ENV CLOUD_INTAKE=1
 # The server runs as the image's unprivileged `node` user (see the
 # entrypoint), so a compromise of the process — the class of thing the
 # frontmatter parser fix in 1.2.0 closed — does not hand out root in the

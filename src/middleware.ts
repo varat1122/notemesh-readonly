@@ -6,6 +6,7 @@ import { pageAccess } from "./server/pages";
 import { announceResetFlow } from "./server/reset";
 import { applySecurityHeaders } from "./server/headers";
 import { protectedResourceMetadata } from "./server/mcp/endpoint";
+import { ensureCloudIntakeStarted } from "./server/cloud-intake";
 
 function redirectTo(path: string): Response {
   return new Response(null, { status: 302, headers: { Location: path } });
@@ -69,6 +70,7 @@ export default createMiddleware({
       // a full-vault scan.
       ensureSyncStarted();
       ensureIndexerStarted();
+      ensureCloudIntakeStarted();
       // Prints the reset PIN on the first request after a boot, when armed.
       announceResetFlow();
 
