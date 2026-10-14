@@ -464,7 +464,15 @@ export default function Status() {
                     <For each={d().oauthClients}>
                       {(c) => (
                         <tr>
-                          <td>{c.name}</td>
+                          <td>
+                            {c.name}
+                            <Show when={c.scopeDiagnostics}>
+                              {(scope) => <>
+                                <br /><small>Approved: {scope().approvedScopes.join(", ") || "none"}</small>
+                                <br /><small>Active refresh grants: {scope().activeRefreshCount}; scopes: {scope().activeRefreshScopes.join(", ") || "none"}</small>
+                              </>}
+                            </Show>
+                          </td>
                           <td class="muted">
                             {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : "—"}
                           </td>
@@ -483,6 +491,9 @@ export default function Status() {
                 </table>
               </Show>
               <small class="muted">
+                Approved consent and refresh grants are diagnostic metadata; each tool call is still
+                authorized only by its current bearer token's scopes.
+                <br />
                 Revoking a client deletes its registration, its consent, and every token it holds —
                 access stops immediately.
               </small>

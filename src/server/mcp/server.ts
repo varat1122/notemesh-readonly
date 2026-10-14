@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerIntakeTools } from "./intake-tools";
+import { oauthScopeDiagnostics } from "../oauth-diagnostics";
 import { getSetting } from "../db";
 import { withBoundary, fenceEach, fenceDeep } from "./boundary";
 import { signAttachmentUrl } from "../vault/attachment-url";
@@ -971,12 +972,13 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       inputSchema: {},
     },
     safe(() => json({ ...vaultInfo(), sync: syncBackend().status(), connection: {
-      build: "intake-tool-auth-wire-20261014",
+      build: "intake-scope-diagnostics-20261014",
       credentialType: access.label.startsWith("oauth:") ? "oauth" : access.label.startsWith("api-key:") ? "api-key" : "other",
       requestScopes: access.scopes ?? [],
       read: access.read, submitAnalysis: access.intake === true,
       editExistingNotes: false, deleteNotes: false,
       submissionRequires: "vault:read inbox:submit",
+      ...(access.label.startsWith("oauth:") ? { grantDiagnostics: oauthScopeDiagnostics(access.label.slice(6)) } : {}),
     } })),
   );
 

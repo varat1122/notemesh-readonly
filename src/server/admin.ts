@@ -19,6 +19,7 @@ import { formatBytes } from "./vault/paths";
 import { indexer, ensureIndexerStarted } from "./vault/indexer";
 import { obLogin, looksLikeMfaRequired } from "./ob/cli";
 import { storeObsidianAccount, obsidianAccountState } from "./ob/credentials";
+import { oauthScopeDiagnostics } from "./oauth-diagnostics";
 
 function headers(): Headers {
   return getRequestEvent()!.request.headers;
@@ -129,6 +130,7 @@ export async function getStatusPage() {
       clientId: c.clientId,
       name: c.name ?? "(unnamed client)",
       createdAt: c.createdAt,
+      scopeDiagnostics: oauthScopeDiagnostics(c.clientId),
     })),
   };
 }
