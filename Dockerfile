@@ -6,7 +6,8 @@ RUN corepack enable && apt-get update && apt-get install -y --no-install-recomme
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
-RUN pnpm exec vitest run src/server/oauth-diagnostics.test.ts src/server/mcp/readonly-deployment.test.ts src/server/mcp/tool-auth.test.ts src/server/intake.test.ts src/routes/api/intake-worker.test.ts && pnpm exec tsc --noEmit
+RUN node scripts/patch-oauth-refresh-scopes.mjs
+RUN pnpm exec vitest run src/server/oauth-refresh-scopes.test.ts src/server/oauth-diagnostics.test.ts src/server/mcp/readonly-deployment.test.ts src/server/mcp/tool-auth.test.ts src/server/intake.test.ts src/routes/api/intake-worker.test.ts && pnpm exec tsc --noEmit
 RUN pnpm build
 
 # Runtime stage
