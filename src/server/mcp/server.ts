@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerIntakeTools } from "./intake-tools";
+import { registerPriceTools } from "./price-tools";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
 import { getSetting } from "../db";
 import { cloudIntakeStatus } from "../cloud-intake";
@@ -285,6 +286,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
   // computed from the token's scopes and then never consulted here, so every
   // read tool below registered for any credential at all.
   if (!access.read) return server;
+  registerPriceTools(server);
   // OAuth clients must be able to discover the scoped tool before approving
   // its scope. The handlers enforce the grant on every invocation.
   if (access.intake === true || access.label.startsWith("oauth:")) {
