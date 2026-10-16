@@ -16,7 +16,7 @@ export type EventAnalysisInput = z.input<typeof eventAnalysisSchema>;
 type CachedBar = PriceBar & { fetchedAt: string };
 
 /** Deterministic, read-only computation shared by MCP and future web/mobile HTTP adapters. */
-export function analyzePriceEvent(store: PriceStore, input: EventAnalysisInput) {
+export function analyzePriceEvent(store: Pick<PriceStore, "read">, input: EventAnalysisInput) {
   const args = eventAnalysisSchema.parse(input);
   const target = instrument({ market: args.market, symbol: args.symbol });
   const benchmarkInput: InstrumentInput = args.benchmark ?? BENCHMARKS[args.market];

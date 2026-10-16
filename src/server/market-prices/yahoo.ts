@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { instrument, localDate, PriceError, type InstrumentInput, type PriceSnapshot } from "./model.ts";
+import { instrument, localDate, isoDate, PriceError, type InstrumentInput, type PriceSnapshot } from "./model.ts";
 
 const optionalNumber = z.number().finite().nullable();
 const chartSchema = z.object({ chart: z.object({
   error: z.unknown().nullable(),
   result: z.array(z.object({
     meta: z.object({ symbol: z.string(), currency: z.string(), exchangeTimezoneName: z.string(), instrumentType: z.string() }),
-    timestamp: z.array(z.number().int().nonnegative()).max(2000),
+    timestamp: z.array(z.number().int().nonnegative()).max(10000),
     indicators: z.object({
       quote: z.array(z.object({ open: z.array(optionalNumber), high: z.array(optionalNumber), low: z.array(optionalNumber),
         close: z.array(optionalNumber), volume: z.array(optionalNumber) })).length(1),
@@ -25,7 +25,7 @@ export function startOfWindow(now: Date): string {
   return start.toISOString().slice(0, 10);
 }
 
-export function parseYahooChart(body: unknown, input: InstrumentInput, now = new Date()): PriceSnapshot {
+export function parseYahooChart(body: unknown, input: InstrumentInput, now = new Date(), windowStart?: string): PriceSnapshot {
   const target = instrument(input);
   const parsed = chartSchema.safeParse(body);
   if (!parsed.success || parsed.data.chart.error || !parsed.data.chart.result) throw new PriceError("invalid_provider_response");
@@ -40,7 +40,7 @@ export function parseYahooChart(body: unknown, input: InstrumentInput, now = new
     throw new PriceError("provider_array_mismatch");
   }
   const today = localDate(now.getTime(), target.timeZone);
-  const start = startOfWindow(now);
+  const start = windowStart ? isoDate.parse(windowStart) : startOfWindow(now);
   const snapshot: PriceSnapshot = { instrument: target, fetchedAt: now.toISOString(), source: "yahoo-chart", bars: [], actions: [], excludedCurrentSession: 0, missingBars: 0, quarantinedBars: [] };
   const seen = new Set<string>();
   for (const [i, timestamp] of result.timestamp.entries()) {
@@ -73,11 +73,13 @@ export function parseYahooChart(body: unknown, input: InstrumentInput, now = new
 }
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-export async function fetchYahooDaily(input: InstrumentInput, options: { now?: Date; fetcher?: typeof fetch } = {}): Promise<PriceSnapshot> {
+export async function fetchYahooDaily(input: InstrumentInput, options: { now?: Date; fetcher?: typeof fetch; start?: string } = {}): Promise<PriceSnapshot> {
   const target = instrument(input), now = options.now ?? new Date();
   // Host and path are fixed; neither notes nor MCP callers can supply a URL.
   const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(target.yahooSymbol)}`);
-  url.search = new URLSearchParams({ period1: String(Date.parse(`${startOfWindow(now)}T00:00:00Z`) / 1000),
+  const start = options.start ? isoDate.parse(options.start) : startOfWindow(now);
+  if (start >= localDate(now.getTime(), target.timeZone) || start < "1970-01-01") throw new PriceError("invalid_provider_window");
+  url.search = new URLSearchParams({ period1: String(Date.parse(`${start}T00:00:00Z`) / 1000),
     period2: String(Math.floor(now.getTime() / 1000)), interval: "1d", events: "div,splits", includePrePost: "false" }).toString();
   try {
     const response = await (options.fetcher ?? fetch)(url, { headers: { "User-Agent": "InvestmentOS-PersonalResearch/0.1", Accept: "application/json" },
@@ -97,7 +99,7 @@ export async function fetchYahooDaily(input: InstrumentInput, options: { now?: D
         chunks.push(part.value);
       }
     } finally { reader.releaseLock(); }
-    return parseYahooChart(JSON.parse(Buffer.concat(chunks).toString("utf8")), input, now);
+    return parseYahooChart(JSON.parse(Buffer.concat(chunks).toString("utf8")), input, now, start);
   } catch (error) {
     if (error instanceof PriceError) throw error;
     throw new PriceError("provider_unavailable");

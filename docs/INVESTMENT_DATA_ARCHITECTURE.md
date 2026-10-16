@@ -68,3 +68,5 @@ SQLite is appropriate for this personal, single-writer pilot; a website does not
 5. Website/mobile UI: reuse authenticated domain APIs for charts, event markers, transactions and research links. Do not build a second parallel dataset.
 
 Phase 1 and a provisional event calculator are code-tested here. Production activation, ordinary-chat tool discovery, persisted event registry, portfolio import and app UI are separate acceptance steps and must not be represented as already complete.
+
+Optional personal Drive archive backend is implemented separately in GOOGLE_DRIVE_PRICES.md: immutable signed per-listing snapshots and catalogue for a 200-listing universe, incremental daily updates, verified downloads of only requested listings into bounded RAM, no live SQL file on Drive. Portfolio transactions still require a transactional database in a later phase.

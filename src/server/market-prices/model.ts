@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const marketSchema = z.enum(["US", "TH", "HK", "JP"]);
 export type Market = z.infer<typeof marketSchema>;
+// Capacity: 200 research listings plus up to four explicitly identified comparator ETFs.
+export const MAX_PRICE_INSTRUMENTS = 204;
 export const MARKETS = {
   US: { currency: "USD", timeZone: "America/New_York", suffix: "" },
   TH: { currency: "THB", timeZone: "Asia/Bangkok", suffix: ".BK" },
@@ -79,7 +81,7 @@ export const PRICE_POLICY = {
   source: "yahoo-chart",
   priceBasis: "Provider quote OHLC (may already be split-adjusted); not dividend-adjusted. adjustedClose is a separate provider field. Not an as-traded archive or point-in-time backtest dataset.",
   completion: "Exclude the current exchange calendar date, even after market close. Daily refresh at/after 06:00 UTC; this is conservative next-day data, not a live quote.",
-  adjustment: "Refresh the entire five-year window together on every successful pull. Never synthesize adjusted OHLC or volume from adjustedClose. Source corrections replace cached values and are counted.",
+  adjustment: "Initial target is five years. Drive partitions use daily updates with a 30-calendar-day overlap before the last cached session, weekly full-history checks, and a full re-fetch on overlap or corporate-action changes. Disk mode still refreshes the full window. Never synthesize adjusted OHLC or volume from adjustedClose. Source corrections are recorded; omitted rows retain their older fetchedAt.",
   revisionNoise: "Store every returned value. Detailed correction receipts ignore adjustedClose-only relative changes <= 0.000001 (provider floating-point jitter); OHLC and volume changes are always recorded.",
   deviceSync: "Price database is server data outside the Obsidian vault; it is not replicated by Obsidian Sync.",
   quality: "Invalid OHLCV bars are quarantined, never repaired or forward-filled. Inspect quality issues and missing sessions before event/portfolio analysis.",
