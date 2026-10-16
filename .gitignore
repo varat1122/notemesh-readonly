@@ -11,6 +11,8 @@ dist/
 .idea/
 .vscode/
 /data/
+*.sqlite
+*.sqlite-*
 
 # Playwright
 /test-results/

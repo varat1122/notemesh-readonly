@@ -17,7 +17,9 @@
     "lint": "eslint src tests e2e scripts --max-warnings 0",
     "lint:fix": "eslint src tests e2e scripts --fix",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prices:status": "node scripts/market-prices.ts status",
+    "prices:refresh": "node scripts/market-prices.ts refresh"
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.2",
