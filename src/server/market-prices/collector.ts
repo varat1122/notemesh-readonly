@@ -76,7 +76,8 @@ export function ensurePriceCollectorStarted(): void {
       const result = await refreshPrices();
       if (result.results.some(r => ["updated", "failed"].includes(r.status))) console.log("[market-prices]", JSON.stringify(result));
     } catch (error) {
-      console.error("[market-prices]", error instanceof PriceError ? error.code : "collector_failed");
+      console.error("[market-prices]", error instanceof PriceError ? error.code : "collector_failed",
+        error instanceof PriceError && error.details ? JSON.stringify(error.details) : "");
     } finally { busy = false; }
   };
   // A single server replica, with a durable cross-process lease for CLI/restarts.

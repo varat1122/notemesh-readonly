@@ -87,5 +87,6 @@ export const PRICE_POLICY = {
 
 export class PriceError extends Error {
   readonly code: string;
-  constructor(code: string) { super(code); this.code = code; this.name = "PriceError"; }
+  readonly details?: Record<string, number>;
+  constructor(code: string, details?: Record<string, number>) { super(code); this.code = code; this.details = details; this.name = "PriceError"; }
 }
