@@ -15,7 +15,7 @@ function redirectTo(path: string): Response {
 
 // Routes that legitimately exist under /api. Anything else under /api — and
 // any JSON-shaped request to an unknown path — must fail loudly.
-const API_PREFIXES = ["/api/health", "/api/mcp", "/api/save-analysis", "/api/safe-edit", "/api/safe-edit-approval", "/api/intake-worker", "/api/auth/", "/api/rpc/", "/api/attachment"];
+const API_PREFIXES = ["/api/health", "/api/mcp", "/api/save-analysis", "/api/safe-edit", "/api/safe-edit-approval", "/api/market-prices-drive", "/api/market-prices-drive/callback", "/api/intake-worker", "/api/auth/", "/api/rpc/", "/api/attachment"];
 
 function isKnownApiPath(pathname: string): boolean {
   return API_PREFIXES.some((p) => (p.endsWith("/") ? pathname.startsWith(p) : pathname === p));

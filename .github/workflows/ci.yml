@@ -131,6 +131,10 @@ jobs:
           done
           echo "never became healthy"; exit 1
 
+      - name: Drive setup routes reach their admin guards in the container
+        run: |
+          docker exec nm node --input-type=module -e "for (const path of ['/api/market-prices-drive','/api/market-prices-drive/callback']) { const r = await fetch('http://127.0.0.1:3000'+path); if (r.status !== 401 || r.headers.get('cache-control') !== 'no-store') { console.error(path, r.status); process.exit(1); } }"
+
       # /proc rather than ps: the slim image has no procps, and /proc is the
       # source ps reads anyway.
       - name: tini is PID 1 and node is its child
