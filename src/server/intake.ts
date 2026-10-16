@@ -13,7 +13,7 @@ export const intakeSchema = z.object({
     userInput: z.string().min(1).max(30000).describe("Relevant user-provided source material, stored separately from analysis"),
     analysis: z.string().min(1).max(30000).describe("Completed analysis in Markdown, including evidence categories, mechanisms, risks, evidence gaps and thesis impact"),
     relatedNotes: z.array(z.string().min(1).max(350)).max(30).describe("Exact existing vault-relative Markdown paths found by search, for company/theme/concept/thesis backlinks"),
-  }).strict()).min(1).max(20),
+  }).strict()).min(1).max(20).describe("Completed analysis notes, one item per issue, with user sources separated from interpretation"),
 }).strict();
 export type Intake = z.infer<typeof intakeSchema>;
 type Row = { id: string; payload: string; status: string; created: string; receipt: string | null };

@@ -74,3 +74,19 @@ it("issues an explicitly approved grant for the dedicated save resource", async 
   expect([jwt.aud].flat()).toContain(resource);
   expect(String(jwt.scope).split(" ")).toEqual(expect.arrayContaining(["vault:read", "inbox:submit"]));
 });
+
+it("issues edit scope only after explicit Safe Edit consent on a fresh client", async () => {
+  const resource = `${origin}/api/safe-edit`;
+  const connection = await connect("openid email offline_access vault:read vault:edit", resource);
+  const jwt = decodeJwt(connection.accessToken);
+  expect([jwt.aud].flat()).toContain(resource);
+  expect([jwt.aud].flat()).not.toContain(`${origin}/api/mcp`);
+  expect(String(jwt.scope).split(" ")).toContain("vault:edit");
+});
+it.each(["vault:read", "vault:read inbox:submit"])("never widens an existing %s refresh grant into edit", async scopes => {
+  const c = await connect(`openid offline_access ${scopes}`);
+  const res = await post("token", {grant_type:"refresh_token",client_id:c.clientId,refresh_token:c.refreshToken,scope:"vault:read vault:edit",resource:`${origin}/api/safe-edit`},true);
+  expect(res.status).toBe(400);
+  const body=await res.json();
+  expect(["invalid_scope","invalid_target"]).toContain(body.error);
+});

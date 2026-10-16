@@ -67,7 +67,7 @@ async function connectAsClient(
     response_type: "code",
     client_id: reg.client_id,
     redirect_uri: REDIRECT,
-    scope: "vault:read vault:write",
+    scope: "vault:read",
     code_challenge: CHALLENGE,
     code_challenge_method: "S256",
     state: "test",

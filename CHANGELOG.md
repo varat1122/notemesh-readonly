@@ -1,5 +1,9 @@
 # Changelog
 
+Deployment surface: 22 tools covering research reads and scoped add-only intake.
+Safe Edit adds seven tools on a separate resource; see docs/SAFE_EDIT.md.
+Historical upstream release descriptions below are preserved.
+
 ## How updates reach you
 
 Railway template updates are **opt-in**. When a change lands on this repo's root

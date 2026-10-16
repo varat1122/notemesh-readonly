@@ -3,4 +3,4 @@ import { handleMcpPost, handleMcpOtherMethod } from "~/server/mcp/endpoint-route
 
 export const POST = (event: APIEvent) => handleMcpPost(event, "research");
 export const GET = (event: APIEvent) => handleMcpOtherMethod(event, "research");
-export const DELETE = GET;
+export const DELETE = (event: APIEvent) => handleMcpOtherMethod(event, "research");

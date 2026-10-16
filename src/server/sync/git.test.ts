@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -209,12 +209,15 @@ describe("runGit", () => {
   it("never waits on an interactive credential prompt", async () => {
     // GIT_TERMINAL_PROMPT=0 — without it a daemon hangs forever instead of
     // failing, which is far worse than a clear error.
-    const res = await runGit(["ls-remote", "https://example.invalid/nope.git"], {
-      cwd: root,
-      authenticated: true,
-      timeoutMs: 30_000,
-    });
-    expect(res.ok).toBe(false);
+    // An executable shim checks the real child's environment without relying
+    // on DNS/proxy timeout behavior in the host running the test.
+    const bin=path.join(root,"git-shim");fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin,"git"),'#!/bin/sh\nif [ "$GIT_TERMINAL_PROMPT" = "0" ] && [ -z "$GIT_ASKPASS" ]; then exit 19; fi\nexit 0\n',{mode:0o755});
+    vi.stubEnv("PATH",`${bin}:${process.env.PATH??""}`);
+    try {
+      const res=await runGit(["ls-remote","https://example.invalid/nope.git"],{cwd:root,authenticated:true,timeoutMs:1000});
+      expect(res.ok).toBe(false);expect(res.code).toBe(19);
+    } finally {vi.unstubAllEnvs();}
   });
 });
 

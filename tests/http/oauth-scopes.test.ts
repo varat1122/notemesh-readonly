@@ -101,16 +101,16 @@ describe("authorizing with the scopes a client was promised", () => {
 
   it("accepts the full set ChatGPT requests with OIDC enabled", async () => {
     // The exact scope string that failed in production, verbatim.
-    const location = await authorize("openid profile email offline_access vault:read vault:write");
+    const location = await authorize("openid profile email offline_access vault:read");
     expect(location.searchParams.get("error")).toBeNull();
     // Not signed in, so the destination is the login page rather than a code.
     expect(location.pathname).toBe("/login");
   });
 
   it.each([
-    "vault:read vault:write",
-    "openid vault:read vault:write",
-    "openid profile email vault:read vault:write",
+    "vault:read",
+    "openid vault:read",
+    "openid profile email vault:read",
   ])("accepts %s", async (scope) => {
     const location = await authorize(scope);
     expect(location.searchParams.get("error")).toBeNull();

@@ -169,7 +169,7 @@ export async function handleMcpPost(event: APIEvent, endpoint: McpEndpoint = "re
 
   // 3) API key (Authorization: Bearer <key> or x-api-key).
   // This separate OAuth resource accepts neither research nor receiver keys.
-  if (endpoint === "save-analysis") return authFailed();
+  if (endpoint !== "research") return authFailed();
   const keyAccess = await accessFromApiKey(event.request);
   if (keyAccess) {
     clearAuthFailures(ip);

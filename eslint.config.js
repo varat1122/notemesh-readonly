@@ -146,6 +146,13 @@ export default tseslint.config(
     },
   },
 
+  // The existing cloud importer is deliberately CommonJS, loaded by createRequire.
+  {
+    files: ["scripts/**/*.cjs"],
+    languageOptions: { sourceType: "commonjs", globals: globals.node },
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+
   // Tests: Node host, and fixtures legitimately need `any`.
   {
     files: ["**/*.test.{ts,tsx}", "e2e/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"],

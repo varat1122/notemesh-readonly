@@ -7,6 +7,7 @@ import { RepoFooter } from "~/components/AdminShell";
 const SCOPE_DESCRIPTIONS: Record<string, string> = {
   "inbox:submit": "Submit new analysis to the Investment OS intake queue for automatic addition by your computer. Cannot edit or delete existing notes.",
   "vault:read": "Read your notes: search, list, and open any note in the vault",
+  "vault:edit": "Preview and apply limited edits to existing Markdown notes with backups and version checks. Does not grant portfolio, source-archive or delete access. Thesis changes also need explicit approval of the exact diff.",
   "vault:write": "Edit your vault: create, modify, and organize notes",
   openid: "Confirm your identity",
   profile: "See your basic profile",

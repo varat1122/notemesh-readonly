@@ -29,7 +29,7 @@ if (args[0] === 'sync') {
     encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let config;
-  try { config = JSON.parse(checked.stdout); } catch {}
+  try { config = JSON.parse(checked.stdout); } catch { /* Invalid CLI JSON fails the verification below. */ }
   if (checked.error || checked.status !== 0 || config?.syncMode !== mode) {
     console.error('[readonly] Pull-only mode could not be verified; daemon not started.');
     process.exit(1);
@@ -43,7 +43,7 @@ if (args[0] === 'sync') {
     catch (e) { console.error('[sync-policy] '+e.message); process.exit(1); }
     const enabled = spawnSync('ob', ['sync-config','--path',vaultPath,'--mode','bidirectional','--device-name','Investment OS Cloud'], {encoding:'utf8',timeout:60000,stdio:['ignore','pipe','pipe']});
     const verified = spawnSync('ob', ['sync-config','--path',vaultPath,'--json'], {encoding:'utf8',timeout:60000,stdio:['ignore','pipe','pipe']});
-    let actual; try { actual=JSON.parse(verified.stdout); } catch {}
+    let actual; try { actual=JSON.parse(verified.stdout); } catch { /* Invalid CLI JSON fails the verification below. */ }
     if (enabled.error || enabled.status !== 0 || verified.status !== 0 || actual?.syncMode !== 'bidirectional') { console.error('[sync-policy] Cannot verify cloud Sync mode.'); process.exit(1); }
   }
   console.error(cloud ? '[sync-policy] Verified bidirectional sync.' : '[readonly] Verified pull-only sync.');
