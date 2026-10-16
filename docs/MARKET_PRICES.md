@@ -13,7 +13,7 @@ DATA_DIR=./data pnpm prices:status
 
 For a deliberate diagnostic refresh: `pnpm prices:refresh --force`. Force does not bypass a one-hour provider cooldown after HTTP 401/403/429. The file is `DATA_DIR/market-prices/prices.sqlite`; `MARKET_PRICES_DIR` can move this directory outside the Obsidian vault. Never put a live SQLite database in Obsidian Sync or Git. Local shells behind a configured proxy may need Node's `NODE_USE_ENV_PROXY=1`.
 
-The default pilot has NVDA, PTT, 9988 and 7203 plus the explicit comparator ETFs SPY, TDEX, 2800 and 1306. These are source-connectivity examples, not user holdings or an investment recommendation. Optional `MARKET_PRICES_WATCHLIST` is a JSON array, maximum 100 unique listings:
+The default pilot has NVDA, PTT, 9988 and 7203 plus the explicit comparator ETFs SPY, TDEX, 2800 and 1306. These are source-connectivity examples, not user holdings or an investment recommendation. Optional `MARKET_PRICES_WATCHLIST` is a JSON array, maximum 204 unique listings (200 research listings plus up to four explicit comparator ETFs):
 
 ```json
 [{"market":"US","symbol":"NVDA"},{"market":"TH","symbol":"PTT"},{"market":"HK","symbol":"9988"},{"market":"JP","symbol":"7203"}]
@@ -25,7 +25,7 @@ Use local codes without suffixes. Hong Kong codes have 4–5 digits (preserve le
 
 Default: disabled. After review/deployment, set `MARKET_PRICES_ENABLED=1` on the existing service to start the background collector and expose the additional cached read tools on `/api/mcp`. It adds no new OAuth write scope and leaves Safe Edit flags untouched. Refresh the existing Read Only tool catalogue in ChatGPT when necessary; deployment does not prove that the conversation can already see new tools.
 
-The collector runs at boot and checks every minute whether the daily refresh is due at/after 06:00 UTC (13:00 Bangkok). A pre-06:00 boot does not consume that day's later refresh. Persisted per-instrument receipts and a one-hour durable lease prevent duplicate/overlapping collection. Requests are sequential with three-second spacing. A failed instrument retries no more than hourly; provider auth/throttling errors stop the whole cycle and enforce a provider-wide hour cooldown. An outage keeps the prior usable cache visible with the error status.
+The collector runs at boot and checks every minute whether the daily refresh is due at/after 06:00 UTC (13:00 Bangkok). A pre-06:00 boot does not consume that day's later refresh. Disk-mode receipts and a three-hour durable lease prevent duplicate/overlapping collection. Drive mode instead requires one operational writer and publishes verified signed catalogues in bounded batches. Requests are sequential with three-second spacing. A failed instrument retries no more than hourly; provider auth/throttling errors stop the whole cycle and enforce a provider-wide hour cooldown. An outage keeps the prior usable cache visible with the error status.
 
 In disk mode each pull refreshes the five-year window. Drive mode uses initial backfill, daily overlap and periodic/adjustment-triggered full-history checks as documented in GOOGLE_DRIVE_PRICES.md. Daily timestamps are converted using the provider-validated exchange timezone; the current exchange calendar day is excluded even after close. This is conservative next-day data. It is intentionally not real-time and will sometimes lag an already-closed session until the next local date/refresh.
 
@@ -49,7 +49,7 @@ Tools (require the existing read access and the feature flag):
 | `get_price_data_status` | Refresh receipts, quality issues, source policy and storage budget |
 | `analyze_price_event` | Read-only stock/comparator window calculation, explicit event session/timing, missing-data statuses and dataset hash |
 
-No tool initiates an external download or creates the database. No-read credentials get no tools. All existing Read Only and Save Linked Notes behavior stays in place when the feature is off. Safe Edit OAuth/canary remains a separate pending workflow.
+No tool fetches new source quotes, publishes data or creates a price file on disk. In Drive mode, cold reads may download only existing signed catalogue/price partitions into RAM; warm reads reuse the bounded cache. No-read credentials get no tools. All existing Read Only and Save Linked Notes behavior stays in place when the feature is off. Safe Edit OAuth/canary remains a separate pending workflow.
 
 ## Example research flow
 
