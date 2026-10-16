@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { parse } from "yaml";
 
 // The release workflow holds package, release and signing permissions and
 // Docker Hub credentials, so what it runs must not be able to change under
@@ -25,7 +26,15 @@ describe("the workflows", () => {
     const ci = readFileSync(".github/workflows/ci.yml", "utf8");
     expect(ci).toMatch(/pnpm audit --prod --audit-level=high\s*$/m);
     expect(ci).not.toMatch(/pnpm audit[^\n]*\|\| true/);
-    expect(readFileSync("pnpm-workspace.yaml", "utf8")).toMatch(/auditConfig:\n\s+ignoreCves:/);
+    // pnpm 11's bulk endpoint reports GHSA IDs; ignoreCves is no longer read.
+    const workspace = parse(readFileSync("pnpm-workspace.yaml", "utf8"));
+    expect(workspace.audit.ignore).toEqual([
+      "GHSA-86w9-cpqp-85rv", "GHSA-vfj7-8cjw-p6xm",
+    ]);
+    expect(ci).not.toMatch(/--ignore-unfixable|--ignore-registry-errors/);
+    const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+    expect(pkg.scripts.build).toContain("node scripts/check-runtime-exclusions.mjs");
+    expect(readFileSync("Dockerfile", "utf8")).toContain("RUN node /app/check-runtime-exclusions.mjs .output /usr/local/lib/node_modules");
   });
 
   it("have Dependabot moving the pins", () => {
