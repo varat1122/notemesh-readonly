@@ -4,7 +4,11 @@ import crypto from "node:crypto";
 import Database from "better-sqlite3";
 import { instrument, isoDate, PRICE_POLICY, PriceError, type InstrumentInput, type PriceBar, type PriceSnapshot } from "./model.ts";
 
-const MAX_DB_BYTES = 16 * 1024 * 1024;
+export function priceDatabaseLimit(): number {
+  const mb = Number(process.env.MARKET_PRICES_MAX_DB_MB ?? "4");
+  if (![4, 8, 16].includes(mb)) throw new PriceError("invalid_price_database_limit");
+  return mb * 1024 * 1024;
+}
 const DISK_RESERVE = 50 * 1000 * 1000;
 export function priceDbPath(): string {
   const data = path.resolve(process.env.DATA_DIR ?? "./data");
@@ -33,6 +37,7 @@ export class PriceStore {
     try {
       const stats = fs.lstatSync(filename);
       if (stats.isSymbolicLink() || stats.nlink > 1) throw new PriceError("linked_price_database_refused");
+      if (writable && stats.size > priceDatabaseLimit()) throw new PriceError("price_database_exceeds_configured_limit");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (writable) {
       fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
@@ -45,7 +50,7 @@ export class PriceStore {
       this.db.pragma("journal_mode = DELETE");
       this.db.pragma("synchronous = FULL");
       const pageSize = this.db.pragma("page_size", { simple: true }) as number;
-      this.db.pragma(`max_page_count = ${Math.floor(MAX_DB_BYTES / pageSize)}`);
+      this.db.pragma(`max_page_count = ${Math.floor(priceDatabaseLimit() / pageSize)}`);
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS instruments (
           id TEXT PRIMARY KEY, market TEXT NOT NULL, symbol TEXT NOT NULL, yahoo_symbol TEXT NOT NULL,
@@ -91,7 +96,11 @@ export class PriceStore {
     for (const suffix of ["", "-wal", "-shm"]) {
       try { appBytes += fs.statSync(appDb + suffix).size; } catch { /* Absent in standalone CLI. */ }
     }
-    if (stats.bavail * stats.bsize < Math.max(DISK_RESERVE, appBytes) + MAX_DB_BYTES * 2) throw new PriceError("insufficient_price_disk_reserve");
+    const availableBytes = stats.bavail * stats.bsize, applicationReserveBytes = Math.max(DISK_RESERVE, appBytes);
+    const priceBudgetBytes = priceDatabaseLimit() * 2;
+    if (availableBytes < applicationReserveBytes + priceBudgetBytes) throw new PriceError("insufficient_price_disk_reserve",
+      { availableBytes, applicationIndexBytes: appBytes, applicationReserveBytes, priceBudgetBytes,
+        requiredAvailableBytes: applicationReserveBytes + priceBudgetBytes });
   }
 
   close(): void { this.db.close(); }
@@ -241,7 +250,7 @@ export class PriceStore {
       receipts: this.db.prepare(`SELECT instrument_id AS instrumentId,attempted_at AS attemptedAt,success,error_code AS errorCode,
         row_count AS rowCount,inserted,revised,missing_bars AS missingBars,excluded_current AS excludedCurrent,payload_hash AS payloadHash
         FROM refreshes ORDER BY id DESC LIMIT 20`).all(),
-      storage: { bytes: fs.statSync(this.filename).size, maxDatabaseBytes: MAX_DB_BYTES, diskReserveBytes: DISK_RESERVE },
+      storage: { bytes: fs.statSync(this.filename).size, maxDatabaseBytes: priceDatabaseLimit(), diskReserveBytes: DISK_RESERVE },
       qualityIssues: this.db.prepare(`SELECT instrument_id AS instrumentId,date,reason,first_seen_at AS firstSeenAt,last_seen_at AS lastSeenAt
         FROM quality_issues WHERE resolved_at IS NULL ORDER BY last_seen_at DESC LIMIT 100`).all(),
       automatedWritesToVault: false };

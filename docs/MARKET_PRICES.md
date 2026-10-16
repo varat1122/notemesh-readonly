@@ -37,7 +37,7 @@ Every pull refreshes the five-year window. Daily timestamps are converted using 
 - SQLite transactions, FULL durability and a cross-process lease; retry cannot duplicate date-keyed bars or event-keyed dividends/splits.
 - Raw provider quote OHLC may already reflect splits. Separate adjustedClose is not automatically substituted into OHLC. Each result describes its basis. Missing sessions and quarantine are visible.
 - Retain older bars when a later response omits them, with their older fetchedAt, unless explicitly quarantined. Source corrections have bounded before/after audit history. Ignore tiny adjustedClose-only floating-point jitter for correction receipts while still storing returned values.
-- 16 MiB database page cap, DELETE rollback journal, and disk reserve check. Stop rather than expand paid storage. Audit retention: latest 10,000 refreshes / 5,000 detailed corrections; this is not an immutable institutional historical archive.
+- 4 MiB default database page cap (optionally 8/16 MiB), DELETE rollback journal, and disk reserve check. Stop rather than expand paid storage. Audit retention: latest 10,000 refreshes / 5,000 detailed corrections; this is not an immutable institutional historical archive.
 - No note changes, vault exports, deletions, general write tool or arbitrary provider URL in the price tools.
 
 Tools (require the existing read access and the feature flag):
@@ -56,3 +56,5 @@ No tool initiates an external download or creates the database. No-read credenti
 Read the relevant source and thesis using Read Only. Establish the actual publication time and the first affected exchange session. Then request the price event comparison for that session with an explicit return basis and comparator. Preserve assumptions, sample hash, missing/quarantined data and any overlapping news in the analysis. Save a compact linked analysis note only when requested, using the existing Save Linked Notes tool. The calculator does not register the event or edit a thesis itself.
 
 See [Investment data architecture](INVESTMENT_DATA_ARCHITECTURE.md) for the persistent event registry, portfolio ledger and future web/mobile direction.
+
+Storage diagnostics report available bytes, the unchanged application-index reserve and the bounded price/journal budget, without paths or secrets. `MARKET_PRICES_MAX_DB_MB` accepts only 4 (default), 8 or 16. A small pilot does not reserve the full optional expanded dataset budget. If the vault/index reserve itself exceeds available space, collection still refuses; no automatic paid resize or lower reserve.

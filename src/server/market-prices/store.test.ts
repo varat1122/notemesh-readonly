@@ -2,7 +2,7 @@ import { beforeEach, afterEach, it, expect, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { PriceStore, readPriceStore, priceDbPath } from "./store";
+import { PriceStore, readPriceStore, priceDbPath, priceDatabaseLimit } from "./store";
 import { parseYahooChart } from "./yahoo";
 import { chartFixture, TEST_NOW } from "./fixtures";
 
@@ -67,6 +67,18 @@ it("fails closed on disk reserve and keeps prior data", () => {
   vi.spyOn(fs, "statfsSync").mockReturnValue({ bavail: 1, bsize: 4096 } as fs.StatsFs);
   expect(() => store.save(snapshot())).toThrow("insufficient_price_disk_reserve");
   expect(store.read(input).total).toBe(2);
+});
+it("uses a small pilot budget and exposes reserve arithmetic without reducing the vault reserve", () => {
+  expect(priceDatabaseLimit()).toBe(4 * 1024 * 1024);
+  vi.stubEnv("MARKET_PRICES_MAX_DB_MB", "8"); expect(priceDatabaseLimit()).toBe(8 * 1024 * 1024);
+  vi.stubEnv("MARKET_PRICES_MAX_DB_MB", "1"); expect(() => priceDatabaseLimit()).toThrow("invalid_price_database_limit");
+  vi.stubEnv("MARKET_PRICES_MAX_DB_MB", "4");
+  vi.spyOn(fs, "statfsSync").mockReturnValue({ bavail: 1, bsize: 4096 } as fs.StatsFs);
+  try { store.assertSpace(); throw new Error("should refuse"); }
+  catch (error) { expect(error).toMatchObject({ code: "insufficient_price_disk_reserve", details: {
+    availableBytes: 4096, applicationReserveBytes: 50000000, priceBudgetBytes: 8 * 1024 * 1024,
+    requiredAvailableBytes: 50000000 + 8 * 1024 * 1024,
+  } }); }
 });
 it("rejects a database configured inside the vault", () => {
   vi.stubEnv("MARKET_PRICES_DIR", path.join(root, "vault", "prices"));

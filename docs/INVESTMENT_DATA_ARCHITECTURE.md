@@ -53,7 +53,7 @@ Trade review overlays executions and decision notes on price history. Compare af
 
 ## Storage and application boundary
 
-Start with the existing single-server architecture and a separate `market-prices/prices.sqlite` outside the vault. Keep source and quality metadata with every series. The database has a 16 MiB cap and preserves at least 50 MB plus rollback-journal room before writes; expansion needs a measured disk budget, not an automatic volume upgrade. The pilot is four stocks plus four comparator ETFs, not the whole four-market universe.
+Start with the existing single-server architecture and a separate `market-prices/prices.sqlite` outside the vault. Keep source and quality metadata with every series. The database has a 4 MiB default cap (optionally 8/16 MiB) and preserves at least 50 MB plus rollback-journal room before writes; expansion needs a measured disk budget, not an automatic volume upgrade. The pilot is four stocks plus four comparator ETFs, not the whole four-market universe.
 
 Separate the private portfolio ledger from public-derived market data and the auth/index database. Add authenticated service endpoints over domain functions when building the website/app. Keep portfolio writes behind explicit authorization; the read-only research credential cannot submit transactions. Obsidian Sync replicates notes, not SQLite databases. Mobile clients access the service through APIs; an offline app gets a deliberately scoped cache.
 
