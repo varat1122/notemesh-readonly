@@ -4,10 +4,12 @@ FROM node:24-trixie-slim AS build
 WORKDIR /app
 RUN corepack enable && apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# The root postinstall runs this patch during dependency installation.
+COPY scripts/patch-oauth-refresh-scopes.mjs ./scripts/patch-oauth-refresh-scopes.mjs
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN node scripts/patch-oauth-refresh-scopes.mjs
-RUN pnpm exec vitest run src/server/cloud-intake.test.ts src/server/cloud-preflight.test.ts src/server/oauth-refresh-scopes.test.ts src/server/oauth-diagnostics.test.ts src/server/mcp/readonly-deployment.test.ts src/server/mcp/tool-auth.test.ts src/server/intake.test.ts src/routes/api/intake-worker.test.ts src/server/mcp/save-server.test.ts src/server/mcp/oauth-endpoint.test.ts src/routes/api/save-analysis.test.ts src/server/discovery.test.ts && pnpm exec tsc --noEmit
+RUN pnpm exec vitest run src/server/safe-edit/engine.test.ts src/server/safe-edit/sync.test.ts src/server/mcp/safe-edit-server.test.ts src/server/ob/supervisor-safe-edit.test.ts src/routes/api/safe-edit-approval.test.ts src/routes/api/safe-edit-route.test.ts src/server/cloud-intake.test.ts src/server/cloud-preflight.test.ts src/server/oauth-refresh-scopes.test.ts src/server/oauth-diagnostics.test.ts src/server/mcp/readonly-deployment.test.ts src/server/mcp/tool-auth.test.ts src/server/intake.test.ts src/routes/api/intake-worker.test.ts src/server/mcp/save-server.test.ts src/server/mcp/oauth-endpoint.test.ts src/routes/api/save-analysis.test.ts src/server/discovery.test.ts && pnpm exec tsc --noEmit
 RUN pnpm build
 
 # Runtime stage
@@ -26,6 +28,9 @@ RUN apt-get update \
     && git lfs install --system
 RUN npm install -g obsidian-headless@0.0.14
 COPY --from=build /app/.output ./.output
+COPY scripts/check-runtime-exclusions.mjs /app/check-runtime-exclusions.mjs
+# Include the separately installed ob CLI and its dependencies in the review.
+RUN node /app/check-runtime-exclusions.mjs .output /usr/local/lib/node_modules
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 COPY scripts/ob-readonly.mjs /app/ob-readonly.mjs
 COPY scripts/cloud-sync-preflight.mjs /app/cloud-sync-preflight.mjs

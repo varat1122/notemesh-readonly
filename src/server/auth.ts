@@ -13,7 +13,7 @@ import { oauthProvider } from "@better-auth/oauth-provider";
  * is what `vault:read` and `vault:write` are for — so granting them costs
  * nothing on a single-user server, and withholding them costs the connector.
  */
-export const OAUTH_SCOPES = [
+export const DEFAULT_OAUTH_SCOPES = [
   "openid",
   "profile",
   "email",
@@ -21,6 +21,8 @@ export const OAUTH_SCOPES = [
   "vault:read",
   "inbox:submit",
 ] as const;
+// Registration eligibility is not a grant. Safe Edit requires an explicit scope request and new consent.
+export const OAUTH_SCOPES = [...DEFAULT_OAUTH_SCOPES, "vault:edit"] as const;
 import crypto from "node:crypto";
 import { db } from "./db";
 import { env } from "./env";
@@ -222,9 +224,10 @@ export const auth = betterAuth({
       // authorization and can be narrowed but not widened at the token
       // endpoint, which is what closed GHSA-p2fr-6hmx-4528 (#55).
       resources: [
-        { identifier: `${env.baseUrl}/api/mcp`, allowedScopes: [...OAUTH_SCOPES] },
-        { identifier: `${env.baseUrl}/api/save-analysis`, allowedScopes: [...OAUTH_SCOPES] },
-        { identifier: env.baseUrl, allowedScopes: [...OAUTH_SCOPES] },
+        { identifier: `${env.baseUrl}/api/mcp`, allowedScopes: [...DEFAULT_OAUTH_SCOPES] },
+        { identifier: `${env.baseUrl}/api/save-analysis`, allowedScopes: [...DEFAULT_OAUTH_SCOPES] },
+        { identifier: `${env.baseUrl}/api/safe-edit`, allowedScopes: ["openid", "profile", "email", "offline_access", "vault:read", "vault:edit"] },
+        { identifier: env.baseUrl, allowedScopes: [...DEFAULT_OAUTH_SCOPES] },
       ],
       // 1.7 also links each client to the resources it may request, and
       // refuses `resource` for any it is not linked to. New registrations get
@@ -234,7 +237,7 @@ export const auth = betterAuth({
       // linking can tell apart, so it is off; what closed the advisory is the
       // grant-bound audience above, which stays on.
       enforcePerClientResources: false,
-      clientRegistrationDefaultResources: [`${env.baseUrl}/api/mcp`, `${env.baseUrl}/api/save-analysis`, env.baseUrl],
+      clientRegistrationDefaultResources: [`${env.baseUrl}/api/mcp`, `${env.baseUrl}/api/save-analysis`, `${env.baseUrl}/api/safe-edit`, env.baseUrl],
       silenceWarnings: {
         // The plugin warns on every boot that
         // /.well-known/oauth-authorization-server/api/auth may not exist. It

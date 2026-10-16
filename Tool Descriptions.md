@@ -120,7 +120,7 @@ same width from their start. Matches are counted up to 10,000 and only the
 requested page is built. The way to find a passage in a note too long to read
 at once, before `read_note` with `offset` or `edit_note`.
 
-### create_note — write
+#### Legacy internal reference: create_note — write
 
 Creates a note. A bare filename with no folder goes to Obsidian's *Default
 location for new notes* when the vault sets one to a folder (`app.json`,
@@ -130,7 +130,7 @@ path that names a folder goes exactly there. Refused if the note exists, if
 the path carries a reserved name (`CON`, `__proto__` and the like), or if the
 content is over the write cap. Folders on the path are created.
 
-### edit_note — write
+#### Legacy internal reference: edit_note — write
 
 Replaces text by naming it. `oldString` must occur exactly once, or the edit
 is refused with the line numbers of every occurrence; then pass `line` to
@@ -146,7 +146,7 @@ What `edit_note` would do with the same arguments, without doing it: every
 occurrence with its line and an excerpt, how many the call would replace, and
 the refusal it would get if any. Offered to read-only credentials.
 
-### update_note — write
+#### Legacy internal reference: update_note — write
 
 Replaces the whole note. Everything not in `content` is discarded, including
 whatever a paged `read_note` did not return, so a note read in pages must
@@ -154,7 +154,7 @@ never be rewritten from one page. Pass `read_note`'s `totalLines` as
 `expectedLines`: the write is refused on mismatch, and a note longer than one
 read window is refused without it.
 
-### append_to_note — write
+#### Legacy internal reference: append_to_note — write
 
 Adds a block at the end of the note, separated by a blank line so it never
 merges into the last paragraph. With `heading`, adds it at the end of that
@@ -164,13 +164,13 @@ with or without its `#` marks, and must occur once; the refusal names the
 lines, or the headings the note has. Headings inside code fences or
 frontmatter do not count, as in the index.
 
-### prepend_to_note — write
+#### Legacy internal reference: prepend_to_note — write
 
 Inserts a block at the top of the note, below any YAML frontmatter so the
 frontmatter stays intact. With `heading`, inserts it directly under that
 heading as the section's first block. Same heading rules as `append_to_note`.
 
-### move_note — write, destructive
+#### Legacy internal reference: move_note — write, destructive
 
 Renames or moves a note, and rewrites every `[[wikilink]]` in other notes
 that resolved to it, as Obsidian does on a rename. A link keeps its form: a
@@ -182,20 +182,20 @@ links (`[text](path.md)`) are not rewritten, matching what the index resolves.
 `updateLinks: false` skips the rewrite. The result says how many links in
 which notes changed. On a git backend those notes go into the next commit.
 
-### move_folder — write, destructive
+#### Legacy internal reference: move_folder — write, destructive
 
 Moves or renames a folder with everything in it, and rewrites links to any
 note or attachment inside it by the same rules as `move_note`. Refused if the
 target exists or lies inside the folder, and for the vault root. Reindexes
 every moved file, so a very large folder takes about a millisecond per note.
 
-### delete_note — write, destructive
+#### Legacy internal reference: delete_note — write, destructive
 
 Deletes a note. Recoverable: Obsidian Sync keeps version history, and a git
 backend keeps the file in the previous commit. Present unless turned off on
 the **Settings** tab.
 
-### delete_folder — write, destructive
+#### Legacy internal reference: delete_folder — write, destructive
 
 Deletes an empty folder. Refused while anything is inside it, dotfiles
 included, naming the count. Offered under the same setting as `delete_note`.
@@ -221,7 +221,10 @@ markdown note is refused here with a pointer at `read_note`.
 
 ## Daily notes
 
-### daily_note — write
+### daily_note — read
+
+This deployment allows read/path actions only. Append/prepend are refused.
+The upstream behavior below is retained as an internal reference.
 
 `action` is `read`, `append`, `prepend` or `path`, for today or for `date`
 (`YYYY-MM-DD`). Append and prepend create the note if it does not exist, from
@@ -269,13 +272,13 @@ counts them.
 A note's frontmatter as an object, values fenced, names left plain. Without
 `path`, a survey of every property name in the vault with usage counts.
 
-### set_property — write
+#### Legacy internal reference: set_property — write
 
 Sets one property, creating the frontmatter block if there is none. `value`
 may be a string, number, boolean or list of strings. Returns `changed: false`
 and touches nothing if the value was already set.
 
-### remove_property — write
+#### Legacy internal reference: remove_property — write
 
 Removes one property. Returns `changed: false` and touches nothing if it was
 not set.
@@ -289,7 +292,7 @@ Markdown tasks (`- [ ]` and `- [x]`) across the vault, each with `path`,
 `daily` for today's daily note, resolved the same way `daily_note` resolves
 it.
 
-### toggle_task — write
+#### Legacy internal reference: toggle_task — write
 
 Flips one task's state by `path` and `line`, as `list_tasks` reported them.
 Refused if that line is not a task.
@@ -343,7 +346,7 @@ path, both numbers equal that note's contribution to the totals.
 One note's path, at random. Read it with `read_note`. For resurfacing
 something forgotten, not for finding a specific note.
 
-### unique_note — write
+#### Legacy internal reference: unique_note — write
 
 Creates a Zettelkasten-style timestamped note, following the vault's own
 Unique Note Creator settings (`.obsidian/zk-prefixer.json`) for the folder,
@@ -352,3 +355,13 @@ Without them: `YYYYMMDDHHmm.md` at the vault root, no template. The stamp is
 taken in the configured timezone. A template's `{{date}}` and `{{time}}` use
 the Templates plugin's formats (`templates.json`) when set; content passed
 in goes after the template as its own block.
+
+### submit_investment_notes — write
+
+Add-only linked notes require vault:read and inbox:submit. Cannot modify an existing note.
+
+### get_submission_status — read
+
+Read the intake receipt with vault:read and inbox:submit. Does not prove remote device Sync.
+
+Safe Edit is a separate resource; its seven tools and permissions are documented in docs/SAFE_EDIT.md.

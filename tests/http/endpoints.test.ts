@@ -160,7 +160,7 @@ describe("RPC: the dashboard loaders return real data", () => {
     const res = await rpc(server, "getSettingsPage", [], cookie);
     expect((res.body.result as any).deleteEnabled).toBe(true);
     const tools = (await rpc(server, "getToolsPage", [], cookie)).body.result as any;
-    expect(tools.tools.map((t: any) => t.name)).toContain("delete_note");
+    expect(tools.tools.map((t: any) => t.name)).not.toContain("delete_note");
   });
 
   it("getToolsPage describes the live tool surface", async () => {
@@ -173,7 +173,8 @@ describe("RPC: the dashboard loaders return real data", () => {
     // Read tools every deployment has, and a write tool, on the right sides.
     const byName = Object.fromEntries(r.tools.map((t: any) => [t.name, t]));
     expect(byName.read_note.write).toBe(false);
-    expect(byName.create_note.write).toBe(true);
+    expect(byName.create_note).toBeUndefined();
+    expect(byName.submit_investment_notes.write).toBe(true);
     expect(r.endpoint).toBe(`${server.url}/api/mcp`);
   });
 
@@ -328,7 +329,7 @@ describe("OAuth discovery", () => {
     // matters in practice because Codex prefers server-advertised scopes over
     // its own config, so whatever is here is what the user is asked to approve.
     const pr = await (await fetch(`${server.url}/.well-known/oauth-protected-resource`)).json();
-    expect(pr.scopes_supported).toEqual(["vault:read", "vault:write"]);
+    expect(pr.scopes_supported).toEqual(["vault:read", "inbox:submit"]);
     expect(pr.scopes_supported).not.toContain("offline_access");
     expect(pr.scopes_supported).not.toContain("openid");
   });
@@ -392,7 +393,7 @@ describe("the unauthenticated MCP challenge", () => {
     expect(challenge).toContain(
       `resource_metadata="${server.url}/.well-known/oauth-protected-resource"`,
     );
-    expect(challenge).toContain('scope="vault:read vault:write"');
+    expect(challenge).toContain('scope="vault:read inbox:submit"');
   });
 
   it.each(["GET", "DELETE"])(
@@ -405,7 +406,7 @@ describe("the unauthenticated MCP challenge", () => {
       const res = await fetch(`${server.url}/api/mcp`, { method });
       expect(res.status).toBe(401);
       expect(res.headers.get("www-authenticate")).toContain("resource_metadata=");
-      expect(res.headers.get("www-authenticate")).toContain('scope="vault:read vault:write"');
+      expect(res.headers.get("www-authenticate")).toContain('scope="vault:read inbox:submit"');
     },
   );
 

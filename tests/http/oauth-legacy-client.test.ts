@@ -51,7 +51,7 @@ describe("a connector registered before 1.7", () => {
       response_type: "code",
       client_id: reg.client_id,
       redirect_uri: "https://example.com/cb",
-      scope: "vault:read vault:write",
+      scope: "vault:read",
       code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
       code_challenge_method: "S256",
       state: "s",

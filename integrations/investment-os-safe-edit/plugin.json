@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "investment-os-safe-edit",
+  "version": "1.0.0",
+  "description": "Preview and apply explicitly authorized existing-note edits in Investment_OS with version checks, audit receipts and guarded rollback. Requires a fresh Safe Edit OAuth connection.",
+  "author": { "name": "varat1122" },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Investment OS — Safe Edit",
+        "shortDescription": "Review and edit vault notes",
+        "longDescription": "Connect to the existing Investment OS server. Prepare exact previews, review diffs, apply authorized changes, inspect durable receipts and prepare version-guarded rollback. Thesis changes additionally require human approval of the exact diff. Read notes using the existing read-only connection. Existing Read Only and Save Linked Notes connections remain separate.",
+        "developerName": "varat1122",
+        "category": "Productivity",
+        "capabilities": [],
+        "defaultPrompt": "อ่าน Existing Thesis ผ่าน Read Only แล้วแสดง preview การแก้ไขที่ฉันขอ ก่อน apply ให้รอการอนุมัติของฉันและตรวจ read-back กับ audit receipt หลังเขียน"
+      }
+    }
+  }
+}

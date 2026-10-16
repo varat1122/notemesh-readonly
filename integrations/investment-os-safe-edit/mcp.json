@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "investment-os-safe-edit": {
+      "type": "streamable-http",
+      "url": "https://notemesh-production-a893.up.railway.app/api/safe-edit",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": { "mode": "dcr" },
+            "baseScopes": ["vault:read", "vault:edit", "offline_access"],
+            "defaultScopes": ["vault:read", "vault:edit", "offline_access"]
+          }
+        }
+      }
+    }
+  }
+}

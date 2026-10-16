@@ -6,8 +6,9 @@
   "private": true,
   "packageManager": "pnpm@11.16.0",
   "scripts": {
+    "postinstall": "node scripts/patch-oauth-refresh-scopes.mjs",
     "dev": "vinxi dev",
-    "build": "vinxi build && node scripts/check-client-bundle.mjs",
+    "build": "vinxi build && node scripts/check-client-bundle.mjs && node scripts/check-runtime-exclusions.mjs",
     "check:client": "node scripts/check-client-bundle.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "test:e2e": "playwright test",
@@ -21,7 +22,7 @@
   "dependencies": {
     "@better-auth/api-key": "1.7.2",
     "@better-auth/oauth-provider": "1.7.2",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@picocss/pico": "^2.1.1",
     "@solidjs/meta": "^0.29.4",
     "@solidjs/router": "^0.15.3",

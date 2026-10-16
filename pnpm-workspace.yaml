@@ -14,11 +14,23 @@ overrides:
   hono: ^4.12.34 # ReDoS in CORS middleware
   fast-uri: ^3.1.6 # host confusion via backslash; 3.1.6 also clears the four 2026 URI-parsing advisories (#62)
   qs: ^6.16.0 # prototype pollution and DoS in query parsing, reached only through the MCP SDK's Express (#62)
-  brace-expansion: ^2.1.4 # DoS via unbounded intermediate arrays
+  brace-expansion: ^2.1.6 # nested brace recursion and intermediate-array DoS
   nanoid: ^3.3.17 # custom generators loop forever when size is zero
+  seroval: ^1.6.9 # unsafe JSON deserialization and unchecked TypedArray sizes
+  source-map-js: ^1.2.2 # indexed source-map section offset DoS
+  proxy-addr: ^2.0.8 # IPv4-mapped IPv6 trust-subnet spoofing
 
 # CI fails on a high or critical advisory in a production dependency. An
 # advisory that has been reviewed and found not to apply goes here, with
 # the reason, and comes out when the fix lands.
-auditConfig:
-  ignoreCves: []
+audit:
+  # Reviewed 2026-10-16: only Vinxi/listhen's development TLS helper uses
+  # node-forge; only build-time glob tooling uses braces. Production starts
+  # .output/server/index.mjs directly. The build and Docker runtime scans fail
+  # if either package/import enters .output or the installed ob CLI tree.
+  # No server request or vault pattern reaches these build tools. Remove these
+  # entries when upstream fixes publish; do not run vinxi dev/start in production.
+  # Details and limits: docs/SAFE_EDIT_TEST_REPORT.md.
+  ignore:
+    - GHSA-86w9-cpqp-85rv # node-forge / CVE-2026-85393
+    - GHSA-vfj7-8cjw-p6xm # braces / CVE-2026-93687

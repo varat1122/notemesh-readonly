@@ -38,7 +38,7 @@ async function verify(token: string, endpoint: McpEndpoint): Promise<JWTPayload 
       verifyOptions: {
         // Matches the oauth-provider's issuer: baseURL + basePath.
         issuer: `${env.baseUrl}/api/auth`,
-        audience: [env.baseUrl, mcpResourceUrl(endpoint)],
+        audience: endpoint === "safe-edit" ? [mcpResourceUrl(endpoint)] : [env.baseUrl, mcpResourceUrl(endpoint)],
       },
     });
   } catch {

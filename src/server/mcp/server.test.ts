@@ -86,8 +86,8 @@ describe("tool surface", () => {
     expect(await toolNames(true, false)).toEqual(READ_TOOLS);
   });
 
-  it("adds the write tools for a writable client", async () => {
-    expect(await toolNames(true, true)).toEqual([...READ_TOOLS, ...WRITE_TOOLS].sort());
+  it("keeps legacy writable clients read-only", async () => {
+    expect(await toolNames(true, true)).toEqual(READ_TOOLS);
   });
 
   it("registers list_attachments", async () => {
@@ -107,18 +107,18 @@ describe("tool surface", () => {
 // it is recoverable rather than destructive. The setting still turns it off,
 // and read scope still never gets it — those are the parts that matter.
 describe("delete_folder", () => {
-  it("comes and goes with delete_note", async () => {
+  it("never registers delete_folder even when the legacy setting is on", async () => {
     await setDelete(false);
     expect(await toolNames(true, true)).not.toContain("delete_folder");
     await setDelete(true);
-    expect(await toolNames(true, true)).toContain("delete_folder");
+    expect(await toolNames(true, true)).not.toContain("delete_folder");
     expect(await toolNames(true, false)).not.toContain("delete_folder");
   });
 });
 
 describe("delete_note", () => {
-  it("is present by default for a writable client", async () => {
-    expect(await toolNames(true, true)).toContain("delete_note");
+  it("is absent even for a legacy writable client", async () => {
+    expect(await toolNames(true, true)).not.toContain("delete_note");
   });
 
   it("disappears once the setting is turned off", async () => {
@@ -126,9 +126,9 @@ describe("delete_note", () => {
     expect(await toolNames(true, true)).not.toContain("delete_note");
   });
 
-  it("comes back when the setting is turned on again", async () => {
+  it("stays absent when the setting is turned on again", async () => {
     await setDelete(true);
-    expect(await toolNames(true, true)).toContain("delete_note");
+    expect(await toolNames(true, true)).not.toContain("delete_note");
   });
 
   it("is never exposed to a read-only client", async () => {
@@ -178,69 +178,13 @@ describe("preview_edit", () => {
     return abs;
   }
 
-  it("edit_note reindexes and tells the backend, so the spies are live", async () => {
-    const { call, reindex, notify } = await serverWith(true);
-    const abs = plant("a\nfoo\nb\n");
-    const res = call("edit_note", { path: "Note.md", oldString: "foo", newString: "bar" });
-    expect(res.isError).toBeUndefined();
-    expect(fs.readFileSync(abs, "utf8")).toBe("a\nbar\nb\n");
-    expect(reindex).toHaveBeenCalledWith("Note.md");
-    expect(notify).toHaveBeenCalledWith({ tool: "edit_note", path: "Note.md" });
-  });
-
-  it("append_to_note and prepend_to_note take a heading and say so", async () => {
-    const { call } = await serverWith(true);
-    const abs = plant("## A\n\nold\n\n## B\n");
-    const res = call("append_to_note", { path: "Note.md", content: "new", heading: "A" });
-    expect(res.isError).toBeUndefined();
-    expect(res.content[0].text).toBe('Appended to Note.md under "A"');
-    expect(fs.readFileSync(abs, "utf8")).toBe("## A\n\nold\n\nnew\n\n## B\n");
-    const bad = call("prepend_to_note", { path: "Note.md", content: "x", heading: "Zed" });
-    expect(bad.isError).toBe(true);
-    expect(bad.content[0].text).toMatch(/No heading "Zed"/);
-  });
-
-  it("move_folder moves everything, rewrites the links, and reindexes old, new and rewritten paths", async () => {
-    const { call, reindex } = await serverWith(true);
-    const { reindexPath } = await vi.importActual<typeof import("../vault/indexer")>("../vault/indexer");
-    const v = path.join(root, "vault");
-    fs.mkdirSync(path.join(v, "Old"), { recursive: true });
-    // a.md links to its sibling by path, so it is both moved and rewritten.
-    fs.writeFileSync(path.join(v, "Old", "a.md"), "[[Old/b]]\n");
-    fs.writeFileSync(path.join(v, "Old", "b.md"), "x\n");
-    fs.writeFileSync(path.join(v, "Src.md"), "[[Old/a]]\n");
-    reindexPath("Old/a.md");
-    reindexPath("Old/b.md");
-    reindexPath("Src.md");
-    const res = call("move_folder", { path: "Old", newPath: "New" });
-    expect(res.isError).toBeUndefined();
-    expect(res.content[0].text).toMatch(/^Moved Old → New \(2 files\)\. Updated 2 links in 2 notes: /);
-    expect(fs.readFileSync(path.join(v, "Src.md"), "utf8")).toBe("[[New/a]]\n");
-    expect(fs.readFileSync(path.join(v, "New", "a.md"), "utf8")).toBe("[[New/b]]\n");
-    // Every old path, every new path, and the outside source: each exactly once.
-    expect(reindex.mock.calls.map((c) => c[0]).sort()).toEqual(["New/a.md", "New/b.md", "Old/a.md", "Old/b.md", "Src.md"]);
-  });
-
-  it("move_note rewrites links by default, says what it touched, and updateLinks: false leaves them", async () => {
-    const { call, reindex } = await serverWith(true);
-    // The harness mocks the indexer with a spy; the fixture needs the real one.
-    const { reindexPath } = await vi.importActual<typeof import("../vault/indexer")>("../vault/indexer");
-    plant("x\n");
-    const src = path.join(root, "vault", "Src.md");
-    fs.writeFileSync(src, "[[Note]] twice [[Note|n]]\n");
-    reindexPath("Note.md");
-    reindexPath("Src.md");
-    const res = call("move_note", { path: "Note.md", newPath: "Renamed.md" });
-    expect(res.isError).toBeUndefined();
-    expect(res.content[0].text).toBe("Moved Note.md → Renamed.md. Updated 2 links in 1 note: Src.md.");
-    expect(fs.readFileSync(src, "utf8")).toBe("[[Renamed]] twice [[Renamed|n]]\n");
-    expect(reindex.mock.calls.map((c) => c[0])).toEqual(["Note.md", "Renamed.md", "Src.md"]);
-
-    reindexPath("Renamed.md");
-    reindexPath("Src.md");
-    const kept = call("move_note", { path: "Renamed.md", newPath: "Again.md", updateLinks: false });
-    expect(kept.content[0].text).toBe("Moved Renamed.md → Again.md.");
-    expect(fs.readFileSync(src, "utf8")).toBe("[[Renamed]] twice [[Renamed|n]]\n");
+  it.each(["edit_note", "append_to_note", "prepend_to_note", "move_folder", "move_note"])("refuses legacy %s without reindex or Sync effects", async tool => {
+    const { has, reindex, notify } = await serverWith(true);
+    const abs = plant("## A\nold\n");
+    expect(has(tool)).toBe(false);
+    expect(fs.readFileSync(abs,"utf8")).toBe("## A\nold\n");
+    expect(reindex).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("is offered to a read-only credential and touches nothing", async () => {
@@ -259,30 +203,11 @@ describe("preview_edit", () => {
   });
 });
 
-// A full disk is the one native error a tool names, because the fix is the
-// operator's. The write guard refuses most of them first; this is the write
-// that crosses the line anyway — here the index's, which safe() alone sees.
-describe("a full disk, as a tool reports it", () => {
-  afterEach(() => vi.doUnmock("../vault/notes"));
-
-  it("names the volume instead of the generic failure", async () => {
-    vi.doMock("../vault/notes", async (original) => ({
-      ...(await original<typeof import("../vault/notes")>()),
-      createNote: () => {
-        throw Object.assign(new Error("database or disk is full"), { code: "SQLITE_FULL" });
-      },
-    }));
-    const { createMcpServer } = await import("./server");
-    const server = createMcpServer({ read: true, write: true, label: "test" }) as unknown as {
-      _registeredTools: Record<
-        string,
-        { handler: (args: unknown, extra: unknown) => { content: { text: string }[]; isError?: boolean } }
-      >;
-    };
-    const res = server._registeredTools.create_note.handler({ path: "New.md", content: "x" }, {});
-    expect(res.isError).toBe(true);
-    expect(res.content[0].text).toMatch(/volume is full/);
-    expect(res.content[0].text).not.toMatch(/server logs/);
+// Full-disk write handling belongs to the separate Safe Edit engine suite.
+// The research resource must not route even legacy callers to a write handler.
+describe("research write isolation", () => {
+  it("does not register create_note even for a legacy write flag", async () => {
+    expect(await toolNames(true,true)).not.toContain("create_note");
   });
 });
 

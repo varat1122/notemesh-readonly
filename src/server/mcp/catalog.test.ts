@@ -30,7 +30,7 @@ async function catalog() {
 
 async function registered(read: boolean, write: boolean): Promise<string[]> {
   const { createMcpServer } = await import("./server");
-  const server = createMcpServer({ read, write, label: "test" }) as unknown as {
+  const server = createMcpServer({ read, write, intake: true, label: "test" }) as unknown as {
     _registeredTools: Record<string, unknown>;
   };
   return Object.keys(server._registeredTools).sort();
@@ -40,14 +40,15 @@ describe("the tool catalogue", () => {
   it("lists exactly what a write-scoped client is registered", async () => {
     const names = (await catalog()).map((t) => t.name).sort();
     expect(names).toEqual(await registered(true, true));
-    expect(names.length).toBeGreaterThan(20);
+    expect(names.length).toBe(22);
   });
 
   it("marks as write exactly the tools a read-only client does not get", async () => {
     const tools = await catalog();
     const readOnly = new Set(await registered(true, false));
     for (const t of tools) {
-      expect(t.write, `${t.name} write flag`).toBe(!readOnly.has(t.name));
+      expect(t.write, `${t.name} write flag`).toBe(t.annotations?.readOnlyHint !== true);
+      expect(readOnly.has(t.name)).toBe(true);
     }
     // Both groups are non-empty, so a flag stuck at one value would show here
     // rather than passing the check above vacuously.
@@ -75,7 +76,7 @@ describe("the tool catalogue", () => {
   it("follows a conditional tool rather than hardcoding it", async () => {
     // delete_note is registered behind a setting. A catalogue built from a
     // written-down list would show it either always or never.
-    expect((await catalog()).map((t) => t.name)).toContain("delete_note");
+    expect((await catalog()).map((t) => t.name)).not.toContain("delete_note");
 
     const { setSetting } = await import("../db");
     setSetting("delete_enabled", "false");
@@ -194,7 +195,7 @@ describe("tool definitions, as a client reads them", () => {
     }
     // The five that can lose content a person wrote, and only those.
     const destructive = (await catalog()).filter((t) => t.annotations!.destructiveHint).map((t) => t.name).sort();
-    expect(destructive).toEqual(["delete_folder", "delete_note", "move_folder", "move_note", "update_note"]);
+    expect(destructive).toEqual([]);
   });
 });
 

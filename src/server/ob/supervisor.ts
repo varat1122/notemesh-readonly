@@ -116,6 +116,8 @@ export class SyncSupervisor implements SyncBackend {
   private authProbeAt = 0;
   private authProbing = false;
   private settingsSyncTried = false;
+  private editPaused = false;
+  private manualSyncActive = false;
 
   // Parse daemon output lines into a running tally of the current sync burst.
   private trackActivity(rawLine: string) {
@@ -156,7 +158,7 @@ export class SyncSupervisor implements SyncBackend {
   }
 
   start() {
-    if (this.child || this.state === "running") return;
+    if (this.editPaused || this.child || this.state === "running") return;
     this.stopping = false;
     this.state = "running";
     this.startedAt = Date.now();
@@ -279,6 +281,29 @@ export class SyncSupervisor implements SyncBackend {
     }
   }
 
+  private hasChild(): boolean { return this.child !== null; }
+
+  /** Await daemon exit before a guarded atomic edit; no polling or forced kill. */
+  async withPausedForEdit<T>(run: () => T): Promise<T> {
+    if (this.editPaused || this.manualSyncActive || !this.child || this.state !== "running") throw Error("Sync cannot be paused safely now");
+    this.editPaused = true;
+    const child = this.child;
+    this.stop();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([child, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(Error("Sync did not stop; no edit applied")), 10000);
+      })]);
+      if (this.hasChild() || this.status().state !== "stopped") throw Error("Sync exit was not confirmed");
+      return run();
+    } finally {
+      if (timer) clearTimeout(timer);
+      this.editPaused = false;
+      if (this.hasChild()) void child.then(() => this.start());
+      else this.start();
+    }
+  }
+
   // Called after a successful re-login.
   resetAndStart() {
     this.backoffMs = 2_000;
@@ -301,7 +326,9 @@ export class SyncSupervisor implements SyncBackend {
       this.note(`[admin] ${message}`);
       return { ok: true, output: message };
     }
-    const res = await obSyncOnce();
+    if (this.editPaused || this.manualSyncActive) return { ok: false, output: "Safe Edit or manual Sync is in progress" };
+    this.manualSyncActive = true;
+    const res = await obSyncOnce().finally(() => { this.manualSyncActive = false; });
     const tail = res.combined.split("\n").filter(Boolean).slice(-5).join("\n");
     if (res.ok) {
       this.note("[admin] Manual sync finished.");

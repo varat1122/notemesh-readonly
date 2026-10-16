@@ -44,3 +44,10 @@ it("refuses a revoked client even with a valid save-audience signature", async (
   state.revoked = true;
   expect((await handleMcpWithOAuth(await request(`${origin}/api/save-analysis`), "save-analysis"))?.status).toBe(401);
 });
+
+it("Safe Edit requires its exact audience, refusing research/save/legacy origin audiences", async () => {
+  for (const aud of [origin, `${origin}/api/mcp`, `${origin}/api/save-analysis`]) {
+    expect((await handleMcpWithOAuth(await request(aud), "safe-edit"))?.status).toBe(401);
+  }
+  expect((await handleMcpWithOAuth(await request(`${origin}/api/safe-edit`), "safe-edit"))?.status).toBe(200);
+});

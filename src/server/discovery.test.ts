@@ -72,3 +72,9 @@ describe("everything else falls through", () => {
     expect(discoveryEndpoint("/.well-known/oauth-authorization-server-x")).toBeNull();
   });
 });
+
+it("serves the isolated Safe Edit metadata without adding edit to old endpoints",()=>{
+  expect(discoveryEndpoint("/.well-known/oauth-protected-resource/api/safe-edit")).toBe("edit-protected-resource");
+  expect(protectedResourceMetadata("safe-edit").scopes_supported).toEqual(["vault:read","vault:edit"]);
+  for(const endpoint of ["research","save-analysis"] as const) expect(protectedResourceMetadata(endpoint).scopes_supported).not.toContain("vault:edit");
+});

@@ -3,7 +3,7 @@ import { db } from "./db";
 
 // Diagnostic data only. Never use consent or refresh records to authorize a
 // request; the current verified bearer token remains the authority.
-const knownScopes = new Set(["openid", "profile", "email", "offline_access", "vault:read", "vault:write", "inbox:submit"]);
+const knownScopes = new Set(["openid", "profile", "email", "offline_access", "vault:read", "vault:write", "vault:edit", "inbox:submit"]);
 export function diagnosticScopes(value: unknown): string[] {
   let values: unknown = value;
   if (typeof value === "string") {
