@@ -28,6 +28,9 @@ RUN apt-get update \
     && git lfs install --system
 RUN npm install -g obsidian-headless@0.0.14
 COPY --from=build /app/.output ./.output
+COPY scripts/check-runtime-exclusions.mjs /app/check-runtime-exclusions.mjs
+# Include the separately installed ob CLI and its dependencies in the review.
+RUN node /app/check-runtime-exclusions.mjs .output /usr/local/lib/node_modules
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 COPY scripts/ob-readonly.mjs /app/ob-readonly.mjs
 COPY scripts/cloud-sync-preflight.mjs /app/cloud-sync-preflight.mjs

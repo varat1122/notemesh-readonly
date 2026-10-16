@@ -83,7 +83,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # Blocking at high and critical. A new advisory in a transitive
       # dependency turns CI red until it is fixed or, after review, listed
-      # under auditConfig.ignoreCves in pnpm-workspace.yaml with the reason.
+      # under audit.ignore in pnpm-workspace.yaml with the reason and runtime gate.
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level=high
 

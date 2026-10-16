@@ -2,6 +2,13 @@
 
 ## Preflight: do not merge/enable without these checks
 
+2026-10-16 inspection: Production auto-deploys `main`, with **Wait for CI off**.
+Merging is therefore a deployment action; do not merge before remaining gates.
+The authenticated Backups panel reports **No Backups** and requires Pro to create
+them. The user explicitly waived Production Backup in chat on 2026-10-16 and
+instructed deployment to continue. No Production backup/restore test is certified.
+No plan upgrade or volume resize is authorized by the development request.
+
 1. Inspect Railway's currently running commit and image (not just GitHub HEAD or
    an old successful status). Confirm health `/api/health`, single replica,
    existing service/project/environment IDs and attached persistent `/data` volume.
@@ -9,12 +16,14 @@
    encryption keys and OAuth/Sync tokens out of chat, PRs and logs. Confirm the
    existing BASE_URL/issuer, CLOUD_INTAKE=1 and volume paths. Do not create a new
    vault or change the old connectors' grants.
-3. Pause queue processing and Sync under operator control, then take a consistent
+3. Normally pause queue processing and Sync under operator control, then take a consistent
    production vault + SQLite backup/snapshot (including journal/backup directory)
    and verify checksums and restore readability. Existing migration backups are
    useful historical evidence, not a fresh production backup. Check disk reserve
    on the real volume before copying anything. A Railway volume/snapshot backup
-   must be confirmed through Railway, not inferred from local code.
+   must be confirmed through Railway, not inferred from local code. For this
+   rollout the user waived that pre-deployment backup; retain the waiver in the
+   release evidence. Per-edit backups required by the protocol still apply.
 4. Run lint, typecheck, the complete unit/integration suite and the built-server
    HTTP tests. Build the actual Docker image and verify nonroot user, persistent
    volume and health. CI includes the existing container gate.
