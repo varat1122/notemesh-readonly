@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { extractStructure, splitFrontmatter, joinFrontmatter } from "./markdown";
 
+describe("Obsidian table wikilink aliases", () => {
+  it("indexes the actual note target when the alias uses an escaped pipe", () => {
+    const source = [
+      "Normal [[01_Companies/NVDA|NVIDIA]]",
+      "| Company | Link |",
+      "| --- | --- |",
+      String.raw`| [[01_Companies/NVDA\|NVDA alias]] | [[Theme#Heading\|Heading alias]] |`,
+      String.raw`| [[Dir\Old]] | ` + "`[[Ignored\|Not a link]]`" + ` |`,
+    ].join("\n");
+    expect(extractStructure(source).links).toEqual(["01_Companies/NVDA", "01_Companies/NVDA", "Theme", "Dir\\Old"]);
+  });
+});
 // The comment scanner and the code-span mask, together. Most of extraction is
 // exercised through the indexer in tests/vault/hostile-content.test.ts; this
 // is the one interaction that needs the function on its own.
