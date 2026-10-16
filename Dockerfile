@@ -4,6 +4,8 @@ FROM node:24-trixie-slim AS build
 WORKDIR /app
 RUN corepack enable && apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# The root postinstall runs this patch during dependency installation.
+COPY scripts/patch-oauth-refresh-scopes.mjs ./scripts/patch-oauth-refresh-scopes.mjs
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN node scripts/patch-oauth-refresh-scopes.mjs
