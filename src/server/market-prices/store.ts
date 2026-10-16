@@ -31,16 +31,18 @@ export class PriceStore {
   readonly db: Database.Database;
   readonly filename: string;
   readonly writable: boolean;
-  constructor(filename: string, writable = false) {
-    this.filename = filename;
+  readonly memory: boolean;
+  constructor(filename: string | Buffer, writable = false) {
+    this.memory = Buffer.isBuffer(filename) || filename === ":memory:";
+    this.filename = typeof filename === "string" ? filename : ":memory:";
     this.writable = writable;
-    try {
+    if (!this.memory) try {
       const stats = fs.lstatSync(filename);
       if (stats.isSymbolicLink() || stats.nlink > 1) throw new PriceError("linked_price_database_refused");
       if (writable && stats.size > priceDatabaseLimit()) throw new PriceError("price_database_exceeds_configured_limit");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    if (writable) {
-      fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
+    if (writable && !this.memory) {
+      fs.mkdirSync(path.dirname(this.filename), { recursive: true, mode: 0o700 });
       this.assertSpace();
     }
     this.db = new Database(filename, { readonly: !writable, fileMustExist: !writable, timeout: 5000 });
@@ -89,6 +91,8 @@ export class PriceStore {
   }
 
   assertSpace(): void {
+    // Drive mode uses a bounded, private in-memory DB; it never writes a local price file.
+    if (this.memory) return;
     const stats = fs.statfsSync(path.dirname(this.filename));
     // Reserve one full DB rollback journal plus the existing application's database, if larger.
     const appDb = path.join(path.resolve(process.env.DATA_DIR ?? "./data"), "app.sqlite");
@@ -110,7 +114,7 @@ export class PriceStore {
     const token = crypto.randomUUID();
     const result = this.db.prepare(`INSERT INTO collector_lease VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET
       token=excluded.token,expires_at=excluded.expires_at WHERE collector_lease.expires_at<=?`)
-      .run(token, now.getTime() + 60 * 60 * 1000, now.getTime());
+      .run(token, now.getTime() + 3 * 60 * 60 * 1000, now.getTime());
     return result.changes ? token : null;
   }
   releaseLease(token: string): void {
@@ -148,7 +152,7 @@ export class PriceStore {
     this.assertSpace();
     const id = snapshot.instrument.id;
     // The provider parser is the only producer; also validate at this persistence boundary.
-    if (id !== instrument(snapshot.instrument).id || !snapshot.bars.length || snapshot.bars.length > 2000 ||
+    if (id !== instrument(snapshot.instrument).id || !snapshot.bars.length || snapshot.bars.length > 10000 ||
       !Number.isFinite(Date.parse(snapshot.fetchedAt))) throw new PriceError("invalid_snapshot");
     for (const bar of snapshot.bars) {
       isoDate.parse(bar.date);
@@ -250,7 +254,9 @@ export class PriceStore {
       receipts: this.db.prepare(`SELECT instrument_id AS instrumentId,attempted_at AS attemptedAt,success,error_code AS errorCode,
         row_count AS rowCount,inserted,revised,missing_bars AS missingBars,excluded_current AS excludedCurrent,payload_hash AS payloadHash
         FROM refreshes ORDER BY id DESC LIMIT 20`).all(),
-      storage: { bytes: fs.statSync(this.filename).size, maxDatabaseBytes: priceDatabaseLimit(), diskReserveBytes: DISK_RESERVE },
+      storage: { bytes: this.memory ? (this.db.pragma("page_count", { simple: true }) as number) *
+        (this.db.pragma("page_size", { simple: true }) as number) : fs.statSync(this.filename).size,
+        mode: this.memory ? "memory" : "disk", maxDatabaseBytes: priceDatabaseLimit(), diskReserveBytes: DISK_RESERVE },
       qualityIssues: this.db.prepare(`SELECT instrument_id AS instrumentId,date,reason,first_seen_at AS firstSeenAt,last_seen_at AS lastSeenAt
         FROM quality_issues WHERE resolved_at IS NULL ORDER BY last_seen_at DESC LIMIT 100`).all(),
       automatedWritesToVault: false };

@@ -27,7 +27,7 @@ Default: disabled. After review/deployment, set `MARKET_PRICES_ENABLED=1` on the
 
 The collector runs at boot and checks every minute whether the daily refresh is due at/after 06:00 UTC (13:00 Bangkok). A pre-06:00 boot does not consume that day's later refresh. Persisted per-instrument receipts and a one-hour durable lease prevent duplicate/overlapping collection. Requests are sequential with three-second spacing. A failed instrument retries no more than hourly; provider auth/throttling errors stop the whole cycle and enforce a provider-wide hour cooldown. An outage keeps the prior usable cache visible with the error status.
 
-Every pull refreshes the five-year window. Daily timestamps are converted using the provider-validated exchange timezone; the current exchange calendar day is excluded even after close. This is conservative next-day data. It is intentionally not real-time and will sometimes lag an already-closed session until the next local date/refresh.
+In disk mode each pull refreshes the five-year window. Drive mode uses initial backfill, daily overlap and periodic/adjustment-triggered full-history checks as documented in GOOGLE_DRIVE_PRICES.md. Daily timestamps are converted using the provider-validated exchange timezone; the current exchange calendar day is excluded even after close. This is conservative next-day data. It is intentionally not real-time and will sometimes lag an already-closed session until the next local date/refresh.
 
 ## Integrity and read-only surface
 
@@ -58,3 +58,7 @@ Read the relevant source and thesis using Read Only. Establish the actual public
 See [Investment data architecture](INVESTMENT_DATA_ARCHITECTURE.md) for the persistent event registry, portfolio ledger and future web/mobile direction.
 
 Storage diagnostics report available bytes, the unchanged application-index reserve and the bounded price/journal budget, without paths or secrets. `MARKET_PRICES_MAX_DB_MB` accepts only 4 (default), 8 or 16. A small pilot does not reserve the full optional expanded dataset budget. If the vault/index reserve itself exceeds available space, collection still refuses; no automatic paid resize or lower reserve.
+
+Optional Google Drive immutable snapshots and RAM query backend: see [Drive setup](GOOGLE_DRIVE_PRICES.md). It remains inactive until dedicated server OAuth, encrypted credential persistence and single-writer verification. This does not connect the existing ChatGPT Drive plugin automatically.
+
+Capacity requirement: 200 listings plus up to four comparator ETFs. Drive uses signed per-listing archives/catalogues, default five-listing batches and bounded on-demand RAM queries. Price read tools may download private archived partitions on a cold Drive cache but never request new source quotes or write Drive/Vault data. Synthetic capacity tests are not production coverage.

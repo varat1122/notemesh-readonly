@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { instrumentSchema, instrument, PILOT_INSTRUMENTS, BENCHMARKS, PriceError, type InstrumentInput } from "./model.ts";
+import { instrumentSchema, instrument, PILOT_INSTRUMENTS, BENCHMARKS, MAX_PRICE_INSTRUMENTS, PriceError, type InstrumentInput } from "./model.ts";
 import { PriceStore, priceDbPath } from "./store.ts";
 import { fetchYahooDaily } from "./yahoo.ts";
 
@@ -8,7 +8,7 @@ export function priceWatchlist(): InstrumentInput[] {
   try {
     const value = process.env.MARKET_PRICES_WATCHLIST ? JSON.parse(process.env.MARKET_PRICES_WATCHLIST) :
       [...PILOT_INSTRUMENTS, ...Object.values(BENCHMARKS).map(({ market, symbol }) => ({ market, symbol }))];
-    const list = z.array(instrumentSchema).min(1).max(100).parse(value);
+    const list = z.array(instrumentSchema).min(1).max(MAX_PRICE_INSTRUMENTS).parse(value);
     if (new Set(list.map(i => instrument(i).id)).size !== list.length) throw new Error("duplicate");
     return list;
   } catch { throw new PriceError("invalid_price_watchlist"); }
@@ -23,16 +23,32 @@ export function scheduledCutoff(now: Date): number {
   return scheduled.getTime();
 }
 
-export async function refreshPrices(options: {
+export interface RefreshOptions {
   filename?: string; watchlist?: InstrumentInput[]; now?: Date; force?: boolean;
   fetcher?: typeof fetchYahooDaily; pause?: (ms: number) => Promise<unknown>;
-} = {}) {
-  const now = options.now ?? new Date();
-  const watchlist = options.watchlist ?? priceWatchlist();
-  // Validate the full list before opening a file or making requests.
-  const list = z.array(instrumentSchema).min(1).max(100).parse(watchlist);
-  if (new Set(list.map(i => instrument(i).id)).size !== list.length) throw new PriceError("duplicate_price_instrument");
+}
+export async function refreshPrices(options: RefreshOptions = {}) {
+  priceWatchlistFrom(options);
+  const backend = process.env.MARKET_PRICES_STORAGE ?? "disk";
+  if (!["disk", "google-drive"].includes(backend)) throw new PriceError("invalid_price_storage_backend");
+  // Explicit filenames are a local CLI/test path; the production Drive collector never creates one.
+  if (backend === "google-drive" && !options.filename) {
+    const { drivePriceCache } = await import("./drive-backend.ts");
+    return drivePriceCache().refresh(options);
+  }
+  // Validate before creating a local file.
+  priceWatchlistFrom(options);
   const store = new PriceStore(options.filename ?? priceDbPath(), true);
+  try { return await collectIntoPriceStore(store, options); } finally { store.close(); }
+}
+export function priceWatchlistFrom(options: RefreshOptions) {
+  const list = z.array(instrumentSchema).min(1).max(MAX_PRICE_INSTRUMENTS).parse(options.watchlist ?? priceWatchlist());
+  if (new Set(list.map(i => instrument(i).id)).size !== list.length) throw new PriceError("duplicate_price_instrument");
+  return list;
+}
+export async function collectIntoPriceStore(store: PriceStore, options: RefreshOptions) {
+  const now = options.now ?? new Date();
+  const list = priceWatchlistFrom(options);
   let lease: string | null = null;
   const results: { instrumentId: string; status: string; inserted?: number; revised?: number; unchanged?: number; rowCount?: number; errorCode?: string }[] = [];
   try {
@@ -61,7 +77,6 @@ export async function refreshPrices(options: {
     return { status: results.some(r => r.status === "failed") ? "partial_failure" : "complete", results };
   } finally {
     if (lease) store.releaseLease(lease);
-    store.close();
   }
 }
 
