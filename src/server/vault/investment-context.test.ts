@@ -126,6 +126,41 @@ describe("investment context retrieval",()=>{
     expect(paths).not.toContain("01_Companies/NVO.md");
     expect(p.incomplete.some(x=>x.includes("Current Thesis")||x.includes("Evidence Register"))).toBe(false);
   });
+  it("excludes incidental country mentions in Japan and US-Russia headlines and surfaces missing macro primary-source evidence",async()=>{
+    const build=await fixture();
+    await addExtra("10_Knowledge/Macro and Markets/2026-10-04 - Japan BOJ forecast.md",
+      "# Japan monetary outlook\nJapan interest-rate forecast; Vietnam is mentioned once in a broader ASEAN note.");
+    await addExtra("10_Knowledge/Macro and Markets/2026-10-04 - US-Russia oil deal.md",
+      "# US Russia crude\nTrade pact news; Vietnam is incidental, not the main economic topic.");
+    await addExtra("10_Knowledge/Macro and Markets/2026-10-03 - Vietnam GDP Q3.md",
+      "# Vietnam GDP third quarter\nHistorical Vietnam macro commentary, without an original official primary source URL.");
+    const p=build({question:"Vietnam GDP third quarter economic growth and bank liquidity",
+      industry:"Vietnam macro and markets",focus:"macro",maxNotes:10});
+    const paths=p.items.map(x=>x.path);
+    expect(paths).toContain("10_Knowledge/Macro and Markets/2026-10-03 - Vietnam GDP Q3.md");
+    expect(paths).not.toContain("10_Knowledge/Macro and Markets/2026-10-04 - Japan BOJ forecast.md");
+    expect(paths).not.toContain("10_Knowledge/Macro and Markets/2026-10-04 - US-Russia oil deal.md");
+    expect(p.incomplete.some(x=>x.includes("primary macro/statistical"))).toBe(true);
+  });
+  it("recognizes a country-scoped original primary statistical note without claiming its figures were reverified",async()=>{
+    const build=await fixture();
+    await addExtra("10_Knowledge/Macro and Markets/2026-10-07 - Vietnam official GDP 2026Q3.md",
+      `---
+domain: macro
+country: Vietnam
+source_type: primary
+source_url: https://www.nso.gov.vn/official-gdp
+verification: not_reverified
+published_at: 2026-10-07
+---
+# Vietnam original GDP quarterly statistics
+Official-file source candidate (no verified numeric facts in this synthetic test).`);
+    const p=build({question:"Vietnam GDP 2026Q3 official release",industry:"Vietnam macro and markets",focus:"macro",maxNotes:10});
+    expect(p.items.some(x=>x.path==="10_Knowledge/Macro and Markets/2026-10-07 - Vietnam official GDP 2026Q3.md")).toBe(true);
+    expect(p.incomplete.some(x=>x.includes("primary macro/statistical"))).toBe(false);
+    expect(p.status).toBe("retrieval_only_not_verified");
+    expect(p.items.find(x=>x.path.includes("official GDP"))?.declaredVerification).toBe("not_reverified");
+  });
   it("rejects absent research question",async()=>{
     const build=await fixture();
     expect(()=>build({question:"  "})).toThrow(/Question/);
