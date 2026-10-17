@@ -156,7 +156,15 @@ export function reconcileCoordinatedWriteback(
       }else {state="repair_required";reason="write_record_lacks_verified_local_readback_or_index";}
     }
     else if(record?.status==="preview"){
-      state="awaiting_approval";reason="review_diff_and_apply_token_required";
+      if(step.holdReasons.length||step.action==="hold"){
+        state="hold";reason=step.holdReasons.join(",")||"guarded_route_cannot_be_applied";
+      }else if(step.action==="inspect_existing"){
+        state="conflict";reason="preview_attempted_for_existing_identity_not_verified";
+      }else if(step.dependsOn.some(id=>outcome.get(id)?.state!=="applied_verified")){
+        state="awaiting_dependency";reason="preview_exists_but_dependency_not_locally_verified";
+      }else {
+        state="awaiting_approval";reason="review_diff_and_apply_token_required";
+      }
     }
     else if(record){state="conflict";reason="unexpected_safe_edit_journal_state";}
     else if(step.holdReasons.length){state="hold";reason=step.holdReasons.join(",");}
