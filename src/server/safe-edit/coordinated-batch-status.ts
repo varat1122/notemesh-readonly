@@ -34,7 +34,7 @@ const expected=(kind:CoordinatedKind,p:string,planId:string)=>{
 };
 export function inspectCoordinatedWritebackBatch(planId:string,actor:string) {
   const ids=coordinatedStageIds(planId);
-  const stages:JournalStage[]=ids.map(({kind,operationId})=>{
+  const stages:JournalStage[]=ids.map(({kind,operationId}):JournalStage=>{
     let record:ReturnType<typeof status>;
     try {record=status(operationId,actor);}
     catch(e) {
