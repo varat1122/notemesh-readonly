@@ -8,6 +8,7 @@ import { withPausedSync } from "../safe-edit/sync";
 import { withBoundary, fence } from "./boundary";
 import { fetchAndArchiveOfficialSource } from "../research-source-fetch";
 import { storeUserAttachment, inspectUserAttachment, MAX_USER_ATTACHMENT_BYTES } from "../user-attachment-vault";
+import { inspectCoordinatedWritebackBatch } from "../safe-edit/coordinated-batch-status";
 const securitySchemes=[{type:"oauth2",scopes:["vault:read","vault:edit"]}];
 const base=previewSchema.omit({change:true}).shape;
 export function createSafeEditMcpServer(access:McpAccess) {
@@ -49,6 +50,11 @@ export function createSafeEditMcpServer(access:McpAccess) {
     },annotations:{readOnlyHint:true,openWorldHint:false},...meta
   },async input=>invoke(()=>inspectUserAttachment(input)));
   server.registerTool("get_edit_status",{description:"Read durable operation receipt: before/after hashes and independent write/readback/reindex/Sync stages. Does not prove remote or mobile arrival.",inputSchema:{operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({operationId})=>invoke(()=>status(operationId,access.label)));
+  server.registerTool("inspect_coordinated_writeback",{
+    description:"Read-only: inspect three deterministic source/review/timeline operation IDs against ACTUAL actor-scoped Safe Edit journal, not a model-supplied success flag. Reports preview, write/readback/reindex stages, partial failure and receipt target mismatch. Requires vault:read vault:edit. This does not approve, replay, change Thesis, or assert remote/mobile Sync.",
+    inputSchema:{planId:z.string().regex(/^IN-[A-F0-9]{16}$/).describe("Deterministic Plan ID obtained from read-only plan_investment_writeback")},
+    annotations:{readOnlyHint:true,openWorldHint:false},...meta
+  },async({planId})=>invoke(()=>inspectCoordinatedWritebackBatch(planId,access.label)));
   server.registerTool("rollback_edit",{description:"PREVIEW ONLY: restore checksum-verified backup only if target still equals previous afterHash. Never deletes a created note. Requires fresh review and apply_edit; protected thesis also requires human approval.",inputSchema:{...base,rollbackOperationId:operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({rollbackOperationId,...input})=>invoke(()=>preview({...input,change:{kind:"rollback",operationId:rollbackOperationId}},access.label)));
   return server;
 }

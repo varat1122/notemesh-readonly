@@ -10,6 +10,8 @@ import { db } from "../db";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
 import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
+import { buildCoordinatedWriteback, type CoordinatedWriteback } from "./investment-writeback-coordination";
+import { composeWritebackDrafts, type DraftPacket } from "./investment-writeback-drafts";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"unknown";
@@ -20,6 +22,7 @@ export interface WritebackInput {
   inputFormat:IntakeFormat;
   sourceKind:IntakeSource;
   extractedText:string;
+  analysisText?:string|null; // Explicit analyst-authored interpretation, never inferred by the server
   sourceLanguage?:string|null;
   sourceUrl?:string|null;
   publisher?:string|null;
@@ -36,6 +39,8 @@ type Route={kind:"raw_input"|"research_review"|"company_timeline_candidate"|"ind
   path:string|null;reason:string;requiresReview:boolean};
 export interface WritebackPlan {
   status:"read_only_plan_not_written";
+  coordination:CoordinatedWriteback;
+  safeEditDrafts:DraftPacket;
   planId:string;
   entityScope:string[];
   domain:Domain;
@@ -91,6 +96,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(!T(input.topic)||input.topic.length>250)throw Error("topic must be 1-250 characters");
   if(!T(input.extractedText)||input.extractedText.length>MAX_TEXT)
     throw Error("Provide faithful extractedText, 1 to 12000 characters");
+  if(input.analysisText&&input.analysisText.length>14000)throw Error("analysisText max 14000 characters");
   if(input.sourceUrl&&input.sourceUrl.length>1000)throw Error("sourceUrl too long");
   if(input.rawAttachmentPath&&input.rawAttachmentPath.length>600)throw Error("attachment path too long");
   if(Boolean(input.rawAttachmentSha256)!==Boolean(input.rawAttachmentContentType))
@@ -189,6 +195,22 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     "Preview/approve/apply one non-protected write at a time; verify readback, reindex, links, retry identity and rollback capability.",
     "Propose protected Thesis/Evidence Register or Portfolio revisions only through separate owner-approval workflow."
   ];
+  const coordination=buildCoordinatedWriteback({
+    planId,inputFormat:input.inputFormat,rawAttachmentVerified:verifiedAttachment,
+    eventDate,duplicateCandidate:duplicates,duplicateAdjudicated:false,
+    sourceIndependenceVerified:false,routes,
+  });
+  const [rawStep,reviewStep]=coordination.steps;
+  const safeEditDrafts=composeWritebackDrafts({
+    planId,domain:input.domain,entities,topic:input.topic,
+    inputFormat:input.inputFormat,sourceKind:input.sourceKind,
+    sourceLanguage:input.sourceLanguage??null,extractedText:input.extractedText,
+    analysisText:input.analysisText??null,publisher:input.publisher??null,
+    sourceUrl:input.sourceUrl??null,eventDate,publicationDate,
+    attachmentPath:actualAttachmentPath,attachmentVerified:verifiedAttachment,
+    rawRoute:{...routes[0],operationId:rawStep.operationId,holdReasons:rawStep.holdReasons},
+    reviewRoute:{...routes[1],operationId:reviewStep.operationId,holdReasons:reviewStep.holdReasons},
+  });
   return {
     status:"read_only_plan_not_written",planId,entityScope:entities,domain:input.domain,
     inputFormat:input.inputFormat,sourceKind:input.sourceKind,
@@ -208,6 +230,6 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,
       protectedThesisApprovalRequired:true,canAutoWrite:false},
-    warnings,nextActions:needed
+    warnings,nextActions:needed,coordination,safeEditDrafts,
   };
 }

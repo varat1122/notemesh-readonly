@@ -12,7 +12,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),"safe-edit-mcp-"));
 process.env.DATA_DIR=root;process.env.BASE_URL="https://safe-fixture.test";
 process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
 const access:McpAccess={read:true,write:false,label:"oauth:edit-fixture",scopes:["vault:read","vault:edit"]};
-const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment"];
+const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment","inspect_coordinated_writeback"];
 const args={operationId:"mcp-synthetic-01",path:"Synthetic.md",reason:"Synthetic MCP test",change:{kind:"replace",oldText:"Old data",newText:"New data"}};
 beforeEach(()=>{fs.mkdirSync(path.join(root,"vault"),{recursive:true});fs.writeFileSync(path.join(root,"vault","Synthetic.md"),"# Synthetic\nOld data\n");});
 afterAll(async()=>{(await import("../db")).db().close();fs.rmSync(root,{recursive:true,force:true});for(const k of ["DATA_DIR","BASE_URL","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];});
@@ -20,15 +20,15 @@ async function connected(a:McpAccess) {
  const {createSafeEditMcpServer}=await import("./safe-edit-server");const server=createSafeEditMcpServer(a),client=new Client({name:"test",version:"1"});const [l,r]=InMemoryTransport.createLinkedPair();await server.connect(r);await client.connect(l);return {client,close:async()=>{await client.close();await server.close();}};
 }
 function unpack(result:any){const b=JSON.parse(result.content[0].text);return JSON.parse(b.result.split("\n").slice(1,-1).join("\n"));}
-it("discovers exactly ten scoped tools with accurate write annotations",async()=>{
+it("discovers exactly eleven scoped tools with accurate write annotations",async()=>{
  const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment");}}finally{await c.close();}
 });
 it.each([
  {...access,scopes:["vault:read"]},{...access,scopes:["vault:read","inbox:submit"]},
  {...access,scopes:["vault:write"]},{...access,label:"api-key:general"},{...access,scopes:undefined},
 ])("enforces OAuth scopes again inside handlers: %j",async a=>{
- const c=await connected(a);try{for(const name of ["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment"]){
- const params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="get_edit_status"?{operationId:args.operationId}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
+ const c=await connected(a);try{for(const name of ["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment","inspect_coordinated_writeback"]){
+ const params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="get_edit_status"?{operationId:args.operationId}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="inspect_coordinated_writeback"?{planId:"IN-0123456789ABCDEF"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
  if(name==="preview_edit")params.change=args.change;
  const result=await c.client.callTool({name,arguments:params});expect(result.isError,name).toBe(true);expect(JSON.stringify(result._meta),name).toContain("insufficient_scope");
  }expect(fs.readFileSync(path.join(root,"vault","Synthetic.md"),"utf8")).toContain("Old data");}finally{await c.close();}
@@ -46,6 +46,56 @@ it("real HTTP MCP preview/apply/readback/status succeeds on a synthetic note",as
  const receipt=await call("tools/call",{name:"get_edit_status",arguments:{operationId:p.operationId}});expect(unpack(receipt).status).toBe("written");
 });
 
+it("reads only the actor-scoped coordinated writeback journal; absence never means write succeeded",async()=>{
+ const c=await connected(access);
+ try{
+   const call=await c.client.callTool({name:"inspect_coordinated_writeback",
+     arguments:{planId:"IN-0123456789ABCDEF"}});
+   expect(call.isError).not.toBe(true);
+   const result=unpack(call);
+   expect(result.status).toBe("actor_scoped_safe_edit_journal_inspection_only");
+   expect(result.stages.map((x:{state:string})=>x.state)).toEqual([
+     "not_found_or_not_owned","not_found_or_not_owned","not_found_or_not_owned"
+   ]);
+   expect(result.gates.canAutoWrite).toBe(false);
+   expect(result.gates.canAutoUpdateThesis).toBe(false);
+   expect(result.warnings.join(" ")).toContain("not remote/mobile Obsidian Sync");
+ }finally{await c.close();}
+});
+it("reads actual coordinated raw Safe Edit preview/apply receipt and isolates a different OAuth actor",async()=>{
+ const planId="IN-0123456789ABCDEF";
+ const operationId="ios_in-0123456789abcdef_raw_v1";
+ const destination="00_Inbox/ChatGPT/Investment Intake - "+planId+".md";
+ fs.mkdirSync(path.join(root,"vault","00_Inbox","ChatGPT"),{recursive:true});
+ const c=await connected(access);
+ try {
+  const p=await c.client.callTool({name:"create_note",arguments:{
+    operationId,path:destination,reason:"Synthetic coordinate receipt test",
+    content:"# Synthetic source; no external fact verification\\n"
+  }});
+  expect(p.isError).not.toBe(true);
+  const preview=unpack(p);
+  const before=unpack(await c.client.callTool({name:"inspect_coordinated_writeback",arguments:{planId}}));
+  expect(before.stages[0].state).toBe("preview_pending");
+  expect(before.stages[1].state).toBe("not_found_or_not_owned");
+  const result=await c.client.callTool({name:"apply_edit",arguments:{
+    operationId,previewToken:preview.previewToken,expectedHash:preview.beforeHash
+  }});
+  expect(result.isError).not.toBe(true);
+  const after=unpack(await c.client.callTool({name:"inspect_coordinated_writeback",arguments:{planId}}));
+  expect(after.stages[0].state).toBe("locally_verified");
+  expect(after.stages[0].receipt.readback).toBe("verified");
+  expect(after.stages[0].receipt.reindex).toBe("verified");
+  expect(after.stages[0].receipt.mobileSync).toBe("unverified");
+  expect(after.stages[1].state).toBe("not_found_or_not_owned");
+  const different=await connected({...access,label:"oauth:other-client"});
+  try{
+   const other=unpack(await different.client.callTool({name:"inspect_coordinated_writeback",arguments:{planId}}));
+   expect(other.stages[0].state).toBe("not_found_or_not_owned");
+   expect(other.stages[0].path).toBeNull();
+  }finally{await different.close();}
+ }finally{await c.close();}
+});
 it("authorized Safe Edit MCP captures exact user PNG binary, inspects hash and cannot overwrite it",async()=>{
  const bytes=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from("user source screenshot exact bytes via authenticated MCP")]);
  const c=await connected(access);
