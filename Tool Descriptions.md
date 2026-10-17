@@ -75,6 +75,14 @@ read below, plus `preview_edit`, which writes nothing.
 
 ## Files
 
+### review_investment_claim — read
+
+Review one incoming company, industry, macro, or asset claim against **explicit, structured** historical claim metadata (entity, metric, reporting period, original source, value and unit). The tool is read-only and conservative: it outputs `duplicate_candidate`, `possible_correction_or_contradiction`, `confirmation_candidate_not_independent`, `added_detail_candidate`, or `unresolved`. These are **candidates for human/source review**, not verified investment conclusions.
+
+Required fields: `domain`, `entity`, `metric`, `period`, `originalSource`, and `statement`; optional `value`, `unit`, `eventDate`, `publishedAt`, `focus` and `maxCandidates`. Missing dates must stay null; a different source URL never counts as independent confirmation without actual provenance checks. Exact numerical comparisons require compatible units and periods.
+
+The response includes matched structured evidence paths, related historical candidates, required verification and an explicit `canAutoUpdateThesis:false`. Unstructured archived notes may contain the same event and **cannot be ruled out** from this scan. This tool does not open current financial filings or amend the Vault or any Thesis. It requires only existing `vault:read` permission. A client may need to rescan its MCP tool list after deployment to discover a newly registered tool.
+
 ### investment_context_pack — read
 
 Constructs a bounded, **read-only** research context from the Investment_OS Vault for a question, one or more companies, or an industry/macro theme. It prioritizes Current Thesis, Evidence Register, Company Evolution, source evidence, industry context, and contrary evidence over repeated archived ChatGPT discussions. It is **lexical retrieval**, not guaranteed semantic recall or a complete proof of all evidence. The server reports coverage limits and missing evidence; check original sources before treating a claim as verified.
