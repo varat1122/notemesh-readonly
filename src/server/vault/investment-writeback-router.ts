@@ -10,6 +10,7 @@ import { db } from "../db";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
 import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
+import { buildCoordinatedWriteback, type CoordinatedWriteback } from "./investment-writeback-coordination";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"unknown";
@@ -36,6 +37,7 @@ type Route={kind:"raw_input"|"research_review"|"company_timeline_candidate"|"ind
   path:string|null;reason:string;requiresReview:boolean};
 export interface WritebackPlan {
   status:"read_only_plan_not_written";
+  coordination:CoordinatedWriteback;
   planId:string;
   entityScope:string[];
   domain:Domain;
@@ -208,6 +210,11 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,
       protectedThesisApprovalRequired:true,canAutoWrite:false},
-    warnings,nextActions:needed
+    warnings,nextActions:needed,
+    coordination:buildCoordinatedWriteback({
+      planId,inputFormat:input.inputFormat,rawAttachmentVerified:verifiedAttachment,
+      eventDate,duplicateCandidate:duplicates,duplicateAdjudicated:false,
+      sourceIndependenceVerified:false,routes,
+    }),
   };
 }
