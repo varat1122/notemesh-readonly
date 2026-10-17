@@ -4,6 +4,7 @@ import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
+import { buildInvestmentDecisionPacket } from "../vault/investment-decision-packet";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
 import { getSetting } from "../db";
 import { cloudIntakeStatus } from "../cloud-intake";
@@ -316,7 +317,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     {
       title: "Review incoming investment claim against historical metadata",
       annotations: READ,
-      description: "Read-only, cross-domain candidate matching for Company/Industry/Macro/Asset. Classifies only explicit structured claim keys/values as duplicate, possible contradiction, non-independent confirmation, or added detail. Returns historical note paths and missing evidence. Does not verify original filings or update Thesis. Unstructured old notes may require manual review.",
+      description: "Read-only cross-domain historical claim matching plus an unapproved analyst Decision Packet: staged Demand/Revenue/Margin/Earnings/Cash/ROIC or Macro/Asset/Portfolio checklist, source/thesis pointers, counter-evidence gaps and human approval gate. All causal impacts and Thesis choices remain undetermined until original-source verification; never edits Vault or Current Thesis.",
       inputSchema: {
         domain: z.enum(["company","industry","macro","asset"]).describe("Investment evidence domain, distinct from a company ticker"),
         entity: z.string().min(1).max(140).describe("Company ticker, macro geography, industry name or asset identifier (e.g. NVDA, Vietnam, Optical)"),
@@ -338,10 +339,14 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       focus?:Focus;maxCandidates?:number;
     })=>{
       const reviewed=reviewInvestmentClaim(args);
+      // Backward-compatible addition to the already deployed claim tool:
+      // no new Tool Action discovery required for existing OAuth clients.
+      const packet=buildInvestmentDecisionPacket(args,reviewed);
       return json(withBoundary({
         ...reviewed,
         matchingClaims:fenceEach(reviewed.matchingClaims,"claimId","value","unit","metric","period"),
-        relatedEventClaims:fenceEach(reviewed.relatedEventClaims,"claimId","value","unit","metric","period")
+        relatedEventClaims:fenceEach(reviewed.relatedEventClaims,"claimId","value","unit","metric","period"),
+        decisionPacket:packet
       }));
     }),
   );
