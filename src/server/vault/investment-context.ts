@@ -163,6 +163,26 @@ export function buildInvestmentContextPack(req: Input): Pack {
   }
   const searchTerms = [...new Set([...issuers,...topicTerms(req.industry||""),...terms(question)])].slice(0,12);
   const failed: string[] = [];
+  const macroSubjectPaths = new Set<string>();
+  if(macroScope && primaryTopic){
+    const subject=topicTerms(question).filter(x=>x!==primaryTopic && x.length>=3)
+      .filter(x=>!/^(?:WHAT|IS|ARE|THE|HOW|FOR|LATEST|OFFICIAL|THIRD|QUARTER|POLICY|2026|AND|MARKETS)$/.test(x)).slice(0,5);
+    for(const word of subject){
+      try{
+        for(const h of searchVault(primaryTopic+" "+word,{limit:100}).hits)
+          if(explicitMacroScope(h.path,primaryTopic))macroSubjectPaths.add(h.path);
+      }catch{failed.push(primaryTopic+" "+word);}
+    }
+    // Direct indexed filename discovery avoids losing relevant country-titled
+    // macro notes to the FTS relevance cutoff of the first 30 chat articles.
+    const candidatePaths=db().prepare("SELECT path FROM notes WHERE instr(upper(path),?)>0 ORDER BY path DESC LIMIT 150")
+      .all(primaryTopic) as {path:string}[];
+    for(const r of candidatePaths){
+      if((r.path.startsWith("10_Knowledge/Macro and Markets/")||r.path.startsWith("02_Industries_Themes/"))&&
+         explicitMacroScope(r.path,primaryTopic) && exists(r.path))
+        pool.set(r.path,Math.max(pool.get(r.path)||0,macroSubjectPaths.has(r.path)?60:22));
+    }
+  }
   const industryMatches = new Set<string>();
   if(issuers.length && req.industry){
     for(const topic of topicTerms(req.industry).slice(0,5)){
@@ -207,8 +227,9 @@ export function buildInvestmentContextPack(req: Input): Pack {
     const role=roleOf(path), basename=path.split("/").at(-1)?.toUpperCase()||"";
     const companyBonus=issuerTokenInTitle(path,issuers)?22:0;
     const macroBonus=macroScope && primaryTopic ?
-      (basename.split(/[^A-Z0-9.-]+/).includes(primaryTopic)?25:0) +
-      (path.startsWith("10_Knowledge/Macro and Markets/")?25:0):0;
+      (explicitMacroScope(path,primaryTopic)?25:0) +
+      (path.startsWith("10_Knowledge/Macro and Markets/")?25:0) +
+      (macroSubjectPaths.has(path)?32:0):0;
     const focusBonus=focus==="tam"&&/TAM|Industries|Concepts/.test(path)?20:
       focus==="broker"&&/Broker|Evolution|Research/.test(path)?17:
       focus==="earnings"&&/Primary Evidence|Event_Lineage/.test(path)?20:0;
