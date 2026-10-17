@@ -155,8 +155,13 @@ published_at: 2026-10-07
 ---
 # Vietnam original GDP quarterly statistics
 Official-file source candidate (no verified numeric facts in this synthetic test).`);
+    await addExtra("10_Knowledge/Macro and Markets/2026-10-08 - Vietnam GDP Bot recap.md",
+      "# Vietnam GDP commentary\nVietnam GDP growth Q3 2026 official release repost commentary without source verification.");
     const p=build({question:"Vietnam GDP 2026Q3 official release",industry:"Vietnam macro and markets",focus:"macro",maxNotes:10});
     expect(p.items.some(x=>x.path==="10_Knowledge/Macro and Markets/2026-10-07 - Vietnam official GDP 2026Q3.md")).toBe(true);
+    const paths=p.items.map(x=>x.path);
+    expect(paths.indexOf("10_Knowledge/Macro and Markets/2026-10-07 - Vietnam official GDP 2026Q3.md"))
+      .toBeLessThan(paths.indexOf("10_Knowledge/Macro and Markets/2026-10-08 - Vietnam GDP Bot recap.md"));
     expect(p.incomplete.some(x=>x.includes("primary macro/statistical"))).toBe(false);
     expect(p.status).toBe("retrieval_only_not_verified");
     expect(p.items.find(x=>x.path.includes("official GDP"))?.declaredVerification).toBe("not_reverified");
