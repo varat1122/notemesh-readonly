@@ -55,6 +55,18 @@ describe("P1a coordinated writeback plan (never applies edits)",()=>{
     expect(reconcileCoordinatedWriteback(p,[preview]).map(x=>x.state))
       .toEqual(["awaiting_approval","awaiting_dependency","hold"]);
   });
+  it("does not allow a stale preview to bypass binary, event, or receipt dependency gates",()=>{
+    const image=buildCoordinatedWriteback({...makeInput(),inputFormat:"screenshot"});
+    const p0:TrustedEditStatus={...receipt(image.steps[0]),status:"preview",receipt:null};
+    expect(reconcileCoordinatedWriteback(image,[p0]).map(x=>x.state))
+      .toEqual(["hold","awaiting_dependency","hold"]);
+    const textPlan=buildCoordinatedWriteback(makeInput());
+    const premature:TrustedEditStatus={...receipt(textPlan.steps[1]),status:"preview",receipt:null};
+    expect(reconcileCoordinatedWriteback(textPlan,[premature])[1].state)
+      .toBe("awaiting_dependency");
+    const earlyTimeline:TrustedEditStatus={...receipt(textPlan.steps[2]),status:"preview",receipt:null};
+    expect(reconcileCoordinatedWriteback(textPlan,[earlyTimeline])[2].state).toBe("hold");
+  });
   it("reuses durable actor-scoped receipts on retry without blindly recreating notes",()=>{
     const p=buildCoordinatedWriteback(makeInput());
     const raw=receipt(p.steps[0]);
