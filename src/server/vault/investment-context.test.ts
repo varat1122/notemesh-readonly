@@ -98,13 +98,16 @@ describe("investment context retrieval",()=>{
     await addExtra("10_Knowledge/Industry and Concepts/JPM Hardware Model.md",
       "# JPM Hardware Model\nJPM technology research on optical networking and cloud hardware.");
     await addExtra("10_Knowledge/Company Research/JPM - Bank Credit Losses.md",
-      "# JPM bank credit risk\nJPMorgan bank lending credit losses and earnings.");
+      "# JPM bank credit risk\nJPMorgan banking, bank lending credit losses and earnings.");
+    await addExtra("10_Knowledge/Company Research/ASML - JPM Q3 Preview.md",
+      "# ASML semiconductor estimates\nJPM research Q3 preview on ASML chip equipment; not JPM bank results.");
     const p=build({question:"JPM banking loan growth and credit losses",
       issuers:["JPM"],industry:"banking",focus:"earnings",maxNotes:12});
     const paths=p.items.map(x=>x.path);
     expect(paths).toContain("10_Knowledge/Company Research/JPM - Bank Credit Losses.md");
     expect(paths).not.toContain("08_Daily_Weekly/Research Indexes/Company Evolution - AAPL.md");
     expect(paths).not.toContain("10_Knowledge/Industry and Concepts/JPM Hardware Model.md");
+    expect(paths).not.toContain("10_Knowledge/Company Research/ASML - JPM Q3 Preview.md");
     expect(p.incomplete).toContain("No Current Thesis selected; owner-endorsed thesis is unknown.");
   });
   it("anchors a country macro query and does not request a company Current Thesis",async()=>{
