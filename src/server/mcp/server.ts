@@ -295,12 +295,12 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       annotations: READ,
       description: "Read-only bounded investment retrieval across Obsidian. Prioritizes Current Thesis, Evidence Register, Company Evolution, issuer evidence, industry TAM and counter-evidence over repeated ChatGPT archives. Returns short path/line excerpts, missing evidence and honest coverage limits. Lexical only, not a semantic/full-vault guarantee. Never edits the Vault.",
       inputSchema: {
-        question: z.string().min(3).max(1200),
-        issuers: z.array(z.string().min(1).max(12)).max(6).optional(),
-        industry: z.string().max(140).optional(),
-        focus: z.enum(["earnings","broker","tam","macro","thesis","general"]).optional(),
-        maxNotes: z.number().int().min(5).max(16).optional(),
-        maxChars: z.number().int().min(4500).max(18000).optional(),
+        question: z.string().min(3).max(1200).describe("Investment question to retrieve bounded, dated historical evidence for"),
+        issuers: z.array(z.string().min(1).max(12)).max(6).optional().describe("Up to six company tickers or issuer identifiers; omit for industry or macro questions"),
+        industry: z.string().max(140).optional().describe("Industry or thematic context, such as optical networking or banking"),
+        focus: z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Prioritize sources for earnings, broker research, TAM, macro, thesis, or general review"),
+        maxNotes: z.number().int().min(5).max(16).optional().describe("Maximum retrieved notes in this context pack, from 5 to 16"),
+        maxChars: z.number().int().min(4500).max(18000).optional().describe("Maximum excerpt characters returned, from 4500 to 18000"),
       },
     },
     safe(({question,issuers,industry,focus,maxNotes,maxChars}: {
