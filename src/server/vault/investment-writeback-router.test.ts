@@ -43,7 +43,7 @@ describe("multilingual read-only writeback router",()=>{
   expect(p.routes.find(x=>x.kind==="research_review")?.path).toContain("10_Knowledge/Industry and Concepts/");
   expect(p.routes.some(x=>x.kind==="company_timeline_candidate")).toBe(false);
   expect(p.routes.find(x=>x.kind==="industry_context_candidate")?.action).toBe("link_existing_or_hold");
-  expect(p.warnings).toContain("No Vault path for original image/PDF bytes; preserve attachment separately before claiming complete source archival.");
+  expect(p.warnings).toContain("No verified, matching original image/PDF attachment bytes; call scoped Safe Edit store_user_attachment first.");
  });
  it("NVIDIA announced planned investment is a future intention, not proved completed capex",async()=>{
   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
