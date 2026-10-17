@@ -27,7 +27,7 @@ afterEach(()=>{
 describe("vault:edit official source HTTP byte ingestion",()=>{
  it("fetches one allowed official original as bytes and records hash and version outside Vault",async()=>{
    const {fetchAndArchiveOfficialSource}=await import("./research-source-fetch");
-   const fetched=vi.fn(async()=>html());
+   const fetched=vi.fn(async (_url:string,_init:RequestInit)=>html());
    const a=await fetchAndArchiveOfficialSource({url:sec,operator:"oauth:authorized-researcher"},fetched as unknown as typeof fetch);
    expect(a.status).toBe("archived_fetched_bytes_unverified_publisher");
    expect(a.sha256).toMatch(/^[a-f0-9]{64}$/);
