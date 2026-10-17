@@ -99,6 +99,36 @@ describe("universal structured claim intake review (read only)",()=>{
     expect(reviewInvestmentClaim(claim).classification).toBe("unresolved");
     expect(reviewInvestmentClaim({...claim,unit:undefined}).classification).toBe("unresolved");
   });
+  it("does not label an existing metric with incompatible unit as added detail just because other metrics share the same filing",async()=>{
+    await add("10_Knowledge/Company Research/NVDA Two SEC Metrics.md",`---
+entity: NVDA
+source_url: ${claim.originalSource}
+verification: verified_against_primary
+claims:
+  - claim_id: OCF
+    metric: operating_cash_flow
+    period: FY27H1
+    value: "74421"
+    unit: USD millions
+  - claim_id: AR
+    metric: accounts_receivable_cash_flow_change
+    period: FY27H1
+    value: "-24590"
+    unit: USD millions
+---
+# Synthetic multi-metric SEC period
+`);
+    const {reviewInvestmentClaim}=await import("./investment-claim-review");
+    const incompatible=reviewInvestmentClaim({...claim,unit:"USD billions"});
+    expect(incompatible.classification).toBe("unresolved");
+    expect(incompatible.canAutoUpdateThesis).toBe(false);
+    const missing=reviewInvestmentClaim({...claim,unit:undefined});
+    expect(missing.classification).toBe("unresolved");
+    const same=reviewInvestmentClaim(claim);
+    expect(same.classification).toBe("duplicate_candidate");
+    const added=reviewInvestmentClaim({...claim,metric:"capital_expenditures",value:"1000"});
+    expect(added.classification).toBe("added_detail_candidate");
+  });
   it("prefers source conflict review over another repeated number",async()=>{
     await add("10_Knowledge/Company Research/NVDA Duplicate A.md",
       structured("NVDA","operating_cash_flow","FY27H1",claim.originalSource,"74421"));
