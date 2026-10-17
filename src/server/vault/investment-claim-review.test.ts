@@ -188,6 +188,35 @@ OCF quoted in the review body but not registered as a structured metric.
     expect(r.metadataScan.notesScanned).toBeGreaterThanOrEqual(1);
     expect(r.evidenceNeeded.join(" ")).toContain("same original source");
   });
+  it("never counts source verification receipt as a second original issuer claim or an independent confirmation",async()=>{
+    await add("08_Daily_Weekly/Research Indexes/Source Receipt - NVDA OCF.md",`---
+type: primary_source_verification_receipt
+domain: company
+entity: NVDA
+claim_id: NVDA-OCF-SRC
+metric: operating_cash_flow
+period: FY27H1
+original_source: ${claim.originalSource}
+value: "74421"
+unit: USD millions
+source_excerpt: "Operating cashflow line 74421"
+source_excerpt_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+verification_status: selected_fields_checked_against_primary
+observed_at: 2026-10-17
+---
+# Source audit receipt, not issuer filing itself
+`);
+    const {reviewInvestmentClaim}=await import("./investment-claim-review");
+    const alone=reviewInvestmentClaim(claim);
+    expect(alone.classification).toBe("unresolved");
+    expect(alone.matchingClaims).toEqual([]);
+    expect(alone.sourceLinkedUnstructuredPaths).toEqual([]);
+    await add("10_Knowledge/Company Research/NVDA - Original Filing Claim.md",
+      structured("NVDA","operating_cash_flow","FY27H1",claim.originalSource,"74421"));
+    const both=reviewInvestmentClaim(claim);
+    expect(both.classification).toBe("duplicate_candidate");
+    expect(both.matchingClaims).toHaveLength(1);
+  });
   it("rejects impossible dates and non-offset ISO datetimes",async()=>{
     const {reviewInvestmentClaim}=await import("./investment-claim-review");
     expect(()=>reviewInvestmentClaim({...claim,eventDate:"2026-02-30"})).toThrow();
