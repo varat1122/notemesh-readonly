@@ -6,6 +6,7 @@ import { preview, apply, status } from "../safe-edit/engine";
 import { previewSchema, applySchema, operationId, properties } from "../safe-edit/schema";
 import { withPausedSync } from "../safe-edit/sync";
 import { withBoundary, fence } from "./boundary";
+import { fetchAndArchiveOfficialSource } from "../research-source-fetch";
 const securitySchemes=[{type:"oauth2",scopes:["vault:read","vault:edit"]}];
 const base=previewSchema.omit({change:true}).shape;
 export function createSafeEditMcpServer(access:McpAccess) {
@@ -25,6 +26,12 @@ export function createSafeEditMcpServer(access:McpAccess) {
   server.registerTool("append_section",{description:"PREVIEW ONLY: prepare a dated append to one exact Markdown section. Apply via apply_edit after reviewing diff. Operation ID prevents double append.",inputSchema:{...base,heading:z.string().min(1).max(200),content:z.string().min(1).max(100000),date:z.string().regex(/^\d{4}-\d{2}-\d{2}$/)},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({heading,content,date,...input})=>invoke(()=>preview({...input,change:{kind:"append",heading,content,date}},access.label)));
   server.registerTool("update_frontmatter",{description:"PREVIEW ONLY: update allowlisted metadata keys, preserving other keys/comments. Never promote archived AI or not_reverified to verified without primary evidence. Review then use apply_edit.",inputSchema:{...base,properties},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({properties,...input})=>invoke(()=>preview({...input,change:{kind:"frontmatter",properties}},access.label)));
   server.registerTool("create_note",{description:"PREVIEW ONLY: prepare a new Markdown note after duplicate checks. Existing paths are never overwritten. Parent folder must exist. Review then apply_edit.",inputSchema:{...base,content:z.string().min(1).max(100000)},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({content,...input})=>invoke(()=>preview({...input,change:{kind:"create",content}},access.label)));
+  server.registerTool("archive_original_source",{
+    description:"Download one explicitly allowlisted HTTPS primary document to the content-addressed archive OUTSIDE Obsidian Vault under authorized vault:edit OAuth. Returns SHA-256 of complete fetched bytes and source version. Does not alter Notes, Current Thesis or Portfolio. Redirects, unknown hosts and files above 8 MiB are denied. Requires server SOURCE_ARCHIVE_USER_AGENT identifying a real operator. This is NOT proof of publisher signature, source completeness or claim truth.",
+    inputSchema:{url:z.string().url().max(2000).describe("Official original-source HTTPS URL on the administrator-approved allowlist. Exact source byte hash is computed from fetched response.")},
+    annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    ...meta
+  },async ({url})=>invoke(()=>fetchAndArchiveOfficialSource({url,operator:access.label})));
   server.registerTool("get_edit_status",{description:"Read durable operation receipt: before/after hashes and independent write/readback/reindex/Sync stages. Does not prove remote or mobile arrival.",inputSchema:{operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({operationId})=>invoke(()=>status(operationId,access.label)));
   server.registerTool("rollback_edit",{description:"PREVIEW ONLY: restore checksum-verified backup only if target still equals previous afterHash. Never deletes a created note. Requires fresh review and apply_edit; protected thesis also requires human approval.",inputSchema:{...base,rollbackOperationId:operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({rollbackOperationId,...input})=>invoke(()=>preview({...input,change:{kind:"rollback",operationId:rollbackOperationId}},access.label)));
   return server;
