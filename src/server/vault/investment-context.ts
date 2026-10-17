@@ -79,9 +79,20 @@ export function buildInvestmentContextPack(req: Input): Pack {
   }
   const searchTerms = [...new Set([...issuers,...terms(question),...terms(req.industry||"")])].slice(0,10);
   const failed: string[] = [];
+  // A generic term such as "earnings" must not quietly pull another issuer's
+  // news into a company-specific pack. First discover exact issuer matches.
+  const issuerPaths = new Set<string>();
+  for (const ticker of issuers) {
+    try {
+      for (const h of searchVault(ticker,{limit:100}).hits) issuerPaths.add(h.path);
+    } catch { failed.push(ticker); }
+  }
   for (const term of searchTerms) {
     try {
       for (const [i,h] of searchVault(term,{limit:30}).hits.entries()) {
+        const role=roleOf(h.path);
+        if (issuers.length && !issuerPaths.has(h.path) &&
+          role!=="industry" && role!=="rules" && !pool.has(h.path)) continue;
         pool.set(h.path,Math.max(pool.get(h.path)||0, 30-i));
         if (pool.size>200) break;
       }
