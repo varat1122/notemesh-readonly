@@ -113,6 +113,60 @@ describe("canonical read-time knowledge schema adapter",()=>{
       expect(p.canAutoUpdateThesis).toBe(false);
     }
   });
+  it("preserves raw ChatGPT export/history labels while normalizing only retrieval provenance",()=>{
+    const cases=[
+      {path:"07_Sources/ChatGPT/Conversations/Feed 160726.md",type:"chat_transcript_index",raw:"chatgpt_export",role:"archive"},
+      {path:"07_Sources/ChatGPT/Entries/Stock 160726/Stock 160726 - 0001.md",type:"historical_chat_entry",raw:"chatgpt_export",role:"archive"},
+      {path:"10_Knowledge/Company Research/Stock - AMD old.md",type:"knowledge_note",raw:"chatgpt_history",role:"historical_analysis"},
+      {path:"10_Knowledge/Company Research/Micro - AMD.md",type:"knowledge_note",raw:"chatgpt_analysis",role:"historical_analysis"}
+    ];
+    for(const c of cases){
+      const p=fixture(c.path,["type: "+c.type,"source_type: "+c.raw,
+        "date: 2026-07-16","imported_on: 2026-10-10","verification: not_reverified"]);
+      expect(p.role).toBe(c.role);
+      expect(p.rawSourceType).toBe(c.raw);
+      expect(p.declaredSourceType).toBeNull();
+      expect(p.normalizedSourceType).toBe("archived_ai");
+      expect(p.sourceTypeMapping).toBe("legacy_alias");
+      expect(p.independenceAssessment).toBe("not_independent_archived_ai");
+      expect(p.warnings).not.toContain("unmapped_legacy_source_type");
+      expect(p.eventDate).toBeNull();
+      expect(p.importedAt).toBeNull();
+      expect(p.canAutoUpdateThesis).toBe(false);
+    }
+  });
+  it("conservatively separates user-supplied summaries from issuer originals and navigational indexes",()=>{
+    for(const raw of ["user_supplied_chatgpt_summary","user_supplied_chat_summary","user_supplied_chat_archive_summary"]){
+      const p=fixture("10_Knowledge/Company Research/Micro051026 - Summary 17 - AMD.md",
+        ["type: research_note","source_type: "+raw,"verification: not_reverified"]);
+      expect(p.role).toBe("review");
+      expect(p.normalizedSourceType).toBe("user_supplied");
+      expect(p.rawSourceType).toBe(raw);
+      expect(p.independenceAssessment).toBe("not_independent_derivative_summary");
+    }
+    for(const type of ["knowledge_index","company_history_index","topic_history_index","macro_hub"]){
+      const p=fixture("10_Knowledge/Research Methods/Old Index.md",["type: "+type]);
+      expect(p.role).toBe("navigation");
+      expect(p.normalizedSourceType).toBeNull();
+      expect(p.independenceAssessment).toBe("not_assessed");
+    }
+    const issuer=fixture("08_Daily_Weekly/Research Indexes/Primary Evidence - AMD.md",
+      ["type: primary_ir_evidence_review","source_type: primary","verification: verified_against_primary"]);
+    expect(issuer.role).toBe("source");
+    expect(issuer.declaredSourceType).toBe("primary");
+    expect(issuer.normalizedSourceType).toBe("primary");
+    expect(issuer.independenceAssessment).toBe("not_assessed");
+  });
+  it("does not treat a legacy placeholder thesis as owner approval, or unverified as source type",()=>{
+    const p=fixture("05_Thesis/AI Infrastructure Thesis.md",
+      ["type: thesis","source_type: unverified","status: placeholder"]);
+    expect(p.role).toBe("thesis");
+    expect(p.declaredSourceType).toBeNull();
+    expect(p.normalizedSourceType).toBeNull();
+    expect(p.sourceTypeMapping).toBe("unmapped");
+    expect(p.warnings).toContain("thesis_not_owner_approved_by_status");
+    expect(p.canAutoUpdateThesis).toBe(false);
+  });
   it("draft Current Thesis is never inferred owner approved",()=>{
     const p=fixture("05_Thesis/NVDA - Current Thesis.md",[
       "type: current_thesis","status: draft_from_archived_evidence",
