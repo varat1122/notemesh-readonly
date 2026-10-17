@@ -20,6 +20,7 @@ export interface Draft {
  operationId:string;
  path:string|null;
  content:string|null;
+ requiresPriorLocalReceipt:boolean;
  reasons:string[];
 }
 export interface DraftPacket {
@@ -69,6 +70,7 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
  const original:Draft={
   status:rawStatus,operationId:req.rawRoute.operationId,path:req.rawRoute.path,
   content:rawStatus==="candidate_safe_edit_preview_not_written"?rawContent:null,
+  requiresPriorLocalReceipt:false,
   reasons:rawReasons.length?rawReasons:rawStatus==="inspect_existing"?["compare_existing_input_identity_and_digest"]:[],
  };
  const analysisText=req.analysisText??"";
@@ -91,6 +93,7 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
  const analysis:Draft={
   status:reviewStatus,operationId:req.reviewRoute.operationId,path:req.reviewRoute.path,
   content:reviewStatus==="candidate_safe_edit_preview_not_written"?reviewContent:null,
+  requiresPriorLocalReceipt:true,
   reasons:reviewReasons.length?reviewReasons:reviewStatus==="inspect_existing"?["compare_existing_review_version_before_correction"]:[],
  };
  return {
