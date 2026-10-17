@@ -44,6 +44,9 @@ export function auditVaultKnowledgeIndex() {
   const fieldPresence:Record<string,number>={};
   const verificationCounts:Record<string,number>={};
   const sourceTypes:Record<string,number>={};
+  const normalizedSourceTypes:Record<string,number>={};
+  const sourceTypeMappings:Record<string,number>={};
+  const independenceStatuses:Record<string,number>={};
   const rawSourceTypes:Record<string,number>={};
   const unmappedRoleTypes:Record<string,number>={};
   const warningCounts:Record<string,number>={};
@@ -68,6 +71,9 @@ export function auditVaultKnowledgeIndex() {
     for(const f of fieldNames)if(fm[f]!==undefined&&fm[f]!==null)bump(fieldPresence,f);
     bump(verificationCounts,inspect.declaredVerification??"(not_declared)");
     bump(sourceTypes,inspect.declaredSourceType??(s(fm.source_type)?"(unmapped_legacy_type)":"(not_declared)"));
+    bump(normalizedSourceTypes,inspect.normalizedSourceType??"(unresolved)");
+    bump(sourceTypeMappings,inspect.sourceTypeMapping);
+    bump(independenceStatuses,inspect.independenceAssessment);
     bump(rawSourceTypes,s(fm.source_type)??"(not_declared)");
     for(const warning of inspect.warnings){
       // Strip claim indices so counts are stable across a register.
@@ -130,6 +136,9 @@ export function auditVaultKnowledgeIndex() {
     roleCounts,folderCounts:toTop(folderCounts,20),fieldPresence,
     verificationCounts:toTop(verificationCounts,16),sourceTypeCounts:toTop(sourceTypes,16),
     rawSourceTypeCounts:toTop(rawSourceTypes,20),unknownRoleTypeCounts:toTop(unmappedRoleTypes,20),
+    normalizedSourceTypeCounts:toTop(normalizedSourceTypes,20),
+    sourceTypeMappingCounts:toTop(sourceTypeMappings,10),
+    independenceAssessmentCounts:toTop(independenceStatuses,10),
     claimRegisters:{notes:structuredClaimNotes,declaredClaimRows:declaredClaims,
       noSourceLocator:possibleMissingSource,noOriginalBytesHashDeclared:noKnownPrimaryHash,
       issueCounts:toTop(claimIssueCounts,18),
