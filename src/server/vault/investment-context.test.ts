@@ -61,6 +61,9 @@ describe("investment context retrieval",()=>{
     expect(paths).toContain("08_Daily_Weekly/Research Indexes/Company Evolution - NVDA.md");
     expect(paths.filter(x=>x.startsWith("07_Sources/ChatGPT/"))).toHaveLength(0);
     expect(p.items.find(x=>x.role==="thesis")?.declaredVerification).toBe("not_reverified");
+    expect(p.items.find(x=>x.role==="thesis")?.schemaCompatibility.role).toBe("thesis");
+    expect(p.items.find(x=>x.role==="thesis")?.schemaCompatibility.canAutoUpdateThesis).toBe(false);
+    expect(p.items.find(x=>x.role==="source")?.schemaCompatibility.declaredVerification).toBe("verified_against_primary");
   });
   it("returns counter-evidence passage with its own source line pointer, not just a flattering lead excerpt",async()=>{
     const build=await fixture();
