@@ -47,6 +47,7 @@ const READ_TOOLS = [
   "get_links",
   "get_outline",
   "get_vault_info",
+  "investment_context_pack",
   "list_attachments",
   "list_directory",
   "list_folders",
@@ -88,6 +89,11 @@ describe("tool surface", () => {
 
   it("keeps legacy writable clients read-only", async () => {
     expect(await toolNames(true, true)).toEqual(READ_TOOLS);
+  });
+
+  it("exposes investment_context_pack only to read-scoped clients", async () => {
+    expect(await toolNames(true, false)).toContain("investment_context_pack");
+    expect(await toolNames(false, false)).not.toContain("investment_context_pack");
   });
 
   it("registers list_attachments", async () => {
@@ -373,5 +379,48 @@ describe("list_directory", () => {
       ["New", "folder"],
       ["c.md", "file"],
     ]);
+  });
+});
+
+
+// A direct MCP protocol round-trip isolates server semantics from the
+// ChatGPT app tool snapshot/response adapter. No external Vault is touched.
+describe("read-only MCP wire contract", () => {
+  it("lists the context tool and returns real short note content through tools/call", async () => {
+    const vault = path.join(root, "vault", "Canaries");
+    fs.mkdirSync(vault, { recursive: true });
+    fs.writeFileSync(path.join(vault, "Read Smoke.md"), "# Read Smoke\nFirst line\nSecond line\n", "utf8");
+
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const { createMcpServer } = await import("./server");
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createMcpServer({ read: true, write: false, label: "protocol-smoke" });
+    const client = new Client({ name: "read-only-protocol-smoke", version: "1.0" });
+    try {
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names).toContain("investment_context_pack");
+      expect(names).toContain("read_note");
+
+      const answer = await client.callTool({
+        name: "read_note",
+        arguments: { path: "Canaries/Read Smoke.md", offset: 0, limit: 2 },
+      });
+      expect(answer.isError).not.toBe(true);
+      const block = answer.content.find((part) => part.type === "text");
+      if (!block || block.type !== "text") throw new Error("read_note omitted the text content block");
+      const parsed = JSON.parse(block.text) as {
+        path: string; content: string; count: number; hasMore: boolean;
+      };
+      expect(parsed.path).toBe("Canaries/Read Smoke.md");
+      expect(parsed.content).toContain("# Read Smoke");
+      expect(parsed.count).toBe(2);
+      expect(parsed.hasMore).toBe(true);
+    } finally {
+      await client.close().catch(() => {});
+      await server.close().catch(() => {});
+    }
   });
 });
