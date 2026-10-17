@@ -98,6 +98,21 @@ describe("canonical read-time knowledge schema adapter",()=>{
     expect(p.claimIssues).toContain("claim_0_missing_period");
     expect(p.claimIssues).toContain("claim_0_missing_unit");
   });
+  it("maps existing source, index, industry and legacy research types from real Vault roles",()=>{
+    const data=[
+      {path:"08_Daily_Weekly/Research Indexes/Primary Evidence - NVDA FY27Q2.md",type:"primary_ir_evidence_review",role:"source"},
+      {path:"08_Daily_Weekly/Research Indexes/00_Investment_Evolution_Master.md",type:"investment_evolution_master",role:"timeline"},
+      {path:"08_Daily_Weekly/Research Indexes/00_Industry_TAM_Vintage_CPU_GPU_Optical.md",type:"industry_tam_version_register",role:"industry"},
+      {path:"08_Daily_Weekly/Research Indexes/00_AI_Infrastructure_Economic_Transmission.md",type:"investment_economic_transmission_graph",role:"industry"},
+      {path:"03_Concepts/OCS.md",type:"concept_hub",role:"industry"},
+      {path:"10_Knowledge/Company Research/AMD old summary.md",type:"research_note",role:"review"}
+    ];
+    for(const x of data){
+      const p=fixture(x.path,["type: "+x.type,"verification: not_reverified"]);
+      expect(p.role,x.path).toBe(x.role);
+      expect(p.canAutoUpdateThesis).toBe(false);
+    }
+  });
   it("draft Current Thesis is never inferred owner approved",()=>{
     const p=fixture("05_Thesis/NVDA - Current Thesis.md",[
       "type: current_thesis","status: draft_from_archived_evidence",
