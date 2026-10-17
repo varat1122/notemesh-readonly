@@ -95,13 +95,20 @@ function neverOverwrite(abs, bytes) {
     if (sha256(fs.readFileSync(abs)) !== sha256(bytes)) fail("Existing file conflicts, never overwrite: " + abs);
     return "already_present_identical";
   }
+  // Write to a private adjacent temp file, then atomically hard-link to the
+  // final content-addressed path. linkSync refuses to overwrite on EEXIST.
+  // An interrupted import cannot leave a half-written "original" at final path.
+  const tmp=abs+"."+crypto.randomBytes(8).toString("hex")+".tmp";
   const flags=fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW;
-  const fd=fs.openSync(abs, flags, 0o600);
   try {
-    let n=0;
-    while (n < bytes.length) n += fs.writeSync(fd, bytes, n, bytes.length - n);
-    fs.fsyncSync(fd);
-  } finally { fs.closeSync(fd); }
+    const fd=fs.openSync(tmp, flags, 0o600);
+    try {
+      let n=0;
+      while (n < bytes.length) n += fs.writeSync(fd, bytes, n, bytes.length - n);
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    fs.linkSync(tmp,abs);
+  } finally { fs.rmSync(tmp,{force:true}); }
   if (sha256(fs.readFileSync(abs)) !== sha256(bytes)) fail("Readback checksum mismatch");
   return "written";
 }
