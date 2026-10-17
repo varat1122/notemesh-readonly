@@ -3,6 +3,7 @@ import { z } from "zod";
 import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
+import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
 import { getSetting } from "../db";
 import { cloudIntakeStatus } from "../cloud-intake";
@@ -308,6 +309,39 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     }) => {
       const pack = buildInvestmentContextPack({question,issuers,industry,focus,maxNotes,maxChars});
       return json(withBoundary({...pack,items:fenceEach(pack.items,"excerpt")}));
+    }),
+  );
+  server.registerTool(
+    "review_investment_claim",
+    {
+      title: "Review incoming investment claim against historical metadata",
+      annotations: READ,
+      description: "Read-only, cross-domain candidate matching for Company/Industry/Macro/Asset. Classifies only explicit structured claim keys/values as duplicate, possible contradiction, non-independent confirmation, or added detail. Returns historical note paths and missing evidence. Does not verify original filings or update Thesis. Unstructured old notes may require manual review.",
+      inputSchema: {
+        domain: z.enum(["company","industry","macro","asset"]).describe("Investment evidence domain, distinct from a company ticker"),
+        entity: z.string().min(1).max(140).describe("Company ticker, macro geography, industry name or asset identifier (e.g. NVDA, Vietnam, Optical)"),
+        metric: z.string().min(1).max(140).describe("Canonical claim metric, such as revenue or operating_cash_flow"),
+        period: z.string().min(1).max(120).describe("Explicit source reporting period or event period, never a chat import date"),
+        originalSource: z.string().min(1).max(1000).describe("Canonical primary/original source URL or archival identifier; do not invent"),
+        statement: z.string().min(8).max(2500).describe("Incoming factual claim text to compare, with definition and period"),
+        value: z.string().max(150).optional().describe("Optional original-source numerical value as a literal string, no unit conversion"),
+        unit: z.string().max(80).optional().describe("Optional unit/currency for safe like-for-like comparison"),
+        eventDate: z.string().nullable().optional().describe("ISO source event date, or null if unknown"),
+        publishedAt: z.string().nullable().optional().describe("ISO original source publication date, or null if unknown"),
+        focus: z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Historical note source priority"),
+        maxCandidates: z.number().int().min(1).max(12).optional().describe("Maximum historical matched claim/related note candidates, 1 to 12"),
+      },
+    },
+    safe((args:{
+      domain:Domain;entity:string;metric:string;period:string;originalSource:string;
+      statement:string;value?:string;unit?:string;eventDate?:string|null;publishedAt?:string|null;
+      focus?:Focus;maxCandidates?:number;
+    })=>{
+      const reviewed=reviewInvestmentClaim(args);
+      return json(withBoundary({
+        ...reviewed,
+        matchingClaims:fenceEach(reviewed.matchingClaims,"claimId","value","unit","metric","period")
+      }));
     }),
   );
   // OAuth clients must be able to discover the scoped tool before approving
