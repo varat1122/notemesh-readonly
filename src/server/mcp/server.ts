@@ -333,9 +333,13 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         limit: z.number().int().min(1).max(20000).optional().describe("Max lines (default 2000)"),
       },
     },
-    safe(({ path, offset, limit }: { path: string; offset?: number; limit?: number }) =>
-      json(withBoundary(readNoteRange(path, { offset, limit }), "content")),
-    ),
+    safe(({ path, offset, limit }: { path: string; offset?: number; limit?: number }) => {
+      // Supply the typed MCP payload as well as the original text JSON.
+      // Some clients lose the text-only result when normalizing note reads.
+      // Keeping the text block preserves existing callers and older clients.
+      const payload = withBoundary(readNoteRange(path, { offset, limit }), "content");
+      return { ...json(payload), structuredContent: Object.fromEntries(Object.entries(payload)) };
+    }),
   );
 
   server.registerTool(
