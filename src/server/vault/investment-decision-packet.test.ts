@@ -133,7 +133,8 @@ source_url: ${macro.originalSource}
     const before=fs.readFileSync(abs,"utf8");
     const {packet:p}=await packet(macro);
     expect(p.changeLogDraft.status).toBe("draft_not_approved_or_written");
-    expect(p.changeLogDraft.requiredBeforeWrite.join(" ")).toContain("owner");
+    expect(p.thesisDecision.ownerApprovalRequired).toBe(true);
+    expect(p.changeLogDraft.requiredBeforeWrite.some(x=>/owner approval/i.test(x))).toBe(true);
     expect(p.counterEvidence.status).toBe("not_verified");
     expect(p.historicalContext.missing.some(x=>x.includes("original source"))).toBe(true);
     expect(fs.readFileSync(abs,"utf8")).toBe(before);
