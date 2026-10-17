@@ -93,8 +93,13 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   if(entity.length>140||metric.length>140||period.length>120||originalSource.length>1000||statement.length>2500)
     throw Error("Claim input exceeds its bounded length");
   for(const date of [input.eventDate,input.publishedAt]){
-    if(date!==undefined&&date!==null&&!/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(date))
-      throw Error("Dates must be ISO-formatted or null; do not invent event dates");
+    if(date===undefined||date===null)continue;
+    const validShape=/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2}))?$/.test(date);
+    const day=date.slice(0,10);
+    const parsedDay=new Date(day+"T00:00:00.000Z");
+    if(!validShape||Number.isNaN(Date.parse(date))||
+       Number.isNaN(parsedDay.getTime())||parsedDay.toISOString().slice(0,10)!==day)
+      throw Error("Dates must be valid ISO calendar dates or offset-aware timestamps; unknown dates are null");
   }
   const limit=Math.min(12,Math.max(1,input.maxCandidates??8));
   const selected:StructuredRecord[]=[];
@@ -116,7 +121,11 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
       if(!raw||typeof raw!=="object"||Array.isArray(raw))continue;
       // Nested claims inherit explicit note-level source/date fields, but a
       // child naming another issuer must not be matched to the note's ticker.
-      const merged={...fm,...raw as Record<string,unknown>};
+      const child=raw as Record<string,unknown>;
+      const childIdentity=[child.entity,child.ticker,child.issuer,child.country,child.industry,child.asset]
+        .flatMap(v=>Array.isArray(v)?v:[v]).map(stringOrNull).filter((v):v is string=>v!==null);
+      if(childIdentity.length && !childIdentity.some(v=>norm(v)===norm(entity)))continue;
+      const merged={...fm,...child};
       if(!sameEntity(merged,input))continue;
       const v=record(merged,row.path,stringOrNull(merged.verification));
       if(!v||norm(v.period)!==norm(period))continue;
