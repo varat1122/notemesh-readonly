@@ -52,6 +52,35 @@ function issuerTokenInTitle(path: string, issuers: string[]) {
   const name=path.split("/").at(-1)?.toUpperCase()??"";
   return issuers.some(t=>name.split(/[^A-Z0-9]+/).includes(t));
 }
+// When user asks about a *country*, a casual mention in a Japan/US
+// headline is not sufficient relevance for a country-specific macro brief.
+// Retain topic-named notes and explicit country-tagged metadata; broader
+// regional documents require separate query/review rather than silent mixing.
+function explicitMacroScope(path: string, topic: string): boolean {
+  const title=(path.split("/").at(-1)||"").normalize("NFC").toUpperCase();
+  const t=topic.normalize("NFC").toUpperCase();
+  const isBoundary=(c:string|undefined)=>!c||!/[\\p{L}\\p{N}]/u.test(c);
+  for(let at=title.indexOf(t);at>=0;at=title.indexOf(t,at+1)){
+    if(isBoundary(title[at-1])&&isBoundary(title[at+t.length]))return true;
+  }
+  const row=db().prepare("SELECT frontmatter FROM notes WHERE path = ?").get(path) as {frontmatter:string|null}|undefined;
+  if(!row?.frontmatter)return false;
+  try {
+    const fm=JSON.parse(row.frontmatter) as Record<string,unknown>;
+    const fields=[fm.country,fm.entity,fm.geography,fm.region].flatMap(x=>Array.isArray(x)?x:[x]);
+    return fields.some(x=>typeof x==="string"&&x.trim().normalize("NFC").toUpperCase()===t);
+  }catch{return false;}
+}
+function hasDeclaredMacroPrimary(path:string):boolean {
+  const row=db().prepare("SELECT frontmatter FROM notes WHERE path = ?").get(path) as {frontmatter:string|null}|undefined;
+  if(!row?.frontmatter)return false;
+  try {
+    const fm=JSON.parse(row.frontmatter) as Record<string,unknown>;
+    const tier=(typeof fm.source_type==="string"?fm.source_type:typeof fm.source_tier==="string"?fm.source_tier:"").toLowerCase();
+    const source=[fm.original_source,fm.primary_url,fm.source_url].find(x=>typeof x==="string"&&/^https:\/\//.test(x));
+    return tier==="primary"&&typeof source==="string";
+  }catch{return false;}
+}
 function exists(path: string): boolean {
   try { return fs.existsSync(resolveNotePath(path)); } catch { return false; }
 }
@@ -134,12 +163,6 @@ export function buildInvestmentContextPack(req: Input): Pack {
   }
   const searchTerms = [...new Set([...issuers,...topicTerms(req.industry||""),...terms(question)])].slice(0,12);
   const failed: string[] = [];
-  const macroAnchorPaths = new Set<string>();
-  if(macroScope && primaryTopic){
-    try{
-      for(const hit of searchVault(primaryTopic,{limit:100}).hits)macroAnchorPaths.add(hit.path);
-    }catch{failed.push(primaryTopic);}
-  }
   const industryMatches = new Set<string>();
   if(issuers.length && req.industry){
     for(const topic of topicTerms(req.industry).slice(0,5)){
@@ -170,7 +193,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
           role!=="industry" && role!=="rules" && !pool.has(h.path)) continue;
         if(macroScope){
           // One shared word (e.g. "revenue") must not pull an unrelated issuer.
-          if(!primaryTopic || !macroAnchorPaths.has(h.path))continue;
+          if(!primaryTopic || !explicitMacroScope(h.path,primaryTopic))continue;
           if(role==="company"||role==="thesis"||role==="evidence_register"||
             (role==="timeline" && otherIssuer)||
             h.path.startsWith("10_Knowledge/Company Research/"))continue;
@@ -221,8 +244,11 @@ export function buildInvestmentContextPack(req: Input): Pack {
     if(!roles.has("evidence_register"))incomplete.push("No Evidence Register selected; prior claims may be missing.");
     if(!roles.has("source"))incomplete.push("No original issuer/filing source selected; primary claim verification required.");
     if(!roles.has("industry"))incomplete.push("No industry/TAM source selected; supply-chain effects may be incomplete.");
-  }else if(macroScope && !items.some(x=>x.role!=="rules" && x.role!=="timeline")){
-    incomplete.push("No country/theme-specific macro evidence selected; research coverage is incomplete.");
+  }else if(macroScope){
+    if(!items.some(x=>x.role!=="rules" && x.role!=="timeline"))
+      incomplete.push("No country/theme-specific macro evidence selected; research coverage is incomplete.");
+    if(!items.some(x=>hasDeclaredMacroPrimary(x.path)))
+      incomplete.push("No source-declared primary macro/statistical evidence selected; verify the official data release before analysis.");
   }
   if(failed.length)incomplete.push("Search failed on terms: "+failed.join(", "));
   return {
