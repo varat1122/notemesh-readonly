@@ -42,6 +42,7 @@ async function setDelete(on: boolean) {
 }
 
 const READ_TOOLS = [
+  "assess_thesis_change_proposal",
   "daily_note",
   "find_in_note",
   "get_links",
@@ -416,6 +417,7 @@ verification: not_reverified
       await Promise.all([server.connect(st), client.connect(ct)]);
       const names = (await client.listTools()).tools.map(tool=>tool.name);
       expect(names).toContain("review_investment_claim");
+      expect(names).toContain("assess_thesis_change_proposal");
       const result = await client.callTool({
         name: "review_investment_claim",
         arguments: {

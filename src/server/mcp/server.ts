@@ -5,6 +5,7 @@ import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { buildInvestmentDecisionPacket } from "../vault/investment-decision-packet";
+import { assessThesisProposal } from "../vault/thesis-proposal-gate";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
 import { getSetting } from "../db";
 import { cloudIntakeStatus } from "../cloud-intake";
@@ -290,6 +291,65 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
   // read tool below registered for any credential at all.
   if (!access.read) return server;
   registerPriceTools(server);
+  server.registerTool(
+    "assess_thesis_change_proposal",
+    {
+      title: "Assess an analyst-authored investment thesis change proposal (read-only)",
+      annotations: READ,
+      description: "Validate whether a Company, Macro, Industry or Asset thesis proposal has traceable Claim IDs, analyst-attested original-source citations, counter-evidence, causal transmission and invalidation. Returns only blocked or structurally ready for owner review; NEVER verifies sources on its own, grants owner approval, updates Thesis or recommends trades.",
+      inputSchema: {
+        domain:z.enum(["company","industry","macro","asset"]).describe("Investment domain"),
+        entity:z.string().min(1).max(140).describe("Canonical ticker, geography, industry or asset identifier"),
+        metric:z.string().min(1).max(140).describe("Primary claim metric"),
+        period:z.string().min(1).max(120).describe("Exact fiscal/reporting period"),
+        originalSource:z.string().url().max(1000).describe("Original source URL; caller must have verified separately"),
+        statement:z.string().min(8).max(2500).describe("Source-derived claim text, not an AI guess"),
+        value:z.string().max(150).optional().describe("Literal original number, if applicable"),
+        unit:z.string().max(80).optional().describe("Literal numeric unit, if applicable"),
+        eventDate:z.string().nullable().optional().describe("Actual source event date YYYY-MM-DD, null if unknown"),
+        publishedAt:z.string().nullable().optional().describe("Original publication date YYYY-MM-DD, null if unknown"),
+        proposedDecision:z.enum(["maintain","strengthen","weaken","revise","undetermined"]).describe("Analyst PROPOSED conclusion, not owner-endorsed"),
+        historicalContextPath:z.string().min(1).max(600).describe("Existing Vault path analyst says they read in full"),
+        historicalContextReadByAnalyst:z.boolean().describe("Analyst assertion; server does not certify reading"),
+        existingThesisStatus:z.enum(["owner_approved","draft_or_unverified","not_applicable","unknown"]).describe("Historical thesis authorization, not inferred from excerpts"),
+        evidence:z.array(z.object({
+          claimId:z.string().min(1).max(160),entity:z.string().min(1).max(140),
+          metric:z.string().min(1).max(140),period:z.string().min(1).max(120),
+          sourceUrl:z.string().url().max(1000),sourceSection:z.string().min(1).max(350),
+          finding:z.string().min(1).max(1500),
+          sourceType:z.enum(["primary","regulatory","transcript","secondary","analyst","archived_ai"]),
+          checkedAgainstOriginalByAnalyst:z.boolean(),checkedAt:z.string().nullable().optional(),
+          value:z.string().nullable().optional(),unit:z.string().nullable().optional()
+        })).max(12).describe("Source-specific cited Claim ID rows and analyst verification declarations"),
+        counterEvidence:z.array(z.object({
+          finding:z.string().min(1).max(1800),sourceUrl:z.string().url().max(1000),
+          sourceSection:z.string().min(1).max(350),reviewedByAnalyst:z.boolean()
+        })).max(8).describe("Actual alternative or disconfirming evidence, with original source citations"),
+        transmission:z.array(z.object({
+          stage:z.string().min(1).max(80),direction:z.enum(["positive","negative","mixed","unchanged","unknown"]),
+          explanation:z.string().min(1).max(1600),
+          supportingClaimIds:z.array(z.string().min(1).max(160)).max(12)
+        })).max(12).describe("Evidence-backed causal stage impact; no fabricated effects"),
+        thesisDelta:z.string().max(2500).describe("What the new evidence changes versus historical thesis"),
+        alternatives:z.string().max(2500).describe("Counter-explanations and uncertainty"),
+        invalidation:z.string().max(2500).describe("Falsifiable signal that would invalidate proposed conclusion"),
+        confidence:z.enum(["low","medium","high","unassessed"]).describe("Analyst confidence, never automatic probability"),
+        confidenceRationale:z.string().max(1200).describe("Grounded confidence justification"),
+        catalyst:z.string().nullable().optional().describe("Dated future catalyst when supported"),
+        marketExpectations:z.object({
+          status:z.enum(["not_assessed","assessed"]),
+          asOf:z.string().nullable().optional(),sourceUrl:z.string().nullable().optional(),
+          comparatorDescription:z.string().nullable().optional()
+        }).describe("Dated market expectation source, or honest not_assessed"),
+        portfolio:z.object({
+          status:z.enum(["not_assessed","assessed"]),asOf:z.string().nullable().optional(),
+          authorizedHoldingsReference:z.string().nullable().optional()
+        }).describe("Dated authorized holdings reference, or honest not_assessed")
+      }
+    },
+    safe((args)=>json(withBoundary(assessThesisProposal(args)))),
+  );
+
   server.registerTool(
     "investment_context_pack",
     {
