@@ -338,7 +338,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       // Some clients lose the text-only result when normalizing note reads.
       // Keeping the text block preserves existing callers and older clients.
       const payload = withBoundary(readNoteRange(path, { offset, limit }), "content");
-      return { ...json(payload), structuredContent: payload };
+      return { ...json(payload), structuredContent: payload as Record<string, unknown> };
     }),
   );
 
