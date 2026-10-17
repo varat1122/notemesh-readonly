@@ -409,8 +409,9 @@ describe("read-only MCP wire contract", () => {
         arguments: { path: "Canaries/Read Smoke.md", offset: 0, limit: 2 },
       });
       expect(answer.isError).not.toBe(true);
-      const block = answer.content.find((part) => part.type === "text");
-      if (!block || block.type !== "text") throw new Error("read_note omitted the text content block");
+      const content = (answer as { content?: Array<{ type: string; text?: string }> }).content ?? [];
+      const block = content.find((part) => part.type === "text");
+      if (!block?.text) throw new Error("read_note omitted the text content block");
       const parsed = JSON.parse(block.text) as {
         path: string; content: string; count: number; hasMore: boolean;
       };
