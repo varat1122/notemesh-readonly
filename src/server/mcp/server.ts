@@ -340,7 +340,8 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       const reviewed=reviewInvestmentClaim(args);
       return json(withBoundary({
         ...reviewed,
-        matchingClaims:fenceEach(reviewed.matchingClaims,"claimId","value","unit","metric","period")
+        matchingClaims:fenceEach(reviewed.matchingClaims,"claimId","value","unit","metric","period"),
+        relatedEventClaims:fenceEach(reviewed.relatedEventClaims,"claimId","value","unit","metric","period")
       }));
     }),
   );
