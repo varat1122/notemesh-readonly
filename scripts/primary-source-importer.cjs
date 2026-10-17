@@ -147,7 +147,7 @@ function importSource({vault, sourceFile, manifest, commit=false, receiptDir}) {
   const bytes=fs.readFileSync(sourceFile);
   const m=validateManifest(manifest, bytes, sourceFile);
   const root=fs.realpathSync(vault);
-  const archiveRoot=ensureSafePath(root, "07_Sources/" + m.category + "/.unused", false);
+  const archiveRoot=ensureSafePath(root, "07_Sources/" + m.category + "/source_path_check", false);
   // The category directory itself must already exist, regardless of --commit.
   if (!fs.statSync(path.dirname(archiveRoot)).isDirectory()) fail("Source category folder is missing");
   const destination=ensureSafePath(root,m.documentPath,false);
