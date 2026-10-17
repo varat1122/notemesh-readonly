@@ -186,4 +186,28 @@ unit: USD millions
     expect(result.readiness).toBe("blocked_missing_evidence");
     expect(result.sourceReceiptGate.rejectedReceipts).toBe(1);
   });
+  it("surfaces exact stored full-source byte versions without granting verification or thesis approval",async()=>{
+    await add(note,"# Historical draft thesis");
+    await addReceipt(proposal());
+    const p=proposal();
+    const {captureOriginalDocumentBytes}=await import("../research-source-archive");
+    const archive=captureOriginalDocumentBytes({
+      originalSource:p.originalSource,
+      bytes:Buffer.from("<!doctype html><html><body>Full illustrative original 10-Q with company revenue statement</body></html>"),
+      contentType:"text/html",
+      capturedAt:"2026-10-17T13:00:00Z",
+      captureMethod:"authorized_external_download",
+      retrievedFrom:p.originalSource,
+      reviewerOrOperator:"unit-test-only"
+    });
+    const result=await assess(p);
+    expect(result.readiness).toBe("ready_for_owner_review_not_approved");
+    expect(result.sourceByteArchive.status).toBe("stored_byte_history_unverified");
+    expect(result.sourceByteArchive.snapshotCount).toBe(1);
+    expect(result.sourceByteArchive.sha256Values).toContain(archive.sha256);
+    expect(result.sourceByteArchive.allStoredBytesIntegrityChecked).toBe(true);
+    expect(result.sourceByteArchive.sourcePublisherAuthenticated).toBe(false);
+    expect(result.sourceByteArchive.sourceWasRetrievedThisCall).toBe(false);
+    expect(result.thesisUpdateGate.canAutoUpdateThesis).toBe(false);
+  });
 });

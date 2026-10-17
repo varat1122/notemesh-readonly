@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
 import { findSourceObservationReceipts, type SourceReceiptGateResult } from "./source-observation-receipt";
+import { inspectOriginalSourceHistory } from "../research-source-archive";
 
 /**
  * READ-ONLY proposal completeness gate. This never verifies claims against the
@@ -57,6 +58,14 @@ export interface ThesisProposalQualityResult {
   historicalClaimClassification:ReviewClass;
   evidenceClaimsCheckedForScope:number;
   sourceReceiptGate:{status:"receipt_metadata_and_excerpt_integrity_only";validReceipts:number;rejectedReceipts:number;receiptPaths:string[];externalSourceFetchedThisCall:false;sourceDocumentBytesArchivedAndVerified:false;receiptReviewerIdentityCryptographicallyVerified:false};
+  sourceByteArchive:{status:"not_archived"|"stored_byte_history_unverified";
+    snapshotCount:number;distinctByteVersions:number;
+    allStoredBytesIntegrityChecked:boolean;
+    sha256Values:string[];
+    sourcePublisherAuthenticated:false;
+    sourceWasRetrievedThisCall:false;
+    fullSourceRevisionCompleteness:"not_established";
+  };
   historicalContextNoteExists:boolean;
   analyzedTransmissionStages:string[];
   valuationAndPricing:{
@@ -193,6 +202,11 @@ export function assessThesisProposal(input:ThesisProposalInput):ThesisProposalQu
     issue("Indexed source/metric conflict is unresolved; reconcile original document and correction vintage.");
   if(classify.metadataScan.truncated)
     warnings.push("Bounded historical metadata scan was truncated; not a global dedup assurance.");
+  const sourceHistory=inspectOriginalSourceHistory(input.originalSource);
+  if(sourceHistory.revisionCount===0)
+    warnings.push("No exact original-document bytes archived yet; excerpt-only receipts do not preserve the entire filing.");
+  if(sourceHistory.snapshots.some(x=>x.archiveStatus!=="intact_stored_bytes"))
+    issue("A source archive snapshot failed integrity checks; investigate bytes before using it as historical evidence.");
   warnings.push("The receipt SHA-256 checks stored excerpt consistency, NOT authenticity of the SEC/issuer full document or reviewer identity.");
   warnings.push("This read-only gate validates proposal structure and analyst attestations, NOT external source truth or owner approval.");
   const ready=blockers.length===0;
@@ -209,6 +223,16 @@ export function assessThesisProposal(input:ThesisProposalInput):ThesisProposalQu
       receiptPaths:[...new Set(receiptRows.map(r=>r.path))].slice(0,12),
       externalSourceFetchedThisCall:false,sourceDocumentBytesArchivedAndVerified:false,
       receiptReviewerIdentityCryptographicallyVerified:false},
+    sourceByteArchive:{
+      status:sourceHistory.revisionCount?"stored_byte_history_unverified":"not_archived",
+      snapshotCount:sourceHistory.revisionCount,
+      distinctByteVersions:new Set(sourceHistory.snapshots.map(x=>x.sha256)).size,
+      allStoredBytesIntegrityChecked:sourceHistory.revisionCount>0&&
+        sourceHistory.snapshots.every(x=>x.archiveStatus==="intact_stored_bytes"),
+      sha256Values:sourceHistory.snapshots.map(x=>x.sha256).slice(0,8),
+      sourcePublisherAuthenticated:false,sourceWasRetrievedThisCall:false,
+      fullSourceRevisionCompleteness:"not_established"
+    },
     historicalContextNoteExists:!!historical,
     analyzedTransmissionStages:represented,
     valuationAndPricing:{status:"not_checked_by_tool",
