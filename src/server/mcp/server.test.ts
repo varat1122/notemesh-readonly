@@ -387,6 +387,63 @@ describe("list_directory", () => {
 // A direct MCP protocol round-trip isolates server semantics from the
 // ChatGPT app tool snapshot/response adapter. No external Vault is touched.
 describe("read-only MCP wire contract", () => {
+  it("exposes claim review through real MCP tools/list and tools/call without modifying Vault", async () => {
+    const rel = "Canaries/Structured Claim.md";
+    const abs = path.join(root, "vault", rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, `---
+entity: NVDA
+metric: operating_cash_flow
+period: FY27H1
+original_source: https://example.org/filing-A.htm
+value: "74421"
+unit: USD millions
+verification: not_reverified
+---
+# Synthetic source claim
+`, "utf8");
+    const { reindexPath } = await import("../vault/indexer");
+    reindexPath(rel);
+
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const { createMcpServer } = await import("./server");
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const server = createMcpServer({ read: true, write: false, label: "claim-review-test" });
+    const client = new Client({ name: "claim-review-protocol", version: "1.0" });
+    const before = fs.readFileSync(abs, "utf8");
+    try {
+      await Promise.all([server.connect(st), client.connect(ct)]);
+      const names = (await client.listTools()).tools.map(tool=>tool.name);
+      expect(names).toContain("review_investment_claim");
+      const result = await client.callTool({
+        name: "review_investment_claim",
+        arguments: {
+          domain:"company",entity:"NVDA",metric:"operating_cash_flow",
+          period:"FY27H1",originalSource:"https://example.org/filing-A.htm",
+          statement:"Reported operating cash flows for the six-month period.",
+          value:"74421",unit:"USD millions"
+        }
+      });
+      expect(result.isError).not.toBe(true);
+      const content = (result as {content?:Array<{type:string;text?:string}>}).content ?? [];
+      const message = content.find(part=>part.type==="text")?.text;
+      if (!message) throw new Error("claim review omitted text MCP payload");
+      const out = JSON.parse(message) as {
+        status:string;classification:string;canAutoUpdateThesis:boolean;
+        matchingClaims:Array<{path:string}>;
+      };
+      expect(out.status).toBe("review_only_not_verified");
+      expect(out.classification).toBe("duplicate_candidate");
+      expect(out.canAutoUpdateThesis).toBe(false);
+      expect(out.matchingClaims.map(x=>x.path)).toContain(rel);
+    } finally {
+      await client.close().catch(()=>{});
+      await server.close().catch(()=>{});
+    }
+    expect(fs.readFileSync(abs,"utf8")).toBe(before);
+  });
+
   it("lists the context tool and returns real short note content through tools/call", async () => {
     const vault = path.join(root, "vault", "Canaries");
     fs.mkdirSync(vault, { recursive: true });
