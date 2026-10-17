@@ -75,6 +75,20 @@ read below, plus `preview_edit`, which writes nothing.
 
 ## Files
 
+### investment_context_pack — read
+
+Constructs a bounded, **read-only** research context from the Investment_OS Vault for a question, one or more companies, or an industry/macro theme. It prioritizes Current Thesis, Evidence Register, Company Evolution, source evidence, industry context, and contrary evidence over repeated archived ChatGPT discussions. It is **lexical retrieval**, not guaranteed semantic recall or a complete proof of all evidence. The server reports coverage limits and missing evidence; check original sources before treating a claim as verified.
+
+Parameters:
+- `question` (required): investment question, 3–1,200 characters.
+- `issuers` (optional): up to six company tickers or issuer identifiers; omit for broad macro/theme retrieval.
+- `industry` (optional): relevant industry/theme, up to 140 characters.
+- `focus` (optional): `earnings`, `broker`, `tam`, `macro`, `thesis`, or `general`.
+- `maxNotes` (optional): 5–16, bounds the number of returned notes.
+- `maxChars` (optional): 4,500–18,000, bounds returned excerpt characters.
+
+Outputs include selected note paths, source-line excerpts, verification labels as declared by source notes, and coverage limitations. An archived, `not_reverified` thesis remains unverified. This tool never edits notes and requires the existing `vault:read` scope. A newly deployed MCP tool may require ChatGPT App/Connector tool-catalogue refresh; server registration alone does not confirm that a particular ChatGPT app can invoke it.
+
 ### read_note — read
 
 Returns a note's content, fenced, up to 2,000 lines or 100 KB per call with
