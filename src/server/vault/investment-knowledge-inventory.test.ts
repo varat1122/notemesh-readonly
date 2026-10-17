@@ -79,10 +79,31 @@ describe("full indexed vault metadata audit",()=>{
   expect(a.legacyWarnings.counts.source_type_misused_for_verification).toBe(1);
   expect(a.sourceTypeCounts["(unmapped_legacy_type)"]).toBe(2);
   expect(a.rawSourceTypeCounts.user_supplied_chatgpt_summary).toBe(1);
+  expect(a.normalizedSourceTypeCounts.user_supplied).toBe(1);
+  expect(a.sourceTypeMappingCounts.legacy_alias).toBe(1);
+  expect(a.independenceAssessmentCounts.not_independent_derivative_summary).toBe(1);
   expect(a.rawSourceTypeCounts.unverified).toBe(1);
   expect(a.unknownRoleTypeCounts).toBeDefined();
   expect(a.claimRegisters.notes).toBe(0);
   expect(a.claimRegisters.issueCounts).toEqual({});
+ });
+ it("counts archive and historical derivative roles while preserving raw source classifications",async()=>{
+   await add("07_Sources/ChatGPT/Conversations/Feed.md",
+     ["---","type: chat_transcript_index","source_type: chatgpt_export","date: 2026-07-16","---"].join("\n"));
+   await add("10_Knowledge/Company Research/AMD - Analysis.md",
+     ["---","type: knowledge_note","source_type: chatgpt_history","verification: not_reverified","---"].join("\n"));
+   await add("10_Knowledge/Industry and Concepts/Old Index.md",
+     ["---","type: knowledge_index","---"].join("\n"));
+   const a=await report();
+   expect(a.roleCounts.archive).toBe(1);
+   expect(a.roleCounts.historical_analysis).toBe(1);
+   expect(a.roleCounts.navigation).toBe(1);
+   expect(a.normalizedSourceTypeCounts.archived_ai).toBe(2);
+   expect(a.independenceAssessmentCounts.not_independent_archived_ai).toBe(2);
+   expect(a.sourceTypeMappingCounts.legacy_alias).toBe(2);
+   expect(a.rawSourceTypeCounts.chatgpt_export).toBe(1);
+   expect(a.rawSourceTypeCounts.chatgpt_history).toBe(1);
+   expect(a.duplicateCandidates.sameExactSourceMetricPeriod.totalGroups).toBe(0);
  });
  it("detects missing source, bad claim fields and unresolved wikilinks while preserving counts",async()=>{
   await add("08_Daily_Weekly/Research Indexes/Bad Claim.md",
