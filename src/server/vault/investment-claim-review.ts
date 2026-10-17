@@ -38,6 +38,7 @@ export interface ClaimReview {
   eventDate:string|null; publishedAt:string|null;
   originalSource:string;
   matchingClaims:StructuredRecord[];
+  relatedEventClaims:StructuredRecord[];
   sourceLinkedUnstructuredPaths:string[];
   metadataScan:{indexedNotesWithMetadata:number;notesScanned:number;truncated:boolean;eligibleEntityNotes:number};
   possibleHistoricalPaths:{path:string;role:string;declaredVerification:string|null;line:number}[];
@@ -186,7 +187,8 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   return {
     status:"review_only_not_verified",classification,domain:input.domain,
     entity,metric,period,eventDate:input.eventDate??null,publishedAt:input.publishedAt??null,
-    originalSource,matchingClaims:selected.slice(0,limit),
+    originalSource,matchingClaims:strict.slice(0,limit),
+    relatedEventClaims:matchedSourceSamePeriodOtherMetric.slice(0,limit),
     sourceLinkedUnstructuredPaths,
     metadataScan:{indexedNotesWithMetadata,notesScanned:rows.length,
       truncated:indexedNotesWithMetadata>rows.length,eligibleEntityNotes},
@@ -194,6 +196,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
     evidenceNeeded,suggestedThesisAction:"maintain_pending_review",canAutoUpdateThesis:false,
     caveats:[
       "Classification is a candidate from exact, explicitly structured indexed metadata; it is not an adjudicated fact.",
+      "matchingClaims contains same-metric candidate records only; relatedEventClaims contains separate metrics from the same original source and period and is NOT metric corroboration.",
       "Matching URLs preserve case-sensitive paths; ambiguous source identifiers and unit-free values remain unresolved.",
       "Metadata scan limits and note-level source links are reported; absence of metadata is not absence of historical facts.",
       "Unstructured archives and truncated context results can contain missed duplicates or contradictions.",
