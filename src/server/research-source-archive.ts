@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { db } from "../db";
-import { env } from "../env";
+import { db } from "./db";
+import { env } from "./env";
 
 /**
  * Internal, authenticated-ingest ADAPTER DEPENDENCY — not an MCP write action.
