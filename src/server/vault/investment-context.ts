@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { searchVault } from "./queries";
+import { db } from "../db";
 import { readNote } from "./notes";
 import { resolveNotePath } from "./paths";
 import { splitFrontmatter } from "./markdown";
@@ -67,6 +68,15 @@ export function buildInvestmentContextPack(req: Input): Pack {
   ];
   const absent: string[] = [];
   for (const p of needed) { if (exists(p)) pool.set(p,120); else absent.push(p); }
+  // Explicit issuer-source discovery: a broad "NVDA" lexical query can be
+  // flooded by archived chat and miss the actual issuer IR reviews. Never
+  // let search-result popularity determine whether primary documents exist.
+  for (const ticker of issuers) {
+    const prefix = "08_Daily_Weekly/Research Indexes/Primary Evidence - "+ticker+" ";
+    const matches = db().prepare("SELECT path FROM notes WHERE substr(path,1,?)=? ORDER BY path DESC LIMIT 12")
+      .all(prefix.length,prefix) as {path:string}[];
+    for (const note of matches) if(exists(note.path)) pool.set(note.path,115);
+  }
   const searchTerms = [...new Set([...issuers,...terms(question),...terms(req.industry||"")])].slice(0,10);
   const failed: string[] = [];
   for (const term of searchTerms) {
