@@ -75,6 +75,13 @@ read below, plus `preview_edit`, which writes nothing.
 
 ## Files
 
+
+### User attachment capture via separate Safe Edit OAuth MCP
+
+`store_user_attachment(base64, contentType)` is write-scoped and accepts actual accessible user-provided JPEG/PNG/WebP/PDF file bytes up to 4 MiB. It validates magic bytes and stores an immutable content-addressed file in `07_Sources/ChatGPT/Attachments/`, returning SHA-256, bytes, path and actual readback status. Repeated bytes are idempotent; no arbitrary path input, original-file overwrite or unapproved protected Thesis edit is allowed. `inspect_user_attachment(sha256, contentType)` is read-only and recomputes the SHA-256 of the stored Vault file.
+
+The tools require new Safe Edit OAuth `vault:read vault:edit` consent and tool refresh; they do not OCR, assert publisher authenticity, prove user-supplied figures, read/extract previous chats automatically or certify phone/desktop Sync. The existing read-only `plan_investment_writeback` may read a previously stored SHA/MIME receipt to distinguish actual user screenshot bytes from a text transcription.
+
 ## Safe Edit write-scoped Source Archive ingestion (separate OAuth endpoint)
 
 `archive_original_source(url)` is registered only with Investment OS — Safe Edit (requires `vault:read vault:edit` OAuth). It uses an **admin-controlled exact-host HTTPS allowlist** (defaults: `www.sec.gov`, `ir.amd.com`, `www.nso.gov.vn`), denies any redirect, blocks unsupported MIME/oversized (>8 MiB) responses, requires `SOURCE_ARCHIVE_USER_AGENT` with a **real operator-owned contact** configured on Railway, and uses the actual Safe Edit OAuth identity as the archive operator label. No user-supplied alternate host or unsafe file path is honored. The action writes ONLY the separate, content-addressed source-byte archive outside Vault, not any Markdown/Thesis/Portfolio note.
