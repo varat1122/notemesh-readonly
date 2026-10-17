@@ -19,6 +19,8 @@ describe("separate source and analysis candidate Safe Edit drafts (no writes)",(
    const p=composeWritebackDrafts(fixture());
    expect(p.original.status).toBe("candidate_safe_edit_preview_not_written");
    expect(p.analysis.status).toBe("candidate_safe_edit_preview_not_written");
+   expect(p.original.requiresPriorLocalReceipt).toBe(false);
+   expect(p.analysis.requiresPriorLocalReceipt).toBe(true);
    expect(p.original.content).toContain(fixture().extractedText);
    expect(p.original.content).not.toContain(fixture().analysisText!);
    expect(p.analysis.content).toContain(fixture().analysisText);
