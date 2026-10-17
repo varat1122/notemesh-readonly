@@ -94,11 +94,11 @@ describe("investment context retrieval",()=>{
   it("distinguishes issuer JPM from broker JPM and rejects another issuer's timeline",async()=>{
     const build=await fixture();
     await addExtra("08_Daily_Weekly/Research Indexes/Company Evolution - AAPL.md",
-      "# AAPL evolution\\nJPM broker research on consumer devices, not JPMorgan bank earnings.");
+      "# AAPL evolution\nJPM broker research on consumer devices, not JPMorgan bank earnings.");
     await addExtra("10_Knowledge/Industry and Concepts/JPM Hardware Model.md",
-      "# JPM Hardware Model\\nJPM technology research on optical networking and cloud hardware.");
+      "# JPM Hardware Model\nJPM technology research on optical networking and cloud hardware.");
     await addExtra("10_Knowledge/Company Research/JPM - Bank Credit Losses.md",
-      "# JPM bank credit risk\\nJPMorgan bank lending credit losses and earnings.");
+      "# JPM bank credit risk\nJPMorgan bank lending credit losses and earnings.");
     const p=build({question:"JPM banking loan growth and credit losses",
       issuers:["JPM"],industry:"banking",focus:"earnings",maxNotes:12});
     const paths=p.items.map(x=>x.path);
@@ -110,11 +110,11 @@ describe("investment context retrieval",()=>{
   it("anchors a country macro query and does not request a company Current Thesis",async()=>{
     const build=await fixture();
     await addExtra("10_Knowledge/Macro and Markets/2026-10 - Vietnam GDP.md",
-      "# Vietnam GDP macro growth\\nVietnam policy, GDP and central bank liquidity.");
+      "# Vietnam GDP macro growth\nVietnam policy, GDP and central bank liquidity.");
     await addExtra("10_Knowledge/Macro and Markets/2026-10 - US CMBS.md",
-      "# US CMBS macro\\nUnited States property debt and GDP liquidity.");
+      "# US CMBS macro\nUnited States property debt and GDP liquidity.");
     await addExtra("01_Companies/NVO.md",
-      "# NVO company\\nHealthcare developments and incidental Vietnam mention.");
+      "# NVO company\nHealthcare developments and incidental Vietnam mention.");
     const p=build({question:"Vietnam GDP economic growth and central bank liquidity",
       industry:"Vietnam macro and markets",focus:"macro",maxNotes:12});
     const paths=p.items.map(x=>x.path);
