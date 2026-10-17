@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
+import { findSourceObservationReceipts, type SourceReceiptGateResult } from "./source-observation-receipt";
 
 /**
  * READ-ONLY proposal completeness gate. This never verifies claims against the
@@ -55,6 +56,7 @@ export interface ThesisProposalQualityResult {
   sourceAttestation:"analyst_assertion_not_independently_verified";
   historicalClaimClassification:ReviewClass;
   evidenceClaimsCheckedForScope:number;
+  sourceReceiptGate:{status:"receipt_metadata_and_excerpt_integrity_only";validReceipts:number;rejectedReceipts:number;receiptPaths:string[];externalSourceFetchedThisCall:false;sourceDocumentBytesArchivedAndVerified:false;receiptReviewerIdentityCryptographicallyVerified:false};
   historicalContextNoteExists:boolean;
   analyzedTransmissionStages:string[];
   valuationAndPricing:{
@@ -131,6 +133,24 @@ export function assessThesisProposal(input:ThesisProposalInput):ThesisProposalQu
   if(!input.evidence?.length)issue("At least one structured Claim ID and source-specific Evidence Row is required.");
   if(primaryAttested===0)
     issue("No primary/regulatory/transcript claim has an analyst-dated original-source check on the supplied original URL.");
+  const receiptChecks:SourceReceiptGateResult[]=[];
+  for(const e of input.evidence||[]){
+    if(!e.checkedAgainstOriginalByAnalyst||!["primary","regulatory","transcript"].includes(e.sourceType)||
+      !isoDate(e.checkedAt)||e.sourceUrl!==input.originalSource)continue;
+    receiptChecks.push(findSourceObservationReceipts({
+      claimId:e.claimId,domain:input.domain,entity:e.entity,metric:e.metric,period:e.period,
+      originalSource:e.sourceUrl,value:e.value??input.value??null,unit:e.unit??input.unit??null
+    }));
+  }
+  const receiptRows=receiptChecks.flatMap(x=>x.matchingReceipts);
+  const receiptRejects=receiptChecks.flatMap(x=>x.rejectedReceipts);
+  if(receiptRows.length===0)
+    issue("No claim-scoped source observation receipt with consistent SHA-256 excerpt and source/metric/period/value/unit is indexed; independent original verification remains a separate step.");
+  if(receiptChecks.some(x=>x.truncated))
+    warnings.push("Source receipt lookup truncated; do not treat verification receipts as complete.");
+  if(receiptRejects.length>0)
+    warnings.push("One or more source observation receipts were rejected on scope or excerpt integrity; adjudicate the raw note.");
+
   if(!input.counterEvidence?.length)issue("Counter-evidence must be evaluated, including contrary sources and alternatives.");
   for(const c of input.counterEvidence||[]){
     if(!truth(c.finding)||!webSource(c.sourceUrl)||!truth(c.sourceSection)||!c.reviewedByAnalyst)
@@ -173,6 +193,7 @@ export function assessThesisProposal(input:ThesisProposalInput):ThesisProposalQu
     issue("Indexed source/metric conflict is unresolved; reconcile original document and correction vintage.");
   if(classify.metadataScan.truncated)
     warnings.push("Bounded historical metadata scan was truncated; not a global dedup assurance.");
+  warnings.push("The receipt SHA-256 checks stored excerpt consistency, NOT authenticity of the SEC/issuer full document or reviewer identity.");
   warnings.push("This read-only gate validates proposal structure and analyst attestations, NOT external source truth or owner approval.");
   const ready=blockers.length===0;
   return {
@@ -182,7 +203,13 @@ export function assessThesisProposal(input:ThesisProposalInput):ThesisProposalQu
     blockers,warnings,
     sourceAttestation:"analyst_assertion_not_independently_verified",
     historicalClaimClassification:classify.classification,
-    evidenceClaimsCheckedForScope:scoped,historicalContextNoteExists:!!historical,
+    evidenceClaimsCheckedForScope:scoped,
+    sourceReceiptGate:{status:"receipt_metadata_and_excerpt_integrity_only",
+      validReceipts:receiptRows.length,rejectedReceipts:receiptRejects.length,
+      receiptPaths:[...new Set(receiptRows.map(r=>r.path))].slice(0,12),
+      externalSourceFetchedThisCall:false,sourceDocumentBytesArchivedAndVerified:false,
+      receiptReviewerIdentityCryptographicallyVerified:false},
+    historicalContextNoteExists:!!historical,
     analyzedTransmissionStages:represented,
     valuationAndPricing:{status:"not_checked_by_tool",
       proposalDataStatus:input.marketExpectations.status==="assessed"?"analyst_supplied_not_verified":"not_assessed",
