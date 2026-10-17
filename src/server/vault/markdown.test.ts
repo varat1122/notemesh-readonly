@@ -8,7 +8,7 @@ describe("Obsidian table wikilink aliases", () => {
       "| Company | Link |",
       "| --- | --- |",
       String.raw`| [[01_Companies/NVDA\|NVDA alias]] | [[Theme#Heading\|Heading alias]] |`,
-      String.raw`| [[Dir\Old]] | ` + "`[[Ignored\|Not a link]]`" + ` |`,
+      String.raw`| [[Dir\Old]] | ` + "`[[Ignored\\|Not a link]]`" + ` |`,
     ].join("\n");
     expect(extractStructure(source).links).toEqual(["01_Companies/NVDA", "01_Companies/NVDA", "Theme", "Dir\\Old"]);
   });
