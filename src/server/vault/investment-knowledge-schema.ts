@@ -8,8 +8,12 @@
 export interface SchemaInspection {
   status: "read_time_adapter_only";
   role: "structured_claim" | "source_receipt" | "source" | "industry" | "company" | "timeline" |
-    "thesis" | "evidence_register" | "review" | "archive" | "method" | "other";
+    "thesis" | "evidence_register" | "review" | "historical_analysis" | "navigation" | "archive" | "method" | "other";
   declaredSourceType: string | null;
+  rawSourceType: string | null;
+  normalizedSourceType: string | null;
+  sourceTypeMapping: "canonical" | "legacy_alias" | "unmapped" | "missing";
+  independenceAssessment: "not_independent_archived_ai" | "not_independent_derivative_summary" | "not_assessed";
   declaredVerification: string | null;
   originalSource: string | null;
   sourceUrlAlias: string | null;
@@ -32,20 +36,37 @@ const SOURCE_TYPES=new Set([
   "primary","regulatory","transcript","broker","analyst","secondary",
   "attributed","user_supplied","archived_ai",
 ]);
+const LEGACY_SOURCE_ALIASES:Record<string,"archived_ai"|"user_supplied">={
+  chatgpt_export:"archived_ai",
+  chatgpt_history:"archived_ai",
+  chatgpt_analysis:"archived_ai",
+  archived_ai_navigation:"archived_ai",
+  user_supplied_chatgpt_summary:"user_supplied",
+  user_supplied_chat_summary:"user_supplied",
+  user_supplied_chat_archive_summary:"user_supplied",
+};
 function roleOfNote(path:string, fm:Data):SchemaInspection["role"] {
   const t=asText(fm.type);
   if(t==="primary_source_verification_receipt")return "source_receipt";
   if(t==="investment_structured_claim_register")return "structured_claim";
-  if(t==="current_thesis"||/^05_Thesis\/.*Current Thesis/i.test(path))return "thesis";
+  // Source archive path always wins: an old archive can have type research_note.
+  if(path.startsWith("07_Sources/ChatGPT/")||t==="chatgpt_archive")return "archive";
+  if(t==="current_thesis"||t==="thesis"||/^05_Thesis\/.*Current Thesis/i.test(path))return "thesis";
   if(/Evidence Register/i.test(path))return "evidence_register";
   if(t==="company_evolution_timeline"||t==="investment_evolution_master"||/Company Evolution - |00_Investment_Evolution_Master/.test(path))return "timeline";
   if(t==="primary_ir_evidence_review"||/^08_Daily_Weekly\/Research Indexes\/Primary Evidence - /.test(path))return "source";
   if(t==="industry_tam_version_register"||t==="concept_hub"||t==="investment_economic_transmission_graph"||
     /^02_Industries_Themes\/|^03_Concepts\/|00_Industry_TAM_|00_AI_Infrastructure_Economic_Transmission/.test(path))return "industry";
   if(t==="company"||path.startsWith("01_Companies/"))return "company";
-  if(t==="news_thesis_review"||t==="investment_review"||t==="research_note")return "review";
+  // Historical extracted knowledge is a derivative analysis, not a new issuer source.
+  if(t==="knowledge_note"&&["chatgpt_history","chatgpt_export","chatgpt_analysis"].includes(asText(fm.source_type)??""))
+    return "historical_analysis";
+  if(["knowledge_index","company_history_index","topic_history_index","macro_hub",
+      "chat_transcript_index","historical_navigation_redirect"].includes(t??""))return "navigation";
+  if(["news_thesis_review","investment_review","research_note","preferred_research_note",
+      "research_update","macro_research_note","dated_evidence_review","research_synthesis",
+      "research_map","import_review"].includes(t??""))return "review";
   if(t==="research_workflow"||path.startsWith("09_Templates/"))return "method";
-  if(path.startsWith("07_Sources/ChatGPT/")||t==="chatgpt_archive")return "archive";
   return "other";
 }
 function strictDate(x:unknown): string|null {
@@ -72,10 +93,24 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   const warnings:string[]=[];
   const claimIssues:string[]=[];
   const sourceRaw=asText(fm.source_type);
+  const rawSourceType=sourceRaw;
   const declaredSourceType=sourceRaw&&SOURCE_TYPES.has(sourceRaw.toLowerCase())?
     sourceRaw.toLowerCase():null;
-  if(sourceRaw&&!declaredSourceType)
+  const alias=sourceRaw?LEGACY_SOURCE_ALIASES[sourceRaw.toLowerCase()]??null:null;
+  const normalizedSourceType=declaredSourceType??alias;
+  const sourceTypeMapping:SchemaInspection["sourceTypeMapping"]=
+    declaredSourceType?"canonical":alias?"legacy_alias":sourceRaw?"unmapped":"missing";
+  // Do NOT treat a derivative chat summary as independent issuer evidence.
+  // A primary declaration is still unassessed until the actual source is read.
+  const independenceAssessment:SchemaInspection["independenceAssessment"]=
+    normalizedSourceType==="archived_ai"||(!normalizedSourceType&&role==="archive")
+      ?"not_independent_archived_ai":
+    Boolean(sourceRaw&&["user_supplied_chatgpt_summary","user_supplied_chat_summary",
+      "user_supplied_chat_archive_summary"].includes(sourceRaw.toLowerCase()))
+      ?"not_independent_derivative_summary":"not_assessed";
+  if(sourceRaw&&!declaredSourceType&&!alias)
     warnings.push(sourceRaw==="unverified"?"source_type_misused_for_verification":"unmapped_legacy_source_type");
+  if(alias)warnings.push("legacy_source_alias_retained_raw_provenance");
   const dateFields=["event_date","published_at","received_at","imported_at","verified_at"] as const;
   for(const field of dateFields){
     if(fm[field]!==undefined&&fm[field]!==null&&strictDate(fm[field])===null)
@@ -130,7 +165,8 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   if(role==="thesis"&&asText(fm.status)!=="owner_approved")
     warnings.push("thesis_not_owner_approved_by_status");
   return {
-    status:"read_time_adapter_only",role,declaredSourceType,
+    status:"read_time_adapter_only",role,declaredSourceType,rawSourceType,
+    normalizedSourceType,sourceTypeMapping,independenceAssessment,
     declaredVerification:asText(fm.verification),
     originalSource,sourceUrlAlias,eventDate,publishedAt,importedAt,
     legacyDate,legacyImportedOn,sourceHashScope,
