@@ -44,6 +44,18 @@ describe("read-only deployment protocol", () => {
     const result = await client.callTool({ name: "read_note", arguments: { path: "Test.md" } });
     expect(result.isError).not.toBe(true);
     expect(JSON.stringify(result)).toContain("Read-only protocol fixture");
+    // Text and structured MCP payloads must both carry the real note body.
+    // Merely receiving {} is a failed read even when no protocol error fires.
+    expect(result.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "text", text: expect.stringContaining("Read-only protocol fixture") }),
+    ]));
+    expect(result.structuredContent).toEqual(expect.objectContaining({
+      path: "Test.md",
+      content: expect.stringContaining("Read-only protocol fixture"),
+      count: 3,
+      totalLines: 3,
+      hasMore: false,
+    }));
     expect(fs.readFileSync(notePath, "utf8")).toBe(original);
   });
   for (const tool of ["create_note", "update_note", "edit_note", "append_to_note", "prepend_to_note", "delete_note", "move_note", "move_folder", "delete_folder", "set_property", "remove_property", "toggle_task", "unique_note"]) {
