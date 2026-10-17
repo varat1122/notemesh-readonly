@@ -113,6 +113,10 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   for(const row of rows){
     let fm:Record<string,unknown>;
     try{fm=JSON.parse(row.frontmatter??"null") as Record<string,unknown>}catch{continue;}
+    // An audit receipt is not a new issuer claim or independent evidence.
+    // It may repeat the exact same value and URL solely to document a check.
+    // Exclude it from Claim classification; the dedicated receipt gate handles it.
+    if(fm?.type==="primary_source_verification_receipt")continue;
     if(!fm||typeof fm!=="object"||Array.isArray(fm)||!sameEntity(fm,input))continue;
     eligibleEntityNotes++;
     const noteSource=stringOrNull(fm.original_source)||stringOrNull(fm.source_url)||stringOrNull(fm.primary_url);
