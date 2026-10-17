@@ -379,7 +379,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     {
       title: "Plan multilingual investment intake and evidence-safe Vault writeback",
       annotations: READ,
-      description: "Read-only plan for Thai/English/other-language user-provided text or ChatGPT-extracted screenshot/PDF material. Routes raw input, source-attributed research review, exact-claim dedup and canonical timelines with stable retry IDs. No binary is archived or note written by this tool; verify originals, read related notes fully, and use separate Safe Edit permission for any write. Never auto changes protected Thesis/Evidence Register or Portfolio.",
+      description: "Read-only plan for Thai/English/other-language user-provided text or ChatGPT-extracted screenshot/PDF material. Routes raw input, source-attributed research review, exact-claim dedup and canonical timelines with stable retry IDs. No binary is written by this tool; it can read back a Safe Edit SHA receipt when supplied; verify publisher originals, read related notes fully, and use separate Safe Edit permission for any write. Never auto changes protected Thesis/Evidence Register or Portfolio.",
       inputSchema: {
         domain:z.enum(["company","industry","macro","asset"]).describe("Claim/knowledge domain; not an inferred company ticker"),
         entities:z.array(z.string().min(1).max(120)).min(1).max(6).describe("Explicit issuer ticker(s), macro geography, or industry topics. Do not include inferred suppliers as confirmed issuers."),
@@ -393,6 +393,8 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         eventDate:z.string().nullable().optional().describe("Explicit event date YYYY-MM-DD or null; not chat import date"),
         publicationDate:z.string().nullable().optional().describe("Original source publication date YYYY-MM-DD or null"),
         rawAttachmentPath:z.string().max(600).nullable().optional().describe("Existing Vault file path if known; unverified until attachment read/archive receipt"),
+        rawAttachmentSha256:z.string().regex(/^[a-f0-9]{64}$/).nullable().optional().describe("Full-byte SHA-256 from store_user_attachment receipt; only verified by re-reading the matching Vault attachment"),
+        rawAttachmentContentType:z.enum(["image/jpeg","image/png","image/webp","application/pdf"]).nullable().optional().describe("Content type paired with original user attachment SHA; must match stored content-addressed file"),
         claim:z.object({
           metric:z.string().min(1).max(140),
           period:z.string().min(1).max(120),
