@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { db } from "../db";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
+import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"unknown";
@@ -25,6 +26,8 @@ export interface WritebackInput {
   eventDate?:string|null;
   publicationDate?:string|null;
   rawAttachmentPath?:string|null;
+  rawAttachmentSha256?:string|null;
+  rawAttachmentContentType?:AttachmentType|null;
   claim?:{metric:string;period:string;statement:string;value?:string;unit?:string};
   focus?:Focus;
 }
@@ -43,9 +46,9 @@ export interface WritebackPlan {
     textDigest:string;
     extractedTextIsOriginalBinary:false;
     rawAttachmentPath:string|null;
-    attachmentVerified:false;
+    attachmentVerified:boolean;
     originalSourceVerified:false;
-    preservation:"needs_safe_edit_raw_capture";
+    preservation:"needs_safe_edit_raw_capture"|"stored_original_user_bytes";
   };
   chronology:{
     eventDate:string|null;publicationDate:string|null;
@@ -90,13 +93,21 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     throw Error("Provide faithful extractedText, 1 to 12000 characters");
   if(input.sourceUrl&&input.sourceUrl.length>1000)throw Error("sourceUrl too long");
   if(input.rawAttachmentPath&&input.rawAttachmentPath.length>600)throw Error("attachment path too long");
+  if(Boolean(input.rawAttachmentSha256)!==Boolean(input.rawAttachmentContentType))
+    throw Error("rawAttachmentSha256 and rawAttachmentContentType must be supplied together");
+  const attachment=input.rawAttachmentSha256&&input.rawAttachmentContentType?
+    inspectUserAttachment({sha256:input.rawAttachmentSha256,contentType:input.rawAttachmentContentType}):null;
+  if(attachment&&input.rawAttachmentPath&&attachment.path!==input.rawAttachmentPath)
+    throw Error("raw_attachment_path_digest_mismatch");
+  const verifiedAttachment=Boolean(attachment?.byteReadbackVerified);
+  const actualAttachmentPath=attachment?.path??input.rawAttachmentPath??null;
   const eventDate=validDate(input.eventDate);
   const publicationDate=validDate(input.publicationDate);
   const text=T(input.extractedText);
   const entities=[...new Set(input.entities.map(T))];
   const digest=createHash("sha256").update([
     "investment_os_intake_v1",input.domain,input.inputFormat,input.sourceKind,
-    ...entities.map(x=>x.toLowerCase()),T(input.sourceUrl||""),
+    ...entities.map(x=>x.toLowerCase()),T(input.sourceUrl||""),T(input.rawAttachmentSha256||""),
     // Hash the exact text (apart from leading/trailing whitespace) to avoid
     // claiming that translated summaries are identical to raw originals.
     text
@@ -138,7 +149,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const warnings=[
     "Input and any source labels are user/analyst supplied; no issuer, broker report, translation or number independently verified.",
     "Input language is only caller-declared; do not silently translate, paraphrase or claim unreadable screenshot portions were extracted.",
-    "Image/PDF binary is NOT stored by this router; a text transcription is NOT the original screenshot/PDF.",
+    verifiedAttachment?"Original user attachment bytes are already preserved in the Vault and hash-readback verified; this is not publisher verification or OCR.":"Image/PDF binary is NOT verified by this router without matching archived user attachment digest; transcription is not original bytes.",
     "Do not promote broker PT to company guidance, forecast to realized earnings, or announced investments to completed spending.",
     "Dates are supplied, not inferred from the chat date. Owner-approved thesis and market price-in require separate evidence.",
     "Historical pointers are bounded lexical discovery; missed prior broker PTs, same-event reposts and counter-evidence remain possible."
@@ -148,8 +159,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(input.sourceKind==="issuer_release"||input.sourceKind==="regulatory_filing")
     warnings.push("Source URL supplied is not proof that the original was fetched or verified.");
   if(!input.sourceUrl)warnings.push("Original source URL absent; screenshots and snippets are attributed inputs, not independently validated source records.");
-  if(input.inputFormat!=="text"&&!input.rawAttachmentPath)
-    warnings.push("No Vault path for original image/PDF bytes; preserve attachment separately before claiming complete source archival.");
+  if(input.inputFormat!=="text"&&!verifiedAttachment)
+    warnings.push("No verified, matching original image/PDF attachment bytes; call scoped Safe Edit store_user_attachment first.");
   const routes:Route[]=[
     {kind:"raw_input",action:rawExists?"link_existing_or_hold":"candidate_create",path:rawPath,
       reason:rawExists?"A note with the deterministic intake ID already exists; inspect identity/hash before linking.":"Preserve exact supplied text and attribution with a traceable link to actual image/PDF if available.",requiresReview:true},
@@ -170,7 +181,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       reason:"Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
   const needed=[
     "Preserve user text verbatim in a non-protected raw intake note using separately authorized Safe Edit and verify its receipt.",
-    "When format is screenshot/PDF, archive its actual bytes and link the resulting verified Vault attachment; do not equate transcription with image preservation.",
+    verifiedAttachment?"Link the hash-verified original user attachment in the raw intake note; preserve original language and distinguish source attribution.":"For screenshot/PDF, archive its actual bytes with Safe Edit store_user_attachment and inspect it before claiming raw attachment preservation.",
     "Read selected historical notes in full; confirm same event, same broker/model vintage, report date, primary provenance and conflicting evidence.",
     duplicates?"Link the already registered matching Claim ID; do not add a second structured metric or mark an old event as new.":
       "Resolve duplicate/new/added_detail/correction/unresolved before writing an event or new structured claim.",
@@ -184,9 +195,9 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     sourceLanguage:input.sourceLanguage?T(input.sourceLanguage):null,
     sourceCapture:{
       textDigest:digest,extractedTextIsOriginalBinary:false,
-      rawAttachmentPath:input.rawAttachmentPath??null,
-      attachmentVerified:false,originalSourceVerified:false,
-      preservation:"needs_safe_edit_raw_capture"
+      rawAttachmentPath:actualAttachmentPath,
+      attachmentVerified:verifiedAttachment,originalSourceVerified:false,
+      preservation:verifiedAttachment?"stored_original_user_bytes":"needs_safe_edit_raw_capture"
     },
     chronology:{eventDate,publicationDate,importedAt:"not_yet_written"},
     historical:{source:"bounded_lexical_context_not_exhaustive",
@@ -194,7 +205,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     exactClaimReview:{status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
     routes,gates:{
-      fullSourceRead:false,attachmentArchived:false,duplicateAdjudicated:false,
+      fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,
       protectedThesisApprovalRequired:true,canAutoWrite:false},
     warnings,nextActions:needed
