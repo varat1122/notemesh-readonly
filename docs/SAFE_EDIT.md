@@ -80,7 +80,7 @@ reindex verification → durable receipt → restart Sync.
   file and journal growth. The journal allows up to 1,000 operations / about
   20 MB of before/after text. Archival must preserve evidence and receipts before
   removing old records; no automatic history deletion is included.
-- `07_Sources` and `06_Portfolio` cannot be mutated. Corrections must be saved as
+- Generic Markdown edits cannot mutate `07_Sources` or `06_Portfolio`. A separate binary-only add-only tool stores content-addressed user attachments only under `07_Sources/ChatGPT/Attachments/` and never overwrites originals. `06_Portfolio` remains protected. Corrections must be saved as
   separate review/evidence. No generic delete, move, whole-vault or bulk tool is
   exposed. The API performs one note operation at a time.
 - YAML is parsed as a bounded mapping with duplicate-key detection. Body edits
@@ -149,3 +149,10 @@ Official references checked 2026-10-16:
 - https://modelcontextprotocol.io/specification/2025-11-25/server/tools
 
 See SAFE_EDIT_RUNBOOK.md for rollout/recovery and SAFE_EDIT_PROMPTS.md for daily use.
+
+
+## User-provided image/PDF preservation — Safe Edit binary actions
+
+Safe Edit OAuth exposes `store_user_attachment(base64, contentType)` and `inspect_user_attachment(sha256, contentType)`. The store tool accepts **actual user-uploaded image/PDF bytes** of JPEG, PNG, WebP or PDF, up to 4 MiB decoded, with magic-byte validation. Its output path is deterministic and content-addressed inside Obsidian: `07_Sources/ChatGPT/Attachments/<sha256>.<ext>`. Arbitrary file names and overwrite requests are not accepted. Same bytes are idempotent; an existing mismatched hash is refused. The actual bytes are independently hashed on readback. It runs with the separate Safe Edit `vault:read vault:edit` OAuth authorization and verified idle Sync.
+
+The asset is a **user-supplied original upload**, not authenticated issuer/broker publication. No OCR, factual claim verification, issuer source matching or desktop/mobile Sync confirmation is performed. This Vault binary is distinct from the independently captured official-source archive outside the Vault. The read-only `plan_investment_writeback` can confirm that a supplied SHA/MIME has matching bytes in the Vault, without inferring company/broker fact validity. The caller must actually have access to the attachment's exact bytes and must not invent base64. Live preservation of any prior example screenshot has not been confirmed solely by deploying this code.
