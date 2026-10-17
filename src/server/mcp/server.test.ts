@@ -446,6 +446,16 @@ verification: not_reverified
       expect(packet.thesisDecision.canAutoUpdateThesis).toBe(false);
       expect(packet.businessTransmission.stages.every(x=>x.status==="not_assessed")).toBe(true);
       expect(packet.changeLogDraft.status).toBe("draft_not_approved_or_written");
+      const ledger=(packet as unknown as {evidenceVerificationLedger:{
+        status:string;entries:Array<{originalVerifiedThisRun:boolean}>;
+        gates:{ownerApprovedThesisChange:boolean;originalPrimarySourceRead:string};
+        canAutoUpdateThesis:boolean;
+      }}).evidenceVerificationLedger;
+      expect(ledger.status).toBe("metadata_lineage_only_no_external_verification");
+      expect(ledger.entries.every(x=>x.originalVerifiedThisRun===false)).toBe(true);
+      expect(ledger.gates.ownerApprovedThesisChange).toBe(false);
+      expect(ledger.gates.originalPrimarySourceRead).toBe("not_performed");
+      expect(ledger.canAutoUpdateThesis).toBe(false);
       expect(out.matchingClaims.map(x=>x.path)).toContain(rel);
     } finally {
       await client.close().catch(()=>{});
