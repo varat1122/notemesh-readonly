@@ -400,7 +400,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
           value:z.string().max(150).optional(),
           unit:z.string().max(80).optional(),
         }).optional().describe("OPTIONAL exact dated metric; incomplete or absent values never establish a numeric duplicate"),
-        focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional()
+        focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Historical context relevance; does not verify issuer claims")
       }
     },
     safe((args:WritebackInput)=>json(withBoundary(planInvestmentWriteback(args)))),
