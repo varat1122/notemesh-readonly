@@ -2,6 +2,7 @@ import { beforeEach,afterEach,describe,it,expect,vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 let root:string;
 beforeEach(()=>{root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),"thesis-review-")));
@@ -38,6 +39,32 @@ const proposal=()=>({
   marketExpectations:{status:"not_assessed" as const},
   portfolio:{status:"not_assessed" as const}
 });
+async function addReceipt(p:ReturnType<typeof proposal>, opts?:{badHash?:boolean;wrongPeriod?:boolean}) {
+  const excerpt="Net revenue | $ | 120 | prior-year comparator";
+  const h=createHash("sha256").update(excerpt,"utf8").digest("hex");
+  await add("08_Daily_Weekly/Research Indexes/Source Receipt - "+p.entity+" - Synthetic.md",`---
+type: primary_source_verification_receipt
+schema_version: 1
+domain: ${p.domain}
+entity: ${p.entity}
+claim_id: ${p.evidence[0].claimId}
+metric: ${p.metric}
+period: ${opts?.wrongPeriod?"2026Q3":p.period}
+value: "${p.value}"
+unit: ${p.unit}
+original_source: ${p.originalSource}
+source_locator: Source income statement line
+source_excerpt: "${excerpt}"
+source_excerpt_sha256: ${opts?.badHash?"0000000000000000000000000000000000000000000000000000000000000000":h}
+verification_method: external_original_html_open_and_manual_field_comparison
+verification_status: selected_fields_checked_against_primary
+observed_at: 2026-10-17
+owner_approved: false
+thesis_change_approved: false
+---
+# Synthetic source observation
+`);
+}
 async function assess(p:object){
   const {assessThesisProposal}=await import("./thesis-proposal-gate");
   return assessThesisProposal(p as Parameters<typeof assessThesisProposal>[0]);
@@ -57,6 +84,7 @@ describe("universal Thesis Proposal QA gate",()=>{
   it("returns structurally reviewable candidate without verifying the source, approving Thesis or giving a trade",async()=>{
     await add(note,"# Historical draft thesis\nThis is only synthetic test history.");
     const file=path.join(root,"vault",note),before=fs.readFileSync(file,"utf8");
+    await addReceipt(proposal());
     const result=await assess(proposal());
     expect(result.readiness).toBe("ready_for_owner_review_not_approved");
     expect(result.sourceAttestation).toBe("analyst_assertion_not_independently_verified");
@@ -84,6 +112,7 @@ describe("universal Thesis Proposal QA gate",()=>{
       supportingClaimIds:["ACME-MISSING"]}]});
     expect(bad.readiness).toBe("blocked_missing_evidence");
     expect(bad.blockers.join(" ")).toContain("trace to supplied Claim IDs");
+    await addReceipt(p);
     const good=await assess(p);
     expect(good.readiness).toBe("ready_for_owner_review_not_approved");
   });
@@ -126,10 +155,35 @@ unit: USD millions
         sourceUrl:"https://www.nso.gov.vn/official-q3-2026",value:"9.95",unit:"percent"}],
       transmission:[{stage:"asset_classes",direction:"mixed",explanation:"Country demand can affect rates and equity risk premium, but transmission magnitude requires pricing evidence.",supportingClaimIds:["ACME-REV-2026Q2"]}]
     };
+    await addReceipt(macro as ReturnType<typeof proposal>);
     const result=await assess(macro);
     expect(result.readiness).toBe("ready_for_owner_review_not_approved");
     expect(result.domain).toBe("macro");
     expect(result.portfolioGate.canRecommendTrade).toBe(false);
     expect(result.thesisUpdateGate.canAutoUpdateThesis).toBe(false);
+  });
+  it("refuses an otherwise complete company proposal with no independently indexed source receipt",async()=>{
+    await add(note,"# Historical thesis");
+    const result=await assess(proposal());
+    expect(result.readiness).toBe("blocked_missing_evidence");
+    expect(result.blockers.join(" ")).toContain("No claim-scoped source observation receipt");
+    expect(result.sourceReceiptGate.validReceipts).toBe(0);
+    expect(result.thesisUpdateGate.canAutoUpdateThesis).toBe(false);
+  });
+  it("rejects tampered excerpt hash even if the analyst attests an original-source read",async()=>{
+    await add(note,"# Historical thesis");
+    await addReceipt(proposal(),{badHash:true});
+    const result=await assess(proposal());
+    expect(result.readiness).toBe("blocked_missing_evidence");
+    expect(result.sourceReceiptGate.validReceipts).toBe(0);
+    expect(result.sourceReceiptGate.rejectedReceipts).toBe(1);
+    expect(result.sourceReceiptGate.sourceDocumentBytesArchivedAndVerified).toBe(false);
+  });
+  it("rejects same Claim ID but different reporting period",async()=>{
+    await add(note,"# Historical thesis");
+    await addReceipt(proposal(),{wrongPeriod:true});
+    const result=await assess(proposal());
+    expect(result.readiness).toBe("blocked_missing_evidence");
+    expect(result.sourceReceiptGate.rejectedReceipts).toBe(1);
   });
 });
