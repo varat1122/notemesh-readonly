@@ -107,10 +107,17 @@ export function buildInvestmentContextPack(req: Input): Pack {
     return {path,role,score:base[role]+boost+companyBonus+focusBonus-(role==="archive"?45:0)};
   }).sort((a,b)=>b.score-a.score||a.path.localeCompare(b.path));
   const items: Item[] = [];
+  // Archived chat excerpts are a last resort and may repeat one issuer event.
+  // Prefer current Thesis, original-source review and company evolution unless
+  // the question explicitly asks to inspect archival history.
+  const archivalRequested=/archiv|chatgpt|historical|ประวัติแชต|ย้อนหลัง|แชตเก่า/i.test(question);
+  const substantialNonArchives=rank.filter(r=>!["archive","rules","timeline"].includes(r.role)).length;
+  const allowArchived=archivalRequested||substantialNonArchives<2;
   const roleCounts=new Map<Role,number>();
   let remaining=budget;
   const omitted: string[]=[];
   for (const row of rank) {
+    if (row.role==="archive" && !allowArchived) {omitted.push(row.path);continue;}
     if (items.length>=maxNotes||remaining<250) {omitted.push(row.path);continue;}
     const n=roleCounts.get(row.role)||0;
     if(n>=(quota[row.role]??4)){omitted.push(row.path);continue;}
