@@ -62,6 +62,40 @@ it("reads only the actor-scoped coordinated writeback journal; absence never mea
    expect(result.warnings.join(" ")).toContain("not remote/mobile Obsidian Sync");
  }finally{await c.close();}
 });
+it("reads actual coordinated raw Safe Edit preview/apply receipt and isolates a different OAuth actor",async()=>{
+ const planId="IN-0123456789ABCDEF";
+ const operationId="ios_in-0123456789abcdef_raw_v1";
+ const destination="00_Inbox/ChatGPT/Investment Intake - "+planId+".md";
+ fs.mkdirSync(path.join(root,"vault","00_Inbox","ChatGPT"),{recursive:true});
+ const c=await connected(access);
+ try {
+  const p=await c.client.callTool({name:"create_note",arguments:{
+    operationId,path:destination,reason:"Synthetic coordinate receipt test",
+    content:"# Synthetic source; no external fact verification\\n"
+  }});
+  expect(p.isError).not.toBe(true);
+  const preview=unpack(p);
+  const before=unpack(await c.client.callTool({name:"inspect_coordinated_writeback",arguments:{planId}}));
+  expect(before.stages[0].state).toBe("preview_pending");
+  expect(before.stages[1].state).toBe("not_found_or_not_owned");
+  const result=await c.client.callTool({name:"apply_edit",arguments:{
+    operationId,previewToken:preview.previewToken,expectedHash:preview.beforeHash
+  }});
+  expect(result.isError).not.toBe(true);
+  const after=unpack(await c.client.callTool({name:"inspect_coordinated_writeback",arguments:{planId}}));
+  expect(after.stages[0].state).toBe("locally_verified");
+  expect(after.stages[0].receipt.readback).toBe("verified");
+  expect(after.stages[0].receipt.reindex).toBe("verified");
+  expect(after.stages[0].receipt.mobileSync).toBe("unverified");
+  expect(after.stages[1].state).toBe("not_found_or_not_owned");
+  const different=await connected({...access,label:"oauth:other-client"});
+  try{
+   const other=unpack(await different.client.callTool({name:"inspect_coordinated_writeback",arguments:{planId}}));
+   expect(other.stages[0].state).toBe("not_found_or_not_owned");
+   expect(other.stages[0].path).toBeNull();
+  }finally{await different.close();}
+ }finally{await c.close();}
+});
 it("authorized Safe Edit MCP captures exact user PNG binary, inspects hash and cannot overwrite it",async()=>{
  const bytes=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from("user source screenshot exact bytes via authenticated MCP")]);
  const c=await connected(access);
