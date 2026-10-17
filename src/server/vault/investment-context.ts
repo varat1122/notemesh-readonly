@@ -39,7 +39,7 @@ const STOP_SCOPE = new Set(["AND","THE","WITH","FROM","FOR","MARKET","MARKETS","
 function topicTerms(s: string): string[] { return terms(s).filter(t=>!STOP_SCOPE.has(t)); }
 function issuerTokenInTitle(path: string, issuers: string[]) {
   const name=path.split("/").at(-1)?.toUpperCase()??"";
-  return issuers.some(t=>name.split(/[^A-Z0-9.-]+/).includes(t));
+  return issuers.some(t=>name.split(/[^A-Z0-9]+/).includes(t));
 }
 function exists(path: string): boolean {
   try { return fs.existsSync(resolveNotePath(path)); } catch { return false; }
@@ -151,7 +151,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
         const otherIssuer=namedIssuer(h.path);
         if(issuers.length && otherIssuer && !issuers.includes(otherIssuer))continue;
         if(issuers.length && role==="research" && !pool.has(h.path) &&
-          !h.path.startsWith("10_Knowledge/Company Research/"))continue;
+          (!h.path.startsWith("10_Knowledge/Company Research/") ||
+           (req.industry && !industryMatches.has(h.path))))continue;
         if(issuers.length && role==="industry" && req.industry &&
           !industryMatches.has(h.path))continue;
         if(issuers.length && !issuerPaths.has(h.path) &&
