@@ -54,8 +54,13 @@ function restore({vault,sourceFile,targetPath,expectedSha256=null,commit=false})
   if(f.bavail*f.bsize<50_000_000+bytes.length)fail("Insufficient vault disk space");
   safePath(vault,rel,true);
   if(!fs.existsSync(full)){
-    const fd=fs.openSync(full,fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_WRONLY|fs.constants.O_NOFOLLOW,0o600);
-    try{let n=0;while(n<bytes.length)n+=fs.writeSync(fd,bytes,n,bytes.length-n);fs.fsyncSync(fd)}finally{fs.closeSync(fd)}
+    // Atomically expose only complete files; preserve every original source.
+    const temp=full+"."+crypto.randomBytes(8).toString("hex")+".tmp";
+    try{
+      const fd=fs.openSync(temp,fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_WRONLY|fs.constants.O_NOFOLLOW,0o600);
+      try{let n=0;while(n<bytes.length)n+=fs.writeSync(fd,bytes,n,bytes.length-n);fs.fsyncSync(fd)}finally{fs.closeSync(fd)}
+      fs.linkSync(temp,full);
+    }finally{fs.rmSync(temp,{force:true})}
   }
   if(hash(fs.readFileSync(full))!==digest)fail("Restored archive failed byte-identical SHA-256 readback");
   return {...outcome,status:"written_or_identical_verified"};
