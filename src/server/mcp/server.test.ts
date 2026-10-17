@@ -61,6 +61,7 @@ const READ_TOOLS = [
   "read_attachment",
   "read_note",
   "read_properties",
+  "review_investment_claim",
   "search_vault",
   "word_count",
 ];
