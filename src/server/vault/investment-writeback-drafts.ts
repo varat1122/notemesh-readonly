@@ -78,7 +78,7 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
  const reviewStatus:Draft["status"]=reviewReasons.length?"hold":
   req.reviewRoute.action==="candidate_create"?"candidate_safe_edit_preview_not_written":"inspect_existing";
  const sourceLink=req.rawRoute.path?
-  "[[ "+req.rawRoute.path.replace(/\.md$/,"")+" ]]".replace("[[ ","[[").replace(" ]]"]]"," ]]"):"none";
+  "[["+req.rawRoute.path.replace(/\.md$/,"")+"]]":"none";
  const reviewContent=analysisText.trim()?fm("investment_review","archived_ai",[
    "topic: "+y(req.topic),"analysis_role: "+y("ai_interpretation_not_evidence"),
    "original_intake_path: "+y(req.rawRoute.path),
@@ -96,6 +96,6 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
  return {
   status:"read_only_separated_drafts_not_written",original,analysis,
   timeline:"not_prepared_requires_event_source_dedup_and_approval",
-  exactUserInputPreserved:true,aiAnalysisIndependentlyVerified:false,canAutoWrite:false,
+  exactUserInputPreserved:original.content!==null,aiAnalysisIndependentlyVerified:false,canAutoWrite:false,
  };
 }
