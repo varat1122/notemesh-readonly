@@ -1,5 +1,6 @@
 import { buildInvestmentContextPack, type Focus, type Role } from "./investment-context";
 import type { IncomingClaim, ClaimReview, Domain, ReviewClass } from "./investment-claim-review";
+import { buildEvidenceVerificationLedger, type EvidenceVerificationLedger } from "./evidence-verification-ledger";
 
 /**
  * Institutional investment decision PREPARATION, never a trusted conclusion.
@@ -23,6 +24,7 @@ type ContextRef = {
 export interface InvestmentDecisionPacket {
   status:"analyst_review_packet_not_verified";
   domain:Domain;entity:string;period:string;originalSource:string;
+  evidenceVerificationLedger:EvidenceVerificationLedger;
   claimGate:{
     classification:ReviewClass;
     exactMetricCandidates:number;
@@ -174,6 +176,7 @@ export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimRe
   return {
     status:"analyst_review_packet_not_verified",
     domain:input.domain,entity:input.entity,period:input.period,originalSource:input.originalSource,
+    evidenceVerificationLedger:buildEvidenceVerificationLedger(input,review),
     claimGate:{
       classification:review.classification,exactMetricCandidates:review.matchingClaims.length,
       otherSameEventMetricCandidates:review.relatedEventClaims.length,
