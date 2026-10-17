@@ -46,6 +46,25 @@ it("real HTTP MCP preview/apply/readback/status succeeds on a synthetic note",as
  const receipt=await call("tools/call",{name:"get_edit_status",arguments:{operationId:p.operationId}});expect(unpack(receipt).status).toBe("written");
 });
 
+it("authorized Safe Edit MCP captures exact user PNG binary, inspects hash and cannot overwrite it",async()=>{
+ const bytes=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from("user source screenshot exact bytes via authenticated MCP")]);
+ const c=await connected(access);
+ try{
+  const wrote=await c.client.callTool({name:"store_user_attachment",arguments:{base64:bytes.toString("base64"),contentType:"image/png"}});
+  expect(wrote.isError).not.toBe(true);
+  const asset=unpack(wrote);
+  expect(asset.path).toMatch(/^07_Sources\/ChatGPT\/Attachments\/[a-f0-9]{64}\.png$/);
+  expect(asset.byteReadbackVerified).toBe(true);
+  expect(asset.publisherVerified).toBe(false);
+  expect(asset.mobileSyncVerified).toBe(false);
+  expect(fs.readFileSync(path.join(root,"vault",asset.path)).equals(bytes)).toBe(true);
+  const check=await c.client.callTool({name:"inspect_user_attachment",arguments:{sha256:asset.sha256,contentType:"image/png"}});
+  expect(check.isError).not.toBe(true);
+  expect(unpack(check).status).toBe("stored_and_readback_verified");
+  const again=await c.client.callTool({name:"store_user_attachment",arguments:{base64:bytes.toString("base64"),contentType:"image/png"}});
+  expect(unpack(again).duplicate).toBe(true);
+ }finally{await c.close();}
+});
 it("authorized Safe Edit MCP raw archive fetch returns SHA and leaves Obsidian Vault unchanged",async()=>{
  const original=fs.readFileSync(path.join(root,"vault","Synthetic.md"),"utf8");
  const fetchOriginal=globalThis.fetch;
