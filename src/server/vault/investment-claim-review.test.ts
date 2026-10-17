@@ -126,6 +126,10 @@ claims:
     expect(missing.classification).toBe("unresolved");
     const same=reviewInvestmentClaim(claim);
     expect(same.classification).toBe("duplicate_candidate");
+    expect(same.matchingClaims).toHaveLength(1);
+    expect(same.matchingClaims[0].metric).toBe("operating_cash_flow");
+    expect(same.relatedEventClaims).toHaveLength(1);
+    expect(same.relatedEventClaims[0].metric).toBe("accounts_receivable_cash_flow_change");
     const added=reviewInvestmentClaim({...claim,metric:"capital_expenditures",value:"1000"});
     expect(added.classification).toBe("added_detail_candidate");
   });
