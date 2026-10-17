@@ -4,11 +4,12 @@ import { db } from "../db";
 import { readNote } from "./notes";
 import { resolveNotePath } from "./paths";
 import { splitFrontmatter } from "./markdown";
+import { inspectCanonicalKnowledgeMetadata, type SchemaInspection } from "./investment-knowledge-schema";
 
 export type Focus = "earnings" | "broker" | "tam" | "macro" | "thesis" | "general";
 export type Role = "rules" | "thesis" | "evidence_register" | "timeline" | "company" | "industry" | "source" | "research" | "archive";
 export interface Input { question: string; issuers?: string[]; industry?: string; focus?: Focus; maxNotes?: number; maxChars?: number }
-export interface Item { path: string; role: Role; declaredVerification: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean }
+export interface Item { path: string; role: Role; declaredVerification: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
 export interface Pack { status: "retrieval_only_not_verified"; question: string; issuers: string[]; focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
 export function roleOf(path: string): Role {
@@ -123,9 +124,9 @@ function selectedLines(raw: string, search: string[], max: number, role: Role) {
   };
 }
 function dateOf(v: unknown) { return typeof v==="string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v : null; }
-function declared(raw: string) {
+function declared(raw: string, notePath: string) {
   const f = splitFrontmatter(raw).data as Record<string,unknown>;
-  return { declaredVerification:typeof f.verification==="string"?f.verification:null, declaredEventDate:dateOf(f.event_date), declaredPublishedAt:dateOf(f.published_at) };
+  return { declaredVerification:typeof f.verification==="string"?f.verification:null, declaredEventDate:dateOf(f.event_date), declaredPublishedAt:dateOf(f.published_at), schemaCompatibility: inspectCanonicalKnowledgeMetadata(notePath,f) };
 }
 export function buildInvestmentContextPack(req: Input): Pack {
   const question = req.question.trim().slice(0,1200);
@@ -257,7 +258,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
       const raw=readNote(row.path).content;
       const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining),row.role);
       if(!excerpt.excerpt.trim())continue;
-      items.push({path:row.path,role:row.role,...declared(raw),score:row.score,...excerpt});
+      items.push({path:row.path,role:row.role,...declared(raw,row.path),score:row.score,...excerpt});
       roleCounts.set(row.role,n+1);remaining-=excerpt.excerpt.length;
     } catch {omitted.push(row.path);}
   }
