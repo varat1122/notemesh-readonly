@@ -59,6 +59,7 @@ const READ_TOOLS = [
   "preview_edit",
   "random_note",
   "read_attachment",
+  "review_investment_claim",
   "read_note",
   "read_properties",
   "search_vault",
