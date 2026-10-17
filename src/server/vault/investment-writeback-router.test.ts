@@ -32,6 +32,10 @@ describe("multilingual read-only writeback router",()=>{
   expect(p.warnings.some(x=>x.includes("'reiterates'"))).toBe(true);
   expect(p.gates.canAutoUpdateThesis).toBe(false);
   expect(p.gates.canAutoWrite).toBe(false);
+  expect(p.coordination.status).toBe("read_only_coordination_not_written");
+  expect(p.coordination.steps.map(x=>x.kind)).toEqual(["raw_input","research_review","company_timeline_candidate"]);
+  expect(p.coordination.steps[0].action).toBe("hold"); // screenshot binary not actually archived
+  expect(p.coordination.steps[1].dependsOn).toEqual([p.coordination.steps[0].operationId]);
   expect(fs.readdirSync(vault)).toHaveLength(0);
  });
  it("Citi AI connectivity/HDD/NAND multi-issuer preview goes to research without inferred company guidance",async()=>{
