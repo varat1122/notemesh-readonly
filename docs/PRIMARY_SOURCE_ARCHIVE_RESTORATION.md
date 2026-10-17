@@ -23,12 +23,11 @@ Prepare a separate UTF-8 JSON manifest **outside the Vault**, matching the actua
   "eventDate": "2026-08-26",
   "publishedAt": "2026-08-26",
   "retrievedAt": "2026-10-17T08:30:00+07:00",
-  "originalUrl": "https://investor.example.com/earnings/report.pdf",
-  "expectedSha256": null
+  "originalUrl": "https://investor.example.com/earnings/report.pdf"
 }
 ```
 
-**Note:** the URL above is a *placeholder*, never a verified source. Replace it with the exact publisher's original URL, and remove the `expectedSha256` property if you don't have an independent digest; `null` is not accepted as a claimed checksum.
+**Note:** the URL above is a *placeholder*, never a verified source. Replace it with the exact publisher's original URL. An optional `expectedSha256` must be a previously verified 64-character lowercase hex digest; do not set it to `null`.
 
 ```sh
 node scripts/primary-source-importer.cjs \
