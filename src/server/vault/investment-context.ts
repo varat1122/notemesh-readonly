@@ -33,7 +33,18 @@ function namedIssuer(path: string): string | null {
   const file=path.split("/").at(-1)??"";
   if(path.startsWith("01_Companies/"))return file.match(/^([A-Z][A-Z0-9.-]{0,11})\.md$/)?.[1]??null;
   if(path.startsWith("05_Thesis/"))return file.match(/^([A-Z][A-Z0-9.-]{0,11}) - (?:Current Thesis|Evidence Register)/)?.[1]??null;
-  return file.match(/^(?:Company Evolution - |Company - |Primary Evidence - )([A-Z][A-Z0-9.-]{0,11})(?:\s|\.md)/)?.[1]??null;
+  const structured=file.match(/^(?:Company Evolution - |Company - |Primary Evidence - )([A-Z][A-Z0-9.-]{0,11})(?:\s|\.md)/)?.[1];
+  if(structured)return structured;
+  // Many Company Research titles list the covered issuer before a broker.
+  // E.g. "ASML - JPM Q3 Preview" concerns ASML, not the bank JPM.
+  // Reject obvious generic metric acronyms and source/vintage IDs; this is a
+  // conservative title heuristic, not proof of an issuer's legal identity.
+  if(path.startsWith("10_Knowledge/Company Research/")){
+    const codes=[...file.matchAll(/(?:^|[^A-Za-z0-9])([A-Z][A-Z0-9]{1,7})(?=[^A-Za-z0-9]|$)/g)]
+      .map(x=>x[1]).filter(x=>!/^(?:P\d+|F\d+|Q\d+|FY\d+|USD|GDP|EPS|FCF|OCF|ROIC|BOM|TAM|GPU|CPU|CPO|NPO|ROI|CEO|CFO|IR|US|AI|DC)$/.test(x));
+    return codes[0]??null;
+  }
+  return null;
 }
 const STOP_SCOPE = new Set(["AND","THE","WITH","FROM","FOR","MARKET","MARKETS","MACRO","ECONOMY","ECONOMIC","INDUSTRY","GLOBAL","FINANCIAL","COMPANY","RESEARCH","STOCK","EQUITY","AND"]);
 function topicTerms(s: string): string[] { return terms(s).filter(t=>!STOP_SCOPE.has(t)); }
