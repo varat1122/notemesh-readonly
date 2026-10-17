@@ -92,7 +92,7 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   const excerptHash=hash(fm.source_excerpt_sha256);
   if(asText(fm.original_source_sha256)&&!fullHash)warnings.push("invalid_original_source_hash");
   if(asText(fm.source_excerpt_sha256)&&!excerptHash)warnings.push("invalid_source_excerpt_hash");
-  const sourceHashScope=fullHash?"unverified_full_document_hash_declared":
+  const sourceHashScope:SchemaInspection["sourceHashScope"]=fullHash?"unverified_full_document_hash_declared":
     excerptHash?"excerpt_only":"none";
   if(sourceHashScope==="excerpt_only")
     warnings.push("excerpt_hash_does_not_verify_original_bytes");
