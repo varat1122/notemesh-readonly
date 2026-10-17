@@ -4,7 +4,7 @@ import { db } from "../db";
 import { env } from "../env";
 import { readVaultFile } from "./paths";
 import { writeVaultFile } from "./disk";
-import { maskCodeSpans } from "./markdown";
+import { maskCodeSpans, maskEscapedAliasPipes } from "./markdown";
 
 /**
  * Keep links pointing where they pointed when a note moves.
@@ -86,7 +86,7 @@ export function rewriteText(
     }
     // Masking keeps the length, so an index on the masked copy is the same
     // index on the line; the replacement is spliced into the real line.
-    const masked = maskCodeSpans(line);
+    const masked = maskEscapedAliasPipes(maskCodeSpans(line));
     let out = "";
     let last = 0;
     re.lastIndex = 0;
