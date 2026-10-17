@@ -155,7 +155,13 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   else if(exact.some(v=>v===true))classification="duplicate_candidate";
   else if(otherSource.some(v=>comparable(v)&&amountEqual(v.value,input.value??null)===true))
     classification="confirmation_candidate_not_independent";
-  else if(matchedSourceSamePeriodOtherMetric.length)classification="added_detail_candidate";
+  // A new metric can only be an added detail when the *requested* metric is
+  // absent for this entity/event. If the metric already exists but is
+  // incomparable due to missing/mismatched units, remain unresolved. Without
+  // this guard, any nearby row (e.g. accounts_receivable in a 10-Q containing
+  // OCF) incorrectly turned a unit mismatch into an "added detail".
+  else if(!strict.length && matchedSourceSamePeriodOtherMetric.length)
+    classification="added_detail_candidate";
   const scoped=buildInvestmentContextPack({
     question:statement.slice(0,1100),
     issuers:input.domain==="company"?[entity]:[],
