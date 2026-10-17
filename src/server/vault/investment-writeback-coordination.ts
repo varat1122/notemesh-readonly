@@ -61,6 +61,12 @@ export interface StageObservation {
 const stageId=(batchId:string,kind:CoordinatedKind)=>
   "ios_"+batchId.toLowerCase().replace(/[^a-z0-9_-]/g,"")+"_"+(
     kind==="raw_input"?"raw":kind==="research_review"?"review":"timeline")+"_v1";
+/** Stable batch stage identifiers; read-only Safe Edit receipt inspector uses exactly these. */
+export function coordinatedStageIds(planId:string):Array<{kind:CoordinatedKind;operationId:string}> {
+  if(!/^IN-[A-F0-9]{16}$/.test(planId))throw Error("Invalid server-issued coordination plan ID");
+  return (["raw_input","research_review","company_timeline_candidate"] as const)
+    .map(kind=>({kind,operationId:stageId(planId,kind)}));
+}
 const route=(input:CoordinatorInput,kind:CoordinatedKind)=>
   input.routes.find(r=>r.kind===kind);
 
