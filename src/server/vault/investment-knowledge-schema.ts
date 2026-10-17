@@ -7,7 +7,7 @@
  */
 export interface SchemaInspection {
   status: "read_time_adapter_only";
-  role: "structured_claim" | "source_receipt" | "company" | "timeline" |
+  role: "structured_claim" | "source_receipt" | "source" | "industry" | "company" | "timeline" |
     "thesis" | "evidence_register" | "review" | "archive" | "method" | "other";
   declaredSourceType: string | null;
   declaredVerification: string | null;
@@ -38,9 +38,12 @@ function roleOfNote(path:string, fm:Data):SchemaInspection["role"] {
   if(t==="investment_structured_claim_register")return "structured_claim";
   if(t==="current_thesis"||/^05_Thesis\/.*Current Thesis/i.test(path))return "thesis";
   if(/Evidence Register/i.test(path))return "evidence_register";
-  if(t==="company_evolution_timeline"||/Company Evolution - /.test(path))return "timeline";
+  if(t==="company_evolution_timeline"||t==="investment_evolution_master"||/Company Evolution - |00_Investment_Evolution_Master/.test(path))return "timeline";
+  if(t==="primary_ir_evidence_review"||/^08_Daily_Weekly\/Research Indexes\/Primary Evidence - /.test(path))return "source";
+  if(t==="industry_tam_version_register"||t==="concept_hub"||t==="investment_economic_transmission_graph"||
+    /^02_Industries_Themes\/|^03_Concepts\/|00_Industry_TAM_|00_AI_Infrastructure_Economic_Transmission/.test(path))return "industry";
   if(t==="company"||path.startsWith("01_Companies/"))return "company";
-  if(t==="news_thesis_review"||t==="investment_review")return "review";
+  if(t==="news_thesis_review"||t==="investment_review"||t==="research_note")return "review";
   if(t==="research_workflow"||path.startsWith("09_Templates/"))return "method";
   if(path.startsWith("07_Sources/ChatGPT/")||t==="chatgpt_archive")return "archive";
   return "other";
