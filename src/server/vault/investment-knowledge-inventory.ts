@@ -44,6 +44,8 @@ export function auditVaultKnowledgeIndex() {
   const fieldPresence:Record<string,number>={};
   const verificationCounts:Record<string,number>={};
   const sourceTypes:Record<string,number>={};
+  const rawSourceTypes:Record<string,number>={};
+  const unmappedRoleTypes:Record<string,number>={};
   const warningCounts:Record<string,number>={};
   const claimIssueCounts:Record<string,number>={};
   const warningSamples:Record<string,string[]>={};
@@ -61,10 +63,12 @@ export function auditVaultKnowledgeIndex() {
     }catch{invalidIndexedFrontmatter++;}
     const inspect=inspectCanonicalKnowledgeMetadata(row.path,fm);
     bump(roleCounts,inspect.role);
+    if(inspect.role==="other")bump(unmappedRoleTypes,s(fm.type)??"(not_declared)");
     bump(folderCounts,row.path.split("/")[0]||"(root)");
     for(const f of fieldNames)if(fm[f]!==undefined&&fm[f]!==null)bump(fieldPresence,f);
     bump(verificationCounts,inspect.declaredVerification??"(not_declared)");
     bump(sourceTypes,inspect.declaredSourceType??(s(fm.source_type)?"(unmapped_legacy_type)":"(not_declared)"));
+    bump(rawSourceTypes,s(fm.source_type)??"(not_declared)");
     for(const warning of inspect.warnings){
       // Strip claim indices so counts are stable across a register.
       const key=warning.replace(/^claim_\d+_/,"claim_");
@@ -125,6 +129,7 @@ export function auditVaultKnowledgeIndex() {
     scope:"indexed_markdown_frontmatter_and_indexed_wikilinks_only",
     roleCounts,folderCounts:toTop(folderCounts,20),fieldPresence,
     verificationCounts:toTop(verificationCounts,16),sourceTypeCounts:toTop(sourceTypes,16),
+    rawSourceTypeCounts:toTop(rawSourceTypes,20),unknownRoleTypeCounts:toTop(unmappedRoleTypes,20),
     claimRegisters:{notes:structuredClaimNotes,declaredClaimRows:declaredClaims,
       noSourceLocator:possibleMissingSource,noOriginalBytesHashDeclared:noKnownPrimaryHash,
       issueCounts:toTop(claimIssueCounts,18),
