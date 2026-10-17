@@ -75,6 +75,12 @@ read below, plus `preview_edit`, which writes nothing.
 
 ## Files
 
+### assess_thesis_change_proposal — read
+
+Validate a separately **analyst-authored** proposed Maintain / Strengthen / Weaken / Revise decision for Company, Macro, Industry, or Asset without changing anything in the Vault. The tool checks real-path historical context existence, claim IDs, matching entity/metric/fiscal period, analyst-attested original-source and date/section, counter-evidence, causal transmission claim linkage, alternative explanations, invalidation, confidence reasoning, and optionally dated market expectations/authorized portfolio references.
+
+The result is **blocked_missing_evidence** or **ready_for_owner_review_not_approved**. Ready means only that the payload has been structured for review, **not** that claims are correct or independently verified, that the owner approved the Thesis change, or that a portfolio trade is authorized. The tool DOES NOT fetch the external URLs; analyst attestations are **not certified**. A separate source-verification process and owner-approved Safe Edit preview and readback are required before changes. `canAutoUpdateThesis=false`, `canRecommendTrade=false`, `canClaimPricedIn=false` always. Read-only MCP scope.
+
 ### review_investment_claim — read
 
 **Evidence Verification Ledger (read-only, same Tool):** The `decisionPacket.evidenceVerificationLedger` field preserves original-source links, fiscal periods, Claim IDs, historical Note status, dates, source-hash metadata, matched/related claim boundaries and unstructured same-source leads. Historical note-declared `verified_against_primary` is not a new verification; `originalVerifiedThisRun=false` for every entry. Multiple URLs are never automatically independent evidence. Numeric differences within the same source/metric/unit are note-index discrepancy candidates, not certified issuer corrections. External source checks, revisions, complete dedup, current pricing and owner approval remain separate gates. This output does not change Vault or Thesis.
