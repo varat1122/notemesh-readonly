@@ -28,7 +28,9 @@ async function fixture(){
   add("05_Thesis/NVDA - Current Thesis.md",
     "---\nverification: not_reverified\nstatus: draft_from_archived_evidence\n---\n# NVDA Thesis\n\nNVDA draft risks and catalysts, not owner endorsed.");
   add("05_Thesis/NVDA - Evidence Register.md",
-    "---\nverification: not_reverified\n---\n# Evidence Register\n\nNVDA prior claims counter-evidence.");
+    "---\nverification: not_reverified\n---\n# Evidence Register\n\nNVDA prior claims; " +
+    Array.from({length:24},(_,i)=>"Source claim chronology "+i+".").join("\n") +
+    "\n## ข้อขัดแย้งที่ต้องอ่านร่วมกัน\nCustomer monetization not independently verified; GPU competitors and margin pressure.");
   add("08_Daily_Weekly/Research Indexes/Company Evolution - NVDA.md",
     "# NVDA Evolution\n\nNVDA earnings event and margin progression.");
   add("08_Daily_Weekly/Research Indexes/Primary Evidence - NVDA FY27Q2.md",
@@ -52,6 +54,15 @@ describe("investment context retrieval",()=>{
     expect(paths).toContain("08_Daily_Weekly/Research Indexes/Company Evolution - NVDA.md");
     expect(paths.filter(x=>x.startsWith("07_Sources/ChatGPT/"))).toHaveLength(0);
     expect(p.items.find(x=>x.role==="thesis")?.declaredVerification).toBe("not_reverified");
+  });
+  it("returns counter-evidence passage with its own source line pointer, not just a flattering lead excerpt",async()=>{
+    const build=await fixture();
+    const p=build({question:"NVDA earnings",issuers:["NVDA"],maxNotes:11,maxChars:12000});
+    const evidence=p.items.find(x=>x.role==="evidence_register");
+    expect(evidence).toBeDefined();
+    expect(evidence?.counterEvidenceExcerptIncluded).toBe(true);
+    expect(evidence?.excerpt).toContain("Counter-evidence / risk section: source lines");
+    expect(evidence?.excerpt).toContain("Customer monetization not independently verified");
   });
   it("stays within requested excerpt and note caps even when many archives match",async()=>{
     const build=await fixture();
