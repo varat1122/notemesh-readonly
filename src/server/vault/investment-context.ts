@@ -8,7 +8,7 @@ import { splitFrontmatter } from "./markdown";
 export type Focus = "earnings" | "broker" | "tam" | "macro" | "thesis" | "general";
 export type Role = "rules" | "thesis" | "evidence_register" | "timeline" | "company" | "industry" | "source" | "research" | "archive";
 export interface Input { question: string; issuers?: string[]; industry?: string; focus?: Focus; maxNotes?: number; maxChars?: number }
-export interface Item { path: string; role: Role; declaredVerification: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; score: number; excerpt: string; line: number; truncated: boolean }
+export interface Item { path: string; role: Role; declaredVerification: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean }
 export interface Pack { status: "retrieval_only_not_verified"; question: string; issuers: string[]; focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
 export function roleOf(path: string): Role {
@@ -30,7 +30,7 @@ function terms(s: string): string[] {
 function exists(path: string): boolean {
   try { return fs.existsSync(resolveNotePath(path)); } catch { return false; }
 }
-function selectedLines(raw: string, search: string[], max: number) {
+function selectedLines(raw: string, search: string[], max: number, role: Role) {
   const lines = raw.split(/\r?\n/);
   let index = 0, maxHits = 0;
   for (let i = 0; i < Math.min(lines.length, 1200); i++) {
@@ -38,9 +38,35 @@ function selectedLines(raw: string, search: string[], max: number) {
     const hits = search.filter(t => t.length > 1 && lower.includes(t.toLowerCase())).length;
     if (hits > maxHits) { index = i; maxHits = hits; }
   }
-  const start = index > 15 ? Math.max(0, index-2) : 0;
-  const full = lines.slice(start,start+22).join("\n");
-  return { excerpt: full.slice(0,max), line: start+1, truncated: start>0 || start+22<lines.length || full.length>max };
+  const start = index > 15 ? Math.max(0,index-2) : 0;
+  const firstEnd = Math.min(lines.length,start+12);
+  let excerpt = `[Source lines ${start+1}-${firstEnd}]\n` + lines.slice(start,firstEnd).join("\n");
+  let counterEvidenceExcerptIncluded = false;
+  // Anchor contradictory evidence even when the highest lexical match is in
+  // a note's introduction. Source line labels prevent disjoint snippets from
+  // appearing to be one continuous quotation.
+  if ((role==="thesis" || role==="evidence_register" || role==="source" || role==="research") && max>=700) {
+    const counter = lines.findIndex((s,i) => i < 1200 &&
+      /^\s*#{1,6}\s+.*(counter[- ]?evidence|contradict|invalidation|ข้อขัดแย้ง|ข้อโต้แย้ง|ความเสี่ยง)/i.test(s));
+    if (counter>=0 && (counter<start || counter>=firstEnd)) {
+      const secondEnd = Math.min(lines.length,counter+8);
+      const addition = `\n\n[Counter-evidence / risk section: source lines ${counter+1}-${secondEnd}]\n` +
+        lines.slice(counter,secondEnd).join("\n");
+      const space = max-excerpt.length;
+      if (space>100) {
+        excerpt += addition.slice(0,space);
+        counterEvidenceExcerptIncluded = true;
+      }
+    } else if(counter>=start && counter<firstEnd) {
+      counterEvidenceExcerptIncluded = true;
+    }
+  }
+  const clipped=excerpt.slice(0,max);
+  return {
+    excerpt:clipped,line:start+1,
+    truncated:start>0 || firstEnd<lines.length || clipped.length<excerpt.length,
+    counterEvidenceExcerptIncluded,
+  };
 }
 function dateOf(v: unknown) { return typeof v==="string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v : null; }
 function declared(raw: string) {
@@ -123,7 +149,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
     if(n>=(quota[row.role]??4)){omitted.push(row.path);continue;}
     try {
       const raw=readNote(row.path).content;
-      const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining));
+      const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining),row.role);
       if(!excerpt.excerpt.trim())continue;
       items.push({path:row.path,role:row.role,...declared(raw),score:row.score,...excerpt});
       roleCounts.set(row.role,n+1);remaining-=excerpt.excerpt.length;
@@ -145,6 +171,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
       "Verification fields are note-declared metadata, NOT freshly reverified primary facts. File modified time is NOT event date.",
       "An archived AI repost is not independent corroboration; deduplicate issuer+source+metric+fiscal period.",
       "Use full original notes and current external filings/consensus for investment decisions. This tool is read-only.",
+      "Contradiction/risk sections are discoverability hints, not exhaustive counter-evidence verification. Original context must be read in full where material.",
     ]
   };
 }
