@@ -5,6 +5,7 @@ import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
+import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import { buildInvestmentDecisionPacket } from "../vault/investment-decision-packet";
 import { assessThesisProposal } from "../vault/thesis-proposal-gate";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
@@ -373,6 +374,38 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       return json(withBoundary({...pack,items:fenceEach(pack.items,"excerpt")}));
     }),
   );
+  server.registerTool(
+    "plan_investment_writeback",
+    {
+      title: "Plan multilingual investment intake and evidence-safe Vault writeback",
+      annotations: READ,
+      description: "Read-only plan for Thai/English/other-language user-provided text or ChatGPT-extracted screenshot/PDF material. Routes raw input, source-attributed research review, exact-claim dedup and canonical timelines with stable retry IDs. No binary is archived or note written by this tool; verify originals, read related notes fully, and use separate Safe Edit permission for any write. Never auto changes protected Thesis/Evidence Register or Portfolio.",
+      inputSchema: {
+        domain:z.enum(["company","industry","macro","asset"]).describe("Claim/knowledge domain; not an inferred company ticker"),
+        entities:z.array(z.string().min(1).max(120)).min(1).max(6).describe("Explicit issuer ticker(s), macro geography, or industry topics. Do not include inferred suppliers as confirmed issuers."),
+        topic:z.string().min(1).max(250).describe("Short source topic; may be in Thai, English, or any language"),
+        inputFormat:z.enum(["text","screenshot","pdf","mixed"]).describe("User material actually received; screenshot/PDF binary is NOT automatically preserved"),
+        sourceKind:z.enum(["broker_research","issuer_release","regulatory_filing","news_media","user_commentary","archived_chat","unknown"]).describe("Attributed genre, not independent primary verification"),
+        extractedText:z.string().min(1).max(12000).describe("Faithful model-extracted/user-supplied text; preserve original language, mark illegible or omitted parts rather than invent"),
+        sourceLanguage:z.string().max(35).nullable().optional().describe("Language declared by the caller, not automatically detected or translated"),
+        sourceUrl:z.string().max(1000).nullable().optional().describe("Actual cited source page URL if supplied; never fabricate an original broker PDF"),
+        publisher:z.string().max(160).nullable().optional().describe("Attributed source/publisher as reported, not proven"),
+        eventDate:z.string().nullable().optional().describe("Explicit event date YYYY-MM-DD or null; not chat import date"),
+        publicationDate:z.string().nullable().optional().describe("Original source publication date YYYY-MM-DD or null"),
+        rawAttachmentPath:z.string().max(600).nullable().optional().describe("Existing Vault file path if known; unverified until attachment read/archive receipt"),
+        claim:z.object({
+          metric:z.string().min(1).max(140),
+          period:z.string().min(1).max(120),
+          statement:z.string().min(8).max(2500),
+          value:z.string().max(150).optional(),
+          unit:z.string().max(80).optional(),
+        }).optional().describe("OPTIONAL exact dated metric; incomplete or absent values never establish a numeric duplicate"),
+        focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional()
+      }
+    },
+    safe((args:WritebackInput)=>json(withBoundary(planInvestmentWriteback(args)))),
+  );
+
   server.registerTool(
     "review_investment_claim",
     {
