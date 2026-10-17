@@ -59,7 +59,7 @@ function issuerTokenInTitle(path: string, issuers: string[]) {
 function explicitMacroScope(path: string, topic: string): boolean {
   const title=(path.split("/").at(-1)||"").normalize("NFC").toUpperCase();
   const t=topic.normalize("NFC").toUpperCase();
-  const isBoundary=(c:string|undefined)=>!c||!/[\\p{L}\\p{N}]/u.test(c);
+  const isBoundary=(c:string|undefined)=>!c||!/[\p{L}\p{N}]/u.test(c);
   for(let at=title.indexOf(t);at>=0;at=title.indexOf(t,at+1)){
     if(isBoundary(title[at-1])&&isBoundary(title[at+t.length]))return true;
   }
