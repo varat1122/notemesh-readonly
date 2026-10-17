@@ -1,6 +1,6 @@
 # Changelog
 
-Deployment surface: 23 tools covering research reads, bounded investment context retrieval and scoped add-only intake.
+Deployment surface: 24 tools covering research reads, bounded investment context retrieval, read-only structured claim review and scoped add-only intake.
 Safe Edit adds seven tools on a separate resource; see docs/SAFE_EDIT.md.
 Historical upstream release descriptions below are preserved.
 
