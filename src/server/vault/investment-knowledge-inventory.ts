@@ -12,7 +12,6 @@ import { inspectCanonicalKnowledgeMetadata } from "./investment-knowledge-schema
 
 type FM = Record<string,unknown>;
 type Row = {path:string;frontmatter:string|null};
-type Role = ReturnType<typeof inspectCanonicalKnowledgeMetadata>["role"];
 const MAX_ROWS=10_000, MAX_SAMPLES=6, MAX_GROUPS=8;
 const fieldNames=["type","source_type","verification","event_date","published_at",
   "received_at","imported_at","imported_on","date","entity","original_source",
