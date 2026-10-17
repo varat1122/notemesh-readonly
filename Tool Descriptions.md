@@ -77,6 +77,10 @@ read below, plus `preview_edit`, which writes nothing.
 
 ### review_investment_claim — read
 
+**Investment Decision Packet (same action; no plugin rescan for a new tool):** After structured claim matching, `review_investment_claim` also returns a `decisionPacket` containing bounded historical source pointers, Owner Thesis availability, primary/counter-evidence gaps, a domain-specific *not-yet-assessed* causal research chain, unassessed consensus/market pricing/portfolio exposure, and a dated unapproved Change Log draft. For a company it follows Demand → Revenue Conversion → Gross Profit → Operating Profit → Earnings → Cash Flow → Return on Capital → Valuation → Portfolio. For Macro, Industry and Asset it uses appropriate transmission checkpoints and makes no issuer-specific assumptions. The output is an **analyst evidence checklist, not an AI-determined Strengthen/Weaken/Revise judgment**: `thesisDecision.selected=null`, `canAutoUpdateThesis=false`, and primary source and owner approval remain separate requirements. The packet never writes or upgrades Vault metadata. Read cited originals and seek counter-evidence, then make a separate human-reviewable proposed decision.
+
+
+
 Review one incoming company, industry, macro, or asset claim against **explicit, structured** historical claim metadata (entity, metric, reporting period, original source, value and unit). The tool is read-only and conservative: it outputs `duplicate_candidate`, `possible_correction_or_contradiction`, `confirmation_candidate_not_independent`, `added_detail_candidate`, or `unresolved`. These are **candidates for human/source review**, not verified investment conclusions.
 
 Required fields: `domain`, `entity`, `metric`, `period`, `originalSource`, and `statement`; optional `value`, `unit`, `eventDate`, `publishedAt`, `focus` and `maxCandidates`. Missing dates must stay null; a different source URL never counts as independent confirmation without actual provenance checks. Exact numerical comparisons require compatible units and periods.

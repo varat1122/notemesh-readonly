@@ -436,6 +436,16 @@ verification: not_reverified
       expect(out.status).toBe("review_only_not_verified");
       expect(out.classification).toBe("duplicate_candidate");
       expect(out.canAutoUpdateThesis).toBe(false);
+      const packet=(out as unknown as {decisionPacket:{
+        status:string;thesisDecision:{selected:null;canAutoUpdateThesis:false};
+        businessTransmission:{stages:Array<{status:string}>};
+        changeLogDraft:{status:string};
+      }}).decisionPacket;
+      expect(packet.status).toBe("analyst_review_packet_not_verified");
+      expect(packet.thesisDecision.selected).toBeNull();
+      expect(packet.thesisDecision.canAutoUpdateThesis).toBe(false);
+      expect(packet.businessTransmission.stages.every(x=>x.status==="not_assessed")).toBe(true);
+      expect(packet.changeLogDraft.status).toBe("draft_not_approved_or_written");
       expect(out.matchingClaims.map(x=>x.path)).toContain(rel);
     } finally {
       await client.close().catch(()=>{});
