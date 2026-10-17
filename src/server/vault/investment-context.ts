@@ -229,7 +229,10 @@ export function buildInvestmentContextPack(req: Input): Pack {
     const macroBonus=macroScope && primaryTopic ?
       (explicitMacroScope(path,primaryTopic)?25:0) +
       (path.startsWith("10_Knowledge/Macro and Markets/")?25:0) +
-      (macroSubjectPaths.has(path)?32:0):0;
+      (macroSubjectPaths.has(path)?32:0) +
+      // Ranking priority only: this note DECLARES a primary original URL.
+      // It is not an independent or fresh verification of the claim.
+      (hasDeclaredMacroPrimary(path)?65:0):0;
     const focusBonus=focus==="tam"&&/TAM|Industries|Concepts/.test(path)?20:
       focus==="broker"&&/Broker|Evolution|Research/.test(path)?17:
       focus==="earnings"&&/Primary Evidence|Event_Lineage/.test(path)?20:0;
