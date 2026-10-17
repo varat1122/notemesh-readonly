@@ -3,6 +3,7 @@ import { z } from "zod";
 import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
+import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { buildInvestmentDecisionPacket } from "../vault/investment-decision-packet";
 import { assessThesisProposal } from "../vault/thesis-proposal-gate";
@@ -1098,10 +1099,11 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       description:
         "Vault name, note count, word totals, how many notes are too large to be searchable " +
         "(unindexedNotes), sync daemon status, and disk headroom: disk.availableBytes with disk.level ok, " +
-        "warn (under 100 MB free) or critical (under 50 MB; writes that would not leave the reserve are refused).",
+        "warn (under 100 MB free) or critical (under 50 MB; writes that would not leave the reserve are refused). " +
+        "Also includes a bounded, read-only whole-index knowledgeAudit of metadata, claim identity candidates and link health, not source verification.",
       inputSchema: {},
     },
-    safe(() => json({ ...vaultInfo(), sync: syncBackend().status(), connection: {
+    safe(() => json({ ...vaultInfo(), knowledgeAudit: withBoundary(auditVaultKnowledgeIndex()), sync: syncBackend().status(), connection: {
       build: "intake-cloud-receiver-20261015",
       saving: cloudIntakeStatus(),
       credentialType: access.label.startsWith("oauth:") ? "oauth" : access.label.startsWith("api-key:") ? "api-key" : "other",
