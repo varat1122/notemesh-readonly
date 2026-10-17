@@ -7,6 +7,7 @@ import { previewSchema, applySchema, operationId, properties } from "../safe-edi
 import { withPausedSync } from "../safe-edit/sync";
 import { withBoundary, fence } from "./boundary";
 import { fetchAndArchiveOfficialSource } from "../research-source-fetch";
+import { storeUserAttachment, inspectUserAttachment, MAX_USER_ATTACHMENT_BYTES } from "../user-attachment-vault";
 const securitySchemes=[{type:"oauth2",scopes:["vault:read","vault:edit"]}];
 const base=previewSchema.omit({change:true}).shape;
 export function createSafeEditMcpServer(access:McpAccess) {
@@ -32,6 +33,21 @@ export function createSafeEditMcpServer(access:McpAccess) {
     annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     ...meta
   },async ({url})=>invoke(()=>fetchAndArchiveOfficialSource({url,operator:access.label})));
+  server.registerTool("store_user_attachment",{
+    description:"Authenticated add-only user-supplied JPG/PNG/WebP/PDF original binary capture into Vault 07_Sources/ChatGPT/Attachments. Supply ACTUAL base64 file bytes, not extracted text, URL, image ID or invented data. Computes SHA-256, reopens bytes, indexes attachment and returns receipt; repeat bytes are idempotent and existing files cannot be overwritten. The bytes remain untrusted user-provided material, NOT independently verified issuer or broker originals; no OCR, claim verification or mobile Sync is asserted. Requires vault:read + vault:edit and verified idle Obsidian Sync; max 4 MiB. Tool output never includes attachment bytes.",
+    inputSchema:{
+      base64:z.string().min(24).max(Math.ceil(MAX_USER_ATTACHMENT_BYTES/3)*4+4).describe("Base64 encoding of exact, accessible user-uploaded image/PDF bytes; DO NOT substitute screenshot transcription or fabricate"),
+      contentType:z.enum(["image/jpeg","image/png","image/webp","application/pdf"]).describe("Detected original format; server checks magic bytes")
+    },
+    annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},...meta
+  },async input=>invoke(()=>withPausedSync(()=>storeUserAttachment(input))));
+  server.registerTool("inspect_user_attachment",{
+    description:"Re-open a content-addressed user-uploaded Vault attachment without returning file contents, recompute SHA-256 and report whether stored bytes match. Does not verify publisher authenticity, OCR, sourced claims, or Obsidian device Sync.",
+    inputSchema:{
+      sha256:z.string().regex(/^[a-f0-9]{64}$/).describe("Digest from store_user_attachment receipt"),
+      contentType:z.enum(["image/jpeg","image/png","image/webp","application/pdf"]).describe("Exact recorded format")
+    },annotations:{readOnlyHint:true,openWorldHint:false},...meta
+  },async input=>invoke(()=>inspectUserAttachment(input)));
   server.registerTool("get_edit_status",{description:"Read durable operation receipt: before/after hashes and independent write/readback/reindex/Sync stages. Does not prove remote or mobile arrival.",inputSchema:{operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({operationId})=>invoke(()=>status(operationId,access.label)));
   server.registerTool("rollback_edit",{description:"PREVIEW ONLY: restore checksum-verified backup only if target still equals previous afterHash. Never deletes a created note. Requires fresh review and apply_edit; protected thesis also requires human approval.",inputSchema:{...base,rollbackOperationId:operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({rollbackOperationId,...input})=>invoke(()=>preview({...input,change:{kind:"rollback",operationId:rollbackOperationId}},access.label)));
   return server;

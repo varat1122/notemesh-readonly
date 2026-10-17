@@ -1,7 +1,7 @@
 # Changelog
 
 Deployment surface: 26 tools covering read-only investment retrieval, claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
-Safe Edit adds seven tools on a separate resource; see docs/SAFE_EDIT.md.
+Safe Edit offers ten tools on a separate resource (including original-source archive and two user attachment byte-store/inspect actions); see docs/SAFE_EDIT.md.
 Historical upstream release descriptions below are preserved.
 
 ## How updates reach you

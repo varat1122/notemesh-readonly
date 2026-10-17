@@ -98,6 +98,33 @@ describe("multilingual read-only writeback router",()=>{
   expect(p.routes.find(x=>x.kind==="claim_registry_candidate")).toBeUndefined();
   expect(p.gates.duplicateAdjudicated).toBe(false);
  });
+ it("links an actually stored screenshot only with a live matching SHA receipt",async()=>{
+  process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
+  try{
+   const {storeUserAttachment}=await import("../user-attachment-vault");
+   const bytes=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from("synthetic Citi Research screenshot exact bytes")]);
+   const receipt=storeUserAttachment({base64:bytes.toString("base64"),contentType:"image/png"});
+   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+   const p=route({...base,rawAttachmentSha256:receipt.sha256,
+     rawAttachmentContentType:"image/png",rawAttachmentPath:receipt.path});
+   expect(p.sourceCapture.attachmentVerified).toBe(true);
+   expect(p.sourceCapture.preservation).toBe("stored_original_user_bytes");
+   expect(p.sourceCapture.rawAttachmentPath).toBe(receipt.path);
+   expect(p.sourceCapture.originalSourceVerified).toBe(false);
+   expect(p.gates.attachmentArchived).toBe(true);
+   expect(p.gates.canAutoWrite).toBe(false);
+   expect(p.gates.canAutoUpdateThesis).toBe(false);
+   expect(()=>route({...base,rawAttachmentSha256:receipt.sha256,
+      rawAttachmentContentType:"image/png",rawAttachmentPath:"07_Sources/ChatGPT/Attachments/other.png"}))
+     .toThrow(/digest_mismatch/);
+   fs.writeFileSync(path.join(vault,receipt.path),Buffer.alloc(bytes.length,0x44));
+   const later=route({...base,rawAttachmentSha256:receipt.sha256,rawAttachmentContentType:"image/png"});
+   expect(later.sourceCapture.attachmentVerified).toBe(false);
+   expect(later.gates.attachmentArchived).toBe(false);
+  }finally{
+   delete process.env.SAFE_EDIT_ENABLED;delete process.env.SAFE_EDIT_SINGLE_WRITER;
+  }
+ });
  it("date validation rejects invented impossible source dates; invalid ticker does not route to invented issuer timeline",async()=>{
   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
   expect(()=>route({...base,eventDate:"2026-02-30"})).toThrow(/invalid calendar/);

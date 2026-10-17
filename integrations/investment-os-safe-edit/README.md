@@ -24,3 +24,6 @@ Obtain explicit approval for the runbook's named synthetic production canary,
 then verify preview/apply/readback/audit/index, idempotency, stale-version refusal
 and guarded rollback. Verify ordinary Chat independently of Work/API tests.
 Remote and mobile Sync require separate observed device arrival.
+
+ 
+User screenshot/PDF raw attachment capture: after refreshing Safe Edit tools, `store_user_attachment` preserves actual file bytes (up to 4 MiB JPEG/PNG/WebP/PDF) in the content-addressed Vault attachments area and `inspect_user_attachment` verifies stored bytes. Neither tool proves issuer/broker facts or mobile device arrival, and neither automatically retrieves files from earlier ChatGPT conversations.
