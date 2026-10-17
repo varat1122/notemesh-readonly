@@ -78,6 +78,9 @@ describe("full indexed vault metadata audit",()=>{
   expect(a.legacyWarnings.counts.legacy_imported_on_not_inferred).toBe(1);
   expect(a.legacyWarnings.counts.source_type_misused_for_verification).toBe(1);
   expect(a.sourceTypeCounts["(unmapped_legacy_type)"]).toBe(2);
+  expect(a.rawSourceTypeCounts.user_supplied_chatgpt_summary).toBe(1);
+  expect(a.rawSourceTypeCounts.unverified).toBe(1);
+  expect(a.unknownRoleTypeCounts).toBeDefined();
   expect(a.claimRegisters.notes).toBe(0);
   expect(a.claimRegisters.issueCounts).toEqual({});
  });
