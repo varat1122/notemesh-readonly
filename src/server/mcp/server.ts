@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
+import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
 import { getSetting } from "../db";
 import { cloudIntakeStatus } from "../cloud-intake";
@@ -287,6 +288,28 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
   // read tool below registered for any credential at all.
   if (!access.read) return server;
   registerPriceTools(server);
+  server.registerTool(
+    "investment_context_pack",
+    {
+      title: "Build investment research context pack",
+      annotations: READ,
+      description: "Read-only bounded investment retrieval across Obsidian. Prioritizes Current Thesis, Evidence Register, Company Evolution, issuer evidence, industry TAM and counter-evidence over repeated ChatGPT archives. Returns short path/line excerpts, missing evidence and honest coverage limits. Lexical only, not a semantic/full-vault guarantee. Never edits the Vault.",
+      inputSchema: {
+        question: z.string().min(3).max(1200),
+        issuers: z.array(z.string().min(1).max(12)).max(6).optional(),
+        industry: z.string().max(140).optional(),
+        focus: z.enum(["earnings","broker","tam","macro","thesis","general"]).optional(),
+        maxNotes: z.number().int().min(5).max(16).optional(),
+        maxChars: z.number().int().min(4500).max(18000).optional(),
+      },
+    },
+    safe(({question,issuers,industry,focus,maxNotes,maxChars}: {
+      question:string;issuers?:string[];industry?:string;focus?:Focus;maxNotes?:number;maxChars?:number
+    }) => {
+      const pack = buildInvestmentContextPack({question,issuers,industry,focus,maxNotes,maxChars});
+      return json(withBoundary({...pack,items:fenceEach(pack.items,"excerpt")}));
+    }),
+  );
   // OAuth clients must be able to discover the scoped tool before approving
   // its scope. The handlers enforce the grant on every invocation.
   if (access.intake === true || access.label.startsWith("oauth:")) {
