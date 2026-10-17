@@ -112,6 +112,9 @@ export function storeUserAttachment({base64,contentType}:{
       const already=readAndVerify(abs,digest);
       if(!already.verified)throw Error("attachment_existing_path_hash_conflict");
     }
+    // A temporary hardlink gives the target inode nlink=2 until unlinked.
+    // Release the temporary name before enforcing the final nlink=1 invariant.
+    fs.unlinkSync(tmp);created=false;
     // Immutable add-only blob is in the Vault; recompute from stored bytes.
     const verified=readAndVerify(abs,digest);
     if(!verified.verified||verified.byteLength!==bytes.length)
