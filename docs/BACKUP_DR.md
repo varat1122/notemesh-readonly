@@ -8,7 +8,7 @@
 - `/data/vault`: Markdown and attachments, including protected thesis/portfolio.
 - `/data/home`: Obsidian Headless authentication/sync state. Treat as secret.
 - `/data/app.sqlite`: application, authorization, settings, lineage, journals, safe-edit operations, indexes. `db.ts` uses WAL. **Never** make a raw copy of a running `app.sqlite`.
-- Additional files under `/data` must be inventoried and covered by a validated policy; the fixture utility copies non-SQLite files and creates an online SQLite backup of the primary database.
+- Additional files under `/data` must be inventoried and covered by a validated policy; the fixture utility copies regular non-SQLite files and creates an online SQLite backup of **every discovered `*.sqlite` database under `/data`**, including `app.sqlite` and a nested `market-prices/prices.sqlite` when present. Non-`.sqlite` database formats require separate inventory.
 - Existing `docs/GOOGLE_DRIVE_PRICES.md` is a *price-data* archive backend: it does **not** back up Vault, SQLite application DB or Obsidian Sync state; do not reuse its tokens or assume its signed (not encrypted) price snapshots are DR backups.
 - Existing Drive folder: Investment_OS/Backups/NoteMesh with Daily, Weekly, Monthly, PreDeploy. On inspection 2026-10-18 those folders contained no verified DR bundles. Do not recreate or clear them.
 - Railway production source follows `main`. PR #33 stays unmerged. No Railway variables, secrets, sync settings, volumes or deployment changed in this phase.
@@ -28,7 +28,7 @@ NOTEMESH_BACKUP_PASSPHRASE=... node scripts/backup/nm-backup.mjs restore \
   --bundle /path/to/output/notemesh-fixture-....nmb --dest /path/to/empty-sandbox
 ```
 
-The utility refuses active/unacknowledged writers by requiring a **manual offline confirmation flag** for non-fixture use. The flag itself is not proof that Obsidian Sync is stopped. The bundle consists of a compressed tar encrypted via AES-256-GCM, random IV and salt, scrypt KDF; an encrypted internal manifest lists every regular file and its SHA-256. `app.sqlite` is rebuilt via SQLite's online backup API, validated with `integrity_check`. Restore checks AES-GCM authentication, manifest hashes, file counts and SQLite integrity, and refuses non-empty targets. It is intentionally **not** a production-safe synchronized Vault snapshot while Obsidian Sync is active.
+The utility refuses active/unacknowledged writers by requiring a **manual offline confirmation flag** for non-fixture use. The flag itself is not proof that Obsidian Sync is stopped. The bundle consists of a compressed tar encrypted via AES-256-GCM, random IV and salt, scrypt KDF; an encrypted internal manifest lists every regular file and its SHA-256. Each `*.sqlite` file is rebuilt via SQLite's online backup API, validated with `integrity_check`. Database WAL/SHM sidecars are excluded in favor of transactionally backed-up committed state. Restore checks AES-GCM authentication, manifest hashes, file counts and SQLite integrity, and refuses non-empty targets. It is intentionally **not** a production-safe synchronized Vault snapshot while Obsidian Sync is active.
 
 For production, ensure copied live Vault contents and home state are coherent with database, and use an in-app coordinated quiescence point with safe-edit/Obsidian writer lifecycle. Require bounded staging/free-space, interruption handling and read-only production snapshot before enabling automated jobs. Do not run this offline CLI directly against an active Railway data mount.
 
