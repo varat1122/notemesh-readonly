@@ -255,7 +255,7 @@ it("DR P2.9 integrates a stable offline fixture cut with genuine encrypted .nmb 
         "--data-dir",scratch,"--out",path.join(output,"encrypted")]),
     });
     const bundle=receipt.bundle as string;
-    expect(bundle).toMatch(/\\.nmb$/);
+    expect(bundle).toMatch(/\.nmb$/);
     expect(fs.statSync(bundle).size).toBeGreaterThan(100);
     expect(exec(["verify","--bundle",bundle]).verified).toBe(true);
     const target=path.join(output,"restore");
