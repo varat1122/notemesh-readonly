@@ -207,6 +207,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     sourceLanguage:input.sourceLanguage??null,extractedText:input.extractedText,
     analysisText:input.analysisText??null,publisher:input.publisher??null,
     sourceUrl:input.sourceUrl??null,eventDate,publicationDate,
+    historicalCandidatePaths:pack.items.map(x=>x.path).slice(0,10),
     attachmentPath:actualAttachmentPath,attachmentVerified:verifiedAttachment,
     rawRoute:{...routes[0],operationId:rawStep.operationId,holdReasons:rawStep.holdReasons},
     reviewRoute:{...routes[1],operationId:reviewStep.operationId,holdReasons:reviewStep.holdReasons},
