@@ -3,6 +3,9 @@ const calls=vi.hoisted(()=>({sessions:0,migrations:0}));
 vi.mock("solid-js/web",()=>({
   getRequestEvent:()=>({request:new Request("https://fixture.example/dashboard")}),
 }));
+vi.mock("@solidjs/router",()=>({
+  redirect:(to:string)=>new Error("fixture_redirect:"+to),
+}));
 vi.mock("./auth",()=>({
   runAuthMigrations:async()=>{calls.migrations++;},
   isSetupComplete:async()=>true,
