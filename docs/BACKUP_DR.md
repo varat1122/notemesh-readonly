@@ -29,6 +29,12 @@ The background Vault Indexer previously wrote to app.sqlite through its own dire
 
 This does **not** stop Obsidian Sync, out-of-process indexers, direct writes on the shared SQLite connection from other application modules, or all server endpoint writers. Existing reconstruction of the search index on boot remains the disaster-recovery safety net. A green CI does not establish whole-volume atomicity, restore safety or production readiness.
 
+### Phase 2.4 — Git History and Git Sync writer fencing (Draft, 18 October 2026)
+
+Git-backed NoteMesh also mutates the Vault and app.sqlite. This Draft adds process-local write admission for `applyGitHistory()` (SQLite note/attachment timestamps and its in-memory time caches), for each asynchronous `GitBackend.cycle()` from fetch through merge, conflict-file resolution, metadata refresh and push, and for the setup `cloneVault()` operation until checkout completes. A refused Git cycle while a fixture freeze is active does not incorrectly mark the sync backend as failed or put it into persistent backoff. Regression fixtures check that frozen Git metadata changes leave SQLite/cache unchanged, clone cannot create files, and a frozen sync attempt cannot start Git writers.
+
+A long-running Git network operation **may keep the drain waiting**; timeout must fail closed and leave the existing Vault untouched by any backup capture. A process-local admission gate is NOT cross-process fencing. No live coordinated Backup, scheduled sync pause, Git/Obsidian external writer verification, or Production deployment is enabled.
+
 ### Production safety blockers: hard NO-GO
 
 1. PROVE COMPLETE WRITE FREEZE: Obsidian Sync must be stopped and awaited, and EVERY writer class must enroll in the same admission and drain mechanism. The shared in-process SnapshotWriterFence has only PARTIAL wiring in this Draft branch, not comprehensive coverage.
