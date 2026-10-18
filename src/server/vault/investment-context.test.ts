@@ -206,18 +206,18 @@ describe("legacy Company Index routing across both retained Vault locations", ()
 describe("old event retrieval for safe new-input reconciliation", () => {
   it("prefers the original CRWD × CLEAR archived analysis over generic CRWD recaps", async () => {
     const build=await fixture();
-    await addExtra("01_Companies/CRWD.md", "# CRWD\\nCrowdStrike enterprise cybersecurity.");
+    await addExtra("01_Companies/CRWD.md", "# CRWD\nCrowdStrike enterprise cybersecurity.");
     const eventPath="10_Knowledge/Company Research/2026-08-31 - CrowdStrike × CLEAR - Stock160726-190.md";
     await addExtra(eventPath, [
       "---", "type: knowledge_note", "company: [CRWD]", "verification: not_reverified",
       "source_records:", "  - 07_Sources/ChatGPT/Entries/Stock 160726/Stock 160726 - 0190.md",
       "---", "# CrowdStrike × CLEAR biometric identity partnership",
       "CRWD x CLEAR archived user conversation, not issuer verified."
-    ].join("\\n"));
+    ].join("\n"));
     await addExtra("10_Knowledge/Company Research/CRWD - Generic software recap.md",
-      "# CRWD software overview\\nHistoric CRWD AI security growth overview; no CLEAR partnership.");
+      "# CRWD software overview\nHistoric CRWD AI security growth overview; no CLEAR partnership.");
     await addExtra("10_Knowledge/Company Research/ASML - CLEAR wafer process.md",
-      "# ASML CLEAR wafer process\\nASML source unrelated to CRWD security.");
+      "# ASML CLEAR wafer process\nASML source unrelated to CRWD security.");
     const p=build({
       question:"CRWD CrowdStrike CLEAR biometric identity partnership Stock160726 190",
       issuers:["CRWD"],maxNotes:14,maxChars:14000
