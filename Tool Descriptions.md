@@ -426,3 +426,7 @@ Add-only linked notes require vault:read and inbox:submit. Cannot modify an exis
 Read the intake receipt with vault:read and inbox:submit. Does not prove remote device Sync.
 
 Safe Edit is a separate resource; its seven tools and permissions are documented in docs/SAFE_EDIT.md.
+
+### plan_vault_organization — read
+
+Read-only prioritized organization queue for the current indexed Investment OS Vault. It groups repeated missing ChatGPT archive links by **original target**, separates other broken links, lists incoming notes, exact Company Hub link candidates for historical notes, and ambiguous source/date metadata, and supplies bounded examples with exact Vault paths and required review actions. It never modifies Notes, guesses lost original source bytes, treats import dates as economic event dates, or authorizes a Thesis edit. Inspect full source and prior notes, then use the separately authorized Safe Edit preview/approval/apply/readback workflow for any proposed non-protected change.
