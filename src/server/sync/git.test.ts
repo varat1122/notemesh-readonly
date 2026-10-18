@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   cloneVault,
+  gitBackend,
   gitVersionOk,
   isGitRepo,
   looksLikeAuthFailure,
@@ -240,5 +241,33 @@ describe("runGitBuffer", () => {
     const res = await runGitBuffer(["show", "HEAD:nope"], { cwd: root });
     expect(res.ok).toBe(false);
     expect(res.stdout.length).toBe(0);
+  });
+});
+
+describe("DR Phase 2.4 — Git sync writer admission", () => {
+  it("refuses setup clone during freeze without initializing a working tree", async () => {
+    seedRemote();
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const dir = path.join(root, "data", "vault");
+    await fence.withFrozenWriters(async () => {
+      await expect(cloneVault(remote, "main")).rejects.toThrow("backup_writer_freeze_active");
+      expect(fs.existsSync(dir)).toBe(false);
+    });
+    expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
+    expect((await cloneVault(remote, "main")).ok).toBe(true);
+  });
+
+  it("skips a frozen Git reconcile without latching a healthy backend into backoff", async () => {
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const backend = gitBackend();
+    const before = backend.status().state;
+    await fence.withFrozenWriters(async () => {
+      const response = await backend.syncNow();
+      expect(response.ok).toBe(false);
+      expect(response.output).toContain("DR writer freeze active");
+      expect(backend.status().state).toBe(before);
+      expect(backend.status().activity.active).toBe(false);
+    });
+    expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
   });
 });
