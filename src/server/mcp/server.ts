@@ -1140,8 +1140,8 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         "Returns exact note paths, human review actions, protected thesis gates and safe-edit preview prerequisites; "+
         "never claims missing originals are lost and never writes/moves/deletes files.",
       inputSchema:{
-        focus:z.enum(["all","source_archives","other_links","metadata","inbox"]).optional(),
-        maxExamples:z.number().int().min(1).max(12).optional(),
+        focus:z.enum(["all","source_archives","other_links","metadata","inbox"]).optional().describe("Focus on one source-first review category, or all categories"),
+        maxExamples:z.number().int().min(1).max(12).optional().describe("Maximum review examples per category, from 1 to 12"),
       },
     },
     safe(({focus,maxExamples}:{
