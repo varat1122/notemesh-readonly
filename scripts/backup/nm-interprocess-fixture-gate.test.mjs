@@ -45,7 +45,7 @@ async function holdInChild(root) {
 async function stopChild(child, signal=null) {
   const exited = once(child, "exit");
   if (signal) child.kill(signal);
-  else child.stdin.write("release\n");
+  else child.stdin.end("release\n"); // EOF allows the held child process to exit.
   const [code, sig] = await exited;
   if (!signal) assert.equal(code, 0);
   else assert.equal(sig, signal);
