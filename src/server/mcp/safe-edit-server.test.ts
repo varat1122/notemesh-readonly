@@ -59,7 +59,7 @@ it("reads only the actor-scoped coordinated writeback journal; absence never mea
    ]);
    expect(result.gates.canAutoWrite).toBe(false);
    expect(result.gates.canAutoUpdateThesis).toBe(false);
-   expect(result.warnings.join(" ")).toContain("not remote/mobile Obsidian Sync");
+   expect(result.warnings.join(" ")).toContain("remote/mobile Sync remains unverified");
  }finally{await c.close();}
 });
 it("reads actual coordinated raw Safe Edit preview/apply receipt and isolates a different OAuth actor",async()=>{
@@ -149,6 +149,11 @@ it("gates text intake source→AI review on real same-actor readback and exact s
    const analysisPath=research.preview.path;
    expect(fs.existsSync(path.join(root,"vault",analysisPath))).toBe(false);
    fs.appendFileSync(path.join(root,"vault",raw.preview.path),"\nChanged after the original readback.");
+   const staleJournal=unpack(await c.client.callTool({name:"inspect_coordinated_writeback",
+     arguments:{planId:raw.planId}}));
+   expect(staleJournal.stages[0].state).toBe("stale_local_bytes");
+   expect(staleJournal.stages[0].receipt.readback).toBe("verified");
+   expect(staleJournal.stages[1].state).toBe("preview_pending");
    const stale=await c.client.callTool({name:"preview_investment_intake_stage",
      arguments:{...args,stage:"research_review"}});
    expect(stale.isError).toBe(true);
