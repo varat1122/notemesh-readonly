@@ -6,6 +6,9 @@
  * The input is independently routed at call-time; do not accept caller-
  * supplied path/operation ID/content/receipts as authorization.
  */
+import fs from "node:fs";
+import { createHash } from "node:crypto";
+import { resolveNotePath, openNoFollow } from "../vault/paths";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import { inspectCoordinatedWritebackBatch } from "./coordinated-batch-status";
 import { preview } from "./engine";
@@ -29,6 +32,20 @@ export function previewInvestmentIntakeStage(
       raw.path!==plan.coordination.steps[0].path||
       raw.afterHash!==plan.safeEditDrafts.expectedOriginalSha256)
      throw Error("Independent, same-OAuth raw source write/readback/reindex receipt required before research review preview");
+   // The indexed receipt describes the point of the prior write. Synced
+   // Obsidian notes may change afterwards; re-open the current inode and
+   // verify the exact bytes now instead of trusting a stale journal.
+   const abs=resolveNotePath(raw.path);
+   const fd=openNoFollow(abs);
+   try {
+     const st=fs.fstatSync(fd);
+     if(!st.isFile()||st.nlink!==1||st.size>100000)
+       throw Error("Raw source inode is not an approved single-link Markdown file");
+     const liveHash=createHash("sha256").update(fs.readFileSync(fd)).digest("hex");
+     if(liveHash!==raw.afterHash)
+       throw Error("Raw source changed after last Safe Edit receipt; historical input review and re-approval required");
+   } finally {fs.closeSync(fd);}
+
  }
  const result=preview({
    operationId:current.operationId,path:current.path,
