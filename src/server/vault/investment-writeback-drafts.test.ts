@@ -48,6 +48,17 @@ describe("separate source and analysis candidate Safe Edit drafts (no writes)",(
    expect(withNewline.original.content).not.toContain("original_text_sha256: \""+sha+"\"");
    expect(withNewline.expectedOriginalSha256).not.toBe(noNewline.expectedOriginalSha256);
  });
+ it("does not claim selected historical context pointers were fully read or independently verified",()=>{
+   const p=composeWritebackDrafts({...fixture(),historicalCandidatePaths:[
+     "01_Companies/MDB.md","05_Thesis/MDB - Current Thesis.md"
+   ]});
+   expect(p.analysis.content).toContain('historical_context_status: "candidate_pointers_not_full_note_reads"');
+   expect(p.analysis.content).toContain("01_Companies/MDB.md");
+   expect(p.analysis.content).toContain("05_Thesis/MDB - Current Thesis.md");
+   expect(p.analysis.content).toContain("not proof they were read or verified");
+   expect(p.analysis.content).toContain("verification: not_reverified");
+   expect(p.canAutoWrite).toBe(false);
+ });
  it("never hallucinates an AI analysis when none is supplied",()=>{
    const p=composeWritebackDrafts({...fixture(),analysisText:null});
    expect(p.original.content).toContain(fixture().extractedText);
