@@ -84,6 +84,17 @@ This is NOT a cross-process lease or general SQL transaction coordinator. Remain
 
 **Unresolved blockers:** all Better Auth/internal adapters and direct SQLite calls must be covered with positive runtime evidence; a durable, enforced cross-process protocol must enroll every production writer (the isolated Phase 2.6 lock is NOT wired to NoteMesh); the sync daemon, external devices, additional processes and Volume consistency must be proven quiet; a real-format synthetic `.nmb` must be independently downloaded and restored after authenticated **real Google Drive** transport; encryption-key escrow, RPO/RTO, costs, scheduler and alerts remain unapproved. Until then: NO Production backup activation, Merge, Production Volume change or Production restore.
 
+### Phase 2.8 — direct Git and Better Auth adapter writer admission (Draft, 18 October 2026)
+
+This change set strengthens **process-local**, not cross-process, coverage on existing runtime call paths:
+
+- `runGit()` and `runGitBuffer()` now hold writer admission across the full lifetime of **each** Git subprocess. The freeze check occurs **before** process creation. This also covers direct Git invocations outside `GitBackend.cycle()`; nested calls made by a pre-admitted cycle reuse its active scope without deadlocking. Git commands that seem read-only can still mutate Git metadata or the object database.
+- `resolveConflict()` now holds one outer writer scope through Git reset, conflict-file creation and the final commit. Refusal occurs before any Git or filesystem mutation. Tests cover direct unadmitted Git text/binary entry points, long-running Git subprocess drain, and direct conflict handling refusal during a fixture cut.
+- Direct Better Auth adapter call sites now explicitly enroll: Dashboard API-key creation/revocation, admin `getSession` calls, MCP API-key validation and intake-worker API-key validation. These are separate from the already-fenced `/api/auth/*` route and protect asynchronous adapter work even when invoked from other server functions. MCP key validation propagates `backup_writer_freeze_active`, rather than silently interpreting it as a bad credential; intake worker fails without invoking its adapter. Synthetic tests verify admission refusal, adapter call suppression and asynchronous drain.
+- `nm-writer-source-inventory.mjs` now also flags direct `auth.api.*` call sites. This tool remains source-heuristic and emits `verified:false` for every candidate. Referencing a fence in a file does **not** certify that each candidate is covered.
+
+**Production NO-GO remains:** Better Auth and other third-party internals are not exhaustively instrumented; direct SQLite connections, filesystem utilities, worker processes, Obsidian continuous Sync, mobile/desktop clients and any external writers need independently verified runtime closure. Phase 2.6's opt-in interprocess lock is **only** an isolated fixture primitive and does not govern NoteMesh runtime. Green CI is not snapshot-consistency evidence. Real encrypted `.nmb` Drive upload/readback and isolated restore with synthetic data requires a separately authorized protected Staging session. PR #36 remains Draft with no Production deployment, automatic schedule, Volume changes or restore.
+
 ### Production safety blockers: hard NO-GO
 
 1. PROVE COMPLETE WRITE FREEZE: Obsidian Sync must be stopped and awaited, and EVERY writer class must enroll in the same admission and drain mechanism. The shared in-process SnapshotWriterFence has only PARTIAL wiring in this Draft branch, not comprehensive coverage.
