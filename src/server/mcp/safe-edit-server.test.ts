@@ -115,7 +115,7 @@ it("gates text intake source→AI review on real same-actor readback and exact s
    expect(drafted.isError).not.toBe(true);
    const raw=unpack(drafted);
    expect(raw.status).toBe("safe_edit_preview_only_not_applied");
-   expect(raw.preview.diff).toContain(args.extractedText);
+   expect(raw.preview.diff.added.join("\n")).toContain(args.extractedText);
    expect(raw.prerequisites.originalPublisherVerified).toBe(false);
    const status=unpack(await c.client.callTool({name:"inspect_coordinated_writeback",
      arguments:{planId:raw.planId}}));
@@ -130,7 +130,7 @@ it("gates text intake source→AI review on real same-actor readback and exact s
    expect(next.isError).not.toBe(true);
    const research=unpack(next);
    expect(research.status).toBe("safe_edit_preview_only_not_applied");
-   expect(research.preview.diff).toContain(args.analysisText);
+   expect(research.preview.diff.added.join("\n")).toContain(args.analysisText);
    expect(research.prerequisites.sourceSavedAndIndexed).toBe(true);
    const rechecked=unpack(await c.client.callTool({name:"inspect_coordinated_writeback",
      arguments:{planId:raw.planId}}));
