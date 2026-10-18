@@ -263,6 +263,7 @@ export const auth = betterAuth({
 });
 
 let migrated = false;
+let migrationInProgress: Promise<void> | null = null;
 
 // Creates/updates Better Auth's own tables (user, session, account,
 // apikey, OAuth client/token tables) inside app.sqlite. Runs once per boot.
@@ -287,21 +288,30 @@ function backfillAccountIssuer(): void {
 
 export async function runAuthMigrations() {
   if (migrated) return;
-  backfillAccountIssuer();
-  const { runMigrations } = await getMigrations(auth.options);
-  await runMigrations();
-  // The guard on the user table can only be created once Better Auth has
-  // created the table, so it lives here rather than with our own schema. And
-  // a database that already breaks the invariant — claimed before the guard
-  // existed, by more than one racer — is reported loudly rather than guessed
-  // about; the alert channel carries it too. Recovery is in SECURITY.md.
-  installSingleAdminGuard();
-  const extra = extraAdminAccounts();
-  if (extra > 0) {
-    console.error(
-      `[auth] this server has ${extra + 1} admin accounts and should have exactly one. ` +
-        `See SECURITY.md, "More than one admin account".`,
-    );
+  // Cold-start HTTP requests can race each other. They must all await the
+  // same initialization before any handler attempts a session lookup.
+  if (migrationInProgress) return migrationInProgress;
+  const work = (async () => {
+    backfillAccountIssuer();
+    const { runMigrations } = await getMigrations(auth.options);
+    await runMigrations();
+    // Install the single-admin database invariant only after Better Auth
+    // creates the user table. Initialization errors remain visible and
+    // retryable, rather than marking the schema as migrated prematurely.
+    installSingleAdminGuard();
+    const extra = extraAdminAccounts();
+    if (extra > 0) {
+      console.error(
+        `[auth] this server has ${extra + 1} admin accounts and should have exactly one. ` +
+          `See SECURITY.md, "More than one admin account".`,
+      );
+    }
+    migrated = true;
+  })();
+  migrationInProgress = work;
+  try {
+    await work;
+  } finally {
+    if (migrationInProgress === work) migrationInProgress = null;
   }
-  migrated = true;
 }
