@@ -102,3 +102,23 @@ This drill **does not** prove Google Drive readback, production consistency, res
 - **No encrypted production backup or verified Google Drive upload exists yet.** `drive.file` alone does not grant access to the existing manually created NoteMesh backup folder. Design app-created dedicated backup folder or Google Picker authorization separately; test upload, authenticated readback and isolated restore. Do not broaden the OAuth scope to unrestricted Drive just to access a preexisting folder.
 - Google External + Testing grants (Drive scope) generally produce refresh tokens that expire after seven days: unattended backups require a suitable production OAuth publishing/verification decision and an independently observed long-lived credential. Do not assume Publishing status alone removes all other account/security risks or that creating a Client completes OAuth.
 - **Outstanding live blockers:** production writer quiescence across all mutators, recovery of app secrets, safe snapshot staging outside the small volume, Google folder authorization, upload retry/resume, retention, alerts and a tested isolated production-data restore. No merge, deployment, Railway plan upgrade, credentials changes, or activation are authorized by adding Test Users or code in this branch.
+
+
+## Railway staging admin claim hardening (Draft only — verify CI before use)
+
+When `RAILWAY_ENVIRONMENT_ID` exists and `RAILWAY_ENVIRONMENT_NAME` is not
+`production`, first-admin signup is additionally gated by
+`NOTEMESH_STAGING_CLAIM_SECRET`, a *distinct* operator-created, high-entropy
+secret at least 32 characters long, held only in staging's Railway private
+variables. If missing or weak the signup endpoint fails closed even during
+the 30-minute initial claim window. The browser setup form transmits the
+proof over HTTPS as a request header; the server checks it before accepting
+first-admin signup. Do not paste it in chat, GitHub, logs or Obsidian.
+
+No first-admin proof is configured in the current DR staging service, so **do
+not expose a public domain yet**. Before running browser OAuth, configure a
+staging-only proof privately, ensure staging's BASE_URL and HTTPS callback are
+correct, arrange a controlled claim window, create a separate test admin and
+test only with synthetic data. A production Railway environment is unchanged
+by this guard. The guard does not replace other app security controls or
+supply an OAuth credential, backup key or volume persistence.
