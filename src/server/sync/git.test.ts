@@ -245,6 +245,24 @@ describe("runGitBuffer", () => {
 });
 
 describe("DR Phase 2.4 — Git sync writer admission", () => {
+  it("absorbs freeze refusal during startup Git metadata refresh and continues startup", async () => {
+    const { setSetting } = await import("../db");
+    setSetting("git_remote", remote);
+    const backend = gitBackend();
+    const refresh = vi.spyOn(backend as any, "refreshTimes")
+      .mockRejectedValueOnce(new Error("backup_writer_freeze_active"));
+    const cycle = vi.spyOn(backend as any, "cycle").mockResolvedValue(true);
+    try {
+      backend.start();
+      await vi.waitFor(() => expect(cycle).toHaveBeenCalledWith("startup"), { timeout: 1000 });
+      expect(backend.getLogs().some(l => l.line.includes("metadata refresh deferred"))).toBe(true);
+    } finally {
+      backend.stop();
+      refresh.mockRestore();
+      cycle.mockRestore();
+    }
+  });
+
   it("refuses setup clone during freeze without initializing a working tree", async () => {
     seedRemote();
     const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
