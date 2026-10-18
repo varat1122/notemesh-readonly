@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { SnapshotWriterFence } from "./writer-fence";
@@ -152,4 +153,72 @@ it("does not execute capture when writer drain times out",async()=>{
   expect(events).toEqual([]);
   expect(fence.status.frozen).toBe(false);
   done.resolve();await busy;
+});
+
+it("DR P2.9 refuses a synthetic snapshot when a noncooperating child process modifies source",async()=>{
+  const fence=new SnapshotWriterFence(),events:string[]=[],{sync,isPaused}=mockSync(events);
+  const note=path.join(scratch,"note.md");
+  fs.writeFileSync(note,"before");
+  const original="before";
+  const childWrite=()=>execFileSync(process.execPath,[
+    "-e",
+    'require("node:fs").writeFileSync(process.argv[1],"after")',
+    note,
+  ],{timeout:2000});
+  await expect(withOfflineFixtureCut({
+    fence,sync,
+    // A mock "verified external halt" alone MUST NOT turn a moving source
+    // into an accepted fixture snapshot.
+    assertNoExternalWriters:()=>true,
+    capture:async()=>{
+      expect(isPaused()).toBe(true);
+      expect(fs.readFileSync(note,"utf8")).toBe(original);
+      childWrite();
+      return "should-not-be-accepted";
+    },
+  })).rejects.toThrow("dr_fixture_source_changed_during_cut");
+  expect(fs.readFileSync(note,"utf8")).toBe("after");
+  expect(events).toEqual(["stop_sync","resume_sync"]);
+  expect(fence.status).toEqual({frozen:false,activeWriters:0});
+  // No change to the now-stable fixture should allow the next fixture cut.
+  const accepted=await withOfflineFixtureCut({
+    fence,sync,assertNoExternalWriters:()=>true,capture:()=>42,
+  });
+  expect(accepted).toBe(42);
+});
+
+it.each(["created","deleted","replaced"])(
+  "DR P2.9 detects %s source files during an otherwise accepted offline cut",
+  async(change)=>{
+    const fence=new SnapshotWriterFence(),events:string[]=[],{sync}=mockSync(events);
+    const note=path.join(scratch,"existing.md");
+    fs.writeFileSync(note,"initial");
+    await expect(withOfflineFixtureCut({
+      fence,sync,assertNoExternalWriters:()=>true,
+      capture:()=>{
+        if(change==="created")fs.writeFileSync(path.join(scratch,"new.md"),"payload");
+        else if(change==="deleted")fs.unlinkSync(note);
+        else {fs.unlinkSync(note);fs.writeFileSync(note,"initial");}
+        return "unverified-result";
+      },
+    })).rejects.toThrow("dr_fixture_source_changed_during_cut");
+    expect(events).toEqual(["stop_sync","resume_sync"]);
+    expect(fence.status).toEqual({frozen:false,activeWriters:0});
+  },
+);
+
+it("DR P2.9 rejects a linked or excessive source before running capture",async()=>{
+  const fence=new SnapshotWriterFence(),{sync}=mockSync([]),capture=vi.fn();
+  const file=path.join(scratch,"note.md");
+  fs.writeFileSync(file,"content");
+  const link=path.join(scratch,"link.md");
+  fs.symlinkSync(file,link);
+  const opts={fence,sync,assertNoExternalWriters:()=>true,capture};
+  await expect(withOfflineFixtureCut(opts)).rejects.toThrow("dr_fixture_source_unsafe_entry");
+  expect(capture).not.toHaveBeenCalled();
+  fs.unlinkSync(link);
+  fs.truncateSync(file,256*1024*1024+1);
+  await expect(withOfflineFixtureCut(opts)).rejects.toThrow("dr_fixture_source_fingerprint_limit");
+  expect(capture).not.toHaveBeenCalled();
+  expect(fence.status).toEqual({frozen:false,activeWriters:0});
 });
