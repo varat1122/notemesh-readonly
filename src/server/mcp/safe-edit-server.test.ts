@@ -136,6 +136,17 @@ it("gates text intake source→AI review on real same-actor readback and exact s
      arguments:{planId:raw.planId}}));
    expect(rechecked.stages[0].state).toBe("locally_verified");
    expect(rechecked.stages[1].state).toBe("preview_pending");
+   const originalPath=path.join(root,"vault",raw.preview.path);
+   const oldSourceStat=fs.statSync(originalPath);
+   fs.utimesSync(originalPath,oldSourceStat.atime,new Date(oldSourceStat.mtimeMs+60_000));
+   const indexBlocked=await c.client.callTool({name:"apply_edit",arguments:{
+     operationId:research.operationId,previewToken:research.preview.previewToken,
+     expectedHash:research.preview.beforeHash
+   }});
+   expect(indexBlocked.isError).toBe(true);
+   expect(JSON.stringify(indexBlocked)).toContain("Coordinated review source index is stale");
+   expect(fs.existsSync(path.join(root,"vault",research.preview.path))).toBe(false);
+   fs.utimesSync(originalPath,oldSourceStat.atime,oldSourceStat.mtime);
    const altered=await c.client.callTool({name:"preview_investment_intake_stage",
      arguments:{...args,sourceLanguage:"th",stage:"research_review"}});
    expect(altered.isError).toBe(true);
