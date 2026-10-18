@@ -12,17 +12,20 @@ function deferred<T>() {
   return {promise,resolve};
 }
 function mockSync(events:string[]){
-  let paused=false;
+  let paused=false,calls=0;
+  // Keep the generic call signature intact: vi.fn wraps a polymorphic
+  // function as Promise<unknown>, which is not a valid SyncPauser contract.
   const sync={
-    withPausedForEdit:vi.fn(async<T>(run:()=>Promise<T>|T):Promise<T>=>{
+    withPausedForEdit:async<T>(run:()=>Promise<T>|T):Promise<T>=>{
+      calls++;
       if(paused)throw Error("cannot_pause_twice");
       events.push("stop_sync");
       paused=true;
       try { return await run(); }
       finally {paused=false;events.push("resume_sync");}
-    }),
+    },
   };
-  return {sync,isPaused:()=>paused};
+  return {sync,isPaused:()=>paused,calls:()=>calls};
 }
 
 beforeEach(()=>{
@@ -39,7 +42,7 @@ it.each(railwayVars)("refuses any Railway runtime even with successful external 
   await expect(withOfflineFixtureCut({
     fence,sync:sync.sync,assertNoExternalWriters:()=>true,capture,
   })).rejects.toThrow(/offline_fixture_only/);
-  expect(sync.sync.withPausedForEdit).not.toHaveBeenCalled();
+  expect(sync.calls()).toBe(0);
   expect(capture).not.toHaveBeenCalled();
 });
 it.each(["/data", "/app/data"])("refuses deployed volume root %s without Railway variables",async(dir)=>{
