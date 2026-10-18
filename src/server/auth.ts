@@ -27,7 +27,7 @@ import crypto from "node:crypto";
 import { db } from "./db";
 import { env } from "./env";
 import { authLog } from "./auth-logger";
-import { userCount, withinClaimWindow, CLAIM_WINDOW_MINUTES, installSingleAdminGuard, extraAdminAccounts } from "./claim";
+import { userCount, withinClaimWindow, CLAIM_WINDOW_MINUTES, installSingleAdminGuard, extraAdminAccounts, validStagingClaimProof } from "./claim";
 import { audit } from "./audit";
 
 // Both used to live here, and auth is where the rest of the app reaches for
@@ -133,6 +133,15 @@ export const auth = betterAuth({
               `This server is locked down: it was not claimed within ` +
               `${CLAIM_WINDOW_MINUTES} minutes of starting. Restart it, then create ` +
               `the admin account.`,
+          });
+        }
+        // Railway staging/preview must be claimed with an independent,
+        // operator-held proof. A public domain or service restart alone is
+        // never sufficient to claim its first administrator account.
+        if (!validStagingClaimProof(ctx.headers?.get("x-notemesh-dr-claim") ?? null)) {
+          audit("signup.rejected", { reason: "staging_claim_proof_missing_or_invalid" });
+          throw new APIError("FORBIDDEN", {
+            message: "Staging first-admin claim requires its private setup proof.",
           });
         }
         audit("signup.accepted", {});
