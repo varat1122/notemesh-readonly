@@ -1,7 +1,7 @@
 import type { APIEvent } from "@solidjs/start/server";
 import { auth, runAuthMigrations } from "~/server/auth";
 import { env } from "~/server/env";
-import { issueDrConsentFormProof, validDrConsentFormProof, drConsentRequestOriginAllowed } from "~/server/backup/drive-consent-form";
+import { validDrConsentFormProof, drConsentRequestOriginAllowed } from "~/server/backup/drive-consent-form";
 import { beginDrDriveConsent, driveSetupClient, driveSetupEnabled, DR_DRIVE_CALLBACK_PATH } from "~/server/backup/drive-auth";
 import { claimDrCredential, drDriveHeaders as headers, escapeHtml as esc } from "~/server/backup/drive-admin";
 
@@ -49,7 +49,7 @@ export async function GET({ request }: APIEvent) {
   This page is one-time. Google Drive uploading is NOT enabled by storing it.</p>
   <textarea readonly rows="8" cols="72">${esc(sealed)}</textarea>` : ""}
   ${driveSetupEnabled() && configured ?
-   `<p><strong>Mobile browser:</strong> tap the direct Google consent link below. It navigates to Google without a form redirect.</p>\n  ${directConsentUrl ? `<p><a href="${esc(directConsentUrl)}" target="_self" rel="noreferrer noopener" referrerpolicy="no-referrer">Open Google consent directly (recommended)</a></p>` : `<p>Consent link temporarily unavailable; wait five minutes, then reload.</p>`}\n  <p>Legacy form method (may be blocked by browser security policy):</p>\n  <form method="post"><input type="hidden" name="dr_consent_proof" value="${esc(issueDrConsentFormProof(admin.session?.id ?? admin.user.id, env.encryptionKey))}"><button type="submit">Connect Google Drive for encrypted DR bundles</button></form>` :
+   `<p><strong>Mobile browser:</strong> tap the direct Google consent link below. It navigates to Google without a form redirect.</p>\n  ${directConsentUrl ? `<p><a href="${esc(directConsentUrl)}" target="_self" rel="noreferrer noopener" referrerpolicy="no-referrer">Open Google consent directly (recommended)</a></p>` : `<p>Consent link temporarily unavailable; wait five minutes, then reload.</p>`}` :
    '<p>Consent is disabled until the OAuth callback is deployed and the feature flag is approved.</p>'}
   <p>Required next gates: explicit permission to access an authorized app-created Drive folder,
   production writer coordination, verified upload/download, isolated restore drill, alerts and scheduling.</p>
