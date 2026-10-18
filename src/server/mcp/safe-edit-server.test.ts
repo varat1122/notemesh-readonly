@@ -153,6 +153,33 @@ it("gates text intake source→AI review on real same-actor readback and exact s
      arguments:{...args,stage:"research_review"}});
    expect(stale.isError).toBe(true);
    expect(JSON.stringify(stale)).toContain("Raw source changed after last Safe Edit receipt");
+   const staleApply=await c.client.callTool({name:"apply_edit",arguments:{
+     operationId:research.operationId,previewToken:research.preview.previewToken,
+     expectedHash:research.preview.beforeHash
+   }});
+   expect(staleApply.isError).toBe(true);
+   expect(JSON.stringify(staleApply)).toContain("Coordinated review source changed since its verified write");
+   expect(fs.existsSync(path.join(root,"vault",analysisPath))).toBe(false);
+ }finally{await c.close();}
+});
+it("generic create_note/apply cannot bypass coordinated review source identity or actor gates",async()=>{
+ fs.mkdirSync(path.join(root,"vault","10_Knowledge","Company Research"),{recursive:true});
+ const c=await connected(access);
+ try{
+   const forged=await c.client.callTool({name:"create_note",arguments:{
+     operationId:"ios_in-ffffffffffffffff_review_v1",
+     path:"10_Knowledge/Company Research/Investment Review - MDB - IN-FFFFFFFFFFFFFFFF.md",
+     reason:"Synthetic guard bypass test",
+     content:"# Unsourced research preview with no corresponding original\\n"
+   }});
+   expect(forged.isError).not.toBe(true);
+   const p=unpack(forged);
+   const forbidden=await c.client.callTool({name:"apply_edit",arguments:{
+     operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash
+   }});
+   expect(forbidden.isError).toBe(true);
+   expect(JSON.stringify(forbidden)).toContain("Unknown operation");
+   expect(fs.existsSync(path.join(root,"vault",p.path))).toBe(false);
  }finally{await c.close();}
 });
 it("authorized Safe Edit MCP captures exact user PNG binary, inspects hash and cannot overwrite it",async()=>{
