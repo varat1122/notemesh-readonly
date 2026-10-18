@@ -1135,17 +1135,17 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       annotations: READ,
       description:
         "Source-first read-only organization queue: group unresolved archive originals, "+
-        "other broken links, unreviewed inbox items and metadata that may require targeted correction. "+
+        "other broken links, unreviewed inbox items, historical-to-Company-Hub linkage candidates and metadata that may require targeted correction. "+
         "Keep original ChatGPT archive links, legacy provenance and dates unchanged. "+
         "Returns exact note paths, human review actions, protected thesis gates and safe-edit preview prerequisites; "+
         "never claims missing originals are lost and never writes/moves/deletes files.",
       inputSchema:{
-        focus:z.enum(["all","source_archives","other_links","metadata","inbox"]).optional().describe("Focus on one source-first review category, or all categories"),
+        focus:z.enum(["all","source_archives","other_links","historical_links","metadata","inbox"]).optional().describe("Focus on one source-first review category, or all categories"),
         maxExamples:z.number().int().min(1).max(12).optional().describe("Maximum review examples per category, from 1 to 12"),
       },
     },
     safe(({focus,maxExamples}:{
-      focus?:"all"|"source_archives"|"other_links"|"metadata"|"inbox";maxExamples?:number
+      focus?:"all"|"source_archives"|"other_links"|"historical_links"|"metadata"|"inbox";maxExamples?:number
     })=>json(withBoundary(planVaultOrganization({focus,maxExamples})))),
   );
 
