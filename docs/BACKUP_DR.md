@@ -2,6 +2,31 @@
 
 **2026-10-18.** This branch is a *pre-deployment, offline/fixture* implementation. The current production Vault has **not** been backed up by this code. Do not merge, schedule or deploy until the gates below pass.
 
+
+## Phase 1.4 — verified Staging cloud test and complete offline fixture chain (18 October 2026)
+
+This section supersedes the initial PRE-TEST status further below; earlier notes remain preserved as historical development records. Never treat a staging fixture as a real production recovery.
+
+### Observed evidence
+
+- Google DR OAuth and Refresh Token: Staging OAuth callback returned HTTP 303. The one-time encrypted credential was created, stored privately and confirmed in a subsequent user-triggered token refresh. The staging credential-check POST returned HTTP 200 at 17:33:58 Bangkok (2026-10-18 10:33:58 UTC), independently observed in Railway HTTP logs. No Google Drive file was accessed for this check.
+- Real Google Drive fixture: user manually initiated POST /api/backup-drive/fixture-upload, HTTP 200 at 17:54:55 Bangkok (2026-10-18 10:54:55 UTC), confirmed in Railway logs and by the user reporting PASS. The handler returns HTTP 200 only after creating a new app-owned folder, uploading random AES-GCM-encrypted NMDRFIX1 bytes, downloading Drive ciphertext, verifying SHA-256 and decrypting the original random payload. This was NOT a real encrypted .nmb backup. The test folder and object intentionally remain in Drive.
+- The one-time Staging Drive upload gate NOTEMESH_DRIVE_FIXTURE_TEST_ENABLED was immediately reset to 0 after the successful test. Replacement Railway deployment returned SUCCESS. There is no automatic upload or recurring schedule.
+- Complete REAL-FORMAT .nmb OFFLINE test: scripts/backup/nm-cloud-dr-drill.test.mjs creates an isolated synthetic NoteMesh directory, generates a genuine NMDR1 encrypted .nmb archive, verifies it, passes ciphertext through a MOCKED Google Drive resumable upload/download transport, creates a separate downloaded bundle, cryptographically verifies it, restores into a new sandbox, and compares synthetic Markdown notes, source-archive, fake Obsidian home state and both app and market-price SQLite tables and integrity. The deliberately corrupted readback must fail without a verified receipt. Passing this mock-transport integration test proves the archive/transport/recovery integration boundary only; it does not prove a live Google-Drive .nmb restore.
+- GitHub Draft PR #36 remains unmerged; only a separate, disposable Railway Staging service was deployed for testing. Production remains on main, unchanged.
+
+### Production safety blockers: hard NO-GO
+
+1. PROVE COMPLETE WRITE FREEZE: Obsidian Sync must be stopped and awaited, and EVERY writer class must enroll in the same admission and drain mechanism. The existing SnapshotWriterFence is in-process and not yet connected to all mutators.
+2. Vault Safe Edit, attachments, evidence/Thesis edits, source archives, independent Cloud Intake importer and application/authorization SQLite are not yet shown to share a single snapshot fence. A cloud-intake periodic busy flag is not sufficient.
+3. Market-price SQLite collection, third-party out-of-process CLI writers, Obsidian clients on other devices and multiple Railway replicas must be positively coordinated. A single process in-memory fence cannot stop another process.
+4. Safely snapshot all discovered SQLite databases using the online backup API while ensuring cross-component point-in-time coherence. Never raw-copy an active WAL SQLite file.
+5. Independently recover the separate backup passphrase, original ENCRYPTION_KEY, OAuth/auth dependencies and Obsidian Sync identity. A sealed OAuth credential alone does not make recovery possible.
+6. Bound on-host scratch capacity outside Production's small persistent volume; implement durable failed-upload records, alerts, retention and tested no-loss rollback before enabling a scheduler.
+7. Prove an actual encrypted .nmb Google Drive upload, full ciphertext download, AND isolated restore from that downloaded artifact. The live Google test so far used synthetic NMDRFIX1 bytes, not a .nmb.
+
+Do not merge Draft PR #36, modify Production credentials or volumes, automate production backups, restore over any deployed DATA_DIR, auto-delete Drive data, or treat --offline-confirmed as proof of a coordinated live writer pause. Await explicit operator approval and documented evidence for each gate.
+
 ## Evidence from main and Railway
 
 - NoteMesh data root: `DATA_DIR=/data`, persistent Railway mount `/data` (1 GB).
