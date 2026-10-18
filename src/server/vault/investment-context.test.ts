@@ -230,3 +230,19 @@ describe("old event retrieval for safe new-input reconciliation", () => {
     expect(event?.schemaCompatibility.canAutoUpdateThesis).toBe(false);
   });
 });
+
+
+describe("multi-issuer archived research matching", () => {
+  it("retains a jointly tagged INTC/CRWD archived security event for the CRWD question", async () => {
+    const build=await fixture();
+    const target="10_Knowledge/Company Research/2026-09-02 - INTC × CRWD security.md";
+    await addExtra(target, [
+      "---", "company: [INTC, CRWD]", "verification: not_reverified", "---",
+      "# Intel INTC and CRWD security",
+      "CRWD silicon and cloud security discussion from archived chat, not issuer verified."
+    ].join("\n"));
+    const p=build({question:"CRWD INTC silicon security historical event",issuers:["CRWD"],maxNotes:14});
+    expect(p.items.map(x=>x.path)).toContain(target);
+    expect(p.items.find(x=>x.path===target)?.declaredVerification).toBe("not_reverified");
+  });
+});
