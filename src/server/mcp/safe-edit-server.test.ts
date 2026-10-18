@@ -218,6 +218,16 @@ it("full local text source and separately attributed AI review write both verify
    expect(analysisBody).toContain("original_source_verified: false");
    expect(analysisBody).toContain("owner_approved_thesis: false");
    expect(result.stages[0].receipt.mobileSync).toBe("unverified");
+   // Idempotent retries must stay safe only while currently stored bytes
+   // and index still match the original actor-scoped write receipts.
+   for(const p of [raw,reviewed]){
+     const retry=await c.client.callTool({name:"apply_edit",arguments:{
+       operationId:p.operationId,previewToken:p.preview.previewToken,
+       expectedHash:p.preview.beforeHash
+     }});
+     expect(retry.isError).not.toBe(true);
+     expect(unpack(retry).status).toBe("written");
+   }
    // Same bytes but a changed inode mtime can indicate a peer write; the
    // stale index must not be reported as currently verified.
    const srcPath=path.join(root,"vault",raw.preview.path);
@@ -227,6 +237,16 @@ it("full local text source and separately attributed AI review write both verify
      arguments:{planId:raw.planId}}));
    expect(drift.stages[0].state).toBe("stale_local_index");
    expect(drift.stages[1].state).toBe("locally_verified");
+   for(const p of [raw,reviewed]){
+     const reject=await c.client.callTool({name:"apply_edit",arguments:{
+       operationId:p.operationId,previewToken:p.preview.previewToken,
+       expectedHash:p.preview.beforeHash
+     }});
+     expect(reject.isError).toBe(true);
+   }
+   // Leave the review note intact. Retried Apply never repairs or overwrites.
+   expect(fs.readFileSync(path.join(root,"vault",reviewed.preview.path),"utf8"))
+     .toBe(analysisBody);
  }finally{await c.close();}
 });
 it("generic create_note/apply cannot bypass coordinated review source identity or actor gates",async()=>{
