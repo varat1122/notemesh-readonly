@@ -88,3 +88,20 @@ describe("fresh ephemeral staging database", () => {
     await expect(runAuthMigrations()).resolves.toBeUndefined();
   });
 });
+
+it("does not initialize Better Auth schema while a coordinated writer freeze is held",async()=>{
+  vi.resetModules();
+  const {runAuthMigrations}=await import("./auth");
+  const {db}=await import("./db");
+  const {inProcessDrWriterFence}=await import("./backup/writer-fence");
+  const before=db().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session'").get();
+  expect(before).toBeUndefined();
+  await inProcessDrWriterFence.withFrozenWriters(async()=>{
+    await expect(runAuthMigrations()).rejects.toThrow(/backup_writer_freeze_active/);
+    expect(db().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session'").get()).toBeUndefined();
+  });
+  await runAuthMigrations();
+  expect(db().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session'").get())
+    .toEqual({name:"session"});
+  expect(inProcessDrWriterFence.status).toEqual({frozen:false,activeWriters:0});
+});
