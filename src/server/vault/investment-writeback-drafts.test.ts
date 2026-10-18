@@ -1,4 +1,5 @@
 import {describe,it,expect} from "vitest";
+import {createHash} from "node:crypto";
 import {composeWritebackDrafts,type DraftRequest} from "./investment-writeback-drafts";
 
 const fixture=():DraftRequest=>({
@@ -32,6 +33,20 @@ describe("separate source and analysis candidate Safe Edit drafts (no writes)",(
    expect(p.timeline).toBe("not_prepared_requires_event_source_dedup_and_approval");
    expect(p.aiAnalysisIndependentlyVerified).toBe(false);
    expect(p.canAutoWrite).toBe(false);
+ });
+ it("attests verbatim original text SHA, UTF-8 length and newline independent of Markdown wrapper",()=>{
+   const v=fixture();
+   v.extractedText="\nข้อความภาษาไทย / Japanese 日本語 / 中文\t  ";
+   const noNewline=composeWritebackDrafts(v);
+   const sha=createHash("sha256").update(v.extractedText,"utf8").digest("hex");
+   expect(noNewline.original.content).toContain("original_text_sha256: \""+sha+"\"");
+   expect(noNewline.original.content).toContain("original_text_utf8_bytes: "+Buffer.byteLength(v.extractedText,"utf8"));
+   expect(noNewline.original.content).toContain("original_text_ends_with_newline: false");
+   expect(noNewline.original.content).toContain(v.extractedText);
+   const withNewline=composeWritebackDrafts({...v,extractedText:v.extractedText+"\n"});
+   expect(withNewline.original.content).toContain("original_text_ends_with_newline: true");
+   expect(withNewline.original.content).not.toContain("original_text_sha256: \""+sha+"\"");
+   expect(withNewline.expectedOriginalSha256).not.toBe(noNewline.expectedOriginalSha256);
  });
  it("never hallucinates an AI analysis when none is supplied",()=>{
    const p=composeWritebackDrafts({...fixture(),analysisText:null});
