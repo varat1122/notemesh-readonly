@@ -178,7 +178,7 @@ it("gates text intake source→AI review on real same-actor readback and exact s
    const stale=await c.client.callTool({name:"preview_investment_intake_stage",
      arguments:{...args,stage:"research_review"}});
    expect(stale.isError).toBe(true);
-   expect(JSON.stringify(stale)).toContain("Raw source changed after last Safe Edit receipt");
+   expect(JSON.stringify(stale)).toContain("same-OAuth raw source write/readback/reindex receipt required");
    const staleApply=await c.client.callTool({name:"apply_edit",arguments:{
      operationId:research.operationId,previewToken:research.preview.previewToken,
      expectedHash:research.preview.beforeHash
