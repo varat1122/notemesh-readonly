@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { audit } from "./audit";
 import { db } from "./db";
+import { inProcessDrWriterFence } from "./backup/writer-fence";
 import { claimWindowRemainingMs, CLAIM_WINDOW_MINUTES } from "./claim";
 import type { ResetState } from "~/lib/reset-view";
 
@@ -188,6 +189,9 @@ export async function performAdminReset(pin: string, newPassword: string): Promi
     return { ok: false, message: "Choose a password of at least 10 characters.", attemptsLeft };
   }
 
+  // Credential rehash + session invalidation must stay under one asynchronous
+  // writer ticket. A freeze waits for both; a newly-started reset is rejected.
+  return inProcessDrWriterFence.withWrite(async () => {
   const rows = db().prepare('SELECT id, email FROM "user" ORDER BY createdAt LIMIT 2').all() as {
     id: string;
     email: string;
@@ -220,4 +224,5 @@ export async function performAdminReset(pin: string, newPassword: string): Promi
 
   audit("reset.succeeded", { user: user.id });
   return { ok: true, email: user.email };
+  });
 }
