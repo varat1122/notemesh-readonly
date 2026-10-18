@@ -185,7 +185,7 @@ export function planVaultOrganization(input:{focus?:Focus;maxExamples?:number}={
         "readback_and_index_qa","remote_device_sync_check"],
       bulkMigrationAllowed:false,
       automaticProtectedThesisUpdateAllowed:false,
-      codeReadyDoesNotMeanLive:false,
+      codeReadyDoesNotMeanLive:true,
     },
     caveats:[
       "Unresolved archive links do not prove original files permanently missing.",
