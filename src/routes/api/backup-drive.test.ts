@@ -111,7 +111,13 @@ it("seals credential with a DR-specific key and rejects tamper, client mismatch,
   const sealed = sealDrRefreshToken("fixture-sealed-refresh-token-123");
   expect(sealed).not.toContain("fixture-sealed-refresh-token");
   expect(openDrCredential(sealed).refreshToken).toBe("fixture-sealed-refresh-token-123");
-  expect(() => openDrCredential(sealed.slice(0, -2) + "XX")).toThrow("invalid_or_missing");
+  // Flip a decoded GCM tag byte, not the final base64url characters: the
+  // latter include unused padding bits and can sometimes decode unchanged.
+  const chunks = sealed.split(".");
+  const tag = Buffer.from(chunks[2], "base64url");
+  tag[0] ^= 0x01;
+  const tampered = [chunks[0], chunks[1], tag.toString("base64url")].join(".");
+  expect(() => openDrCredential(tampered)).toThrow("invalid_or_missing");
   vi.stubEnv("NOTEMESH_DRIVE_CLIENT_ID", "other-client.apps.googleusercontent.com");
   expect(() => openDrCredential(sealed)).toThrow("invalid_or_missing");
   vi.stubEnv("NOTEMESH_DRIVE_CLIENT_ID", "test-dr-client.apps.googleusercontent.com");
