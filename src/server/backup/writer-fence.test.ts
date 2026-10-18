@@ -106,14 +106,16 @@ describe("SnapshotWriterFence (isolated fixture only)",()=>{
   });
   it("revokes inherited async admission when parent returns; rejects detached work during freeze",async()=>{
     const fence=new SnapshotWriterFence(),gate=deferred<void>();
-    let detached!:()=>Promise<void>;
+    let detached!:Promise<void>;
     await fence.withWrite(async()=>{
-      detached=async()=>{await gate.promise;fence.withWriteSync(()=>42);};
+      // Spawn a promise from INSIDE an admitted writer but don't await it.
+      // The async-local context survives the parent in this detached task;
+      // it must not retain writer privilege after the parent releases.
+      detached=(async()=>{await gate.promise;fence.withWriteSync(()=>42);})();
     });
-    // Constructed separately after the parent ended; no inherited privilege.
     const snapshot=fence.withFrozenWriters(async()=>{
       gate.resolve();
-      await expect(detached()).rejects.toThrow("backup_writer_freeze_active");
+      await expect(detached).rejects.toThrow("backup_writer_freeze_active");
       expect(fence.status.activeWriters).toBe(0);
     });
     await snapshot;
