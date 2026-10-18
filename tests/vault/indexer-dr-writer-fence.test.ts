@@ -62,3 +62,27 @@ it("releases writer tickets after normal indexing, so a later freeze can drain",
   await expect(fence.withFrozenWriters(() => "snapshot", { drainTimeoutMs: 50 }))
     .resolves.toBe("snapshot");
 });
+
+it("defers removal of an oversized note until thaw instead of swallowing the freeze error", async () => {
+  const { reindexPath, indexer, indexerStatus } = await import("~/server/vault/indexer");
+  const { db } = await import("~/server/db");
+  const { inProcessDrWriterFence: fence } = await import("~/server/backup/writer-fence");
+  const count = () => (db().prepare("SELECT COUNT(*) AS n FROM notes").get() as { n: number }).n;
+  const filename = path.join(vault, "large.md");
+  fs.writeFileSync(filename, "# Initial\n");
+  reindexPath("large.md");
+  expect(count()).toBe(1);
+  // The branch handling an oversized file calls removeFile INSIDE the read
+  // try/catch. A freeze rejection must propagate instead of being mistaken
+  // for an ordinary missing/symlinked file.
+  fs.writeFileSync(filename, Buffer.alloc(1_000_001, 0x61));
+  await fence.withFrozenWriters(async () => {
+    reindexPath("large.md");
+    expect(count()).toBe(1);
+  });
+  await vi.waitFor(() => {
+    expect(count()).toBe(0);
+    expect(indexer().ready).toBe(true);
+    expect(indexerStatus().unindexedNotes).toBe(1);
+  }, { timeout: 5_000 });
+});
