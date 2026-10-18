@@ -23,12 +23,28 @@ export class SnapshotWriterFence {
     }
   }
 
-  /** Gate an entirely synchronous mutator; release its ticket before return. */
-  withWriteSync<T>(perform:()=>T):T {
+  /**
+   * Admit a disk-backed resource whose writable lifetime extends beyond a
+   * single method call (e.g. an open SQLite connection). The owner MUST call
+   * the returned release exactly once on close, including error paths.
+   * An unclosed resource intentionally makes the backup drain time out.
+   */
+  acquireWriteTicket():()=>void {
     if(this.frozen)throw Error("backup_writer_freeze_active");
     this.activeWriters++;
+    let released=false;
+    return ()=>{
+      if(released)throw Error("backup_writer_ticket_already_released");
+      released=true;
+      this.releaseWrite();
+    };
+  }
+
+  /** Gate an entirely synchronous mutator; release its ticket before return. */
+  withWriteSync<T>(perform:()=>T):T {
+    const release=this.acquireWriteTicket();
     try{return perform();}
-    finally {this.releaseWrite();}
+    finally {release();}
   }
 
   /**
@@ -36,10 +52,9 @@ export class SnapshotWriterFence {
    * ticket through asynchronous I/O. Reject if a freeze is already active.
    */
   async withWrite<T>(perform:()=>T|Promise<T>):Promise<T> {
-    if(this.frozen)throw Error("backup_writer_freeze_active");
-    this.activeWriters++;
+    const release=this.acquireWriteTicket();
     try{return await perform();}
-    finally {this.releaseWrite();}
+    finally {release();}
   }
 
   /**
