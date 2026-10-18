@@ -88,12 +88,22 @@ it("reads actual coordinated raw Safe Edit preview/apply receipt and isolates a 
   expect(after.stages[0].receipt.reindex).toBe("verified");
   expect(after.stages[0].receipt.mobileSync).toBe("unverified");
   expect(after.stages[1].state).toBe("not_found_or_not_owned");
+  const same={operationId,path:destination,reason:"Synthetic coordinate receipt test",
+    content:"# Synthetic source; no external fact verification\\n"};
+  const repeated=await c.client.callTool({name:"create_note",arguments:same});
+  expect(repeated.isError).not.toBe(true);
+  expect(unpack(repeated).status).toBe("written");
+  expect(unpack(repeated).previewToken).toBeNull();
   const different=await connected({...access,label:"oauth:other-client"});
   try{
    const other=unpack(await different.client.callTool({name:"inspect_coordinated_writeback",arguments:{planId}}));
    expect(other.stages[0].state).toBe("not_found_or_not_owned");
    expect(other.stages[0].path).toBeNull();
   }finally{await different.close();}
+  fs.appendFileSync(path.join(root,"vault",destination),"\\nChanged by a peer");
+  const stale=await c.client.callTool({name:"create_note",arguments:same});
+  expect(stale.isError).toBe(true);
+  expect(JSON.stringify(stale)).toContain("Coordinated retry refused");
  }finally{await c.close();}
 });
 it("gates text intake source→AI review on real same-actor readback and exact source hash",async()=>{
