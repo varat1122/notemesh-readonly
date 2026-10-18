@@ -6,8 +6,13 @@
  * Until that integration is audited, neither this primitive nor an Obsidian
  * child pause can be used to claim a consistent production backup.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
+
 export class SnapshotWriterFence {
   private activeWriters=0;
+  // Nested write helpers may run AFTER freeze begins, but only when their
+  // ancestor was admitted BEFORE the freeze and is still in flight.
+  private readonly admissionContext=new AsyncLocalStorage<{active:boolean}>();
   private frozen=false;
   private waiting: Set<() => void>=new Set();
 
@@ -30,7 +35,8 @@ export class SnapshotWriterFence {
    * An unclosed resource intentionally makes the backup drain time out.
    */
   acquireWriteTicket():()=>void {
-    if(this.frozen)throw Error("backup_writer_freeze_active");
+    if(this.frozen && !this.admissionContext.getStore()?.active)
+      throw Error("backup_writer_freeze_active");
     this.activeWriters++;
     let released=false;
     return ()=>{
@@ -42,9 +48,10 @@ export class SnapshotWriterFence {
 
   /** Gate an entirely synchronous mutator; release its ticket before return. */
   withWriteSync<T>(perform:()=>T):T {
-    const release=this.acquireWriteTicket();
-    try{return perform();}
-    finally {release();}
+    if(this.admissionContext.getStore()?.active) return perform();
+    const release=this.acquireWriteTicket(), scope={active:true};
+    try{return this.admissionContext.run(scope,perform);}
+    finally {scope.active=false;release();}
   }
 
   /**
@@ -52,9 +59,10 @@ export class SnapshotWriterFence {
    * ticket through asynchronous I/O. Reject if a freeze is already active.
    */
   async withWrite<T>(perform:()=>T|Promise<T>):Promise<T> {
-    const release=this.acquireWriteTicket();
-    try{return await perform();}
-    finally {release();}
+    if(this.admissionContext.getStore()?.active) return await perform();
+    const release=this.acquireWriteTicket(), scope={active:true};
+    try{return await this.admissionContext.run(scope,perform);}
+    finally {scope.active=false;release();}
   }
 
   /**
@@ -65,6 +73,8 @@ export class SnapshotWriterFence {
    */
   async withFrozenWriters<T>(perform:()=>T|Promise<T>,opts:{drainTimeoutMs?:number}={}):Promise<T>{
     if(this.frozen)throw Error("backup_already_in_progress");
+    if(this.admissionContext.getStore()?.active)
+      throw Error("backup_freeze_cannot_run_within_writer");
     const timeoutMs=opts.drainTimeoutMs??10_000;
     if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>300_000)
       throw Error("invalid_backup_drain_timeout");
@@ -88,7 +98,8 @@ export class SnapshotWriterFence {
         }
       }
       if(this.activeWriters!==0)throw Error("backup_writer_drain_incomplete");
-      return await perform();
+      // Snapshot callbacks never inherit a write-admission privilege.
+      return await this.admissionContext.run({active:false},perform);
     }finally{this.frozen=false;}
   }
 }
