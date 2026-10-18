@@ -1,7 +1,7 @@
 import type { APIEvent } from "@solidjs/start/server";
 import { auth, runAuthMigrations } from "~/server/auth";
 import { env } from "~/server/env";
-import { validDrConsentFormProof, drConsentRequestOriginAllowed } from "~/server/backup/drive-consent-form";
+import { issueDrConsentFormProof, validDrConsentFormProof, drConsentRequestOriginAllowed } from "~/server/backup/drive-consent-form";
 import { beginDrDriveConsent, driveSetupClient, driveSetupEnabled, DR_DRIVE_CALLBACK_PATH } from "~/server/backup/drive-auth";
 import { claimDrCredential, drDriveHeaders as headers, escapeHtml as esc } from "~/server/backup/drive-admin";
 
@@ -51,6 +51,10 @@ export async function GET({ request }: APIEvent) {
   ${driveSetupEnabled() && configured ?
    `<p><strong>Mobile browser:</strong> tap the direct Google consent link below. It navigates to Google without a form redirect.</p>\n  ${directConsentUrl ? `<p><a href="${esc(directConsentUrl)}" target="_self" rel="noreferrer noopener" referrerpolicy="no-referrer">Open Google consent directly (recommended)</a></p>` : `<p>Consent link temporarily unavailable; wait five minutes, then reload.</p>`}` :
    '<p>Consent is disabled until the OAuth callback is deployed and the feature flag is approved.</p>'}
+  ${process.env.RAILWAY_ENVIRONMENT_NAME === "staging" && driveSetupEnabled() && !!process.env.NOTEMESH_DRIVE_CREDENTIAL ?
+    `<h2>Staging-only credential smoke test (no Drive file access)</h2>
+    <p>Use the button once to verify the encrypted credential decrypts and Google accepts its refresh grant. It does not upload or schedule anything.</p>
+    <form method="post" action="/api/backup-drive/credential-check"><input type="hidden" name="dr_consent_proof" value="${esc(issueDrConsentFormProof(admin.session?.id ?? admin.user.id, env.encryptionKey))}"><button type="submit">Verify stored Google DR credential (no upload)</button></form>` : ""}
   <p>Required next gates: explicit permission to access an authorized app-created Drive folder,
   production writer coordination, verified upload/download, isolated restore drill, alerts and scheduling.</p>
   </main></body></html>`;
