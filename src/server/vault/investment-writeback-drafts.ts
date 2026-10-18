@@ -4,6 +4,8 @@
  * there is no AI research synthesis or publisher verification in this module.
  * Actual writes require separate Safe Edit preview, approval, apply, receipt.
  */
+import { createHash } from "node:crypto";
+
 export interface DraftRequest {
  planId:string; domain:string; entities:string[]; topic:string;
  inputFormat:"text"|"screenshot"|"pdf"|"mixed";
@@ -28,6 +30,7 @@ export interface DraftPacket {
  original:Draft;
  analysis:Draft;
  timeline:"not_prepared_requires_event_source_dedup_and_approval";
+ expectedOriginalSha256:string;
  exactUserInputPreserved:boolean;
  aiAnalysisIndependentlyVerified:false;
  canAutoWrite:false;
@@ -98,6 +101,7 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
  };
  return {
   status:"read_only_separated_drafts_not_written",original,analysis,
+  expectedOriginalSha256:createHash("sha256").update(rawContent,"utf8").digest("hex"),
   timeline:"not_prepared_requires_event_source_dedup_and_approval",
   exactUserInputPreserved:original.content!==null,aiAnalysisIndependentlyVerified:false,canAutoWrite:false,
  };
