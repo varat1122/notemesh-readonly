@@ -34,6 +34,20 @@ describe("separate source and analysis candidate Safe Edit drafts (no writes)",(
    expect(p.aiAnalysisIndependentlyVerified).toBe(false);
    expect(p.canAutoWrite).toBe(false);
  });
+ it("labels non-archived news/IR user inputs as source captures, not ChatGPT historical AI",()=>{
+   for(const sourceKind of ["news_media","issuer_release","regulatory_filing","user_commentary"]){
+     const p=composeWritebackDrafts({...fixture(),sourceKind});
+     expect(p.original.content).toContain("type: investment_source_capture");
+     expect(p.original.content).toContain("source_type: user_supplied");
+     expect(p.original.content).toContain("verification: not_reverified");
+     expect(p.original.content).not.toContain("type: chatgpt_archive");
+     expect(p.analysis.content).toContain("type: investment_review");
+     expect(p.analysis.content).toContain("source_type: archived_ai");
+   }
+   const archive=composeWritebackDrafts(fixture());
+   expect(archive.original.content).toContain("type: chatgpt_archive");
+   expect(archive.original.content).toContain("source_type: archived_ai");
+ });
  it("attests verbatim original text SHA, UTF-8 length and newline independent of Markdown wrapper",()=>{
    const v=fixture();
    v.extractedText="\nข้อความภาษาไทย / Japanese 日本語 / 中文\t  ";
