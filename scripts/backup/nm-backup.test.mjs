@@ -16,6 +16,7 @@ function fixture(fn) {
   const data=path.join(root,"data"),out=path.join(root,"bundles");
   fs.mkdirSync(path.join(data,"vault","05_Thesis"),{recursive:true});
   fs.mkdirSync(path.join(data,"home"),{recursive:true});
+  fs.mkdirSync(path.join(data,"vault","Empty-Folder"),{recursive:true});
   fs.writeFileSync(path.join(data,"vault","05_Thesis","NVDA.md"),"# Thesis\nทดสอบ");
   fs.writeFileSync(path.join(data,"home","auth.conf"),"fixture secret in encrypted bundle");
   fs.mkdirSync(path.join(data,"market-prices"),{recursive:true});
@@ -40,6 +41,7 @@ test("encrypted fixture snapshot, SHA readback, SQLite WAL recovery and non-dest
   const target=path.join(root,"restored");
   const restored=JSON.parse(command(["restore","--bundle",created.bundle,"--dest",target]));
   assert.equal(restored.restored,true);
+  assert.ok(fs.statSync(path.join(target,"vault","Empty-Folder")).isDirectory());
   assert.equal(fs.readFileSync(path.join(target,"vault","05_Thesis","NVDA.md"),"utf8"),"# Thesis\nทดสอบ");
   const d=new DatabaseSync(path.join(target,"app.sqlite"),{readOnly:true});
   assert.equal(d.prepare("SELECT value FROM claims").get().value,"committed wal");
@@ -69,4 +71,25 @@ test("unsafe source types, overlapping paths, and missing offline acknowledgemen
   fs.symlinkSync("/etc/passwd",path.join(data,"vault","badlink"));
   const symlink=spawnSync(process.execPath,[tool,"create","--data-dir",data,"--out",out,"--fixture-only"],{env,encoding:"utf8"});
   assert.notEqual(symlink.status,0);
+}));
+
+test("unsafe directory symlinks and filenames fail closed, without leaking outside bytes",()=>fixture(async ({root,data,out})=>{
+  const secret=path.join(root,"unrelated.txt");
+  fs.writeFileSync(secret,"OUTSIDE THE ALLOWED DATA ROOT");
+  fs.symlinkSync(root,path.join(data,"vault","external-directory"));
+  let check=spawnSync(process.execPath,[tool,"create","--data-dir",data,"--out",out,"--fixture-only"],{env,encoding:"utf8"});
+  assert.notEqual(check.status,0);
+  fs.unlinkSync(path.join(data,"vault","external-directory"));
+  fs.writeFileSync(path.join(data,"vault","line\nbreak.md"),"x");
+  check=spawnSync(process.execPath,[tool,"create","--data-dir",data,"--out",out,"--fixture-only"],{env,encoding:"utf8"});
+  assert.notEqual(check.status,0);
+  const backupDir=fs.existsSync(out)?fs.readdirSync(out):[];
+  assert.equal(backupDir.some(x=>x.endsWith(".nmb")),false);
+}));
+test("fails closed on a missing SQLite primary DB",()=>fixture(async ({data,out,db})=>{
+  db.close();
+  fs.rmSync(path.join(data,"app.sqlite"),{force:true});
+  const processResult=spawnSync(process.execPath,[tool,"create","--data-dir",data,"--out",out,"--fixture-only"],{env,encoding:"utf8"});
+  assert.notEqual(processResult.status,0);
+  assert.match(processResult.stderr,/app.sqlite not found/);
 }));
