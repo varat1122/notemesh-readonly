@@ -289,6 +289,34 @@ export function status(id:string,actor:string) {
   return {operationId:id,status:r.status,path:(JSON.parse(r.payload) as PreviewInput).path,
     beforeHash:r.before_hash,afterHash:r.after_hash,receipt:r.receipt?JSON.parse(r.receipt):null};
 }
+/**
+ * Guard the APPLY stage, not only preview, against a stale or substituted
+ * coordinated source. This also covers a generic Safe Edit create_note/apply
+ * call that attempts to bypass the convenience intake-preview tool.
+ */
+function assertCoordinatedResearchSource(input:PreviewInput,actor:string,after:string) {
+  const m=/^ios_in-([a-f0-9]{16})_review_v1$/.exec(input.operationId);
+  const canonical=/^10_Knowledge\/(?:Company Research|Industry and Concepts|Macro and Markets)\/Investment Review - [^/]+ - IN-([A-F0-9]{16})\.md$/.exec(input.path);
+  if(!m&&!canonical)return;
+  if(!m||!canonical||canonical[1].toLowerCase()!==m[1]||input.change.kind!=="create")
+    throw Error("Coordinated review path and operation identity must match and create a separate note");
+  const expectedPath="00_Inbox/ChatGPT/Investment Intake - IN-"+m[1].toUpperCase()+".md";
+  const source=owned("ios_in-"+m[1]+"_raw_v1",actor);
+  const payload=JSON.parse(source.payload) as PreviewInput;
+  const receipt=source.receipt?JSON.parse(source.receipt) as Record<string,unknown>:null;
+  const md=document(after).data;
+  if(payload.path!==expectedPath||source.status!=="written"||
+      receipt?.path!==expectedPath||receipt.afterHash!==source.after_hash||
+      receipt.write!=="written"||receipt.readback!=="verified"||receipt.reindex!=="verified"||
+      !/^[a-f0-9]{64}$/.test(source.after_hash)||
+      md.original_intake_path!==expectedPath||
+      md.original_intake_sha256!==source.after_hash||
+      md.original_source_verified!==false)
+    throw Error("Coordinated review requires exact same-actor raw source verified write/readback/reindex and digest");
+  const current=read(target(expectedPath).abs);
+  if(current===null||sha256(current)!==source.after_hash)
+    throw Error("Coordinated review source changed since its verified write; do not apply stale preview");
+}
 export function apply(input:unknown,actor:string) {
   assertEnabled();const args=applySchema.parse(input),r=owned(args.operationId,actor);
   if(!crypto.timingSafeEqual(Buffer.from(sha256(args.previewToken),"hex"),Buffer.from(r.token_hash,"hex"))||args.expectedHash!==r.before_hash) throw Error("Invalid preview token or expected hash");
@@ -297,6 +325,7 @@ export function apply(input:unknown,actor:string) {
   if(requiresApproval(r)&&!r.approval) throw Error("Explicit admin approval of this exact thesis diff is required; open approvalUrl");
   const p=JSON.parse(r.payload) as PreviewInput;
   if(r.status==="writing") throw Error("Interrupted write: inspect receipt and backup; do not replay without recovery review");
+  assertCoordinatedResearchSource(p,actor,r.after_text);
   // Cross-process lock deliberately has no stale timeout. A crash requires
   // administrator recovery, rather than silently racing an unknown writer.
   const lock=path.join(env.dataDir,"safe-edit.lock");
@@ -305,7 +334,8 @@ export function apply(input:unknown,actor:string) {
     const {abs}=target(p.path),current=read(abs);
     if((p.change.kind==="create"?current!==null:current===null)||sha256(current??"")!==r.before_hash) throw Error("Version conflict: re-preview; another writer changed this note");
     checkEvidence(p,current??"");
-    document(r.after_text);assertHeadroom(Buffer.byteLength(r.before_text)*2+Buffer.byteLength(r.after_text)+64_000);
+    document(r.after_text);assertCoordinatedResearchSource(p,actor,r.after_text);
+    assertHeadroom(Buffer.byteLength(r.before_text)*2+Buffer.byteLength(r.after_text)+64_000);
     backup(r,p);
     const receipt={operationId:r.id,path:p.path,beforeHash:r.before_hash,afterHash:r.after_hash,
       writtenAt:null as string|null,write:"pending",readback:"pending",reindex:"pending",
@@ -314,6 +344,7 @@ export function apply(input:unknown,actor:string) {
     store().prepare("UPDATE safe_edit_operations SET status='writing',receipt=? WHERE id=?").run(JSON.stringify(receipt),r.id);
     log(r.id,actor,"write_started",{path:p.path,beforeHash:r.before_hash,afterHash:r.after_hash});
     try {
+      assertCoordinatedResearchSource(p,actor,r.after_text);
       atomic(r,p);
       receipt.write="written";receipt.writtenAt=new Date().toISOString();
       if(sha256(read(abs)??"")!==r.after_hash) throw Error("Readback hash mismatch; backup retained");
