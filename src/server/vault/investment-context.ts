@@ -41,6 +41,20 @@ function namedIssuer(path: string): string | null {
   // Reject obvious generic metric acronyms and source/vintage IDs; this is a
   // conservative title heuristic, not proof of an issuer's legal identity.
   if(path.startsWith("10_Knowledge/Company Research/")){
+    // Archived company research declares its primary company in frontmatter.
+    // A title like "CrowdStrike × CLEAR" otherwise returns CLEAR as the first
+    // all-caps token and incorrectly excludes the CRWD research event.
+    const indexed=db().prepare("SELECT frontmatter FROM notes WHERE path=?").get(path)
+      as {frontmatter:string|null}|undefined;
+    if(indexed?.frontmatter){
+      try {
+        const fm=JSON.parse(indexed.frontmatter) as Record<string,unknown>;
+        const declared=Array.isArray(fm.company)?fm.company:[fm.company];
+        const tagged=declared.filter((v):v is string=>typeof v==="string")
+          .map(v=>v.trim().toUpperCase()).filter(v=>/^[A-Z][A-Z0-9.-]{0,11}$/.test(v));
+        if(tagged.length)return tagged[0];
+      }catch{/* Invalid legacy metadata falls back to conservative filename inference. */}
+    }
     const codes=[...file.matchAll(/(?:^|[^A-Za-z0-9])([A-Z][A-Z0-9]{1,7})(?=[^A-Za-z0-9]|$)/g)]
       .map(x=>x[1]).filter(x=>!/^(?:P\d+|F\d+|Q\d+|FY\d+|USD|GDP|EPS|FCF|OCF|ROIC|BOM|TAM|GPU|CPU|CPO|NPO|ROI|CEO|CFO|IR|US|AI|DC)$/.test(x));
     return codes[0]??null;
@@ -236,9 +250,18 @@ export function buildInvestmentContextPack(req: Input): Pack {
       }
     } catch { failed.push(term); }
   }
+  // Promote same-event research whose headline contains the user's specific
+  // subject (e.g. CrowdStrike + CLEAR), not older ticker-only summaries.
+  // The ranking is a discovery hint, never a deduplication or source verdict.
+  const subjectTerms=topicTerms(question).filter(t=>t.length>=4 && !/^[0-9]/.test(t) &&
+    !issuers.includes(t) && !/^(?:HISTORICAL|ARCHIVE|RE-INGEST|UPDATE|LATEST|NEW|EVENT|TEST|VERIFY|SOURCE|CLAIM|NEWS|RESEARCH)$/.test(t));
   const rank = [...pool].map(([path,boost])=>{
     const role=roleOf(path);
     const companyBonus=issuerTokenInTitle(path,issuers)?22:0;
+    const title=(path.split("/").at(-1)??"").normalize("NFC").toUpperCase();
+    const eventTitleMatches=subjectTerms.filter(term=>title.split(/[^\\p{L}\\p{N}]+/u).includes(term)).length;
+    const specificEventBonus=issuers.length && role==="research"
+      ? Math.min(3,eventTitleMatches)*35:0;
     const macroBonus=macroScope && primaryTopic ?
       (explicitMacroScope(path,primaryTopic)?25:0) +
       (path.startsWith("10_Knowledge/Macro and Markets/")?25:0) +
@@ -249,7 +272,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
     const focusBonus=focus==="tam"&&/TAM|Industries|Concepts/.test(path)?20:
       focus==="broker"&&/Broker|Evolution|Research/.test(path)?17:
       focus==="earnings"&&/Primary Evidence|Event_Lineage/.test(path)?20:0;
-    return {path,role,score:base[role]+boost+companyBonus+focusBonus+macroBonus-(role==="archive"?45:0)};
+    return {path,role,score:base[role]+boost+companyBonus+focusBonus+macroBonus+specificEventBonus-(role==="archive"?45:0)};
   }).sort((a,b)=>b.score-a.score||a.path.localeCompare(b.path));
   const items: Item[] = [];
   // Archived chat excerpts are a last resort and may repeat one issuer event.
