@@ -151,7 +151,8 @@ export function reconcileCoordinatedWriteback(
     }
     else if(record?.status==="written"){
       if(record.receipt?.write==="written"&&record.receipt.readback==="verified"&&
-        record.receipt.reindex==="verified"&&/^[a-f0-9]{64}$/.test(record.afterHash)){
+        record.receipt.reindex==="verified"&&record.receipt.path===record.path&&
+        record.receipt.afterHash===record.afterHash&&/^[a-f0-9]{64}$/.test(record.afterHash)){
         state="applied_verified";reason="actor_scoped_write_readback_reindex_receipt";
       }else {state="repair_required";reason="write_record_lacks_verified_local_readback_or_index";}
     }
