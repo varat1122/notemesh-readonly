@@ -65,6 +65,7 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
  ])+"# User-supplied source capture — "+req.planId+"\n\n"+
  "This record preserves supplied input. Publisher, dates, claims and any transcription are NOT independently verified.\n\n"+
  "## Original input (verbatim as supplied)\n\n"+fence(req.extractedText)+"\n";
+ const originalContentHash=createHash("sha256").update(rawContent,"utf8").digest("hex");
  const rawReasons=[...req.rawRoute.holdReasons];
  if(req.inputFormat!=="text"&&!req.attachmentVerified)
   rawReasons.push("original_image_or_pdf_bytes_not_preserved");
@@ -87,6 +88,7 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
  const reviewContent=analysisText.trim()?fm("investment_review","archived_ai",[
    "topic: "+y(req.topic),"analysis_role: "+y("ai_interpretation_not_evidence"),
    "original_intake_path: "+y(req.rawRoute.path),
+   "original_intake_sha256: "+y(originalContentHash),
    "original_source_verified: false","owner_approved_thesis: false",
   ])+"# AI research review — "+req.planId+"\n\n"+
   "Original input: "+sourceLink+"\n\n"+
@@ -101,7 +103,7 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
  };
  return {
   status:"read_only_separated_drafts_not_written",original,analysis,
-  expectedOriginalSha256:createHash("sha256").update(rawContent,"utf8").digest("hex"),
+  expectedOriginalSha256:originalContentHash,
   timeline:"not_prepared_requires_event_source_dedup_and_approval",
   exactUserInputPreserved:original.content!==null,aiAnalysisIndependentlyVerified:false,canAutoWrite:false,
  };
