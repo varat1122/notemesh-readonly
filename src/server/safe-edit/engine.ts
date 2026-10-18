@@ -313,9 +313,16 @@ function assertCoordinatedResearchSource(input:PreviewInput,actor:string,after:s
       md.original_intake_sha256!==source.after_hash||
       md.original_source_verified!==false)
     throw Error("Coordinated review requires exact same-actor raw source verified write/readback/reindex and digest");
-  const current=read(target(expectedPath).abs);
+  const sourcePath=target(expectedPath).abs;
+  const current=read(sourcePath);
   if(current===null||sha256(current)!==source.after_hash)
     throw Error("Coordinated review source changed since its verified write; do not apply stale preview");
+  const indexed=store().prepare("SELECT mtime,size FROM notes WHERE path=?")
+    .get(expectedPath) as {mtime:number;size:number}|undefined;
+  const stat=fs.statSync(sourcePath);
+  if(!indexed||indexed.size!==Buffer.byteLength(current,"utf8")||
+      indexed.mtime!==Math.round(stat.mtimeMs))
+    throw Error("Coordinated review source index is stale; reindex and reapprove before applying");
 }
 export function apply(input:unknown,actor:string) {
   assertEnabled();const args=applySchema.parse(input),r=owned(args.operationId,actor);
