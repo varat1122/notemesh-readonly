@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import {createHash} from "node:crypto";
 import {resolveNotePath,openNoFollow} from "../vault/paths";
+import {db} from "../db";
 import { status } from "./engine";
 import { coordinatedStageIds, type CoordinatedKind } from "../vault/investment-writeback-coordination";
 
@@ -47,7 +48,12 @@ function currentLocalDigestMatches(rel:string,expectedHash:string):boolean {
     if(!st.isFile()||st.nlink!==1||st.size>100_000)return false;
     const content=fs.readFileSync(fd);
     if(content.length!==st.size||content.includes(0))return false;
-    return createHash("sha256").update(content).digest("hex")===expectedHash;
+    if(createHash("sha256").update(content).digest("hex")!==expectedHash)return false;
+    const indexed=db().prepare("SELECT mtime,size FROM notes WHERE path=?")
+      .get(rel) as {mtime:number;size:number}|undefined;
+    // A historic reindex receipt is not proof that the current file is still
+    // correctly represented in the live full-text index.
+    return indexed?.size===st.size&&indexed.mtime===Math.round(st.mtimeMs);
   }catch{return false;}finally{if(fd!==undefined)fs.closeSync(fd);}
 }
 export function inspectCoordinatedWritebackBatch(planId:string,actor:string) {
@@ -95,7 +101,7 @@ export function inspectCoordinatedWritebackBatch(planId:string,actor:string) {
     },
     warnings:[
       "Status is retrieved from Safe Edit's actual actor-scoped journal, not a user-provided receipt.",
-      "locally_verified requires a prior Safe Edit write/readback/reindex receipt AND a fresh SHA-256 match to current local bytes; remote/mobile Sync remains unverified.",
+      "locally_verified requires prior Safe Edit write/readback/reindex, fresh local SHA-256 equality and current matching index size/mtime; remote/mobile Sync remains unverified.",
       "No dependent operation may be created or applied without a fresh matching plan, evidence review, prior-step receipt and explicit Safe Edit approval.",
       "A writing/interrupted record requires administrator investigation; never replay or automatically rollback a multi-note sequence.",
     ],
