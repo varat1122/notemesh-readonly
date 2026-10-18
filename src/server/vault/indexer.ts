@@ -102,7 +102,11 @@ function indexFile(relPath: string, absPath: string) {
     } finally {
       fs.closeSync(fd);
     }
-  } catch {
+  } catch (e) {
+    // An oversized note can remove old index rows inside the read branch.
+    // Freeze refusal is not a filesystem error: propagate it so reconciliation
+    // is scheduled rather than silently leaving stale index rows behind.
+    if (e instanceof Error && e.message === "backup_writer_freeze_active") throw e;
     return; // Deleted between event and read, or a symlink: either way, not indexed.
   }
   const parsed = parseNote(relPath, content);
@@ -178,7 +182,9 @@ export function reindexPath(relPath: string) {
     }
     resolveLinksFor(relPath);
   } catch (e) {
-    console.error("[indexer] reindexPath failed:", e);
+    if (e instanceof Error && e.message === "backup_writer_freeze_active")
+      indexer().scheduleRebuildAfterThaw();
+    else console.error("[indexer] reindexPath failed:", e);
   }
 }
 
@@ -296,12 +302,12 @@ class VaultIndexer {
 
   // A watcher event during freeze must neither crash the server nor vanish.
   // Once thawed, rebuild to reconcile coalesced events and a partial index.
-  private rebuildAfterThaw() {
+  scheduleRebuildAfterThaw() {
     if (this.thawRetryTimer) return;
     const retry = () => {
       this.thawRetryTimer = null;
       if (inProcessDrWriterFence.status.frozen || this.building) {
-        this.rebuildAfterThaw();
+        this.scheduleRebuildAfterThaw();
         return;
       }
       void this.rebuild().catch(e => console.error("[indexer] post-freeze rebuild failed:", e));
@@ -314,7 +320,7 @@ class VaultIndexer {
     try { run(); }
     catch (e) {
       if (e instanceof Error && e.message === "backup_writer_freeze_active")
-        this.rebuildAfterThaw();
+        this.scheduleRebuildAfterThaw();
       else console.error("[indexer] watcher mutation failed:", e);
     }
   }
@@ -399,7 +405,7 @@ class VaultIndexer {
         (e: unknown) => {
           // Remembered, so the alert can say so; ensureIndexerStarted only logs.
           this.lastRebuildError = e instanceof Error ? e.message : String(e);
-          if (this.lastRebuildError === "backup_writer_freeze_active") this.rebuildAfterThaw();
+          if (this.lastRebuildError === "backup_writer_freeze_active") this.scheduleRebuildAfterThaw();
           throw e;
         },
       )
