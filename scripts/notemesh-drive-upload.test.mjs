@@ -24,6 +24,9 @@ test("encrypted Drive upload is append-only and verifies complete remote ciphert
   let uploaded=null,calls=[];
   const fetcher=async(input,opts)=>{
    const uri=new URL(String(input));calls.push({path:uri.pathname,method:opts.method||"GET"});
+   if(uri.pathname==="/drive/v3/files/"+folder&&uri.searchParams.has("fields"))
+     return new Response(JSON.stringify({id:folder,mimeType:"application/vnd.google-apps.folder",
+       capabilities:{canAddChildren:true}}),{status:200});
    if(uri.pathname==="/drive/v3/files"&&uri.searchParams.has("q"))
      return new Response(JSON.stringify({files:[]}),{status:200});
    if(uri.pathname==="/upload/drive/v3/files"&&opts.method==="POST")
@@ -41,7 +44,7 @@ test("encrypted Drive upload is append-only and verifies complete remote ciphert
   assert.equal(x.fileId,remoteId);
   assert.equal(x.bytes,fs.statSync(file).size);
   assert.equal(x.sha256,crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"));
-  assert.deepEqual(calls.map(x=>x.method),["GET","POST","PUT","GET"]);
+  assert.deepEqual(calls.map(x=>x.method),["GET","GET","POST","PUT","GET"]);
   calls=[];uploaded=null;
   const corrupted=async(u,opts)=>{
     const r=await fetcher(u,opts);
