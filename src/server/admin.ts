@@ -6,6 +6,7 @@ import { authFailureSnapshot } from "./mcp/ratelimit";
 import { CLAIM_WINDOW_MINUTES } from "./claim";
 import { requireAdmin } from "./session";
 import { db, getSetting, setSetting } from "./db";
+import { inProcessDrWriterFence } from "./backup/writer-fence";
 import { env, detectOriginMismatch, detectInsecureBaseUrl, railwayLinks } from "./env";
 import { MAX_LOG_LINES } from "~/server/sync";
 import { syncBackend, syncKind } from "./sync";
@@ -249,11 +250,16 @@ export async function revokeOAuthClient(clientId: string) {
   audit("oauth.client.revoke", { user: session.user.id, clientId });
   // Remove the client and everything it was granted (tokens + consent), so a
   // revoked connector loses access immediately.
-  const d = db();
-  d.prepare('DELETE FROM "oauthAccessToken" WHERE clientId = ?').run(clientId);
-  d.prepare('DELETE FROM "oauthRefreshToken" WHERE clientId = ?').run(clientId);
-  d.prepare('DELETE FROM "oauthConsent" WHERE clientId = ?').run(clientId);
-  d.prepare('DELETE FROM "oauthClient" WHERE clientId = ?').run(clientId);
+  // Deleting consent and access tokens is one fenced SQLite transaction.
+  inProcessDrWriterFence.withWriteSync(() => {
+    const d = db();
+    d.transaction(() => {
+      d.prepare('DELETE FROM "oauthAccessToken" WHERE clientId = ?').run(clientId);
+      d.prepare('DELETE FROM "oauthRefreshToken" WHERE clientId = ?').run(clientId);
+      d.prepare('DELETE FROM "oauthConsent" WHERE clientId = ?').run(clientId);
+      d.prepare('DELETE FROM "oauthClient" WHERE clientId = ?').run(clientId);
+    })();
+  });
   return { ok: true };
 }
 
