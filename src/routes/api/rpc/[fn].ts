@@ -3,6 +3,7 @@ import { json } from "@solidjs/router";
 import type { APIEvent } from "@solidjs/start/server";
 import { PublicError } from "~/server/public-error";
 import { originAllowed } from "~/server/origin";
+import { inProcessDrWriterFence } from "~/server/backup/writer-fence";
 
 /**
  * The one door between the browser and the server.
@@ -166,6 +167,12 @@ async function readCappedBody(request: Request): Promise<string | null> {
 }
 
 export async function POST(event: APIEvent) {
+  // Auth getSession and several RPC handlers mutate their own SQLite and
+  // Vault state. Keep the entire asynchronous RPC request admitted until it
+  // finishes, rather than releasing a ticket after session validation.
+  return inProcessDrWriterFence.withWrite(() => postWithWriterTicket(event));
+}
+async function postWithWriterTicket(event: APIEvent) {
   const fn = event.params.fn;
   if (!fn || !/^[a-zA-Z][a-zA-Z0-9]*$/.test(fn)) {
     return json({ error: "bad_request", message: "Invalid procedure name." }, { status: 400 });
