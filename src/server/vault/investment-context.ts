@@ -259,7 +259,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
     const role=roleOf(path);
     const companyBonus=issuerTokenInTitle(path,issuers)?22:0;
     const title=(path.split("/").at(-1)??"").normalize("NFC").toUpperCase();
-    const eventTitleMatches=subjectTerms.filter(term=>title.split(/[^\\p{L}\\p{N}]+/u).includes(term)).length;
+    const eventTitleMatches=subjectTerms.filter(term=>title.split(/[^\p{L}\p{N}]+/u).includes(term)).length;
     const specificEventBonus=issuers.length && role==="research"
       ? Math.min(3,eventTitleMatches)*35:0;
     const macroBonus=macroScope && primaryTopic ?
