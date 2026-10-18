@@ -41,6 +41,27 @@ A long-running Git network operation **may keep the drain waiting**; timeout mus
 
 **Boundary still open:** the continuously running `ob sync --continuous` daemon is launched directly by `SyncSupervisor` rather than `runOb()`, so it is *not* covered by these tickets. Offline fixture `withPausedForEdit()` separately waits for the daemon to exit before capture, but this has not been proven against Production's actual processes or any external devices. Other raw CLI, filesystem and SQLite writers and cross-process exclusivity remain unverified.
 
+### Phase 2.5 — writer coverage hardening and outstanding inventory (Draft, 18 October 2026)
+
+This phase addresses previously unregistered **in-process** mutators, NOT end-to-end production snapshot consistency:
+
+- **Vault content:** `writeVaultFile()` enters a process-local writer scope before any temp file creation/rename. `createNote()`, `moveNote()`, `deleteNote()`, `moveFolder()`, and `deleteFolder()` enter before directory creation, rename, removal and cascading link rewrites. Synthetic test fixtures exercise rejection during freeze, intact data/paths and resumption afterward.
+- **Administration:** OAuth client revocation deletes its consent, access, refresh tokens and client row in one fenced SQLite transaction. Admin password reset holds one async admission ticket through Better Auth password update and session invalidation; neither is permitted to begin after freeze.
+- **Reentrancy:** An operation admitted *before* freeze may call other fenced helpers across awaited I/O without failing midway solely because the freeze began. Context is scoped to its live operation and expires on its return; snapshot callbacks run outside write scope and all new unrelated admissions are rejected. Tests exercise nested writer completion, snapshot drain, self-freeze refusal and denial of writes during capture.
+
+This is NOT a cross-process lease or general SQL transaction coordinator. Remaining explicit **NO-GO** findings and required evidence:
+
+| Path/class | Current boundary | Gate to production |
+| --- | --- | --- |
+| `app.sqlite` shared `db()` handle | Individual known writers fenced; other direct `prepare().run()`, `exec()`, ORM or auth plugin pathways may bypass admission | Enumerate all write statements/routes and instrument every mutator, including asynchronous state transitions |
+| Better Auth sessions/OAuth/API keys | HTTP handlers fenced, admin revoke/reset now fenced; internal background refresh and other direct adapter entry points not proven | Exercise realistic auth background operations and freeze race with SQLite writes |
+| Obsidian continuous daemon, desktop/mobile | Offline fixture helper can stop and await local child only; desktop/mobile clients and out-of-process writers unverified | Positive evidence of daemon and external writer quiescence before capture |
+| Git and market prices | Process-local Git cycles, CLI calls and PriceStore disk handles enrolled; other processes, manual CLI and external Drive price backend not coordinated | Verify backend selection, process count, leases and all other write surfaces |
+| Full Vault, source archive, home, SQLite | No verified globally consistent cut of every data class | Real-format, isolated, synthetic `.nmb` restore through a verified live Drive transport, followed by integrity/lineage validation |
+| Backup scheduler/retention/credentials | No automated Production backup; no proven recovery escrow, durable retries or alert policy | Document RPO/RTO, recovery runbook, monitored schedule, private key escrow, failure rollback |
+
+**Never infer consistency from a green CI, process-local ticket counts, mocked Google Drive transport or isolated fixture snapshots.** PR #36 remains Draft and Production remains out of scope.
+
 ### Production safety blockers: hard NO-GO
 
 1. PROVE COMPLETE WRITE FREEZE: Obsidian Sync must be stopped and awaited, and EVERY writer class must enroll in the same admission and drain mechanism. The shared in-process SnapshotWriterFence has only PARTIAL wiring in this Draft branch, not comprehensive coverage.
