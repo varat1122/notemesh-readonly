@@ -18,7 +18,6 @@ const MAGIC = Buffer.from("NMDR1");
 const HEADER_BYTES = MAGIC.length + 16 + 12;
 const PASS_ENV = "NOTEMESH_BACKUP_PASSPHRASE";
 const KINDS = new Set(["daily", "weekly", "monthly", "predeploy", "fixture"]);
-const EXCLUDE = new Set(["app.sqlite-wal", "app.sqlite-shm", "app.sqlite-journal"]);
 async function shaFile(p) {
   const hash=createHash("sha256");
   for await(const chunk of fs.createReadStream(p)) hash.update(chunk);
@@ -58,14 +57,17 @@ async function run(cmd, argv, options={}) {
   const closed = new Promise((resolve,reject) => {child.on("error",reject);child.on("close", c=>c===0?resolve():reject(Error(cmd+" failed: "+err.slice(0,256))));});
   return {child, closed};
 }
-async function copyTree(src,dst,inventory,rel="") {
+async function copyTree(src,dst,inventory,rel="",databases=[]) {
   for(const e of await fsp.readdir(src,{withFileTypes:true})) {
     if(!nameSafe(e.name)) throw Error("Unsupported filename");
     const child = path.join(src,e.name), target=path.join(dst,e.name), logical=rel ? rel+"/"+e.name:e.name;
     const st = await fsp.lstat(child);
     if(st.isSymbolicLink() || !st.isFile() && !st.isDirectory() || st.nlink !== 1 && st.isFile()) throw Error("Symlink, hardlink or non-regular file refused: "+logical);
-    if(st.isDirectory()) {await fsp.mkdir(target,{recursive:true,mode:0o700}); await copyTree(child,target,inventory,logical);continue;}
-    if(rel==="" && (EXCLUDE.has(e.name) || e.name==="app.sqlite")) continue;
+    if(st.isDirectory()) {await fsp.mkdir(target,{recursive:true,mode:0o700}); await copyTree(child,target,inventory,logical,databases);continue;}
+    if(/\.sqlite(?:-(?:wal|shm|journal))?$/.test(e.name)) {
+      if(e.name.endsWith(".sqlite"))databases.push(logical);
+      continue;
+    }
     const before = {size:st.size,mtimeMs:st.mtimeMs,ino:st.ino};
     await fsp.copyFile(child,target,fs.constants.COPYFILE_EXCL);
     const after = await fsp.lstat(child);
@@ -76,27 +78,23 @@ async function copyTree(src,dst,inventory,rel="") {
 async function stageData(data,stage) {
   const payload=path.join(stage,"payload");
   await fsp.mkdir(payload,{recursive:true,mode:0o700});
-  const inventory=[];
-  await copyTree(data,payload,inventory);
-  const liveDb = path.join(data,"app.sqlite");
-  const stagedDb=path.join(payload,"app.sqlite");
-  if(!fs.existsSync(liveDb)) throw Error("app.sqlite not found; incomplete NoteMesh data directory");
-  // The online SQLite backup API takes a transactionally consistent snapshot,
-  // including committed WAL state; never copy app.sqlite from a live source.
-  await fsp.rm(stagedDb,{force:true});
-  const db=new DatabaseSync(liveDb,{readOnly:true});
-  try {await sqliteBackup(db,stagedDb);} finally {db.close();}
-  const check=new DatabaseSync(stagedDb,{readOnly:true});
-  try {if(check.prepare("PRAGMA integrity_check").get()?.integrity_check!=="ok") throw Error("SQLite integrity check failed");}
-  finally {check.close();}
-  // A readonly integrity check on a WAL-mode snapshot may create sidecars.
-  // They must never enter a self-contained archive.
-  for(const suffix of ["-wal","-shm","-journal"]) await fsp.rm(stagedDb+suffix,{force:true});
-  const dbSize=(await fsp.stat(stagedDb)).size;
-  inventory.push({path:"app.sqlite",size:dbSize,sha256:await shaFile(stagedDb)});
+  const inventory=[],databases=[];
+  await copyTree(data,payload,inventory,"",databases);
+  if(!databases.includes("app.sqlite")) throw Error("app.sqlite not found; incomplete NoteMesh data directory");
+  for(const relative of databases) {
+    const liveDb=path.join(data,relative),stagedDb=path.join(payload,relative);
+    // Online SQLite backup obtains committed WAL contents, never raw live DB copying.
+    const db=new DatabaseSync(liveDb,{readOnly:true});
+    try {await sqliteBackup(db,stagedDb);} finally {db.close();}
+    const check=new DatabaseSync(stagedDb,{readOnly:true});
+    try {if(check.prepare("PRAGMA integrity_check").get()?.integrity_check!=="ok") throw Error("SQLite integrity check failed: "+relative);}
+    finally {check.close();}
+    for(const suffix of ["-wal","-shm","-journal"]) await fsp.rm(stagedDb+suffix,{force:true});
+    inventory.push({path:relative,size:(await fsp.stat(stagedDb)).size,sha256:await shaFile(stagedDb)});
+  }
   inventory.sort((a,b)=>a.path.localeCompare(b.path));
   const meta={
-    format:"notemesh-dr/1",createdAt:new Date().toISOString(),sqlite:"online-backup+integrity-check",
+    format:"notemesh-dr/1",createdAt:new Date().toISOString(),sqlite:"online-backup+integrity-check",sqliteDatabases:databases.sort(),
     files:inventory,totalBytes:inventory.reduce((a,x)=>a+x.size,0)
   };
   await fsp.writeFile(path.join(stage,"manifest.json"),JSON.stringify(meta),{mode:0o600,flag:"wx"});
@@ -171,9 +169,14 @@ async function checkStage(stage) {
   await walk(path.join(stage,"payload"));
   if(actual.length!==seen.size || actual.some(x=>!seen.has(x)) || total!==meta.totalBytes || !seen.has("app.sqlite"))
     throw Error("Archive file count/size mismatch (manifest="+seen.size+",actual="+actual.length+",bytes="+total+"/"+meta.totalBytes+",extra="+actual.filter(x=>!seen.has(x)).slice(0,5).join(",")+")");
-  const db=new DatabaseSync(path.join(stage,"payload","app.sqlite"),{readOnly:true});
-  try {if(db.prepare("PRAGMA integrity_check").get()?.integrity_check!=="ok")throw Error("Recovered database invalid");}
-  finally {db.close();}
+  const paths=meta.sqliteDatabases;
+  if(!Array.isArray(paths) || !paths.length || !paths.includes("app.sqlite") ||
+    paths.some(p=>typeof p!=="string" || !seen.has(p)))throw Error("Missing SQLite database metadata");
+  for(const sqlitePath of paths) {
+    const db=new DatabaseSync(path.join(stage,"payload",sqlitePath),{readOnly:true});
+    try {if(db.prepare("PRAGMA integrity_check").get()?.integrity_check!=="ok")throw Error("Recovered database invalid: "+sqlitePath);}
+    finally {db.close();}
+  }
   return {files:seen.size,bytes:total,createdAt:meta.createdAt};
 }
 async function openVerified(bundle,secret) {
