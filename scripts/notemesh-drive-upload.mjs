@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
+import {verifySnapshot} from "./notemesh-backup.mjs";
 const MAX_BYTES=1024*1024*1024,CHUNK=4*1024*1024;
 const googleHost=(s)=>{
   const u=new URL(s);
@@ -54,7 +55,7 @@ async function accessToken(fetcher=fetch){
   if(json.refresh_token)throw Error("Refresh token rotated: separately update secure secret, no silent discard");
   return json.access_token;
 }
-export async function uploadEncryptedBackup(file,folderId,fetcher=fetch,token=null){
+export async function uploadEncryptedBackup(file,folderId,fetcher=fetch,token=null,archiveKey=undefined){
   const basename=path.basename(file),st=fs.lstatSync(file);
   if(!basename.endsWith(".nmbk")||!st.isFile()||st.isSymbolicLink()||st.nlink!==1||
      st.size<40||st.size>MAX_BYTES)throw Error("Refuse non-encrypted/symlink/oversized backup upload");
@@ -62,13 +63,15 @@ export async function uploadEncryptedBackup(file,folderId,fetcher=fetch,token=nu
   try{fs.readSync(fd,head,0,head.length,0);}finally{fs.closeSync(fd);}
   if(!head.equals(Buffer.from("NMBK1GCM")))throw Error("Not an encrypted NoteMesh snapshot");
   if(!validId(folderId))throw Error("A dedicated owner-approved backup folder ID is required");
+  await verifySnapshot(file,archiveKey);
+  // A verifiably restorable ciphertext is the only artifact permitted to upload.
   const bearer=token??await accessToken(fetcher);
   const auth={Authorization:"Bearer "+bearer},hash=readSha(file);
   // Check prior app-created generations. Drive.file cannot query other apps'
   // unseen files, so folder consent is separately necessary.
   const q="name = '"+basename.replaceAll("'","\\'")+"' and '"+folderId+"' in parents and trashed = false";
   const query=new URL("https://www.googleapis.com/drive/v3/files");
-  query.search=new URLSearchParams({q,fields:"nextPageToken,files(id,name,size)",page_size:"20"}).toString();
+  query.search=new URLSearchParams({q,fields:"nextPageToken,files(id,name,size)",pageSize:"20"}).toString();
   const listing=await request(fetcher,query,{headers:auth});
   const found=await listing.json();
   if(!Array.isArray(found.files))throw Error("Google Drive list permission or response invalid");
@@ -112,6 +115,9 @@ export async function uploadEncryptedBackup(file,folderId,fetcher=fetch,token=nu
     }
   }finally{fs.closeSync(handle);}
   if(!id)throw Error("No Google Drive upload receipt");
+  const after=fs.lstatSync(file);
+  if(after.size!==st.size||after.mtimeMs!==st.mtimeMs||readSha(file)!==hash)
+    throw Error("Local encrypted file changed during upload");
   // Full REMOTE readback and SHA check. Merely receiving a 200 or Drive MD5
   // metadata is insufficient evidence the encrypted backup is recoverable.
   const download=await request(fetcher,
