@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import Database from "better-sqlite3";
 import os from "node:os";
 import path from "node:path";
 import { SnapshotWriterFence } from "./writer-fence";
@@ -221,4 +222,48 @@ it("DR P2.9 rejects a linked or excessive source before running capture",async()
   await expect(withOfflineFixtureCut(opts)).rejects.toThrow("dr_fixture_source_fingerprint_limit");
   expect(capture).not.toHaveBeenCalled();
   expect(fence.status).toEqual({frozen:false,activeWriters:0});
+});
+
+it("DR P2.9 integrates a stable offline fixture cut with genuine encrypted .nmb verify and isolated restore",async()=>{
+  const output=fs.mkdtempSync(path.join(os.tmpdir(),"nm-dr-bundle-fixture-"));
+  const sourceFile=path.join(scratch,"vault","Research","fixture.md");
+  fs.mkdirSync(path.dirname(sourceFile),{recursive:true});
+  fs.writeFileSync(sourceFile,"# Synthetic vault\\n");
+  const db=new Database(path.join(scratch,"app.sqlite"));
+  try{
+    db.exec("CREATE TABLE fixture(id INTEGER PRIMARY KEY, note TEXT); INSERT INTO fixture(note) VALUES('synthetic');");
+  }finally{db.close();}
+  const cli=path.resolve("scripts/backup/nm-backup.mjs");
+  const env={
+    ...process.env,
+    NOTEMESH_BACKUP_PASSPHRASE:"synthetic-dr-fixture-passphrase-1234567890",
+    RAILWAY_PROJECT_ID:"",RAILWAY_SERVICE_ID:"",RAILWAY_ENVIRONMENT_ID:"",
+    RAILWAY_ENVIRONMENT_NAME:"",RAILWAY_PROJECT_NAME:"",RAILWAY_SERVICE_NAME:"",
+  };
+  const exec=(args:string[])=>JSON.parse(execFileSync(process.execPath,[cli,...args],{
+    env,encoding:"utf8",timeout:60000,maxBuffer:1024*1024,
+  }).trim()) as Record<string,unknown>;
+  const events:string[]=[],fence=new SnapshotWriterFence(),{sync}=mockSync(events);
+  try{
+    const receipt=await withOfflineFixtureCut({
+      fence,sync,assertNoExternalWriters:()=>true,
+      capture:()=>exec(["create","--fixture-only","--kind","fixture",
+        "--data-dir",scratch,"--out",path.join(output,"encrypted")]),
+    });
+    const bundle=receipt.bundle as string;
+    expect(bundle).toMatch(/\\.nmb$/);
+    expect(fs.statSync(bundle).size).toBeGreaterThan(100);
+    expect(exec(["verify","--bundle",bundle]).verified).toBe(true);
+    const target=path.join(output,"restore");
+    expect(exec(["restore","--bundle",bundle,"--dest",target]).verified).toBe(true);
+    expect(fs.readFileSync(path.join(target,"vault","Research","fixture.md"),"utf8"))
+      .toBe("# Synthetic vault\\n");
+    const restored=new Database(path.join(target,"app.sqlite"),{readonly:true});
+    try{
+      expect(restored.prepare("SELECT note FROM fixture").get()).toEqual({note:"synthetic"});
+      expect(restored.pragma("integrity_check",{simple:true})).toBe("ok");
+    }finally{restored.close();}
+    expect(events).toEqual(["stop_sync","resume_sync"]);
+    expect(fence.status).toEqual({frozen:false,activeWriters:0});
+  }finally{fs.rmSync(output,{recursive:true,force:true});}
 });
