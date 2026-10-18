@@ -5,6 +5,7 @@ import chokidar, { type FSWatcher } from "chokidar";
 import { countWords } from "./text";
 import { extractStructure, splitFrontmatter } from "./markdown";
 import { db } from "../db";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { env } from "../env";
 import { toVaultRelative, isSafeVaultPath, openNoFollow, MAX_INDEX_BYTES } from "./paths";
 import { createdFor, modifiedFor } from "./modified";
@@ -105,6 +106,8 @@ function indexFile(relPath: string, absPath: string) {
     return; // Deleted between event and read, or a symlink: either way, not indexed.
   }
   const parsed = parseNote(relPath, content);
+  // A full Index/FTS transaction must enter the same writer admission gate.
+  inProcessDrWriterFence.withWriteSync(() => {
   const d = db();
   const tx = d.transaction(() => {
     // The notes row's rowid keys the FTS row. `path` is UNINDEXED in FTS5, and
@@ -154,6 +157,7 @@ function indexFile(relPath: string, absPath: string) {
   });
   tx();
   oversized.delete(relPath);
+  });
 }
 
 // Index a single path synchronously. Called right after a tool writes a note
@@ -183,6 +187,7 @@ export function reindexPath(relPath: string) {
 // Whole-vault re-resolution is left to the debounced watcher path — doing it on
 // every write would rescan every link row in the vault.
 function resolveLinksFor(relPath: string) {
+  inProcessDrWriterFence.withWriteSync(() => {
   const d = db();
   const { byPathLower, byBasename } = buildPathMaps(d);
   const rows = d
@@ -195,6 +200,7 @@ function resolveLinksFor(relPath: string) {
     }
   });
   tx();
+  });
 }
 
 function buildPathMaps(d: ReturnType<typeof db>) {
@@ -216,6 +222,7 @@ function buildPathMaps(d: ReturnType<typeof db>) {
 }
 
 function removeFile(relPath: string) {
+  inProcessDrWriterFence.withWriteSync(() => {
   const d = db();
   const tx = d.transaction(() => {
     // The FTS row is keyed by the note's rowid, so look it up before the note
@@ -230,11 +237,13 @@ function removeFile(relPath: string) {
   });
   tx();
   oversized.delete(relPath);
+  });
 }
 
 // Re-resolve every wikilink against the current set of notes. Cheap enough to
 // run after any batch of changes (debounced).
 function resolveAllLinks() {
+  inProcessDrWriterFence.withWriteSync(() => {
   const d = db();
   const { byPathLower, byBasename } = buildPathMaps(d);
   const rows = d.prepare("SELECT source_path, target FROM links").all() as {
@@ -248,10 +257,12 @@ function resolveAllLinks() {
     }
   });
   tx();
+  });
 }
 
 // Attachments are tracked by path only — enough to resolve embeds.
 function indexAttachment(relPath: string, absPath: string) {
+  inProcessDrWriterFence.withWriteSync(() => {
   try {
     const st = fs.lstatSync(absPath);
     if (st.isSymbolicLink() || !st.isFile()) return;
@@ -266,11 +277,13 @@ function indexAttachment(relPath: string, absPath: string) {
   } catch {
     // vanished between event and stat
   }
+  });
 }
 
 class VaultIndexer {
   private watcher: FSWatcher | null = null;
   private resolveTimer: ReturnType<typeof setTimeout> | null = null;
+  private thawRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private building: Promise<void> | null = null;
   lastFullIndexAt: number | null = null;
   /** The message of the last rebuild that threw; null once one succeeds. Alerted on. */
@@ -281,9 +294,35 @@ class VaultIndexer {
   // partial vault, and this is how they can tell.
   ready = false;
 
+  // A watcher event during freeze must neither crash the server nor vanish.
+  // Once thawed, rebuild to reconcile coalesced events and a partial index.
+  private rebuildAfterThaw() {
+    if (this.thawRetryTimer) return;
+    const retry = () => {
+      this.thawRetryTimer = null;
+      if (inProcessDrWriterFence.status.frozen || this.building) {
+        this.rebuildAfterThaw();
+        return;
+      }
+      void this.rebuild().catch(e => console.error("[indexer] post-freeze rebuild failed:", e));
+    };
+    this.thawRetryTimer = setTimeout(retry, 200);
+    this.thawRetryTimer.unref();
+  }
+
+  private handleWatcherWrite(run: () => void) {
+    try { run(); }
+    catch (e) {
+      if (e instanceof Error && e.message === "backup_writer_freeze_active")
+        this.rebuildAfterThaw();
+      else console.error("[indexer] watcher mutation failed:", e);
+    }
+  }
+
   private scheduleLinkResolve() {
     if (this.resolveTimer) clearTimeout(this.resolveTimer);
-    this.resolveTimer = setTimeout(() => resolveAllLinks(), 1_000);
+    this.resolveTimer = setTimeout(() => this.handleWatcherWrite(() => resolveAllLinks()), 1_000);
+    this.resolveTimer.unref();
   }
 
   // Full rebuild, yielding to the event loop between batches. This used to be
@@ -304,11 +343,11 @@ class VaultIndexer {
       // others full. Wrapped, a failed wipe leaves the previous index intact.
       // The rebuild as a whole still is not atomic — it yields between batches
       // — and does not need to be; see the note on start().
-      d.transaction(() =>
+      inProcessDrWriterFence.withWriteSync(() => d.transaction(() =>
         d.exec(
           "DELETE FROM notes; DELETE FROM notes_fts; DELETE FROM links; DELETE FROM tags; DELETE FROM tasks; DELETE FROM attachments;",
         ),
-      )();
+      )());
       oversized.clear();
       const notes: string[] = [];
       const attachments: string[] = [];
@@ -340,6 +379,7 @@ class VaultIndexer {
         try {
           indexFile(toVaultRelative(notes[i]), notes[i]);
         } catch (e) {
+          if (e instanceof Error && e.message === "backup_writer_freeze_active") throw e;
           console.error(`[indexer] skipped ${toVaultRelative(notes[i])}:`, e);
         }
         if (i % 50 === 49) await yieldToLoop();
@@ -359,6 +399,7 @@ class VaultIndexer {
         (e: unknown) => {
           // Remembered, so the alert can say so; ensureIndexerStarted only logs.
           this.lastRebuildError = e instanceof Error ? e.message : String(e);
+          if (this.lastRebuildError === "backup_writer_freeze_active") this.rebuildAfterThaw();
           throw e;
         },
       )
@@ -396,22 +437,30 @@ class VaultIndexer {
       // with no symlinked component (indexFile re-checks, but reject early).
       if (!isSafeVaultPath(absPath)) return;
       const rel = toVaultRelative(absPath);
-      if (absPath.toLowerCase().endsWith(".md")) indexFile(rel, absPath);
-      else indexAttachment(rel, absPath);
-      this.scheduleLinkResolve();
+      this.handleWatcherWrite(() => {
+        if (absPath.toLowerCase().endsWith(".md")) indexFile(rel, absPath);
+        else indexAttachment(rel, absPath);
+        this.scheduleLinkResolve();
+      });
     };
     this.watcher.on("add", onChange);
     this.watcher.on("change", onChange);
     this.watcher.on("unlink", (absPath: string) => {
       const rel = toVaultRelative(absPath);
       if (rel.startsWith("..") || path.isAbsolute(rel)) return;
-      removeFile(rel);
-      this.scheduleLinkResolve();
+      this.handleWatcherWrite(() => {
+        removeFile(rel);
+        this.scheduleLinkResolve();
+      });
     });
     await this.rebuild();
   }
 
   async stop() {
+    if (this.thawRetryTimer) clearTimeout(this.thawRetryTimer);
+    this.thawRetryTimer = null;
+    if (this.resolveTimer) clearTimeout(this.resolveTimer);
+    this.resolveTimer = null;
     await this.watcher?.close();
     this.watcher = null;
   }
