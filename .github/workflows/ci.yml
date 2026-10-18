@@ -144,7 +144,7 @@ jobs:
           test "$pid1" = "tini"
           # By command line, not by the Name: field: Node 24 names its main
           # thread, so status reports MainThread rather than node.
-          children=$(docker exec nm sh -c 'for p in /proc/[0-9]*; do grep -q "^PPid:[[:space:]]*1$" "$p/status" 2>/dev/null && tr "\\0" " " < "$p/cmdline" && echo; done')
+          children=$(docker exec nm sh -c 'for p in /proc/[0-9]*; do if grep -q "^PPid:[[:space:]]*1$" "$p/status" 2>/dev/null; then tr "\\0" " " < "$p/cmdline" && echo; fi; done; true')
           echo "children of PID 1: $children"
           echo "$children" | grep -q "^node "
 
