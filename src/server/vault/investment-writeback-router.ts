@@ -112,11 +112,11 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const text=T(input.extractedText);
   const entities=[...new Set(input.entities.map(T))];
   const digest=createHash("sha256").update([
-    "investment_os_intake_v1",input.domain,input.inputFormat,input.sourceKind,
+    "investment_os_intake_v2_exact_user_text",input.domain,input.inputFormat,input.sourceKind,
     ...entities.map(x=>x.toLowerCase()),T(input.sourceUrl||""),T(input.rawAttachmentSha256||""),
-    // Hash the exact text (apart from leading/trailing whitespace) to avoid
-    // claiming that translated summaries are identical to raw originals.
-    text
+    // Hash exact UTF-8 user-supplied text, including leading/trailing whitespace.
+    // Idempotency MUST NOT merge two distinct byte-level original captures.
+    input.extractedText
   ].join("\n")).digest("hex");
   const planId="IN-"+digest.slice(0,16).toUpperCase();
   const rawPath="00_Inbox/ChatGPT/Investment Intake - "+planId+".md";
