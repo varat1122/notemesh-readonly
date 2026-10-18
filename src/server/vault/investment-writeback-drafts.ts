@@ -60,7 +60,7 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
   "published_at: "+y(req.publicationDate),
   ...extras,"---",""
  ].join("\n");
- const rawContent=fm("chatgpt_archive",originalRoles,[
+ const rawContent=fm(req.sourceKind==="archived_chat"?"chatgpt_archive":"investment_source_capture",originalRoles,[
   "topic: "+y(req.topic),"input_format: "+y(req.inputFormat),
   "source_kind: "+y(req.sourceKind),"source_language: "+y(req.sourceLanguage),
   "publisher_claimed: "+y(req.publisher),"source_url_claimed: "+y(req.sourceUrl),
