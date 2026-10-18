@@ -29,6 +29,7 @@ import { env } from "./env";
 import { authLog } from "./auth-logger";
 import { userCount, withinClaimWindow, CLAIM_WINDOW_MINUTES, installSingleAdminGuard, extraAdminAccounts, validStagingClaimProof } from "./claim";
 import { audit } from "./audit";
+import { inProcessDrWriterFence } from "./backup/writer-fence";
 
 // Both used to live here, and auth is where the rest of the app reaches for
 // them, so keep them importable from this module.
@@ -291,7 +292,11 @@ export async function runAuthMigrations() {
   // Cold-start HTTP requests can race each other. They must all await the
   // same initialization before any handler attempts a session lookup.
   if (migrationInProgress) return migrationInProgress;
-  const work = (async () => {
+  // Run migrations under their own write ticket as callers outside the
+  // /api/auth handler (RPC, MCP and setup) also initialize Better Auth.
+  // This admission must span the awaited upstream migration, not only its
+  // first synchronous SQLite statement.
+  const work = inProcessDrWriterFence.withWrite(async () => {
     backfillAccountIssuer();
     const { runMigrations } = await getMigrations(auth.options);
     await runMigrations();
@@ -307,7 +312,7 @@ export async function runAuthMigrations() {
       );
     }
     migrated = true;
-  })();
+  });
   migrationInProgress = work;
   try {
     await work;
