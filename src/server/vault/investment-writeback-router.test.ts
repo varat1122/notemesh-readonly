@@ -107,6 +107,15 @@ describe("multilingual read-only writeback router",()=>{
   expect(route(b).safeEditDrafts.expectedOriginalSha256)
     .toBe(first.safeEditDrafts.expectedOriginalSha256);
  });
+ it("rejects unpaired UTF-16 code units rather than silently changing original bytes",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  expect(()=>route({...base,extractedText:"broken"+String.fromCharCode(0xD800)}))
+    .toThrow(/invalid Unicode/);
+  expect(()=>route({...base,analysisText:String.fromCharCode(0xDFFF)}))
+    .toThrow(/invalid Unicode/);
+  expect(route({...base,extractedText:"Valid emoji 🚀 and Thai ภาษาไทย"}).sourceCapture.textDigest)
+    .toHaveLength(64);
+ });
  it("does not auto-create a claim for an exact structured duplicate from an original URL",async()=>{
   const u="https://www.sec.gov/Archives/edgar/data/2488/fake-Q2.htm";
   await add("08_Daily_Weekly/Research Indexes/AMD source.md",[
