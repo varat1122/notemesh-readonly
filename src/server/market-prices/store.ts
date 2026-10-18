@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import Database from "better-sqlite3";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { instrument, isoDate, PRICE_POLICY, PriceError, type InstrumentInput, type PriceBar, type PriceSnapshot } from "./model.ts";
 
 export function priceDatabaseLimit(): number {
@@ -32,10 +33,18 @@ export class PriceStore {
   readonly filename: string;
   readonly writable: boolean;
   readonly memory: boolean;
+  private releaseWriter: (()=>void)|null = null;
   constructor(filename: string | Buffer, writable = false) {
     this.memory = Buffer.isBuffer(filename) || filename === ":memory:";
     this.filename = typeof filename === "string" ? filename : ":memory:";
     this.writable = writable;
+    // Keep one admission ticket for the entire writable on-disk SQLite
+    // handle lifetime, including direct PriceStore.db calls. Otherwise the
+    // freeze could begin between write methods while a caller held the DB.
+    this.releaseWriter = writable && !this.memory ?
+      inProcessDrWriterFence.acquireWriteTicket() : null;
+    let opened: Database.Database | null = null;
+    try {
     if (!this.memory) try {
       const stats = fs.lstatSync(filename);
       if (stats.isSymbolicLink() || stats.nlink > 1) throw new PriceError("linked_price_database_refused");
@@ -46,6 +55,7 @@ export class PriceStore {
       this.assertSpace();
     }
     this.db = new Database(filename, { readonly: !writable, fileMustExist: !writable, timeout: 5000 });
+    opened = this.db;
     this.db.pragma("foreign_keys = ON");
     if (writable) {
       // DELETE journal bounds disk usage and allows safe read-only clients without creating a WAL.
@@ -88,6 +98,12 @@ export class PriceStore {
         );
       `);
     } else this.db.pragma("query_only = ON");
+    } catch (error) {
+      try { opened?.close(); } catch { /* Preserve original open/migration failure. */ }
+      this.releaseWriter?.();
+      this.releaseWriter = null;
+      throw error;
+    }
   }
 
   assertSpace(): void {
@@ -107,7 +123,14 @@ export class PriceStore {
         requiredAvailableBytes: applicationReserveBytes + priceBudgetBytes });
   }
 
-  close(): void { this.db.close(); }
+  close(): void {
+    try { this.db.close(); }
+    finally {
+      const release = this.releaseWriter;
+      this.releaseWriter = null;
+      release?.();
+    }
+  }
 
   acquireLease(now: Date): string | null {
     if (!this.writable) throw new PriceError("read_only_price_store");
