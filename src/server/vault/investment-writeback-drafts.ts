@@ -62,6 +62,9 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
   "publisher_claimed: "+y(req.publisher),"source_url_claimed: "+y(req.sourceUrl),
   "attachment_path: "+y(req.attachmentVerified?req.attachmentPath:null),
   "attachment_sha_readback_verified: "+(req.attachmentVerified?"true":"false"),
+  "original_text_sha256: "+y(createHash("sha256").update(req.extractedText,"utf8").digest("hex")),
+  "original_text_utf8_bytes: "+Buffer.byteLength(req.extractedText,"utf8"),
+  "original_text_ends_with_newline: "+(req.extractedText.endsWith("\n")?"true":"false"),
  ])+"# User-supplied source capture — "+req.planId+"\n\n"+
  "This record preserves supplied input. Publisher, dates, claims and any transcription are NOT independently verified.\n\n"+
  "## Original input (verbatim as supplied)\n\n"+fence(req.extractedText)+"\n";
