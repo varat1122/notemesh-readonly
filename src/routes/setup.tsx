@@ -214,6 +214,7 @@ function AdminStep(props: { onDone: () => void }) {
     const [email, setEmail] = createSignal("");
     const [password, setPassword] = createSignal("");
     const [confirm, setConfirm] = createSignal("");
+    const [stagingProof, setStagingProof] = createSignal("");
     const [error, setError] = createSignal<string | null>(null);
     const [busy, setBusy] = createSignal(false);
 
@@ -246,7 +247,9 @@ function AdminStep(props: { onDone: () => void }) {
             email: email(),
             password: password(),
             name: "Admin",
-        });
+        }, claim()?.stagingProofRequired
+            ? {headers: {"x-notemesh-dr-claim": stagingProof()}}
+            : undefined);
         setBusy(false);
         if (error) {
             setError(error.message ?? "Could not create the admin account.");
@@ -319,6 +322,15 @@ function AdminStep(props: { onDone: () => void }) {
                                 <b>Time remaining: {formatCountdown(left())}</b>
                             </p>
                             <form onSubmit={submit}>
+                                <Show when={c.stagingProofRequired}>
+                                    <label for="staging-claim">Private staging claim proof</label>
+                                    <input id="staging-claim" type="password" autocomplete="off"
+                                           required value={stagingProof()}
+                                           onInput={(e) => setStagingProof(e.currentTarget.value)}/>
+                                    <p class="muted">Use the independent staging-only secret configured
+                                        directly in Railway private variables. Do not share it in chat.
+                                        A 30-minute window alone does not authorize claiming staging.</p>
+                                </Show>
                                 <label for="email">Admin email</label>
                                 <input id="email" type="email" autocomplete="username" required value={email()}
                                        onInput={(e) => setEmail(e.currentTarget.value)}/>
