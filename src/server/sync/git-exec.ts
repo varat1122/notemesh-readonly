@@ -1,5 +1,6 @@
 import { execa } from "execa";
 import { env } from "../env";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { getGitCredentials } from "./git-credentials";
 
 // Every git invocation goes through here. Split out from git.ts so the
@@ -32,6 +33,9 @@ export async function runGit(
   args: string[],
   opts: { cwd?: string; authenticated?: boolean; timeoutMs?: number } = {},
 ): Promise<GitResult> {
+  // Git commands that appear read-only can write refs, indexes and object
+  // metadata. Hold admission across the entire subprocess lifetime.
+  return inProcessDrWriterFence.withWrite(async () => {
   const creds = opts.authenticated ? getGitCredentials() : null;
   const full = creds ? ["-c", `credential.helper=${CREDENTIAL_HELPER}`, ...args] : args;
   try {
@@ -60,6 +64,7 @@ export async function runGit(
     const msg = redact(String(e?.message ?? e), [getGitCredentials()?.token]);
     return { ok: false, stdout: "", stderr: msg, combined: msg, code: null };
   }
+  });
 }
 
 
@@ -69,6 +74,7 @@ export async function runGitBuffer(
   args: string[],
   opts: { cwd?: string; timeoutMs?: number } = {},
 ): Promise<{ ok: boolean; stdout: Buffer }> {
+  return inProcessDrWriterFence.withWrite(async () => {
   try {
     const res = await execa("git", args, {
       cwd: opts.cwd ?? env.vaultDir,
@@ -85,4 +91,5 @@ export async function runGitBuffer(
   } catch {
     return { ok: false, stdout: Buffer.alloc(0) };
   }
+  });
 }
