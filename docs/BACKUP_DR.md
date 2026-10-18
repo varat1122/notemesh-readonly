@@ -62,3 +62,17 @@ node scripts/backup/nm-drive-upload.mjs --bundle /path/to/notemesh-fixture-...nm
 ```
 
 The uploader first verifies the local encrypted bundle with the backup passphrase; then it uploads **without overwrite** and downloads the ciphertext for SHA-256 comparison. It does not delete or implement backup retention. No real user Drive grant was made or tested as part of PR #36. Before deployment, define recoverable token ownership, safe refresh, retries, alerting, and a one-writer coordinator inside the existing NoteMesh service. The `--authorize-upload` flag is a development gate, **not** a substitute for permission or safety review.
+
+## Phase 1.1 — Source hardening and read-only preflight (not activated)
+
+The offline snapshot now opens regular files using Linux O_NOFOLLOW and verifies the opened descriptor remains inside the resolved source root. Files are copied with inode/mtime/size checks. Unsafe symlinks and special files are refused; the source budget is capped at 100,000 files and 2,000,000,000 bytes. Both manifest and isolated restore retain empty folders.
+
+scripts/backup/nm-dr-preflight.mjs provides read-only source inventory, coarse category counts, and an approximate scratch-space check without emitting filenames, notes, or credentials. It explicitly reports writerQuiescenceVerified=false and snapshotReady=false even if expected directories exist. Railway metadata alone cannot attest to the mounted volume's file-level state.
+
+Run the preflight only on an isolated fixture or with explicit authorization for read-only on-host inspection:
+
+    node scripts/backup/nm-dr-preflight.mjs --data-dir /path/to/data
+
+SyncSupervisor.withPausedForEdit now awaits asynchronous callbacks while keeping the pause and mutual-exclusion flag active. A regression test checks that the daemon stays paused until the callback resolves. This is a building block, NOT an activated production backup coordinator.
+
+Production remains gated: other Vault writers and the price collector need cross-component coordination. The system must restore sync on error, preserve secrets, verify disk staging capacity, and forbid any backup job that cannot establish writer quiescence. Do not invoke the offline CLI on the live Railway volume or assume a CLI confirmation flag proves safe quiescence.
