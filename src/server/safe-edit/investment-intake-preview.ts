@@ -26,7 +26,8 @@ export function previewInvestmentIntakeStage(
    const receipts=inspectCoordinatedWritebackBatch(plan.planId,actor);
    const raw=receipts.stages.find(step=>step.kind==="raw_input");
    if(raw?.state!=="locally_verified"||raw.operationId!==plan.coordination.steps[0].operationId||
-      raw.path!==plan.coordination.steps[0].path)
+      raw.path!==plan.coordination.steps[0].path||
+      raw.afterHash!==plan.safeEditDrafts.expectedOriginalSha256)
      throw Error("Independent, same-OAuth raw source write/readback/reindex receipt required before research review preview");
  }
  const result=preview({
