@@ -324,13 +324,42 @@ function assertCoordinatedResearchSource(input:PreviewInput,actor:string,after:s
       indexed.mtime!==Math.round(stat.mtimeMs))
     throw Error("Coordinated review source index is stale; reindex and reapprove before applying");
 }
+/** A successful historical receipt is not proof the current Vault bytes/index
+ * still match. In particular an idempotent retry must NEVER return "written"
+ * for a coordinated source/review whose synced file has since changed. */
+function assertCoordinatedReplayCurrent(r:RecordRow,p:PreviewInput,actor:string) {
+  const m=/^ios_in-([a-f0-9]{16})_(raw|review)_v1$/.exec(r.id);
+  if(!m)return;
+  const intake="IN-"+m[1].toUpperCase();
+  const pathValid=m[2]==="raw"?
+    p.path==="00_Inbox/ChatGPT/Investment Intake - "+intake+".md":
+    /^10_Knowledge\\/(?:Company Research|Industry and Concepts|Macro and Markets)\\/Investment Review - [^/]+ - IN-[A-F0-9]{16}\\.md$/.test(p.path)&&p.path.endsWith(intake+".md");
+  if(!pathValid||p.change.kind!=="create")
+    throw Error("Coordinated replay path or operation identity mismatch");
+  const receipt=r.receipt?JSON.parse(r.receipt) as Record<string,unknown>:null;
+  const abs=target(p.path).abs;
+  const current=read(abs);
+  const index=store().prepare("SELECT mtime,size FROM notes WHERE path=?")
+    .get(p.path) as {mtime:number;size:number}|undefined;
+  const stats=current===null?null:fs.statSync(abs);
+  if(!receipt||receipt.path!==p.path||receipt.afterHash!==r.after_hash||
+      receipt.write!=="written"||receipt.readback!=="verified"||receipt.reindex!=="verified"||
+      current===null||sha256(current)!==r.after_hash||!index||
+      index.size!==Buffer.byteLength(current,"utf8")||
+      index.mtime!==Math.round(stats!.mtimeMs))
+    throw Error("Coordinated retry refused: current bytes or index disagree with original verified receipt");
+  if(m[2]==="review")assertCoordinatedResearchSource(p,actor,r.after_text);
+}
 export function apply(input:unknown,actor:string) {
   assertEnabled();const args=applySchema.parse(input),r=owned(args.operationId,actor);
   if(!crypto.timingSafeEqual(Buffer.from(sha256(args.previewToken),"hex"),Buffer.from(r.token_hash,"hex"))||args.expectedHash!==r.before_hash) throw Error("Invalid preview token or expected hash");
-  if(r.status==="written") return status(r.id,actor);
+  const p=JSON.parse(r.payload) as PreviewInput;
+  if(r.status==="written") {
+    assertCoordinatedReplayCurrent(r,p,actor);
+    return status(r.id,actor);
+  }
   if(Date.now()>r.expires) throw Error("Preview expired; review a fresh diff");
   if(requiresApproval(r)&&!r.approval) throw Error("Explicit admin approval of this exact thesis diff is required; open approvalUrl");
-  const p=JSON.parse(r.payload) as PreviewInput;
   if(r.status==="writing") throw Error("Interrupted write: inspect receipt and backup; do not replay without recovery review");
   assertCoordinatedResearchSource(p,actor,r.after_text);
   // Cross-process lock deliberately has no stale timeout. A crash requires
