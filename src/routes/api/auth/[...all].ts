@@ -3,6 +3,7 @@ import { auth, runAuthMigrations } from "~/server/auth";
 import { userCount } from "~/server/claim";
 import { audit } from "~/server/audit";
 import { normalizeClientRegistration } from "~/server/oauth-registration";
+import { inProcessDrWriterFence } from "~/server/backup/writer-fence";
 
 const handler = toSolidStartHandler(auth);
 
@@ -10,6 +11,10 @@ async function withMigrations(
   fn: (event: { request: Request }) => Promise<Response>,
   event: { request: Request },
 ) {
+  // Better Auth manages its own SQLite writes inside this handler, including
+  // cookies, OAuth grants, sessions, accounts, and lazy migrations. Keep one
+  // async ticket over ALL of it, not just the preliminary auth hook.
+  return inProcessDrWriterFence.withWrite(async () => {
   await runAuthMigrations();
   // A registration that says nothing about its application type and
   // redirects to plain-HTTP loopback is a native client; the provider would
@@ -54,6 +59,7 @@ async function withMigrations(
     }
   }
   return res;
+  });
 }
 
 export const GET = (event: { request: Request }) => withMigrations(handler.GET, event);
