@@ -133,3 +133,19 @@ describe("multilingual read-only writeback router",()=>{
   expect(p.routes.find(x=>x.kind==="industry_context_candidate")).toBeDefined();
  });
 });
+
+
+describe("new intake reconciles legacy company navigation before proposing Vault writes", () => {
+ it("links to the retained historical issuer index and never implies absent history", async () => {
+  await add("10_Knowledge/Indexes/Company - MDB.md",
+   "# Legacy MDB history\\n\\nArchived notes in older Company Index; not independently verified.");
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route(base);
+  expect(p.status).toBe("read_only_plan_not_written");
+  expect(p.historical.paths).toContain("10_Knowledge/Indexes/Company - MDB.md");
+  expect(p.historical.missing.some(x=>x.includes("No legacy Company Index found for MDB"))).toBe(false);
+  expect(p.historical.missing).not.toContain("08_Daily_Weekly/Research Indexes/Company - MDB.md");
+  expect(p.gates.canAutoWrite).toBe(false);
+  expect(p.gates.canAutoUpdateThesis).toBe(false);
+ });
+});
