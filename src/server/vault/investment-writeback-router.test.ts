@@ -85,6 +85,9 @@ describe("multilingual read-only writeback router",()=>{
   expect(a.routes[0].path).toBe(b.routes[0].path);
   expect(a.sourceCapture.textDigest).toHaveLength(64);
   expect(route({...base,extractedText:base.extractedText+" Amended."}).planId).not.toBe(a.planId);
+  // Raw note preserves whitespace; ID must not collide across distinct bytes.
+  expect(route({...base,extractedText:" "+base.extractedText}).planId).not.toBe(a.planId);
+  expect(route({...base,extractedText:base.extractedText+"\\n"}).planId).not.toBe(a.planId);
  });
  it("does not auto-create a claim for an exact structured duplicate from an original URL",async()=>{
   const u="https://www.sec.gov/Archives/edgar/data/2488/fake-Q2.htm";
