@@ -10,6 +10,7 @@ export interface DraftRequest {
  planId:string; domain:string; entities:string[]; topic:string;
  inputFormat:"text"|"screenshot"|"pdf"|"mixed";
  sourceKind:string; sourceLanguage:string|null;
+ historicalCandidatePaths?:string[]; // discovered-only; NOT verified original context reads
  extractedText:string; analysisText?:string|null;
  publisher:string|null; sourceUrl:string|null;
  eventDate:string|null; publicationDate:string|null;
@@ -93,9 +94,12 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
    "original_intake_path: "+y(req.rawRoute.path),
    "original_intake_sha256: "+y(originalContentHash),
    "original_source_verified: false","owner_approved_thesis: false",
+   "historical_context_status: "+y("candidate_pointers_not_full_note_reads"),
+   "historical_candidate_paths: "+list((req.historicalCandidatePaths??[]).slice(0,10)),
   ])+"# AI research review — "+req.planId+"\n\n"+
   "Original input: "+sourceLink+"\n\n"+
   "AI interpretation is **not** an independent original source, company guidance or an approved Thesis. "+
+  "Historical candidate paths are discovery pointers, not proof they were read or verified. "+
   "Preserve contrary evidence and uncertainty in the analyst text; all citations require actual source readback.\n\n"+
   "## Analyst interpretation (attributed, not verified)\n\n"+fence(analysisText)+"\n":null;
  const analysis:Draft={
