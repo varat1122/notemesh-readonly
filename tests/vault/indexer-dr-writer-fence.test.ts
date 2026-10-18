@@ -29,12 +29,12 @@ it("blocks direct note/FTS/link/attachment updates and index rebuild while froze
   const { inProcessDrWriterFence: fence } = await import("~/server/backup/writer-fence");
   const count = (table: string) =>
     (db().prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
-  fs.writeFileSync(path.join(vault, "before.md"), "# Before\\n");
+  fs.writeFileSync(path.join(vault, "before.md"), "# Before\n");
   reindexPath("before.md");
   expect(count("notes")).toBe(1);
   vi.spyOn(console, "error").mockImplementation(() => {});
   await fence.withFrozenWriters(async () => {
-    fs.writeFileSync(path.join(vault, "added.md"), "# Added\\n[[before]] #tag\\n");
+    fs.writeFileSync(path.join(vault, "added.md"), "# Added\n[[before]] #tag\n");
     fs.writeFileSync(path.join(vault, "picture.png"), "fixture");
     reindexPath("added.md");
     reindexPath("picture.png");
@@ -56,7 +56,7 @@ it("blocks direct note/FTS/link/attachment updates and index rebuild while froze
 it("releases writer tickets after normal indexing, so a later freeze can drain", async () => {
   const { reindexPath } = await import("~/server/vault/indexer");
   const { inProcessDrWriterFence: fence } = await import("~/server/backup/writer-fence");
-  fs.writeFileSync(path.join(vault, "note.md"), "# Note\\n");
+  fs.writeFileSync(path.join(vault, "note.md"), "# Note\n");
   reindexPath("note.md");
   expect(fence.status.activeWriters).toBe(0);
   await expect(fence.withFrozenWriters(() => "snapshot", { drainTimeoutMs: 50 }))
