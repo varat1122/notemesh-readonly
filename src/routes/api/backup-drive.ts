@@ -64,7 +64,7 @@ export async function POST({ request }: APIEvent) {
         Number(request.headers.get("content-length") ?? 0) > 4096) throw Error();
     proof = (await request.formData()).get("dr_consent_proof");
   } catch {
-    return new Response("Invalid form", { status: 400, headers });
+    return new Response("Invalid form", { status: 403, headers });
   }
   if (typeof proof !== "string" ||
       !validDrConsentFormProof(proof, admin.session.id, env.encryptionKey))
