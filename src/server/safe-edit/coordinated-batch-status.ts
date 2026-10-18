@@ -16,7 +16,7 @@ import { coordinatedStageIds, type CoordinatedKind } from "../vault/investment-w
 
 export type JournalStageState =
   "not_found_or_not_owned"|"preview_pending"|"locally_verified"|
-  "repair_required"|"stale_local_bytes"|"unexpected_target"|"unrecognized_state";
+  "repair_required"|"stale_local_bytes"|"stale_local_index"|"unexpected_target"|"unrecognized_state";
 export interface JournalStage {
   kind:CoordinatedKind;
   operationId:string;
@@ -39,22 +39,22 @@ const expected=(kind:CoordinatedKind,p:string,planId:string)=>{
 /** A completed receipt is historical evidence; inspect CURRENT stored bytes,
  * because an Obsidian peer or another authorized editor may have changed them.
  * This is read-only and fail closed on unsafe inode, missing path or bad bytes. */
-function currentLocalDigestMatches(rel:string,expectedHash:string):boolean {
-  if(!/^[a-f0-9]{64}$/.test(expectedHash))return false;
+function inspectCurrentLocalState(rel:string,expectedHash:string):"current"|"bytes_differ"|"index_differ" {
+  if(!/^[a-f0-9]{64}$/.test(expectedHash))return "bytes_differ";
   let fd:number|undefined;
   try {
     fd=openNoFollow(resolveNotePath(rel));
     const st=fs.fstatSync(fd);
-    if(!st.isFile()||st.nlink!==1||st.size>100_000)return false;
+    if(!st.isFile()||st.nlink!==1||st.size>100_000)return "bytes_differ";
     const content=fs.readFileSync(fd);
-    if(content.length!==st.size||content.includes(0))return false;
-    if(createHash("sha256").update(content).digest("hex")!==expectedHash)return false;
+    if(content.length!==st.size||content.includes(0))return "bytes_differ";
+    if(createHash("sha256").update(content).digest("hex")!==expectedHash)return "bytes_differ";
     const indexed=db().prepare("SELECT mtime,size FROM notes WHERE path=?")
       .get(rel) as {mtime:number;size:number}|undefined;
     // A historic reindex receipt is not proof that the current file is still
     // correctly represented in the live full-text index.
-    return indexed?.size===st.size&&indexed.mtime===Math.round(st.mtimeMs);
-  }catch{return false;}finally{if(fd!==undefined)fs.closeSync(fd);}
+    return indexed?.size===st.size&&indexed.mtime===Math.round(st.mtimeMs)?"current":"index_differ";
+  }catch{return "bytes_differ";}finally{if(fd!==undefined)fs.closeSync(fd);}
 }
 export function inspectCoordinatedWritebackBatch(planId:string,actor:string) {
   const ids=coordinatedStageIds(planId);
@@ -85,8 +85,10 @@ export function inspectCoordinatedWritebackBatch(planId:string,actor:string) {
     else if(record.status==="written"){
       const historic=rec?.write==="written"&&rec.readback==="verified"&&
         rec.reindex==="verified"&&/^[a-f0-9]{64}$/.test(record.afterHash);
+      const current=historic?inspectCurrentLocalState(record.path,record.afterHash):null;
       state=!historic?"repair_required":
-        currentLocalDigestMatches(record.path,record.afterHash)?"locally_verified":"stale_local_bytes";
+        current==="current"?"locally_verified":
+        current==="index_differ"?"stale_local_index":"stale_local_bytes";
     }else state="unrecognized_state";
     return {kind,operationId,path:record.path,state,journalStatus:record.status,
       beforeHash:record.beforeHash,afterHash:record.afterHash,receipt:stageReceipt};
