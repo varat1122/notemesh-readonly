@@ -281,3 +281,26 @@ describe("listings", () => {
     expect(Date.parse(a.modified)).not.toBe(INSTANT);
   });
 });
+
+describe("DR Phase 2.4 — Git metadata freeze", () => {
+  it("refuses Git history metadata changes atomically before cache or SQLite mutation", async () => {
+    const { db } = await import("../db");
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const { applyGitHistory, modifiedFor, createdFor, recordLocalModification } = await import("./modified");
+    const d = db();
+    d.exec("INSERT INTO notes (path,title,mtime,size,modified,created) VALUES ('freeze.md','Freeze',1,1,5,3)");
+    recordLocalModification("freeze.md", 5);
+    const history = { modified: new Map([["freeze.md", 9000]]), created: new Map([["freeze.md", 6000]]) };
+    await fence.withFrozenWriters(() => {
+      expect(() => applyGitHistory(history)).toThrow("backup_writer_freeze_active");
+      expect(modifiedFor("freeze.md", 1)).toBe(5);
+      expect(createdFor("freeze.md", { birthtimeMs: 10, mtimeMs: 1 })).toBe(3);
+      expect(d.prepare("SELECT modified, created FROM notes WHERE path='freeze.md'").get())
+        .toEqual({ modified: 5, created: 3 });
+    });
+    expect(applyGitHistory(history)).toBe(2);
+    expect(d.prepare("SELECT modified, created FROM notes WHERE path='freeze.md'").get())
+      .toEqual({ modified: 9000, created: 6000 });
+    expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
+  });
+});
