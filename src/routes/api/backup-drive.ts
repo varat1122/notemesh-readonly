@@ -55,6 +55,17 @@ export async function GET({ request }: APIEvent) {
     `<h2>Staging-only credential smoke test (no Drive file access)</h2>
     <p>Use the button once to verify the encrypted credential decrypts and Google accepts its refresh grant. It does not upload or schedule anything.</p>
     <form method="post" action="/api/backup-drive/credential-check"><input type="hidden" name="dr_consent_proof" value="${esc(issueDrConsentFormProof(admin.session?.id ?? admin.user.id, env.encryptionKey))}"><button type="submit">Verify stored Google DR credential (no upload)</button></form>` : ""}
+  ${process.env.RAILWAY_ENVIRONMENT_NAME === "staging" &&
+     process.env.NOTEMESH_DRIVE_FIXTURE_TEST_ENABLED === "1" &&
+     driveSetupEnabled() && !!process.env.NOTEMESH_DRIVE_CREDENTIAL ?
+    `<h2>Optional STAGING synthetic Drive upload/readback (manual only)</h2>
+    <p>This one-shot test creates one NEW application-owned Drive folder and uploads a small encrypted
+    random fixture into it, then downloads, hashes and decrypts that test object. The test files are left
+    in that folder for audit. It does NOT read Vault or existing Drive folders, run actual .nmb backup,
+    restore production data, activate a backup scheduler or automatically retry failures.</p>
+    <form method="post" action="/api/backup-drive/fixture-upload"><input type="hidden" name="dr_consent_proof"
+    value="${esc(issueDrConsentFormProof(admin.session?.id ?? admin.user.id, env.encryptionKey))}">
+    <button type="submit">Run one synthetic encrypted Drive upload/download (creates test folder)</button></form>` : ""}
   <p>Required next gates: explicit permission to access an authorized app-created Drive folder,
   production writer coordination, verified upload/download, isolated restore drill, alerts and scheduling.</p>
   </main></body></html>`;
