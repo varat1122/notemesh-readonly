@@ -79,6 +79,15 @@ describe("separate source and analysis candidate Safe Edit drafts (no writes)",(
    expect(p.analysis.content).toContain("verification: not_reverified");
    expect(p.canAutoWrite).toBe(false);
  });
+ it("fails closed rather than corrupting malformed Unicode user text or interpretation",()=>{
+   const invalid=String.fromCharCode(0xD800);
+   expect(()=>composeWritebackDrafts({...fixture(),extractedText:"input "+invalid}))
+     .toThrow(/lossless UTF-8/);
+   expect(()=>composeWritebackDrafts({...fixture(),analysisText:"AI "+invalid}))
+     .toThrow(/lossless UTF-8/);
+   const valid=composeWritebackDrafts({...fixture(),extractedText:"🚀 ภาษาไทย"});
+   expect(valid.original.content).toContain("🚀 ภาษาไทย");
+ });
  it("never hallucinates an AI analysis when none is supplied",()=>{
    const p=composeWritebackDrafts({...fixture(),analysisText:null});
    expect(p.original.content).toContain(fixture().extractedText);
