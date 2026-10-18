@@ -20,6 +20,11 @@ const PASS_ENV = "NOTEMESH_BACKUP_PASSPHRASE";
 const KINDS = new Set(["daily", "weekly", "monthly", "predeploy", "fixture"]);
 const EXCLUDE = new Set(["app.sqlite-wal", "app.sqlite-shm", "app.sqlite-journal"]);
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
+async function shaFile(p) {
+  const hash=createHash("sha256");
+  for await(const chunk of fs.createReadStream(p)) hash.update(chunk);
+  return hash.digest("hex");
+}
 const inside = (parent, child) => child === parent || child.startsWith(parent + path.sep);
 const clean = (p) => path.resolve(p);
 const nameSafe = (name) => name !== "." && name !== ".." && !/[\x00-\x1f]/u.test(name);
@@ -61,13 +66,12 @@ async function copyTree(src,dst,inventory,rel="") {
     const st = await fsp.lstat(child);
     if(st.isSymbolicLink() || !st.isFile() && !st.isDirectory() || st.nlink !== 1 && st.isFile()) throw Error("Symlink, hardlink or non-regular file refused: "+logical);
     if(st.isDirectory()) {await fsp.mkdir(target,{recursive:true,mode:0o700}); await copyTree(child,target,inventory,logical);continue;}
-    if(rel==="" && EXCLUDE.has(e.name)) continue;
+    if(rel==="" && (EXCLUDE.has(e.name) || e.name==="app.sqlite")) continue;
     const before = {size:st.size,mtimeMs:st.mtimeMs,ino:st.ino};
     await fsp.copyFile(child,target,fs.constants.COPYFILE_EXCL);
     const after = await fsp.lstat(child);
     if(after.size!==before.size || after.mtimeMs!==before.mtimeMs || after.ino!==before.ino) throw Error("Source changed during snapshot: "+logical);
-    const buf = await fsp.readFile(target);
-    inventory.push({path:logical,size:buf.length,sha256:sha(buf)});
+    inventory.push({path:logical,size:after.size,sha256:await shaFile(target)});
   }
 }
 async function stageData(data,stage) {
@@ -86,10 +90,11 @@ async function stageData(data,stage) {
   const check=new DatabaseSync(stagedDb,{readOnly:true});
   try {if(check.prepare("PRAGMA integrity_check").get()?.integrity_check!=="ok") throw Error("SQLite integrity check failed");}
   finally {check.close();}
-  const buf=await fsp.readFile(stagedDb);
-  const pos=inventory.findIndex(x=>x.path==="app.sqlite");
-  if(pos>=0) inventory.splice(pos,1);
-  inventory.push({path:"app.sqlite",size:buf.length,sha256:sha(buf)});
+  // A readonly integrity check on a WAL-mode snapshot may create sidecars.
+  // They must never enter a self-contained archive.
+  for(const suffix of ["-wal","-shm","-journal"]) await fsp.rm(stagedDb+suffix,{force:true});
+  const dbSize=(await fsp.stat(stagedDb)).size;
+  inventory.push({path:"app.sqlite",size:dbSize,sha256:await shaFile(stagedDb)});
   inventory.sort((a,b)=>a.path.localeCompare(b.path));
   const meta={
     format:"notemesh-dr/1",createdAt:new Date().toISOString(),sqlite:"online-backup+integrity-check",
@@ -152,7 +157,7 @@ async function checkStage(stage) {
     const p=path.join(stage,"payload",item.path);
     const s=await fsp.lstat(p);
     if(!s.isFile() || s.isSymbolicLink() || s.nlink!==1 || s.size!==item.size) throw Error("Manifest stat mismatch");
-    if(sha(await fsp.readFile(p))!==item.sha256) throw Error("Manifest SHA-256 mismatch");
+    if(await shaFile(p)!==item.sha256) throw Error("Manifest SHA-256 mismatch");
     total+=s.size;
   }
   const actual=[];
@@ -165,7 +170,8 @@ async function checkStage(stage) {
     }
   }
   await walk(path.join(stage,"payload"));
-  if(actual.length!==seen.size || actual.some(x=>!seen.has(x)) || total!==meta.totalBytes || !seen.has("app.sqlite")) throw Error("Archive file count/size mismatch");
+  if(actual.length!==seen.size || actual.some(x=>!seen.has(x)) || total!==meta.totalBytes || !seen.has("app.sqlite"))
+    throw Error("Archive file count/size mismatch (manifest="+seen.size+",actual="+actual.length+",bytes="+total+"/"+meta.totalBytes+",extra="+actual.filter(x=>!seen.has(x)).slice(0,5).join(",")+")");
   const db=new DatabaseSync(path.join(stage,"payload","app.sqlite"),{readOnly:true});
   try {if(db.prepare("PRAGMA integrity_check").get()?.integrity_check!=="ok")throw Error("Recovered database invalid");}
   finally {db.close();}
@@ -191,6 +197,8 @@ export async function main(argv=process.argv.slice(2)) {
     const kind=flags.get("--kind")||"fixture";
     if(!flags.has("--data-dir")||!flags.has("--out") || !KINDS.has(kind))throw Error("Require --data-dir, --out and valid --kind");
     if(!flags.get("--offline-confirmed") && !flags.get("--fixture-only"))throw Error("Refusing live data: --offline-confirmed or --fixture-only required");
+    if(flags.get("--fixture-only") && (inside("/data",data) || inside(clean(process.env.DATA_DIR||"/data"),data) || process.env.RAILWAY_ENVIRONMENT_ID))
+      throw Error("Fixture mode cannot operate on Railway or a deployed data root");
     if(inside(data,out) || inside(out,data))throw Error("Backup output and source directories must be disjoint");
     await fsp.mkdir(out,{recursive:true,mode:0o700});
     const stage=await fsp.mkdtemp(path.join(os.tmpdir(),"notemesh-stage-"));
@@ -198,8 +206,7 @@ export async function main(argv=process.argv.slice(2)) {
     try {
       const meta=await stageData(data,stage);
       await encryptTar(stage,target,secret);
-      const encrypted=await fsp.readFile(target);
-      const receipt={bundle:target,sha256:sha(encrypted),encryptedBytes:encrypted.length,files:meta.files.length,kind,verified:false};
+      const receipt={bundle:target,sha256:await shaFile(target),encryptedBytes:(await fsp.stat(target)).size,files:meta.files.length,kind,verified:false};
       console.log(JSON.stringify(receipt));
     } finally {await fsp.rm(stage,{recursive:true,force:true});}
   } else {
