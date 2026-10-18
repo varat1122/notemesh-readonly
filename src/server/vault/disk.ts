@@ -5,6 +5,7 @@ import { db } from "../db";
 import { env } from "../env";
 import { VaultPathError, assertDescriptorInVault, formatBytes, toVaultRelative } from "./paths";
 import { recordLocalModification } from "./modified";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 
 /**
  * How much room the vault has left, and what is using it.
@@ -198,6 +199,8 @@ export interface WriteOptions {
 }
 
 export function writeVaultFile(abs: string, content: string, opts: WriteOptions = {}): void {
+  // Gate before disk headroom checks, temporary-file creation or any rename.
+  inProcessDrWriterFence.withWriteSync(() => {
   const bytes = Buffer.from(content, "utf8");
   assertHeadroom(bytes.length);
   const sync = opts.sync !== false;
@@ -257,6 +260,7 @@ export function writeVaultFile(abs: string, content: string, opts: WriteOptions 
   // Written, so this is its modification time from here on, whatever git
   // remembers about the path from before (vault/modified.ts).
   recordLocalModification(toVaultRelative(abs));
+  });
 }
 
 function lstatOrNull(p: string): fs.Stats | null {
