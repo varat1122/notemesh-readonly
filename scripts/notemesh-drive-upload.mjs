@@ -68,6 +68,16 @@ export async function uploadEncryptedBackup(file,folderId,fetcher=fetch,token=nu
   // A verifiably restorable ciphertext is the only artifact permitted to upload.
   const bearer=token??await accessToken(fetcher);
   const auth={Authorization:"Bearer "+bearer},hash=readSha(file);
+  // Explicitly prove this OAuth app can see AND add children to the selected
+  // private folder. The connected ChatGPT Drive app does not grant this access.
+  const folder=await request(fetcher,
+    "https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(folderId)+
+    "?fields=id,mimeType,capabilities(canAddChildren)",{headers:auth});
+  const folderMetadata=await folder.json();
+  if(folderMetadata.id!==folderId||
+     folderMetadata.mimeType!=="application/vnd.google-apps.folder"||
+     folderMetadata.capabilities?.canAddChildren!==true)
+    throw Error("Google Drive folder not authorized for this backup OAuth app");
   // Check prior app-created generations. Drive.file cannot query other apps'
   // unseen files, so folder consent is separately necessary.
   const q="name = '"+basename.replaceAll("'","\\'")+"' and '"+folderId+"' in parents and trashed = false";
