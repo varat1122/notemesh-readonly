@@ -1,4 +1,9 @@
-import {expect,it} from "vitest";
+import {expect,it,vi} from "vitest";
+// Vite's Vitest server resolver maps @solidjs/router's json helper to its
+// client-only entry. Mock only that serializer for this route unit test.
+vi.mock("@solidjs/router",()=>({
+  json:(body:unknown,init?:ResponseInit)=>Response.json(body,init),
+}));
 import type {APIEvent} from "@solidjs/start/server";
 import {POST} from "./rpc/[fn]";
 import {inProcessDrWriterFence as fence} from "~/server/backup/writer-fence";
