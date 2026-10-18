@@ -289,3 +289,47 @@ describe("DR Phase 2.4 — Git sync writer admission", () => {
     expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
   });
 });
+
+describe("DR Phase 2.8 — direct Git execution freeze", () => {
+  it("refuses both text and binary Git entry points before spawning while frozen", async () => {
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const cwd = path.join(root, "nonexistent-working-tree");
+    await fence.withFrozenWriters(async () => {
+      await expect(runGit(["init"], { cwd })).rejects.toThrow("backup_writer_freeze_active");
+      await expect(runGitBuffer(["show", "HEAD:note.md"], { cwd }))
+        .rejects.toThrow("backup_writer_freeze_active");
+      expect(fs.existsSync(cwd)).toBe(false);
+      expect(fence.status.activeWriters).toBe(0);
+    });
+    expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
+  });
+
+  it("holds a direct Git process ticket until the child exits before snapshot", async () => {
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const bin = path.join(root, "dr-git-shim");
+    fs.mkdirSync(bin);
+    const started = path.join(root, "dr-git-started");
+    const release = path.join(root, "dr-git-release");
+    fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh
+echo started > "${started}"
+while [ ! -f "${release}" ]; do sleep 0.05; done
+exit 0
+`, { mode: 0o755 });
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH ?? ""}`);
+    try {
+      const active = runGit(["status"], { cwd: root, timeoutMs: 5000 });
+      await vi.waitFor(() => expect(fs.existsSync(started)).toBe(true), { timeout: 3000 });
+      expect(fence.status.activeWriters).toBeGreaterThanOrEqual(1);
+      let captured = false;
+      const cut = fence.withFrozenWriters(() => { captured = true; return "snapshot"; },
+        { drainTimeoutMs: 4000 });
+      expect(captured).toBe(false);
+      await expect(runGit(["status"], { cwd: root })).rejects
+        .toThrow("backup_writer_freeze_active");
+      fs.writeFileSync(release, "go");
+      expect((await active).ok).toBe(true);
+      await expect(cut).resolves.toBe("snapshot");
+      expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
+    } finally { vi.unstubAllEnvs(); }
+  });
+});
