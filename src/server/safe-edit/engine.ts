@@ -203,13 +203,19 @@ function requiresApproval(r:RecordRow) {
 export function preview(input:unknown,actor:string) {
   assertEnabled();const p=previewSchema.parse(input);const t=target(p.path);p.path=t.rel;
   if(store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND status='writing' LIMIT 1").get(p.path)) throw Error("This path has an interrupted operation; administrator recovery required");
-  const before=read(t.abs);
-  if(p.change.kind==="create"?before!==null:before===null) throw Error("Create never overwrites; other edits require an existing note");
+  // Look up an existing server-issued operation BEFORE interpreting the
+  // existing file as a new create request. This permits safe read-only retry
+  // introspection of an already-written operation while still rejecting a
+  // genuinely new create that would overwrite an existing file.
   const existing=store().prepare("SELECT * FROM safe_edit_operations WHERE id=?").get(p.operationId) as RecordRow|undefined;
   if(existing) {
     if(existing.actor!==actor||existing.payload!==JSON.stringify(p)) throw Error("Operation ID reused for different input or actor");
+    if(existing.status==="writing") throw Error("Interrupted write: administrator recovery required, never auto-replay");
+    if(existing.status==="written")assertCoordinatedReplayCurrent(existing,p,actor);
     return {...publicPreview(existing),previewToken:null,retry:"Use original preview token; it is never stored in plaintext"};
   }
+  const before=read(t.abs);
+  if(p.change.kind==="create"?before!==null:before===null) throw Error("Create never overwrites; other edits require an existing note");
   const size=store().prepare("SELECT count(*) AS n,coalesce(sum(length(CAST(before_text||after_text AS BLOB))),0) AS bytes FROM safe_edit_operations").get() as {n:number;bytes:number};
   if(size.n>=1000||size.bytes+200_000>20_000_000) throw Error("Safe Edit journal quota reached; administrator archival required");
   document(before??"");checkEvidence(p,before??"");
