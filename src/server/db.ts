@@ -5,17 +5,26 @@ import { inProcessDrWriterFence } from "./backup/writer-fence";
 let _db: Database.Database | undefined;
 
 export function db(): Database.Database {
-  if (!_db) {
-    // Lazy opening executes schema migrations and creates files. Never allow
-    // it to start after a snapshot freeze began.
-    if (inProcessDrWriterFence.status.frozen) throw Error("backup_writer_freeze_active");
+  if (_db) return _db;
+  // A simple frozen-state check has a TOCTOU gap: the freeze could begin
+  // after checking but before opening SQLite or completing schema changes.
+  // Admit the whole synchronous bootstrap and publish the handle only after
+  // every required pragma and migration has completed successfully.
+  return inProcessDrWriterFence.withWriteSync(() => {
+    if (_db) return _db;
     ensureDataDirs();
-    _db = new Database(env.dbPath);
-    _db.pragma("journal_mode = WAL");
-    _db.pragma("foreign_keys = ON");
-    migrate(_db);
-  }
-  return _db;
+    const opened = new Database(env.dbPath);
+    try {
+      opened.pragma("journal_mode = WAL");
+      opened.pragma("foreign_keys = ON");
+      migrate(opened);
+      _db = opened;
+      return opened;
+    } catch (error) {
+      try { opened.close(); } catch { /* Retain the original migration error. */ }
+      throw error;
+    }
+  });
 }
 
 // App-owned tables. Better Auth manages its own tables in the same file via
