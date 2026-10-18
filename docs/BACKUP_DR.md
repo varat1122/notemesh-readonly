@@ -35,6 +35,12 @@ Git-backed NoteMesh also mutates the Vault and app.sqlite. This Draft adds proce
 
 A long-running Git network operation **may keep the drain waiting**; timeout must fail closed and leave the existing Vault untouched by any backup capture. A process-local admission gate is NOT cross-process fencing. No live coordinated Backup, scheduled sync pause, Git/Obsidian external writer verification, or Production deployment is enabled.
 
+### Phase 2.4 (continued) — Obsidian CLI child-process coverage
+
+`runOb()` now holds an in-process DR Writer Ticket for each complete external Obsidian CLI child-process lifetime, including login/credential-home side effects, sync setup, manual sync and settings-sync commands. Freeze admission is rejected **before** `ensureDataDirs()` or process spawn. A long-running command blocks snapshot drain until it exits, and a timeout rejects capture. Added isolated fake-CLI tests for refusal-before-spawn and drain-until-exit.
+
+**Boundary still open:** the continuously running `ob sync --continuous` daemon is launched directly by `SyncSupervisor` rather than `runOb()`, so it is *not* covered by these tickets. Offline fixture `withPausedForEdit()` separately waits for the daemon to exit before capture, but this has not been proven against Production's actual processes or any external devices. Other raw CLI, filesystem and SQLite writers and cross-process exclusivity remain unverified.
+
 ### Production safety blockers: hard NO-GO
 
 1. PROVE COMPLETE WRITE FREEZE: Obsidian Sync must be stopped and awaited, and EVERY writer class must enroll in the same admission and drain mechanism. The shared in-process SnapshotWriterFence has only PARTIAL wiring in this Draft branch, not comprehensive coverage.
