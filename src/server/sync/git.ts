@@ -155,7 +155,16 @@ class GitBackend implements SyncBackend {
     // Commit times first, so the index a boot rebuilds carries them; then pull
     // promptly so the model isn't reading a stale vault, then on the
     // configured interval.
-    void this.refreshTimes().finally(() => void this.cycle("startup"));
+    // The startup metadata read can finish after a fixture freeze begins.
+    // Its SQLite application then refuses admission. Handle that rejection
+    // explicitly: a rejected .finally() chain would otherwise be unobserved.
+    void this.refreshTimes()
+      .catch((e: unknown) => {
+        if (e instanceof Error && e.message === "backup_writer_freeze_active")
+          this.log("[git] startup metadata refresh deferred during DR freeze", "warn");
+        else this.log("[git] startup metadata refresh failed", "warn");
+      })
+      .finally(() => void this.cycle("startup"));
     this.pullTimer = setInterval(() => void this.cycle("poll"), pullMs());
   }
 
