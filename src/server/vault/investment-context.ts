@@ -237,7 +237,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
     } catch { failed.push(term); }
   }
   const rank = [...pool].map(([path,boost])=>{
-    const role=roleOf(path), basename=path.split("/").at(-1)?.toUpperCase()||"";
+    const role=roleOf(path);
     const companyBonus=issuerTokenInTitle(path,issuers)?22:0;
     const macroBonus=macroScope && primaryTopic ?
       (explicitMacroScope(path,primaryTopic)?25:0) +
