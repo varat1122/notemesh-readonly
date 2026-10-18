@@ -228,10 +228,12 @@ export async function createApiKey(name: string) {
   "use server";
   const session = await requireAdmin();
   audit("apikey.create", { user: session.user.id, name });
-  const res = await auth.api.createApiKey({
+  // The Better Auth adapter can mutate SQLite after an await.
+  // Hold one ticket across the entire API-key creation operation.
+  const res = await inProcessDrWriterFence.withWrite(() => auth.api.createApiKey({
     body: { name: name || "mcp-client" },
     headers: headers(),
-  });
+  }));
   // The plaintext key is shown exactly once; the caller revalidates the list.
   return { key: (res as any).key as string };
 }
@@ -240,7 +242,7 @@ export async function deleteApiKey(keyId: string) {
   "use server";
   const session = await requireAdmin();
   audit("apikey.delete", { user: session.user.id, keyId });
-  await auth.api.deleteApiKey({ body: { keyId }, headers: headers() });
+  await inProcessDrWriterFence.withWrite(() => auth.api.deleteApiKey({ body: { keyId }, headers: headers() }));
   return { ok: true };
 }
 
