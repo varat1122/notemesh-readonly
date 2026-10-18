@@ -162,6 +162,48 @@ it("gates text intake source→AI review on real same-actor readback and exact s
    expect(fs.existsSync(path.join(root,"vault",analysisPath))).toBe(false);
  }finally{await c.close();}
 });
+it("full local text source and separately attributed AI review write both verify and remain distinct",async()=>{
+ fs.mkdirSync(path.join(root,"vault","00_Inbox","ChatGPT"),{recursive:true});
+ fs.mkdirSync(path.join(root,"vault","10_Knowledge","Company Research"),{recursive:true});
+ const c=await connected(access);
+ const input={domain:"company",entities:["AMD"],topic:"Synthetic source/review local end-to-end",
+   inputFormat:"text",sourceKind:"user_commentary",
+   extractedText:"ต้นฉบับผู้ใช้: synthetic data only. No independent issuer evidence.",
+   analysisText:"AI Interpretation: ไม่มีข้อมูล primary; ไม่สรุปกำไรหรือ Thesis.",
+   sourceLanguage:"th",publisher:"User supplied, not independently verified"};
+ try{
+   const raw=unpack(await c.client.callTool({name:"preview_investment_intake_stage",
+     arguments:{...input,stage:"raw_input"}}));
+   const created=await c.client.callTool({name:"apply_edit",arguments:{
+     operationId:raw.operationId,previewToken:raw.preview.previewToken,expectedHash:raw.preview.beforeHash
+   }});
+   expect(created.isError).not.toBe(true);
+   const reviewed=unpack(await c.client.callTool({name:"preview_investment_intake_stage",
+     arguments:{...input,stage:"research_review"}}));
+   const saved=await c.client.callTool({name:"apply_edit",arguments:{
+     operationId:reviewed.operationId,previewToken:reviewed.preview.previewToken,
+     expectedHash:reviewed.preview.beforeHash
+   }});
+   expect(saved.isError).not.toBe(true);
+   const applied=unpack(saved);
+   expect(applied.receipt.readback).toBe("verified");
+   expect(applied.receipt.reindex).toBe("verified");
+   const result=unpack(await c.client.callTool({name:"inspect_coordinated_writeback",
+     arguments:{planId:raw.planId}}));
+   expect(result.stages.map((x:{state:string})=>x.state))
+     .toEqual(["locally_verified","locally_verified","not_found_or_not_owned"]);
+   const rawBody=fs.readFileSync(path.join(root,"vault",raw.preview.path),"utf8");
+   const analysisBody=fs.readFileSync(path.join(root,"vault",reviewed.preview.path),"utf8");
+   expect(rawBody).toContain(input.extractedText);
+   expect(rawBody).not.toContain(input.analysisText);
+   expect(analysisBody).toContain(input.analysisText);
+   expect(analysisBody).not.toContain(input.extractedText);
+   expect(analysisBody).toContain("original_intake_sha256:");
+   expect(analysisBody).toContain("original_source_verified: false");
+   expect(analysisBody).toContain("owner_approved_thesis: false");
+   expect(result.stages[0].receipt.mobileSync).toBe("unverified");
+ }finally{await c.close();}
+});
 it("generic create_note/apply cannot bypass coordinated review source identity or actor gates",async()=>{
  fs.mkdirSync(path.join(root,"vault","10_Knowledge","Company Research"),{recursive:true});
  const c=await connected(access);
