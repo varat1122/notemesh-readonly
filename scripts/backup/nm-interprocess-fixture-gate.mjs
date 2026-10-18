@@ -60,20 +60,34 @@ export async function withFixtureInterprocessExclusion(root, purpose, perform) {
   const owner = crypto.randomBytes(32).toString("hex");
   const ownerFile = path.join(lockDir, OWNER);
   const lockStat = fs.lstatSync(lockDir);
+  let result;
+  let failure;
+  let failed = false;
   try {
     // No PID-based "stale lease" override. The random value is used only for
     // ownership checks and is never printed in errors or CI output.
     fs.writeFileSync(ownerFile, owner, { flag: "wx", mode: 0o600 });
-    return await perform();
-  } finally {
-    // If another actor replaced or modified the lock, do not delete it.
-    // Never use recursive remove: an unexpected file must prevent release.
+    result = await perform();
+  } catch (e) {
+    failure = e;
+    failed = true;
+  }
+  // Do NOT throw from finally: cleanup errors have their own explicit branch,
+  // so we can preserve the original callback failure where cleanup succeeds.
+  let cleanupError;
+  try {
     const now = fs.lstatSync(lockDir);
     if (!now.isDirectory() || now.isSymbolicLink() ||
         now.dev !== lockStat.dev || now.ino !== lockStat.ino ||
         fs.readFileSync(ownerFile, "utf8") !== owner)
       throw Error("dr_ipc_gate_ownership_lost_fail_closed");
+    // Never remove recursively; unexpected files deliberately keep the lock.
     fs.unlinkSync(ownerFile);
     fs.rmdirSync(lockDir);
+  } catch (e) {
+    cleanupError = e;
   }
+  if (cleanupError) throw cleanupError;
+  if (failed) throw failure;
+  return result;
 }
