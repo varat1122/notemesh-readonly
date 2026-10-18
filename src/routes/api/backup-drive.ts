@@ -1,6 +1,7 @@
 import type { APIEvent } from "@solidjs/start/server";
 import { auth, runAuthMigrations } from "~/server/auth";
 import { env } from "~/server/env";
+import { issueDrConsentFormProof, validDrConsentFormProof, drConsentRequestOriginAllowed } from "~/server/backup/drive-consent-form";
 import { beginDrDriveConsent, driveSetupClient, driveSetupEnabled, DR_DRIVE_CALLBACK_PATH } from "~/server/backup/drive-auth";
 import { claimDrCredential, drDriveHeaders as headers, escapeHtml as esc } from "~/server/backup/drive-admin";
 
@@ -40,7 +41,7 @@ export async function GET({ request }: APIEvent) {
   This page is one-time. Google Drive uploading is NOT enabled by storing it.</p>
   <textarea readonly rows="8" cols="72">${esc(sealed)}</textarea>` : ""}
   ${driveSetupEnabled() && configured ?
-   '<form method="post"><button type="submit">Connect Google Drive for encrypted DR bundles</button></form>' :
+   `<form method="post"><input type="hidden" name="dr_consent_proof" value="${esc(issueDrConsentFormProof(admin.session.id, env.encryptionKey))}"><button type="submit">Connect Google Drive for encrypted DR bundles</button></form>` :
    '<p>Consent is disabled until the OAuth callback is deployed and the feature flag is approved.</p>'}
   <p>Required next gates: explicit permission to access an authorized app-created Drive folder,
   production writer coordination, verified upload/download, isolated restore drill, alerts and scheduling.</p>
@@ -48,11 +49,26 @@ export async function GET({ request }: APIEvent) {
   return new Response(page, { headers });
 }
 export async function POST({ request }: APIEvent) {
-  if (request.headers.get("origin") !== env.baseUrl)
-    return new Response("Forbidden origin", { status: 403, headers });
   const admin = await adminSession(request);
   if (!admin) return new Response("Unauthorized", { status: 401, headers });
   if (!driveSetupEnabled()) return new Response("DR setup disabled", { status: 403, headers });
+  // Do not accept an explicit cross-site Origin/Referer/Fetch-Metadata signal.
+  // Browsers omitting Origin must still prove they loaded the current admin's
+  // short-lived, server-signed form; this replaces the brittle header-only gate.
+  if (!drConsentRequestOriginAllowed(request.headers, env.baseUrl))
+    return new Response("Forbidden origin", { status: 403, headers });
+  let proof: FormDataEntryValue | null;
+  try {
+    if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
+        "application/x-www-form-urlencoded" ||
+        Number(request.headers.get("content-length") ?? 0) > 4096) throw Error();
+    proof = (await request.formData()).get("dr_consent_proof");
+  } catch {
+    return new Response("Invalid form", { status: 400, headers });
+  }
+  if (typeof proof !== "string" ||
+      !validDrConsentFormProof(proof, admin.session.id, env.encryptionKey))
+    return new Response("Invalid or expired form. Reload this page and try again.", { status: 403, headers });
   try {
     const location = beginDrDriveConsent(admin.user.id);
     return new Response(null, { status: 303, headers: { ...headers, Location: location } });
