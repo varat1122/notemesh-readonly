@@ -207,6 +207,15 @@ it("full local text source and separately attributed AI review write both verify
    expect(analysisBody).toContain("original_source_verified: false");
    expect(analysisBody).toContain("owner_approved_thesis: false");
    expect(result.stages[0].receipt.mobileSync).toBe("unverified");
+   // Same bytes but a changed inode mtime can indicate a peer write; the
+   // stale index must not be reported as currently verified.
+   const srcPath=path.join(root,"vault",raw.preview.path);
+   const oldStat=fs.statSync(srcPath);
+   fs.utimesSync(srcPath,oldStat.atime,new Date(oldStat.mtimeMs+60_000));
+   const drift=unpack(await c.client.callTool({name:"inspect_coordinated_writeback",
+     arguments:{planId:raw.planId}}));
+   expect(drift.stages[0].state).toBe("stale_local_bytes");
+   expect(drift.stages[1].state).toBe("locally_verified");
  }finally{await c.close();}
 });
 it("generic create_note/apply cannot bypass coordinated review source identity or actor gates",async()=>{
