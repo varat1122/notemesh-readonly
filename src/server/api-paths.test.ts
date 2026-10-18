@@ -6,6 +6,7 @@ describe("fail-closed API routing", () => {
     "/api/backup-drive",
     "/api/backup-drive/callback",
     "/api/backup-drive/credential-check",
+    "/api/backup-drive/fixture-upload",
     "/api/health",
     "/api/mcp",
     "/api/market-prices-drive",
@@ -18,6 +19,8 @@ describe("fail-closed API routing", () => {
 
   it.each([
     "/api/backup-drive/credential-check/extra",
+    "/api/backup-drive/fixture-upload/extra",
+    "/api/backup-drive/fixture-upload-evil",
     "/api/backup-drive/credential-check-evil",
     "/api/backup-drive/foo",
     "/api/backup-drive/callback/extra",
