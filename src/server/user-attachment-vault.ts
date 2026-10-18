@@ -16,6 +16,7 @@ import { resolveNotePath, assertDescriptorInVault, openNoFollow } from "./vault/
 import { recordLocalModification } from "./vault/modified";
 import { reindexPath } from "./vault/indexer";
 import { assertEnabled } from "./safe-edit/engine";
+import { inProcessDrWriterFence } from "./backup/writer-fence";
 
 export type AttachmentType="image/jpeg"|"image/png"|"image/webp"|"application/pdf";
 const ext:Record<AttachmentType,string>={
@@ -82,7 +83,10 @@ export function inspectUserAttachment({sha256,contentType}:{sha256:string;conten
     byteReadbackVerified:file.verified,publisherVerified:false,ocrVerified:false,
     claimVerified:false,remoteSyncVerified:false,mobileSyncVerified:false};
 }
-export function storeUserAttachment({base64,contentType}:{
+export function storeUserAttachment(input:{base64:string;contentType:AttachmentType}) {
+  return inProcessDrWriterFence.withWriteSync(()=>storeUserAttachmentUnderFence(input));
+}
+function storeUserAttachmentUnderFence({base64,contentType}:{
   base64:string;contentType:AttachmentType;
 }){
   assertEnabled();
