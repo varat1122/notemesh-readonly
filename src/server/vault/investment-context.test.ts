@@ -174,3 +174,30 @@ Official-file source candidate (no verified numeric facts in this synthetic test
     expect(()=>build({question:"  "})).toThrow(/Question/);
   });
 });
+
+
+describe("legacy Company Index routing across both retained Vault locations", () => {
+  it("retrieves a canonical older history index and never falsely reports it missing", async () => {
+    const build=await fixture();
+    const legacy="10_Knowledge/Indexes/Company - NVDA.md";
+    await addExtra(legacy,"# Company - NVDA\\n\\nArchived historical NVIDIA source-linked events; not new issuer verification.");
+    const p=build({question:"NVDA historical investment research", issuers:["NVDA"], maxNotes:16});
+    expect(p.items.map(x=>x.path)).toContain(legacy);
+    expect(p.incomplete.some(x=>x.includes("No legacy Company Index found for NVDA"))).toBe(false);
+    expect(p.incomplete).not.toContain("08_Daily_Weekly/Research Indexes/Company - NVDA.md");
+    // Old navigation must not be mistaken for independently verified primary evidence.
+    expect(p.items.find(x=>x.path===legacy)?.role).toBe("research");
+    expect(p.items.find(x=>x.path===legacy)?.schemaCompatibility.canAutoUpdateThesis).toBe(false);
+  });
+  it("preserves discoverability of both indexes if both coexist without bulk moving history", async () => {
+    const build=await fixture();
+    const newer="08_Daily_Weekly/Research Indexes/Company - NVDA.md";
+    const older="10_Knowledge/Indexes/Company - NVDA.md";
+    await addExtra(newer,"# Newer navigational view NVDA\\nExisting source note links.");
+    await addExtra(older,"# Older navigational view NVDA\\nHistorical chat event links.");
+    const p=build({question:"NVDA historic company events", issuers:["NVDA"],maxNotes:16});
+    expect(p.items.map(x=>x.path)).toContain(newer);
+    expect(p.items.map(x=>x.path)).toContain(older);
+    expect(p.incomplete.some(x=>x.includes("No legacy Company Index"))).toBe(false);
+  });
+});
