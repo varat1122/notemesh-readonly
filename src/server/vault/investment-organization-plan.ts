@@ -106,13 +106,31 @@ export function planVaultOrganization(input:{focus?:Focus;maxExamples?:number}={
       for(const ticker of declared.slice(0,8)){
         if(typeof ticker!=="string"||!/^[A-Za-z0-9._-]{1,18}$/.test(ticker))continue;
         const target="01_Companies/"+ticker+".md";
-        if(!notePaths.has(target)||
-            (isLinked(note.path,target)&&isLinked(target,note.path)))continue;
+        if(!notePaths.has(target)||isLinked(note.path,target)||isLinked(target,note.path))continue;
         historical.push({
           key:note.path+" => "+target,paths:[note.path,target],targetPath:target,
           finding:"declared_historical_company_link_candidate_not_verified_relationship",
           relationship:"declared_entity_mention_not_business_relationship",
           nextAction:"Read original historical note and Company Hub. Preserve source_records and chronology. Preview only missing navigation wikilinks after review; never infer supplier relation or add independent-event weight.",
+          safeEdit:"read_and_classify_first",ownerReviewRequired:true,
+        });
+      }
+    }
+    if((inspection.role==="historical_analysis"||inspection.role==="review") &&
+       note.path.startsWith("10_Knowledge/")){
+      const themes=Array.isArray(fm.theme)?fm.theme:[];
+      // Use only exact existing canonical theme or concept titles from
+      // declared metadata. Not every co-mention implies a financial linkage.
+      for(const theme of themes.slice(0,6)){
+        if(typeof theme!=="string"||theme.length>85||/[\\/<>]/.test(theme))continue;
+        const targets=["02_Industries_Themes/"+theme+".md","03_Concepts/"+theme+".md"];
+        const target=targets.find(t=>notePaths.has(t));
+        if(!target||isLinked(note.path,target)||isLinked(target,note.path))continue;
+        historical.push({
+          key:note.path+" => "+target,paths:[note.path,target],targetPath:target,
+          finding:"declared_historical_theme_link_candidate_not_verified_exposure",
+          relationship:"declared_entity_mention_not_business_relationship",
+          nextAction:"Read historical material and existing theme/concept hub; preview a navigation-only link if context supports it. Do not infer causal exposure, supplier relations, corroboration or same-event novelty.",
           safeEdit:"read_and_classify_first",ownerReviewRequired:true,
         });
       }
