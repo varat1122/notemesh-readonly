@@ -169,15 +169,23 @@ export const auth = betterAuth({
         // legitimate connector.
         let count: number | null = null;
         try {
-          d.prepare(
-            `DELETE FROM "oauthClient"
-             WHERE createdAt < ?
-               AND clientId NOT IN (SELECT clientId FROM "oauthAccessToken")
-               AND clientId NOT IN (SELECT clientId FROM "oauthRefreshToken")
-               AND clientId NOT IN (SELECT clientId FROM "oauthConsent")`,
-          ).run(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
-          count = (d.prepare('SELECT COUNT(*) AS n FROM "oauthClient"').get() as { n: number }).n;
+          // This hook is ordinarily nested inside the fenced auth endpoint.
+          // Guard its direct SQL path too, so internal auth calls cannot
+          // delete clients during the fixture's writer freeze.
+          count = inProcessDrWriterFence.withWriteSync(() => {
+            d.prepare(
+              `DELETE FROM "oauthClient"
+               WHERE createdAt < ?
+                 AND clientId NOT IN (SELECT clientId FROM "oauthAccessToken")
+                 AND clientId NOT IN (SELECT clientId FROM "oauthRefreshToken")
+                 AND clientId NOT IN (SELECT clientId FROM "oauthConsent")`,
+            ).run(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+            return (d.prepare('SELECT COUNT(*) AS n FROM "oauthClient"').get() as { n: number }).n;
+          });
         } catch (e) {
+          // Never turn freeze refusal into "unknown count, proceed anyway".
+          // Registration itself may write; fail closed before the adapter.
+          if (e instanceof Error && e.message === "backup_writer_freeze_active") throw e;
           console.error("[auth] client-cap check failed:", e);
         }
 
