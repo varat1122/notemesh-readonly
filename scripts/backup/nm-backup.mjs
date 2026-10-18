@@ -238,7 +238,10 @@ export async function main(argv=process.argv.slice(2)) {
     const kind=flags.get("--kind")||"fixture";
     if(!flags.has("--data-dir")||!flags.has("--out") || !KINDS.has(kind))throw Error("Require --data-dir, --out and valid --kind");
     if(!flags.get("--offline-confirmed") && !flags.get("--fixture-only"))throw Error("Refusing live data: --offline-confirmed or --fixture-only required");
-    if(flags.get("--fixture-only") && (inside("/data",data) || inside(clean(process.env.DATA_DIR||"/data"),data) || process.env.RAILWAY_ENVIRONMENT_ID))
+    const resolvedData=fs.realpathSync(data);
+    if(flags.get("--fixture-only") && (inside("/data",resolvedData) ||
+      inside(clean(process.env.DATA_DIR||"/data"),resolvedData) ||
+      process.env.RAILWAY_ENVIRONMENT_ID))
       throw Error("Fixture mode cannot operate on Railway or a deployed data root");
     if(inside(data,out) || inside(out,data))throw Error("Backup output and source directories must be disjoint");
     if(!fs.statSync(data).isDirectory())throw Error("Source must be a directory");
@@ -262,8 +265,20 @@ export async function main(argv=process.argv.slice(2)) {
         if(!flags.has("--dest"))throw Error("Require --dest");
         const dest=clean(flags.get("--dest"));
         if(dest==="/" || dest==="/data" || dest===clean(process.env.DATA_DIR||"/data") || inside(dest,bundle))throw Error("Refusing restore over a live/protected path");
-        await fsp.mkdir(dest,{recursive:true,mode:0o700});
-        if((await fsp.readdir(dest)).length)throw Error("Restore destination must be empty");
+        // Never follow a symlink target. The sandbox must be a NEW directory,
+        // not a preexisting (even empty) destination that could be overwritten.
+        let cursor=path.dirname(dest);
+        while(true){
+          const st=await fsp.lstat(cursor);
+          if(!st.isDirectory() || st.isSymbolicLink())throw Error("Restore parent directory is unsafe");
+          const parent=path.dirname(cursor);
+          if(parent===cursor)break;
+          cursor=parent;
+        }
+        await fsp.mkdir(dest,{mode:0o700}).catch(e=>{
+          if(e?.code==="EEXIST")throw Error("Restore destination must be empty and not already exist");
+          throw e;
+        });
         const manifest=JSON.parse(await fsp.readFile(path.join(stage,"manifest.json"),"utf8"));
         for(const directory of manifest.folders)
           await fsp.mkdir(path.join(dest,directory),{recursive:true,mode:0o700});
