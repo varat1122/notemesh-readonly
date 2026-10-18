@@ -8,6 +8,18 @@ function deferred<T>() {
   return {promise,resolve,reject};
 }
 describe("SnapshotWriterFence (isolated fixture only)",()=>{
+  it("holds explicit tickets until resource close and releases exactly once",async()=>{
+    const fence=new SnapshotWriterFence();
+    const release=fence.acquireWriteTicket();
+    expect(fence.status.activeWriters).toBe(1);
+    await expect(fence.withFrozenWriters(()=>true,{drainTimeoutMs:15}))
+      .rejects.toThrow(/drain_timeout/);
+    expect(fence.status).toEqual({frozen:false,activeWriters:1});
+    release();
+    expect(fence.status).toEqual({frozen:false,activeWriters:0});
+    expect(release).toThrow(/already_released/);
+    expect(await fence.withFrozenWriters(()=>true)).toBe(true);
+  });
   it("freezes new writes immediately and drains existing mutators before snapshot",async()=>{
     const fence=new SnapshotWriterFence();
     const writer=deferred<void>();
