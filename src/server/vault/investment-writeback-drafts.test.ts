@@ -47,6 +47,12 @@ describe("separate source and analysis candidate Safe Edit drafts (no writes)",(
    expect(withNewline.original.content).toContain("original_text_ends_with_newline: true");
    expect(withNewline.original.content).not.toContain("original_text_sha256: \""+sha+"\"");
    expect(withNewline.expectedOriginalSha256).not.toBe(noNewline.expectedOriginalSha256);
+   const term="~~~~";
+   const baseSource=composeWritebackDrafts({...v,extractedText:"First line"});
+   const newlineSource=composeWritebackDrafts({...v,extractedText:"First line\n"});
+   expect(baseSource.original.content).toContain(term+"text\nFirst line\n"+term+"\n");
+   expect(newlineSource.original.content).toContain(term+"text\nFirst line\n\n"+term+"\n");
+   expect(newlineSource.original.content).not.toContain(term+"text\nFirst line\n"+term+"\n");
  });
  it("does not claim selected historical context pointers were fully read or independently verified",()=>{
    const p=composeWritebackDrafts({...fixture(),historicalCandidatePaths:[
