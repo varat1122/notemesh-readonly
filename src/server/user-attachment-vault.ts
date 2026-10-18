@@ -123,5 +123,5 @@ export function storeUserAttachment({base64,contentType}:{
     try{fs.fsyncSync(dirFd);}finally{fs.closeSync(dirFd);}
     recordLocalModification(rel);reindexPath(rel);
     return {...inspectUserAttachment({sha256:digest,contentType}),duplicate:false};
-  }finally{if(created)try{fs.unlinkSync(tmp);}catch{}}
+  }finally{if(created)try{fs.unlinkSync(tmp);}catch{/* Temp may already have been removed. */}}
 }
