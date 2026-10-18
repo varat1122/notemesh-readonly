@@ -148,3 +148,34 @@ test("tampered Google ciphertext is never given a verified receipt",async()=>{
     assert.equal(fs.existsSync(path.join(root,"isolated-restore")),false);
   } finally {db.close();prices.close();fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test("downloaded .nmb tampering fails verification, decryption and isolated restore",async()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"nm-dr-independent-corruption-"));
+  const {data,db,prices}=fakeVault(root);
+  try {
+    const created=cli(["create","--data-dir",data,"--out",path.join(root,"encrypted"),
+      "--kind","fixture","--fixture-only"]);
+    const folderId="fixture_app_owned_folder_id_012345678";
+    const google=fakeGoogleDrive(folderId);
+    const receipt=await uploadVerifiedBundle({
+      bundle:created.bundle,folderId,accessToken:"offline-fixture-access-token",
+      fetcher:google.fetcher
+    });
+    assert.equal(receipt.verified,true);
+    // An independently retrieved artifact can subsequently be damaged or
+    // replaced. It must not inherit the old successful upload receipt.
+    const downloaded=Buffer.from(google.uploadedBytes());
+    downloaded[downloaded.length-25]^=1;
+    const corrupted=path.join(root,"downloaded-damaged.nmb");
+    fs.writeFileSync(corrupted,downloaded,{flag:"wx",mode:0o600});
+    const verification=spawnSync(process.execPath,[backupScript,"verify","--bundle",corrupted],
+      {env:isolatedEnv(),encoding:"utf8"});
+    assert.notEqual(verification.status,0);
+    assert.equal(verification.stdout.includes('"verified":true'),false);
+    const target=path.join(root,"isolated-restore");
+    const recovery=spawnSync(process.execPath,[backupScript,"restore","--bundle",corrupted,
+      "--dest",target],{env:isolatedEnv(),encoding:"utf8"});
+    assert.notEqual(recovery.status,0);
+    assert.equal(fs.existsSync(path.join(target,"vault/05_Thesis/FIXTURE.md")),false);
+  } finally {db.close();prices.close();fs.rmSync(root,{recursive:true,force:true});}
+});
