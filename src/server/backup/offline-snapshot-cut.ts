@@ -6,6 +6,8 @@
  * gate must remain CLOSED until each writer class and deployment scope has
  * independently verifiable coverage.
  */
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { SnapshotWriterFence } from "./writer-fence";
 
@@ -26,10 +28,25 @@ export function assertOfflineFixtureOnly(): void {
       process.env.RAILWAY_ENVIRONMENT_ID || process.env.RAILWAY_ENVIRONMENT_NAME ||
       process.env.RAILWAY_PROJECT_NAME || process.env.RAILWAY_SERVICE_NAME)
     throw Error("dr_offline_fixture_only_no_railway");
-  if (process.env.DATA_DIR &&
-      (path.resolve(process.env.DATA_DIR) === "/data" ||
-       path.resolve(process.env.DATA_DIR) === "/app/data"))
+  const raw = process.env.DATA_DIR;
+  if (!raw) throw Error("dr_offline_fixture_only_requires_data_dir");
+  const configured = path.resolve(raw);
+  if (configured === "/data" || configured === "/app/data")
     throw Error("dr_offline_fixture_only_deployed_data_dir");
+  // A filename check alone is not isolation: /tmp/fixture might be a symlink
+  // to the live Vault or a different mounted volume. Resolve both filesystem
+  // and configured pathname and require a real scratch directory with a
+  // deliberately unique fixture prefix. No automatic directory creation.
+  const scratch = fs.realpathSync(os.tmpdir());
+  let real: string;
+  try { real = fs.realpathSync(configured); }
+  catch { throw Error("dr_offline_fixture_only_missing_root"); }
+  if (path.dirname(real) !== scratch ||
+      !path.basename(real).startsWith("nm-dr-snapshot-fixture-"))
+    throw Error("dr_offline_fixture_only_not_isolated_scratch");
+  if (real !== configured || fs.lstatSync(configured).isSymbolicLink() ||
+      !fs.lstatSync(configured).isDirectory())
+    throw Error("dr_offline_fixture_only_symlink_or_unsafe_root");
 }
 
 /**
