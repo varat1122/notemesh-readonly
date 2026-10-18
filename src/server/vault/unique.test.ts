@@ -98,13 +98,20 @@ describe("uniqueNote", () => {
   });
 
   it("creates an empty note from a missing template, and a second note in the same minute gets a suffix", async () => {
-    obsidianConfig("zk-prefixer", JSON.stringify({ folder: "Zettel", template: "Templates/Nope" }));
-    const { uniqueNote } = await import("./unique");
-    const first = uniqueNote();
-    expect(first).toMatch(/^Zettel\/\d{12}\.md$/);
-    expect(get(first)).toBe("");
-    const second = uniqueNote();
-    expect(second).toMatch(/^Zettel\/\d{12}-[0-9a-f]{4}\.md$/);
+    // Pin Date only: previously a busy CI run could cross a real minute.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-18T14:32:15.000Z"));
+    try {
+      obsidianConfig("zk-prefixer", JSON.stringify({ folder: "Zettel", template: "Templates/Nope" }));
+      const { uniqueNote } = await import("./unique");
+      const first = uniqueNote();
+      expect(first).toMatch(/^Zettel\/\d{12}\.md$/);
+      expect(get(first)).toBe("");
+      const second = uniqueNote();
+      expect(second).toMatch(/^Zettel\/\d{12}-[0-9a-f]{4}\.md$/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
