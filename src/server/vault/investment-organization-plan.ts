@@ -9,7 +9,7 @@ import { db } from "../db";
 import { indexer } from "./indexer";
 import { inspectCanonicalKnowledgeMetadata } from "./investment-knowledge-schema";
 
-type Focus = "all" | "source_archives" | "other_links" | "metadata" | "inbox";
+type Focus = "all" | "source_archives" | "other_links" | "historical_links" | "metadata" | "inbox";
 type Row = { path: string; frontmatter: string | null };
 type LinkRow = { source: string; target: string };
 type Item = {
@@ -20,6 +20,8 @@ type Item = {
   nextAction: string;
   safeEdit: "not_allowed_without_original" | "review_and_preview_only" | "read_and_classify_first";
   ownerReviewRequired: true;
+  relationship?: "declared_entity_mention_not_business_relationship";
+  targetPath?: string;
 };
 type Group = {
   priority: "P0" | "P1" | "P2";
@@ -43,7 +45,7 @@ const group=(category:Group["category"],priority:Group["priority"],items:Item[],
 
 export function planVaultOrganization(input:{focus?:Focus;maxExamples?:number}={}) {
   const focus=input.focus??"all",limit=maxExamplesBound(input.maxExamples);
-  if(!["all","source_archives","other_links","metadata","inbox"].includes(focus))
+  if(!["all","source_archives","other_links","historical_links","metadata","inbox"].includes(focus))
     throw Error("organization_invalid_focus");
   if(input.maxExamples!==undefined && (!Number.isInteger(input.maxExamples)||input.maxExamples<1||input.maxExamples>12))
     throw Error("organization_invalid_example_limit");
@@ -81,6 +83,14 @@ export function planVaultOrganization(input:{focus?:Focus;maxExamples?:number}={
   const notesCapped=rows.length>MAX_NOTE_ROWS;
   const metadata:Item[]=[];
   const inbox:Item[]=[];
+  const historical:Item[]=[];
+  const notePaths=new Set(rows.slice(0,MAX_NOTE_ROWS).map(r=>r.path));
+  const resolvedRows=conn.prepare(
+    "SELECT source_path AS source,resolved_path AS target FROM links WHERE resolved_path IS NOT NULL LIMIT ?"
+  ).all(60001) as LinkRow[];
+  const resolvedTruncated=resolvedRows.length>60000;
+  const linked=new Set(resolvedRows.slice(0,60000).map(r=>JSON.stringify([r.source,r.target])));
+  const isLinked=(a:string,b:string)=>linked.has(JSON.stringify([a,b]));
   let normalizedAliases=0;
   for(const note of rows.slice(0,MAX_NOTE_ROWS)){
     let fm:Record<string,unknown>={};
@@ -90,6 +100,23 @@ export function planVaultOrganization(input:{focus?:Focus;maxExamples?:number}={
     }catch{/* Malformed legacy fields require separate full note read. */}
     const inspection=inspectCanonicalKnowledgeMetadata(note.path,fm);
     if(inspection.sourceTypeMapping==="legacy_alias")normalizedAliases++;
+    if((inspection.role==="historical_analysis"||inspection.role==="review") &&
+       note.path.startsWith("10_Knowledge/Company Research/")){
+      const declared=Array.isArray(fm.company)?fm.company:[];
+      for(const ticker of declared.slice(0,8)){
+        if(typeof ticker!=="string"||!/^[A-Za-z0-9._-]{1,18}$/.test(ticker))continue;
+        const target="01_Companies/"+ticker+".md";
+        if(!notePaths.has(target)||
+            (isLinked(note.path,target)&&isLinked(target,note.path)))continue;
+        historical.push({
+          key:note.path+" => "+target,paths:[note.path,target],targetPath:target,
+          finding:"declared_historical_company_link_candidate_not_verified_relationship",
+          relationship:"declared_entity_mention_not_business_relationship",
+          nextAction:"Read original historical note and Company Hub. Preserve source_records and chronology. Preview only missing navigation wikilinks after review; never infer supplier relation or add independent-event weight.",
+          safeEdit:"read_and_classify_first",ownerReviewRequired:true,
+        });
+      }
+    }
     if(note.path.startsWith("00_Inbox/")){
       inbox.push({
         key:note.path,paths:[note.path],
@@ -120,10 +147,11 @@ export function planVaultOrganization(input:{focus?:Focus;maxExamples?:number}={
     group("source_archives","P0",archive,limit),
     group("other_links","P1",other,limit),
     group("inbox","P1",inbox,limit),
+    group("historical_links","P1",historical,limit),
     group("metadata","P2",metadata,limit),
   ].filter(g=>focus==="all"||g.category===focus);
   return {
-    status:indexReady&&!linksCapped&&!notesCapped?
+    status:indexReady&&!linksCapped&&!notesCapped&&!resolvedTruncated?
       "indexed_organization_plan_not_applied":"partial_index_or_scan_do_not_execute",
     vaultMutationPerformed:false,
     sourceOriginalsVerified:false,
@@ -134,7 +162,8 @@ export function planVaultOrganization(input:{focus?:Focus;maxExamples?:number}={
     indexReady,indexedCount,
     scan:{indexedNotesScanned:Math.min(rows.length,MAX_NOTE_ROWS),
       notesTruncated:notesCapped,linkRowsScanned:Math.min(links.length,MAX_LINK_ROWS),
-      linksTruncated:linksCapped,legacySourceAliasesReadTimeOnly:normalizedAliases},
+      linksTruncated:linksCapped,resolvedLinkScanTruncated:resolvedTruncated,
+      legacySourceAliasesReadTimeOnly:normalizedAliases},
     groups,
     workflow:[
       "Read and identify exact source and note path, including date and provenance.",
@@ -145,6 +174,7 @@ export function planVaultOrganization(input:{focus?:Focus;maxExamples?:number}={
     caveats:[
       "Unresolved archive links do not prove original files permanently missing.",
       "Repeated legacy source_type aliases are supported read-time and are not bulk edit candidates.",
+      "Legacy company metadata indicates a historical mention, not proven issuer involvement, supplier status or independent verification.",
       "No action here moves, modifies, deletes, restores or uploads any Vault file.",
     ],
   };
