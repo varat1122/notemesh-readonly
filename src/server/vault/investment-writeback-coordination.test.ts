@@ -84,6 +84,11 @@ describe("P1a coordinated writeback plan (never applies edits)",()=>{
     const unindexed=receipt(p.steps[0],{receipt:{
       path:p.steps[0].path!,write:"written",readback:"verified",reindex:"unverified"}});
     expect(reconcileCoordinatedWriteback(p,[unindexed])[0].state).toBe("repair_required");
+    // Missing receipt target/hash are NOT accepted as verified even if the
+    // write/readback/reindex flags claim success.
+    const missingProof=receipt(p.steps[0],{receipt:{
+      write:"written",readback:"verified",reindex:"verified"}});
+    expect(reconcileCoordinatedWriteback(p,[missingProof])[0].state).toBe("repair_required");
   });
   it("rejects mismatched paths, hashes, duplicate receipts and out-of-order writes",()=>{
     const p=buildCoordinatedWriteback(makeInput());
