@@ -234,7 +234,7 @@ it("DR P2.9 integrates a stable offline fixture cut with genuine encrypted .nmb 
     db.exec("CREATE TABLE fixture(id INTEGER PRIMARY KEY, note TEXT); INSERT INTO fixture(note) VALUES('synthetic');");
   }finally{db.close();}
   const cli=path.resolve("scripts/backup/nm-backup.mjs");
-  const env={
+  const env:NodeJS.ProcessEnv={
     ...process.env,
     NOTEMESH_BACKUP_PASSPHRASE:"synthetic-dr-fixture-passphrase-1234567890",
     RAILWAY_PROJECT_ID:"",RAILWAY_SERVICE_ID:"",RAILWAY_ENVIRONMENT_ID:"",
