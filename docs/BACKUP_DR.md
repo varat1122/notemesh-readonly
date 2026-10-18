@@ -76,3 +76,5 @@ Run the preflight only on an isolated fixture or with explicit authorization for
 SyncSupervisor.withPausedForEdit now awaits asynchronous callbacks while keeping the pause and mutual-exclusion flag active. A regression test checks that the daemon stays paused until the callback resolves. This is a building block, NOT an activated production backup coordinator.
 
 Production remains gated: other Vault writers and the price collector need cross-component coordination. The system must restore sync on error, preserve secrets, verify disk staging capacity, and forbid any backup job that cannot establish writer quiescence. Do not invoke the offline CLI on the live Railway volume or assume a CLI confirmation flag proves safe quiescence.
+
+Recovery hardening: restore now refuses any existing destination (including an empty directory), rejects symlink ancestors, and requires a new sandbox directory under an existing normal parent. Fixture-only mode checks the real path of its source so a symlink alias to a deployed data root is not accepted.
