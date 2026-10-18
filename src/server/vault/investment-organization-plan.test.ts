@@ -96,3 +96,21 @@ it("bounds output and refuses invalid limits; no scan truncation is silently cer
   expect(()=>planVaultOrganization({maxExamples:13})).toThrow("organization_invalid_example_limit");
   expect(()=>planVaultOrganization({focus:"invalid" as "all"})).toThrow("organization_invalid_focus");
 });
+
+it("finds only exact existing Company Hubs for dated historical notes, without asserting issuer economics",async()=>{
+  await note("01_Companies/TSMC.md","---\ntype: company_hub\n---","# Hub");
+  await note("10_Knowledge/Company Research/TSMC 2026Q2.md",
+    "---\ntype: knowledge_note\ncompany: [TSMC, NET]\nsource_type: chatgpt_history\ndate: 2026-07-16\n---",
+    "# History\n[[07_Sources/ChatGPT/Entries/Original]]");
+  const {planVaultOrganization}=await import("./investment-organization-plan");
+  const p=planVaultOrganization({focus:"historical_links"});
+  expect(p.groups[0].total).toBe(1);
+  expect(p.groups[0].examples[0]).toMatchObject({
+    targetPath:"01_Companies/TSMC.md",
+    relationship:"declared_entity_mention_not_business_relationship",
+    ownerReviewRequired:true,safeEdit:"read_and_classify_first",
+  });
+  expect(p.groups[0].examples[0].key).not.toContain("01_Companies/NET.md");
+  expect(fs.readFileSync(path.join(vault,"10_Knowledge/Company Research/TSMC 2026Q2.md"),"utf8"))
+    .toContain("date: 2026-07-16");
+});
