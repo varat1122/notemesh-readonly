@@ -12,6 +12,7 @@ const SUFFIX = /\.(?:ts|tsx|js|mjs)$/;
 const MUTATORS = [
   ["sqlite_statement", /\.(?:run|exec|transaction)\s*\(/],
   ["sqlite_open", /\bnew\s+(?:Database|DatabaseSync)\s*\(/],
+  ["auth_adapter", /\bauth\.api\.[A-Za-z_$][\w$]*\s*\(/],
   ["filesystem", /\bfs\.(?:writeFileSync|appendFileSync|copyFileSync|renameSync|rmSync|rmdirSync|mkdirSync|unlinkSync|linkSync|truncateSync)\s*\(/],
   ["filesystem_handle", /\bfs\.openSync\s*\(/],
   ["external_process", /\b(?:runGit|runOb|spawn|execa|execFileSync)\s*\(/],
