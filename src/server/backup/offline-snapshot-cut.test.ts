@@ -1,4 +1,7 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { SnapshotWriterFence } from "./writer-fence";
 import { assertOfflineFixtureOnly, withOfflineFixtureCut } from "./offline-snapshot-cut";
 
@@ -28,11 +31,17 @@ function mockSync(events:string[]){
   return {sync,isPaused:()=>paused,calls:()=>calls};
 }
 
+let scratch: string;
 beforeEach(()=>{
-  vi.stubEnv("DATA_DIR","/tmp/offline-snapshot-fixture");
+  scratch=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),"nm-dr-snapshot-fixture-")));
+  vi.stubEnv("DATA_DIR",scratch);
   for(const key of railwayVars)vi.stubEnv(key,"");
 });
-afterEach(()=>{vi.unstubAllEnvs();vi.restoreAllMocks();});
+afterEach(()=>{
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  fs.rmSync(scratch,{recursive:true,force:true});
+});
 
 it.each(railwayVars)("refuses any Railway runtime even with successful external attestation: %s",async(key)=>{
   vi.stubEnv(key,"railway-fixture-test");
@@ -48,6 +57,30 @@ it.each(railwayVars)("refuses any Railway runtime even with successful external 
 it.each(["/data", "/app/data"])("refuses deployed volume root %s without Railway variables",async(dir)=>{
   vi.stubEnv("DATA_DIR",dir);
   expect(()=>assertOfflineFixtureOnly()).toThrow(/deployed_data_dir/);
+});
+
+it("refuses a symlink alias to isolated scratch and any non-fixture scratch directory",async()=>{
+  const alias=scratch+"-alias",outside=fs.mkdtempSync(path.join(os.tmpdir(),"nm-dr-unverified-"));
+  try{
+    fs.symlinkSync(scratch,alias);
+    vi.stubEnv("DATA_DIR",alias);
+    expect(()=>assertOfflineFixtureOnly()).toThrow(/not_isolated_scratch|symlink_or_unsafe_root/);
+    vi.stubEnv("DATA_DIR",outside);
+    expect(()=>assertOfflineFixtureOnly()).toThrow(/not_isolated_scratch/);
+    expect(fs.readdirSync(scratch)).toEqual([]);
+  }finally{
+    fs.rmSync(alias,{force:true});
+    fs.rmSync(outside,{recursive:true,force:true});
+  }
+});
+it("refuses missing or nonexistent fixture path before freezing writers",async()=>{
+  const fence=new SnapshotWriterFence(),events:string[]=[],{sync}=mockSync(events),capture=vi.fn();
+  vi.stubEnv("DATA_DIR",scratch+"-gone");
+  await expect(withOfflineFixtureCut({fence,sync,assertNoExternalWriters:()=>true,capture}))
+    .rejects.toThrow(/missing_root/);
+  expect(capture).not.toHaveBeenCalled();
+  expect(fence.status).toEqual({frozen:false,activeWriters:0});
+  expect(events).toEqual([]);
 });
 
 it("waits for in-flight writes, then holds Sync pause and admission fence until async cut finishes",async()=>{
