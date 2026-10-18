@@ -5,6 +5,7 @@ import { env } from "./env";
 import { getSetting } from "./db";
 import { nextIntake, acknowledge } from "./intake";
 import { syncBackend, syncKind } from "./sync";
+import { inProcessDrWriterFence } from "./backup/writer-fence";
 
 export const cloudIntakeEnabled = () => process.env.CLOUD_INTAKE === "1";
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -31,6 +32,9 @@ export function processCloudIntake() {
   if (verifiedStart !== status.startedAt) return;
   busy = true;
   try {
+    // Admission is checked before reading/acknowledging an intake batch;
+    // the importer mutates Vault files, source archive and SQLite synchronously.
+    inProcessDrWriterFence.withWriteSync(() => {
     const item = nextIntake();
     lastRun = new Date().toISOString();
     if (!item) { lastResult = "idle"; return; }
@@ -50,6 +54,7 @@ export function processCloudIntake() {
       acknowledge({ id: item.id, status: "blocked", paths: [], message: String(e instanceof Error ? e.message : e).slice(0,1000) });
       lastResult = "blocked";
     }
+    });
   } finally { busy = false; }
 }
 
