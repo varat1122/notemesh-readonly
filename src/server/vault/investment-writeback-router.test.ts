@@ -87,7 +87,7 @@ describe("multilingual read-only writeback router",()=>{
   expect(route({...base,extractedText:base.extractedText+" Amended."}).planId).not.toBe(a.planId);
   // Raw note preserves whitespace; ID must not collide across distinct bytes.
   expect(route({...base,extractedText:" "+base.extractedText}).planId).not.toBe(a.planId);
-  expect(route({...base,extractedText:base.extractedText+"\\n"}).planId).not.toBe(a.planId);
+  expect(route({...base,extractedText:base.extractedText+"\n"}).planId).not.toBe(a.planId);
  });
  it("does not conflate identically worded originals with different event or attribution metadata",async()=>{
   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
