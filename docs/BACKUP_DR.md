@@ -15,6 +15,14 @@ This section supersedes the initial PRE-TEST status further below; earlier notes
 - Complete REAL-FORMAT .nmb OFFLINE test: scripts/backup/nm-cloud-dr-drill.test.mjs creates an isolated synthetic NoteMesh directory, generates a genuine NMDR1 encrypted .nmb archive, verifies it, passes ciphertext through a MOCKED Google Drive resumable upload/download transport, creates a separate downloaded bundle, cryptographically verifies it, restores into a new sandbox, and compares synthetic Markdown notes, source-archive, fake Obsidian home state and both app and market-price SQLite tables and integrity. The deliberately corrupted readback must fail without a verified receipt. Passing this mock-transport integration test proves the archive/transport/recovery integration boundary only; it does not prove a live Google-Drive .nmb restore.
 - GitHub Draft PR #36 remains unmerged; only a separate, disposable Railway Staging service was deployed for testing. Production remains on main, unchanged.
 
+### Phase 2.1 — offline-only coordinated snapshot lifecycle (Draft, 18 October 2026)
+
+The Draft adds `src/server/backup/offline-snapshot-cut.ts` as an **isolated test helper only**. It is not mounted on any API, job, cron, or Railway production service. It rejects Railway service/environment markers and deployed DATA_DIR roots outright.
+
+The tested operation order is: (1) freeze in-process writer admissions, (2) wait for registered in-flight writes to drain within a deadline, (3) request Obsidian Sync pause and await confirmed daemon exit, (4) require positive fixture-only external-writer halt assertion, (5) run asynchronous isolated snapshot, (6) resume Sync and release admissions after success or failure. If any step fails, capture must not run and existing writers must be unblocked after cleanup. Tests cover concurrent writes, timer expiry, missing external halt, snapshot failure and Railway restrictions.
+
+**Not a production-ready consistent snapshot:** external halt in this helper is a **mock fixture assertion**, not verified proof of disabled desktop/mobile sync or another process. Neither the in-process fence nor this orchestrator catches arbitrary direct SQLite writers. Before any live coordinator is implemented, define a durable distributed/exclusive writer lease with known fencing behavior; enumerate and enroll all mutate-capable pathways; freeze SQL/auth/background queue operations; verify one active deployment/replica and no external sync writer; enforce immutable source/volume boundaries; calculate bounded scratch space; and test actual .nmb Drive recovery through a separate, authenticated restore environment.
+
 ### Production safety blockers: hard NO-GO
 
 1. PROVE COMPLETE WRITE FREEZE: Obsidian Sync must be stopped and awaited, and EVERY writer class must enroll in the same admission and drain mechanism. The shared in-process SnapshotWriterFence has only PARTIAL wiring in this Draft branch, not comprehensive coverage.
