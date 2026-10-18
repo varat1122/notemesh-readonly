@@ -105,6 +105,12 @@ An additional integration regression runs a genuine encrypted `.nmb` create, cry
 
 **Production remains NO-GO:** require a real source-consistent storage cut with all Vault, home, source-archive and SQLite writers enrolled or positively quiescent, with durable cross-process fencing and crash tests. No change in this phase activates live backup, changes the Production volume, uploads data to Drive or removes the requirement for protected Staging end-to-end `.nmb` recovery with synthetic data.
 
+### Phase 2.10 — direct Git metadata cache admission (Draft, 19 October 2026)
+
+The exported `recordLocalModification()` and `forgetModification()` helpers previously changed the process-local Git timestamp and birth-time maps directly. Although Vault file operations and `applyGitHistory()` had outer admission, a direct caller could change those caches during a fixture Writer Freeze without entering the fence. Both helpers now acquire `inProcessDrWriterFence.withWriteSync()` independently; nested calls by already admitted Vault/Git writers continue normally. New tests verify direct calls are rejected *before* modifying either cache during Freeze, restore normal write/evict behavior after thaw, and allow nested metadata updates from an in-flight admitted writer to drain before capture.
+
+This is **metadata-cache consistency only**, not disk or cross-process writer closure. A green regression does not establish that the shared SQLite handle, Better Auth internals, Obsidian continuous daemon, external devices, Git subprocesses in another process or Production volume are frozen. No active Snapshot Coordinator, Backup Schedule, Drive upload, live Production change, staging service or Restore has been enabled by this change.
+
 ### Production safety blockers: hard NO-GO
 
 1. PROVE COMPLETE WRITE FREEZE: Obsidian Sync must be stopped and awaited, and EVERY writer class must enroll in the same admission and drain mechanism. The shared in-process SnapshotWriterFence has only PARTIAL wiring in this Draft branch, not comprehensive coverage.
