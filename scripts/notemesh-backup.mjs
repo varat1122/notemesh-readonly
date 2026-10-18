@@ -58,6 +58,8 @@ async function copyConsistent(src,dst,manifest,prefix="",counter={bytes:0}) {
   if(stat.isDirectory()){
     fs.mkdirSync(dst,{recursive:true,mode:0o700});
     for(const name of fs.readdirSync(src).sort()){
+      if(name.includes("\n")||name.includes("\r")||name.includes("\\"))
+        throw Error("Unsupported backup pathname needs operator review");
       // Never take unstable SQLite sidecars. Base SQLite database is backed up
       // transactionally using the SQLite online-backup API.
       if(isSidecar(name)||name==="safe-edit.lock")continue;
@@ -87,6 +89,11 @@ async function copyConsistent(src,dst,manifest,prefix="",counter={bytes:0}) {
   if(stat.size!==after.size||stat.mtimeMs!==after.mtimeMs||stat.ino!==after.ino)
     throw Error("Source file changed during snapshot: abort and retry with sync quiesced");
   const copied=regular(dst);
+  if(!isDb&&fileSha(src)!==fileSha(dst))
+    throw Error("Non-SQLite original changed during snapshot despite matching file metadata");
+  if(copied.size>maxSource||counter.bytes+Math.max(0,copied.size-stat.size)>maxSource)
+    throw Error("Snapshot copy exceeds backup size cap");
+  counter.bytes+=Math.max(0,copied.size-stat.size);
   manifest.push({path:prefix,bytes:copied.size,sha256:fileSha(dst),sqliteOnlineBackup:isDb});
 }
 function checkedArchiveEntries(text) {
@@ -140,6 +147,9 @@ async function extractVerifiedSealedArchive(file,dest,key){
   );
   const names=await command("tar",["-tzf",temp]);
   checkedArchiveEntries(names);
+  const types=await command("tar",["-tvzf",temp]);
+  if(types.split("\n").filter(Boolean).some(line=>!/^[-d]/.test(line)))
+    throw Error("Backup archive contains an unsupported link or special file");
   const restore=path.join(dest,"restore");
   fs.mkdirSync(restore,{mode:0o700});
   await command("tar",["--no-same-owner","--no-same-permissions","-xzf",temp,"-C",restore]);
@@ -197,7 +207,9 @@ export async function createSnapshot(dataDir,outFile,key=keyFromEnvironment()){
       sqliteMode:"online_backup_not_live_wal_copy",files};
     fs.writeFileSync(path.join(stage,"manifest.json"),JSON.stringify(manifest),{flag:"wx",mode:0o600});
     await encryptTar(stage,out,key);
-    const check=await verifySnapshot(out,key);
+    let check;
+    try{check=await verifySnapshot(out,key);}
+    catch(e){fs.rmSync(out,{force:true});throw e;}
     return {status:"verified_encrypted_local_snapshot_not_uploaded",filename:path.basename(out),
       encryptedBytes:fs.statSync(out).size,sha256:fileSha(out),...check};
   }finally{fs.rmSync(stage,{recursive:true,force:true});}
