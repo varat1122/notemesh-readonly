@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Validate feature branch commits without requiring production merge.
+    # This workflow uses standard hosted runners on a public repository.
+    branches: [main, "feat/**", "fix/**"]
   pull_request:
   # A branch can be run by hand: gh workflow run ci.yml --ref <branch>.
   workflow_dispatch:
