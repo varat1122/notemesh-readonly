@@ -2,14 +2,14 @@
 # trixie (not bookworm): better-sqlite3 v13's linux prebuilds need glibc >= 2.38.
 FROM node:24-trixie-slim AS build
 WORKDIR /app
-RUN corepack enable && apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
+RUN corepack enable && apt-get update && apt-get install -y --no-install-recommends python3 make g++ tar && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # The root postinstall runs this patch during dependency installation.
 COPY scripts/patch-oauth-refresh-scopes.mjs ./scripts/patch-oauth-refresh-scopes.mjs
 RUN pnpm install --frozen-lockfile
 COPY . .
 # Backup restore verification uses the Node 24 SQLite online-backup API.
-RUN node --test scripts/notemesh-backup.test.mjs
+RUN node --test scripts/notemesh-backup.test.mjs scripts/notemesh-drive-upload.test.mjs
 RUN node scripts/patch-oauth-refresh-scopes.mjs
 RUN pnpm exec vitest run src/server/market-prices src/server/mcp/price-tools.test.ts src/server/safe-edit/engine.test.ts src/server/safe-edit/sync.test.ts src/server/mcp/safe-edit-server.test.ts src/server/ob/supervisor-safe-edit.test.ts src/routes/api/market-prices-drive.test.ts src/routes/api/safe-edit-approval.test.ts src/routes/api/safe-edit-route.test.ts src/server/cloud-intake.test.ts src/server/cloud-preflight.test.ts src/server/oauth-refresh-scopes.test.ts src/server/oauth-diagnostics.test.ts src/server/mcp/readonly-deployment.test.ts src/server/mcp/server.test.ts src/server/mcp/catalog.test.ts src/server/mcp/tool-auth.test.ts src/server/intake.test.ts src/routes/api/intake-worker.test.ts src/server/mcp/save-server.test.ts src/server/mcp/oauth-endpoint.test.ts src/routes/api/save-analysis.test.ts src/server/discovery.test.ts src/server/vault/investment-knowledge-schema.test.ts src/server/vault/investment-knowledge-inventory.test.ts src/server/vault/investment-context.test.ts src/server/vault/investment-claim-review.test.ts src/server/vault/investment-writeback-router.test.ts src/server/vault/investment-decision-packet.test.ts src/server/vault/evidence-verification-ledger.test.ts src/server/vault/thesis-proposal-gate.test.ts src/server/research-source-archive.test.ts src/server/research-source-fetch.test.ts src/server/user-attachment-vault.test.ts && pnpm exec tsc --noEmit
 RUN pnpm build
@@ -38,6 +38,7 @@ COPY scripts/ob-readonly.mjs /app/ob-readonly.mjs
 COPY scripts/cloud-sync-preflight.mjs /app/cloud-sync-preflight.mjs
 # Operator-invoked only; does not schedule or upload unless separately configured.
 COPY scripts/notemesh-backup.mjs /app/scripts/notemesh-backup.mjs
+COPY scripts/notemesh-drive-upload.mjs /app/scripts/notemesh-drive-upload.mjs
 COPY scripts/intake-importer.cjs /app/scripts/intake-importer.cjs
 RUN chmod 755 /app/ob-readonly.mjs
 ENV OB_BIN=/app/ob-readonly.mjs
