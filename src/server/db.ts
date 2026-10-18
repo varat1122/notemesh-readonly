@@ -1,10 +1,14 @@
 import Database from "better-sqlite3";
 import { env, ensureDataDirs } from "./env";
+import { inProcessDrWriterFence } from "./backup/writer-fence";
 
 let _db: Database.Database | undefined;
 
 export function db(): Database.Database {
   if (!_db) {
+    // Lazy opening executes schema migrations and creates files. Never allow
+    // it to start after a snapshot freeze began.
+    if (inProcessDrWriterFence.status.frozen) throw Error("backup_writer_freeze_active");
     ensureDataDirs();
     _db = new Database(env.dbPath);
     _db.pragma("journal_mode = WAL");
@@ -119,14 +123,18 @@ export function getSetting(key: string): string | undefined {
 }
 
 export function setSetting(key: string, value: string) {
-  db()
-    .prepare(
-      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, unixepoch())
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = unixepoch()`,
-    )
-    .run(key, value);
+  return inProcessDrWriterFence.withWriteSync(() => {
+    db()
+      .prepare(
+        `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, unixepoch())
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = unixepoch()`,
+      )
+      .run(key, value);
+  });
 }
 
 export function deleteSetting(key: string) {
-  db().prepare("DELETE FROM settings WHERE key = ?").run(key);
+  return inProcessDrWriterFence.withWriteSync(() => {
+    db().prepare("DELETE FROM settings WHERE key = ?").run(key);
+  });
 }
