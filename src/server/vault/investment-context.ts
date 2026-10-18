@@ -30,12 +30,12 @@ function terms(s: string): string[] {
 }
 // Scope the candidate set before ranking. A ticker mentioned as a broker
 // in somebody else's research is not evidence about the issuer's business.
-function namedIssuer(path: string): string | null {
+function namedIssuers(path: string): string[] {
   const file=path.split("/").at(-1)??"";
-  if(path.startsWith("01_Companies/"))return file.match(/^([A-Z][A-Z0-9.-]{0,11})\.md$/)?.[1]??null;
-  if(path.startsWith("05_Thesis/"))return file.match(/^([A-Z][A-Z0-9.-]{0,11}) - (?:Current Thesis|Evidence Register)/)?.[1]??null;
+  if(path.startsWith("01_Companies/")){const t=file.match(/^([A-Z][A-Z0-9.-]{0,11})\.md$/)?.[1];return t?[t]:[];}
+  if(path.startsWith("05_Thesis/")){const t=file.match(/^([A-Z][A-Z0-9.-]{0,11}) - (?:Current Thesis|Evidence Register)/)?.[1];return t?[t]:[];}
   const structured=file.match(/^(?:Company Evolution - |Company - |Primary Evidence - )([A-Z][A-Z0-9.-]{0,11})(?:\s|\.md)/)?.[1];
-  if(structured)return structured;
+  if(structured)return [structured];
   // Many Company Research titles list the covered issuer before a broker.
   // E.g. "ASML - JPM Q3 Preview" concerns ASML, not the bank JPM.
   // Reject obvious generic metric acronyms and source/vintage IDs; this is a
@@ -52,14 +52,14 @@ function namedIssuer(path: string): string | null {
         const declared=Array.isArray(fm.company)?fm.company:[fm.company];
         const tagged=declared.filter((v):v is string=>typeof v==="string")
           .map(v=>v.trim().toUpperCase()).filter(v=>/^[A-Z][A-Z0-9.-]{0,11}$/.test(v));
-        if(tagged.length)return tagged[0];
+        if(tagged.length)return [...new Set(tagged)];
       }catch{/* Invalid legacy metadata falls back to conservative filename inference. */}
     }
     const codes=[...file.matchAll(/(?:^|[^A-Za-z0-9])([A-Z][A-Z0-9]{1,7})(?=[^A-Za-z0-9]|$)/g)]
       .map(x=>x[1]).filter(x=>!/^(?:P\d+|F\d+|Q\d+|FY\d+|USD|GDP|EPS|FCF|OCF|ROIC|BOM|TAM|GPU|CPU|CPO|NPO|ROI|CEO|CFO|IR|US|AI|DC)$/.test(x));
-    return codes[0]??null;
+    return codes.slice(0,1);
   }
-  return null;
+  return [];
 }
 const STOP_SCOPE = new Set(["AND","THE","WITH","FROM","FOR","MARKET","MARKETS","MACRO","ECONOMY","ECONOMIC","INDUSTRY","GLOBAL","FINANCIAL","COMPANY","RESEARCH","STOCK","EQUITY","AND"]);
 function topicTerms(s: string): string[] { return terms(s).filter(t=>!STOP_SCOPE.has(t)); }
@@ -229,8 +229,9 @@ export function buildInvestmentContextPack(req: Input): Pack {
     try {
       for (const [i,h] of searchVault(term,{limit:30}).hits.entries()) {
         const role=roleOf(h.path);
-        const otherIssuer=namedIssuer(h.path);
-        if(issuers.length && otherIssuer && !issuers.includes(otherIssuer))continue;
+        const scopedIssuerNames=namedIssuers(h.path);
+        if(issuers.length && scopedIssuerNames.length &&
+          !scopedIssuerNames.some(t=>issuers.includes(t)))continue;
         if(issuers.length && role==="research" && !pool.has(h.path) &&
           (!h.path.startsWith("10_Knowledge/Company Research/") ||
            (req.industry && !industryMatches.has(h.path))))continue;
@@ -242,7 +243,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
           // One shared word (e.g. "revenue") must not pull an unrelated issuer.
           if(!primaryTopic || !explicitMacroScope(h.path,primaryTopic))continue;
           if(role==="company"||role==="thesis"||role==="evidence_register"||
-            (role==="timeline" && otherIssuer)||
+            (role==="timeline" && scopedIssuerNames.length>0)||
             h.path.startsWith("10_Knowledge/Company Research/"))continue;
         }
         pool.set(h.path,Math.max(pool.get(h.path)||0, 30-i));
