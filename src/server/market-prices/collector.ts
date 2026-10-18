@@ -3,6 +3,7 @@ import { z } from "zod";
 import { instrumentSchema, instrument, PILOT_INSTRUMENTS, BENCHMARKS, MAX_PRICE_INSTRUMENTS, PriceError, type InstrumentInput } from "./model.ts";
 import { PriceStore, priceDbPath } from "./store.ts";
 import { fetchYahooDaily } from "./yahoo.ts";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 
 export function priceWatchlist(): InstrumentInput[] {
   try {
@@ -28,6 +29,9 @@ export interface RefreshOptions {
   fetcher?: typeof fetchYahooDaily; pause?: (ms: number) => Promise<unknown>;
 }
 export async function refreshPrices(options: RefreshOptions = {}) {
+  // Keep one writer ticket throughout provider I/O, price-store mutation and
+  // cleanup, so a coordinated freeze cannot enter mid-refresh.
+  return inProcessDrWriterFence.withWrite(async () => {
   priceWatchlistFrom(options);
   const backend = process.env.MARKET_PRICES_STORAGE ?? "disk";
   if (!["disk", "google-drive"].includes(backend)) throw new PriceError("invalid_price_storage_backend");
@@ -40,6 +44,7 @@ export async function refreshPrices(options: RefreshOptions = {}) {
   priceWatchlistFrom(options);
   const store = new PriceStore(options.filename ?? priceDbPath(), true);
   try { return await collectIntoPriceStore(store, options); } finally { store.close(); }
+  });
 }
 export function priceWatchlistFrom(options: RefreshOptions) {
   const list = z.array(instrumentSchema).min(1).max(MAX_PRICE_INSTRUMENTS).parse(options.watchlist ?? priceWatchlist());
