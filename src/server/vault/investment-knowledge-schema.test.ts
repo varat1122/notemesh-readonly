@@ -54,6 +54,23 @@ describe("canonical read-time knowledge schema adapter",()=>{
     expect(p.claimIssues).toEqual([]);
     expect(p.eventDate).toBeNull();
   });
+  it("classifies a new attributed investment intake as source, not verified issuer evidence",()=>{
+    const source=fixture("00_Inbox/ChatGPT/Investment Intake - IN-0123456789ABCDEF.md",[
+      "type: investment_source_capture","source_type: user_supplied",
+      "verification: not_reverified","publisher_claimed: Reuters",
+      "event_date: null","published_at: null"
+    ]);
+    expect(source.role).toBe("source");
+    expect(source.normalizedSourceType).toBe("user_supplied");
+    expect(source.declaredVerification).toBe("not_reverified");
+    expect(source.originalSource).toBeNull();
+    expect(source.canAutoUpdateThesis).toBe(false);
+    const legacy=fixture("00_Inbox/ChatGPT/Investment Intake - IN-FEDCBA9876543210.md",[
+      "type: chatgpt_archive","source_type: archived_ai","verification: not_reverified"
+    ]);
+    expect(legacy.role).toBe("archive");
+    expect(legacy.independenceAssessment).toBe("not_independent_archived_ai");
+  });
   it("ChatGPT archive date and imported_on are not asserted as original news chronology",()=>{
     const p=fixture("07_Sources/ChatGPT/Entries/Feed 160726.md",[
       "type: investment_review","source_type: archived_ai",

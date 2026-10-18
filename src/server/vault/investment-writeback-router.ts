@@ -10,6 +10,8 @@ import { db } from "../db";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
 import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
+import { buildCoordinatedWriteback, type CoordinatedWriteback } from "./investment-writeback-coordination";
+import { composeWritebackDrafts, type DraftPacket } from "./investment-writeback-drafts";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"unknown";
@@ -20,6 +22,7 @@ export interface WritebackInput {
   inputFormat:IntakeFormat;
   sourceKind:IntakeSource;
   extractedText:string;
+  analysisText?:string|null; // Explicit analyst-authored interpretation, never inferred by the server
   sourceLanguage?:string|null;
   sourceUrl?:string|null;
   publisher?:string|null;
@@ -36,6 +39,8 @@ type Route={kind:"raw_input"|"research_review"|"company_timeline_candidate"|"ind
   path:string|null;reason:string;requiresReview:boolean};
 export interface WritebackPlan {
   status:"read_only_plan_not_written";
+  coordination:CoordinatedWriteback;
+  safeEditDrafts:DraftPacket;
   planId:string;
   entityScope:string[];
   domain:Domain;
@@ -91,6 +96,14 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(!T(input.topic)||input.topic.length>250)throw Error("topic must be 1-250 characters");
   if(!T(input.extractedText)||input.extractedText.length>MAX_TEXT)
     throw Error("Provide faithful extractedText, 1 to 12000 characters");
+  if(input.analysisText&&input.analysisText.length>14000)throw Error("analysisText max 14000 characters");
+  // JS can hold unpaired UTF-16 surrogate code units which UTF-8 encoding
+  // silently replaces with U+FFFD. Reject these before claiming lossless
+  // preservation or computing a source identity.
+  if(Buffer.from(input.extractedText,"utf8").toString("utf8")!==input.extractedText)
+    throw Error("Original text contains invalid Unicode and cannot be preserved losslessly");
+  if(input.analysisText&&Buffer.from(input.analysisText,"utf8").toString("utf8")!==input.analysisText)
+    throw Error("Analysis text contains invalid Unicode");
   if(input.sourceUrl&&input.sourceUrl.length>1000)throw Error("sourceUrl too long");
   if(input.rawAttachmentPath&&input.rawAttachmentPath.length>600)throw Error("attachment path too long");
   if(Boolean(input.rawAttachmentSha256)!==Boolean(input.rawAttachmentContentType))
@@ -105,13 +118,20 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const publicationDate=validDate(input.publicationDate);
   const text=T(input.extractedText);
   const entities=[...new Set(input.entities.map(T))];
-  const digest=createHash("sha256").update([
-    "investment_os_intake_v1",input.domain,input.inputFormat,input.sourceKind,
-    ...entities.map(x=>x.toLowerCase()),T(input.sourceUrl||""),T(input.rawAttachmentSha256||""),
-    // Hash the exact text (apart from leading/trailing whitespace) to avoid
-    // claiming that translated summaries are identical to raw originals.
-    text
-  ].join("\n")).digest("hex");
+  // Original note identity must cover EVERY field persisted in its source
+  // frontmatter, not only extractedText. Two captures with an amended claimed
+  // event date, publisher, language or topic are distinct audit records.
+  // We do NOT include optional AI analysis: a revised interpretation never
+  // silently changes the identity of user-supplied source bytes.
+  const digest=createHash("sha256").update(JSON.stringify([
+    "investment_os_intake_v4_exact_capture_and_attribution",
+    input.domain,input.inputFormat,input.sourceKind,entities,
+    input.topic,input.sourceLanguage??null,input.publisher??null,input.sourceUrl??null,
+    eventDate,publicationDate,
+    verifiedAttachment?attachment?.path??null:null,
+    verifiedAttachment,verifiedAttachment?input.rawAttachmentSha256??null:null,
+    input.extractedText,
+  ])).digest("hex");
   const planId="IN-"+digest.slice(0,16).toUpperCase();
   const rawPath="00_Inbox/ChatGPT/Investment Intake - "+planId+".md";
   // Same digest is a stable idempotency key across repeated routing calls.
@@ -189,6 +209,23 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     "Preview/approve/apply one non-protected write at a time; verify readback, reindex, links, retry identity and rollback capability.",
     "Propose protected Thesis/Evidence Register or Portfolio revisions only through separate owner-approval workflow."
   ];
+  const coordination=buildCoordinatedWriteback({
+    planId,inputFormat:input.inputFormat,rawAttachmentVerified:verifiedAttachment,
+    eventDate,duplicateCandidate:duplicates,duplicateAdjudicated:false,
+    sourceIndependenceVerified:false,routes,
+  });
+  const [rawStep,reviewStep]=coordination.steps;
+  const safeEditDrafts=composeWritebackDrafts({
+    planId,domain:input.domain,entities,topic:input.topic,
+    inputFormat:input.inputFormat,sourceKind:input.sourceKind,
+    sourceLanguage:input.sourceLanguage??null,extractedText:input.extractedText,
+    analysisText:input.analysisText??null,publisher:input.publisher??null,
+    sourceUrl:input.sourceUrl??null,eventDate,publicationDate,
+    historicalCandidatePaths:pack.items.map(x=>x.path).slice(0,10),
+    attachmentPath:actualAttachmentPath,attachmentVerified:verifiedAttachment,
+    rawRoute:{...routes[0],operationId:rawStep.operationId,holdReasons:rawStep.holdReasons},
+    reviewRoute:{...routes[1],operationId:reviewStep.operationId,holdReasons:reviewStep.holdReasons},
+  });
   return {
     status:"read_only_plan_not_written",planId,entityScope:entities,domain:input.domain,
     inputFormat:input.inputFormat,sourceKind:input.sourceKind,
@@ -208,6 +245,6 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,
       protectedThesisApprovalRequired:true,canAutoWrite:false},
-    warnings,nextActions:needed
+    warnings,nextActions:needed,coordination,safeEditDrafts,
   };
 }

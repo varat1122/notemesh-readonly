@@ -8,6 +8,8 @@ import { withPausedSync } from "../safe-edit/sync";
 import { withBoundary, fence } from "./boundary";
 import { fetchAndArchiveOfficialSource } from "../research-source-fetch";
 import { storeUserAttachment, inspectUserAttachment, MAX_USER_ATTACHMENT_BYTES } from "../user-attachment-vault";
+import { inspectCoordinatedWritebackBatch } from "../safe-edit/coordinated-batch-status";
+import { previewInvestmentIntakeStage } from "../safe-edit/investment-intake-preview";
 const securitySchemes=[{type:"oauth2",scopes:["vault:read","vault:edit"]}];
 const base=previewSchema.omit({change:true}).shape;
 export function createSafeEditMcpServer(access:McpAccess) {
@@ -49,6 +51,30 @@ export function createSafeEditMcpServer(access:McpAccess) {
     },annotations:{readOnlyHint:true,openWorldHint:false},...meta
   },async input=>invoke(()=>inspectUserAttachment(input)));
   server.registerTool("get_edit_status",{description:"Read durable operation receipt: before/after hashes and independent write/readback/reindex/Sync stages. Does not prove remote or mobile arrival.",inputSchema:{operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({operationId})=>invoke(()=>status(operationId,access.label)));
+  server.registerTool("preview_investment_intake_stage",{
+    description:"Prepare source or separate research-review Markdown as an exact Safe Edit diff. PREVIEW ONLY; never applies. On first call stage raw_input; obtain explicit authorization and apply separately; research_review preview requires actual raw write/readback/reindex under same OAuth actor. Text-only; no screenshot/PDF binary is inferred, and existing paths are not overwritten.",
+    inputSchema:{
+      stage:z.enum(["raw_input","research_review"]),
+      domain:z.enum(["company","industry","macro","asset"]),
+      entities:z.array(z.string().min(1).max(120)).min(1).max(6),
+      topic:z.string().min(1).max(250),
+      inputFormat:z.literal("text"),
+      sourceKind:z.enum(["broker_research","issuer_release","regulatory_filing","news_media","user_commentary","archived_chat","unknown"]),
+      extractedText:z.string().min(1).max(12000),
+      analysisText:z.string().max(14000).nullable().optional(),
+      sourceLanguage:z.string().max(35).nullable().optional(),
+      sourceUrl:z.string().max(1000).nullable().optional(),
+      publisher:z.string().max(160).nullable().optional(),
+      eventDate:z.string().nullable().optional(),
+      publicationDate:z.string().nullable().optional(),
+    },
+    annotations:{readOnlyHint:true,openWorldHint:false},...meta
+  },async({stage,...input})=>invoke(()=>previewInvestmentIntakeStage({...input},stage,access.label)));
+  server.registerTool("inspect_coordinated_writeback",{
+    description:"Read-only: inspect three deterministic source/review/timeline operation IDs against ACTUAL actor-scoped Safe Edit journal, not a model-supplied success flag. Reports preview, write/readback/reindex stages, partial failure and receipt target mismatch. Requires vault:read vault:edit. This does not approve, replay, change Thesis, or assert remote/mobile Sync.",
+    inputSchema:{planId:z.string().regex(/^IN-[A-F0-9]{16}$/).describe("Deterministic Plan ID obtained from read-only plan_investment_writeback")},
+    annotations:{readOnlyHint:true,openWorldHint:false},...meta
+  },async({planId})=>invoke(()=>inspectCoordinatedWritebackBatch(planId,access.label)));
   server.registerTool("rollback_edit",{description:"PREVIEW ONLY: restore checksum-verified backup only if target still equals previous afterHash. Never deletes a created note. Requires fresh review and apply_edit; protected thesis also requires human approval.",inputSchema:{...base,rollbackOperationId:operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({rollbackOperationId,...input})=>invoke(()=>preview({...input,change:{kind:"rollback",operationId:rollbackOperationId}},access.label)));
   return server;
 }

@@ -32,6 +32,12 @@ describe("multilingual read-only writeback router",()=>{
   expect(p.warnings.some(x=>x.includes("'reiterates'"))).toBe(true);
   expect(p.gates.canAutoUpdateThesis).toBe(false);
   expect(p.gates.canAutoWrite).toBe(false);
+  expect(p.coordination.status).toBe("read_only_coordination_not_written");
+  expect(p.coordination.steps.map(x=>x.kind)).toEqual(["raw_input","research_review","company_timeline_candidate"]);
+  expect(p.coordination.steps[0].action).toBe("hold"); // screenshot binary not actually archived
+  expect(p.coordination.steps[1].dependsOn).toEqual([p.coordination.steps[0].operationId]);
+  expect(p.safeEditDrafts.original.status).toBe("hold");
+  expect(p.safeEditDrafts.original.content).toBeNull();
   expect(fs.readdirSync(vault)).toHaveLength(0);
  });
  it("Citi AI connectivity/HDD/NAND multi-issuer preview goes to research without inferred company guidance",async()=>{
@@ -67,6 +73,8 @@ describe("multilingual read-only writeback router",()=>{
     expect(p.sourceLanguage).toBe(lang);
     expect(p.chronology.eventDate).toBeNull();
     expect(p.sourceCapture.extractedTextIsOriginalBinary).toBe(false);
+    expect(p.safeEditDrafts.original.content).toContain(text);
+    expect(p.safeEditDrafts.analysis.status).toBe("hold");
     expect(p.exactClaimReview.status).toBe("not_checked_missing_exact_fields");
    }
  });
@@ -77,6 +85,36 @@ describe("multilingual read-only writeback router",()=>{
   expect(a.routes[0].path).toBe(b.routes[0].path);
   expect(a.sourceCapture.textDigest).toHaveLength(64);
   expect(route({...base,extractedText:base.extractedText+" Amended."}).planId).not.toBe(a.planId);
+  // Raw note preserves whitespace; ID must not collide across distinct bytes.
+  expect(route({...base,extractedText:" "+base.extractedText}).planId).not.toBe(a.planId);
+  expect(route({...base,extractedText:base.extractedText+"\n"}).planId).not.toBe(a.planId);
+ });
+ it("does not conflate identically worded originals with different event or attribution metadata",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const b={domain:"company" as const,entities:["MDB"],topic:"Broker analysis 1",
+    inputFormat:"text" as const,sourceKind:"archived_chat" as const,
+    extractedText:"Same captured words, but possibly different underlying event.",
+    publisher:"Attributed source A",sourceLanguage:"th",eventDate:"2026-10-14",
+    publicationDate:"2026-10-15"};
+  const first=route(b);
+  for(const changed of [
+    {topic:"Broker analysis 2"},{publisher:"Attributed source B"},
+    {sourceLanguage:"en"},{eventDate:"2026-10-15"},
+    {publicationDate:"2026-10-16"},{entities:["mdb"]},
+  ])expect(route({...b,...changed}).planId).not.toBe(first.planId);
+  expect(route({...b,analysisText:"AI interpretation A"}).planId).toBe(first.planId);
+  expect(route({...b,analysisText:"AI interpretation B"}).planId).toBe(first.planId);
+  expect(route(b).safeEditDrafts.expectedOriginalSha256)
+    .toBe(first.safeEditDrafts.expectedOriginalSha256);
+ });
+ it("rejects unpaired UTF-16 code units rather than silently changing original bytes",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  expect(()=>route({...base,extractedText:"broken"+String.fromCharCode(0xD800)}))
+    .toThrow(/invalid Unicode/);
+  expect(()=>route({...base,analysisText:String.fromCharCode(0xDFFF)}))
+    .toThrow(/invalid Unicode/);
+  expect(route({...base,extractedText:"Valid emoji 🚀 and Thai ภาษาไทย"}).sourceCapture.textDigest)
+    .toHaveLength(64);
  });
  it("does not auto-create a claim for an exact structured duplicate from an original URL",async()=>{
   const u="https://www.sec.gov/Archives/edgar/data/2488/fake-Q2.htm";
@@ -124,6 +162,21 @@ describe("multilingual read-only writeback router",()=>{
   }finally{
    delete process.env.SAFE_EDIT_ENABLED;delete process.env.SAFE_EDIT_SINGLE_WRITER;
   }
+ });
+ it("integrates a separate human-supplied research interpretation without changing original ID",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const t={domain:"company" as const,entities:["MDB"],topic:"BofA reiteration",
+    inputFormat:"text" as const,sourceKind:"archived_chat" as const,
+    extractedText:"BofA reiterates PT $540 (user-provided text only)"};
+  const a=route(t);
+  const b=route({...t,analysisText:"Broker PT is not issuer guidance. Report date unresolved."});
+  expect(a.planId).toBe(b.planId);
+  expect(a.safeEditDrafts.original.content).toBe(b.safeEditDrafts.original.content);
+  expect(a.safeEditDrafts.analysis.content).toBeNull();
+  expect(b.safeEditDrafts.analysis.content).toContain("Broker PT is not issuer guidance.");
+  expect(b.safeEditDrafts.analysis.content).not.toContain("BofA reiterates PT $540");
+  expect(b.safeEditDrafts.canAutoWrite).toBe(false);
+  expect(b.coordination.steps[2].action).toBe("hold");
  });
  it("date validation rejects invented impossible source dates; invalid ticker does not route to invented issuer timeline",async()=>{
   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");

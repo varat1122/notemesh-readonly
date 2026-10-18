@@ -48,6 +48,7 @@ const LEGACY_SOURCE_ALIASES:Record<string,"archived_ai"|"user_supplied">={
 function roleOfNote(path:string, fm:Data):SchemaInspection["role"] {
   const t=asText(fm.type);
   if(t==="primary_source_verification_receipt")return "source_receipt";
+  if(t==="investment_source_capture")return "source"; // user-supplied capture; NOT verified issuer material
   if(t==="investment_structured_claim_register")return "structured_claim";
   // Source archive path always wins: an old archive can have type research_note.
   if(path.startsWith("07_Sources/ChatGPT/")||t==="chatgpt_archive")return "archive";
@@ -105,8 +106,8 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   const independenceAssessment:SchemaInspection["independenceAssessment"]=
     normalizedSourceType==="archived_ai"||(!normalizedSourceType&&role==="archive")
       ?"not_independent_archived_ai":
-    Boolean(sourceRaw&&["user_supplied_chatgpt_summary","user_supplied_chat_summary",
-      "user_supplied_chat_archive_summary"].includes(sourceRaw.toLowerCase()))
+    sourceRaw!==null&&["user_supplied_chatgpt_summary","user_supplied_chat_summary",
+      "user_supplied_chat_archive_summary"].includes(sourceRaw.toLowerCase())
       ?"not_independent_derivative_summary":"not_assessed";
   if(sourceRaw&&!declaredSourceType&&!alias)
     warnings.push(sourceRaw==="unverified"?"source_type_misused_for_verification":"unmapped_legacy_source_type");
