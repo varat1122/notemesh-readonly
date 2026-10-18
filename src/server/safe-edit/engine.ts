@@ -333,7 +333,7 @@ function assertCoordinatedReplayCurrent(r:RecordRow,p:PreviewInput,actor:string)
   const intake="IN-"+m[1].toUpperCase();
   const pathValid=m[2]==="raw"?
     p.path==="00_Inbox/ChatGPT/Investment Intake - "+intake+".md":
-    /^10_Knowledge\\/(?:Company Research|Industry and Concepts|Macro and Markets)\\/Investment Review - [^/]+ - IN-[A-F0-9]{16}\\.md$/.test(p.path)&&p.path.endsWith(intake+".md");
+    /^10_Knowledge\/(?:Company Research|Industry and Concepts|Macro and Markets)\/Investment Review - [^/]+ - IN-[A-F0-9]{16}\.md$/.test(p.path)&&p.path.endsWith(intake+".md");
   if(!pathValid||p.change.kind!=="create")
     throw Error("Coordinated replay path or operation identity mismatch");
   const receipt=r.receipt?JSON.parse(r.receipt) as Record<string,unknown>:null;
