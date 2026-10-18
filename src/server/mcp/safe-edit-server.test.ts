@@ -214,7 +214,7 @@ it("full local text source and separately attributed AI review write both verify
    fs.utimesSync(srcPath,oldStat.atime,new Date(oldStat.mtimeMs+60_000));
    const drift=unpack(await c.client.callTool({name:"inspect_coordinated_writeback",
      arguments:{planId:raw.planId}}));
-   expect(drift.stages[0].state).toBe("stale_local_bytes");
+   expect(drift.stages[0].state).toBe("stale_local_index");
    expect(drift.stages[1].state).toBe("locally_verified");
  }finally{await c.close();}
 });
