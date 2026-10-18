@@ -146,13 +146,25 @@ export function buildInvestmentContextPack(req: Input): Pack {
     ...issuers.flatMap(t=>[
       "01_Companies/"+t+".md",
       "08_Daily_Weekly/Research Indexes/Company Evolution - "+t+".md",
-      "08_Daily_Weekly/Research Indexes/Company - "+t+".md",
       "05_Thesis/"+t+" - Current Thesis.md",
       "05_Thesis/"+t+" - Evidence Register.md",
     ]),
   ];
   const absent: string[] = [];
   for (const p of needed) { if (exists(p)) pool.set(p,120); else absent.push(p); }
+  // Historical Company indexes exist in two legacy locations. Neither is a
+  // current/approved Thesis, but both provide routes back to dated prior
+  // conversations. A missing newer index must not hide the older one or be
+  // reported as missing when the other location is present.
+  for (const ticker of issuers) {
+    const candidates=[
+      "08_Daily_Weekly/Research Indexes/Company - "+ticker+".md",
+      "10_Knowledge/Indexes/Company - "+ticker+".md"
+    ];
+    const present=candidates.filter(exists);
+    if(present.length) for(const p of present)pool.set(p,120);
+    else absent.push("No legacy Company Index found for "+ticker+" (both known locations checked).");
+  }
   // Explicit issuer-source discovery: a broad "NVDA" lexical query can be
   // flooded by archived chat and miss the actual issuer IR reviews. Never
   // let search-result popularity determine whether primary documents exist.
