@@ -71,7 +71,10 @@ async function copyConsistent(src,dst,manifest,prefix="",counter={bytes:0}) {
   if(counter.bytes>maxSource||!Number.isFinite(maxSource)||maxSource<1)
     throw Error("Source exceeds explicit backup size cap");
   fs.mkdirSync(path.dirname(dst),{recursive:true,mode:0o700});
-  const isDb=sqliteName(src);
+  const fd=fs.openSync(src,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+  const sig=Buffer.alloc(16);
+  try{fs.readSync(fd,sig,0,16,0);}finally{fs.closeSync(fd);}
+  const isDb=sqliteName(src)&&sig.equals(Buffer.from("SQLite format 3\0","ascii"));
   if(isDb) {
     const source=new DatabaseSync(src,{readOnly:true});
     try {await sqliteBackup(source,dst);} finally {source.close();}
@@ -148,8 +151,8 @@ async function extractVerifiedSealedArchive(file,dest,key){
     if(typeof f.path!=="string"||!f.path||path.posix.isAbsolute(f.path)||
       f.path.split("/").includes("..")||f.path.includes("\\")||expected.has(f.path))
       throw Error("Invalid snapshot manifest entry");
-    expected.add(f.path);
-    const abs=path.join(restore,f.path),stat=regular(abs);
+    expected.add("payload/"+f.path);
+    const abs=path.join(restore,"payload",f.path),stat=regular(abs);
     if(!stat.isFile()||stat.size!==f.bytes||fileSha(abs)!==f.sha256)
       throw Error("Snapshot payload verification failed");
     if(f.sqliteOnlineBackup){
