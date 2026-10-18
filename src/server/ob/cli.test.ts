@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -338,5 +338,41 @@ describe("obSyncConfigs", () => {
     // named files is core-plugin-data, and daily-notes.json is one of those.
     const { OB_CONFIG_CATEGORIES } = await import("./cli");
     expect(OB_CONFIG_CATEGORIES["core-plugin-data"]).toMatch(/daily-notes\.json/);
+  });
+});
+
+describe("DR Phase 2.4 — Obsidian CLI process fencing", () => {
+  it("rejects every CLI entry point before spawning under an active writer freeze", async () => {
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    fakeOb("would be spawned");
+    await fence.withFrozenWriters(async () => {
+      await expect(runOb(["sync-status"])).rejects.toThrow("backup_writer_freeze_active");
+      expect(fence.status.activeWriters).toBe(0);
+    });
+  });
+
+  it("waits for an already admitted external CLI process to exit before a snapshot cut", async () => {
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const start = path.join(dir, "started");
+    const release = path.join(dir, "release");
+    const script = path.join(dir, "wait-ob");
+    fs.writeFileSync(script, `#!/bin/sh
+echo started > "${start}"
+while [ ! -f "${release}" ]; do sleep 0.05; done
+echo exited
+`, { mode: 0o755 });
+    process.env.OB_BIN = script;
+    const child = runOb(["sync-status"], { timeoutMs: 5000 });
+    await vi.waitFor(() => expect(fs.existsSync(start)).toBe(true), { timeout: 3000 });
+    expect(fence.status.activeWriters).toBeGreaterThanOrEqual(1);
+    let captured = false;
+    const cut = fence.withFrozenWriters(() => { captured = true; return "snapshot"; }, { drainTimeoutMs: 3000 });
+    expect(fence.status.frozen).toBe(true);
+    expect(captured).toBe(false);
+    await expect(runOb(["sync-status"])).rejects.toThrow("backup_writer_freeze_active");
+    fs.writeFileSync(release, "go");
+    expect((await child).ok).toBe(true);
+    await expect(cut).resolves.toBe("snapshot");
+    expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
   });
 });
