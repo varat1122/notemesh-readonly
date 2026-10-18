@@ -60,7 +60,10 @@ function syntheticTreeFingerprint():string {
   const root=process.env.DATA_DIR!;
   const digest=createHash("sha256");
   let files=0,total=0;
-  const update=(value:string)=>digest.update(value,"utf8").update("\\0");
+  const update=(value:string)=>{
+    const bytes=Buffer.from(value,"utf8"),len=Buffer.allocUnsafe(4);
+    len.writeUInt32BE(bytes.length);digest.update(len);digest.update(bytes);
+  };
   const walk=(dir:string,relative:string):void=>{
     const entries=fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name,"en"));
     for(const entry of entries){
