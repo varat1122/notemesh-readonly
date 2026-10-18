@@ -61,12 +61,20 @@ function indexedCreated(relPath: string): number | null {
  * the path.
  */
 export function recordLocalModification(relPath: string, at = Date.now()) {
-  times.set(relPath, at);
+  // This exported helper can be called outside the Vault file writer.
+  // Refuse an unadmitted metadata mutation before touching the cache.
+  return inProcessDrWriterFence.withWriteSync(() => {
+    times.set(relPath, at);
+  });
 }
 
 export function forgetModification(relPath: string) {
-  times.delete(relPath);
-  born.delete(relPath);
+  // A metadata eviction is also a write: otherwise a direct caller could
+  // silently change the time cache while an offline cut is frozen.
+  return inProcessDrWriterFence.withWriteSync(() => {
+    times.delete(relPath);
+    born.delete(relPath);
+  });
 }
 
 /** Test seam: the module is a singleton, so a suite starts from nothing. */
