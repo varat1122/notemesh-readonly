@@ -10,6 +10,7 @@ import { reindexPath } from "../vault/indexer";
 import { recordLocalModification } from "../vault/modified";
 import { splitFrontmatter, extractStructure } from "../vault/markdown";
 import { audit } from "../audit";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { previewSchema, applySchema, operationId as idSchema, type PreviewInput } from "./schema";
 
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
@@ -201,6 +202,9 @@ function requiresApproval(r:RecordRow) {
   });
 }
 export function preview(input:unknown,actor:string) {
+  return inProcessDrWriterFence.withWriteSync(()=>previewUnderFence(input,actor));
+}
+function previewUnderFence(input:unknown,actor:string) {
   assertEnabled();const p=previewSchema.parse(input);const t=target(p.path);p.path=t.rel;
   if(store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND status='writing' LIMIT 1").get(p.path)) throw Error("This path has an interrupted operation; administrator recovery required");
   const before=read(t.abs);
@@ -236,8 +240,13 @@ export function preview(input:unknown,actor:string) {
   log(p.operationId,actor,"preview",{path:p.path,beforeHash:sha256(before??""),afterHash:sha256(after),reason:p.reason});
   return {...publicPreview(row(p.operationId)),previewToken:token};
 }
-export function adminPreview(id:string) { assertEnabled();return publicPreview(row(id)); }
+export function adminPreview(id:string) {
+  return inProcessDrWriterFence.withWriteSync(()=>{ assertEnabled();return publicPreview(row(id)); });
+}
 export function approve(id:string,adminId:string,afterHash:string) {
+  return inProcessDrWriterFence.withWriteSync(()=>approveUnderFence(id,adminId,afterHash));
+}
+function approveUnderFence(id:string,adminId:string,afterHash:string) {
   assertEnabled();const r=row(id);
   if(r.status!=="preview"||Date.now()>r.expires||afterHash!==r.after_hash) throw Error("Approval expired or does not match the reviewed diff");
   store().prepare("UPDATE safe_edit_operations SET approval=? WHERE id=? AND status='preview'").run(`admin:${adminId}`,id);
@@ -285,11 +294,17 @@ function atomic(r:RecordRow,p:PreviewInput) {
   } finally {if(temp) fs.rmSync(temp,{force:true});fs.closeSync(fd);}
 }
 export function status(id:string,actor:string) {
+  return inProcessDrWriterFence.withWriteSync(()=>statusUnderFence(id,actor));
+}
+function statusUnderFence(id:string,actor:string) {
   const r=owned(id,actor);
   return {operationId:id,status:r.status,path:(JSON.parse(r.payload) as PreviewInput).path,
     beforeHash:r.before_hash,afterHash:r.after_hash,receipt:r.receipt?JSON.parse(r.receipt):null};
 }
 export function apply(input:unknown,actor:string) {
+  return inProcessDrWriterFence.withWriteSync(()=>applyUnderFence(input,actor));
+}
+function applyUnderFence(input:unknown,actor:string) {
   assertEnabled();const args=applySchema.parse(input),r=owned(args.operationId,actor);
   if(!crypto.timingSafeEqual(Buffer.from(sha256(args.previewToken),"hex"),Buffer.from(r.token_hash,"hex"))||args.expectedHash!==r.before_hash) throw Error("Invalid preview token or expected hash");
   if(r.status==="written") return status(r.id,actor);
