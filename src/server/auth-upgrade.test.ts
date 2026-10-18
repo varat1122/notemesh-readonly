@@ -74,3 +74,17 @@ describe("upgrading a claimed 1.6 database", () => {
     expect(log).not.toHaveBeenCalledWith(expect.stringMatching(/added issuer/));
   });
 });
+
+describe("fresh ephemeral staging database", () => {
+  it("initializes session table once for overlapping public RPC requests", async () => {
+    vi.resetModules();
+    const { runAuthMigrations } = await import("./auth");
+    await Promise.all(Array.from({ length: 8 }, () => runAuthMigrations()));
+    const { db } = await import("./db");
+    const sessionTable = db().prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session'",
+    ).get();
+    expect(sessionTable).toEqual({ name: "session" });
+    await expect(runAuthMigrations()).resolves.toBeUndefined();
+  });
+});
