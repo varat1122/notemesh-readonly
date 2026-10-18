@@ -48,6 +48,7 @@ const LEGACY_SOURCE_ALIASES:Record<string,"archived_ai"|"user_supplied">={
 function roleOfNote(path:string, fm:Data):SchemaInspection["role"] {
   const t=asText(fm.type);
   if(t==="primary_source_verification_receipt")return "source_receipt";
+  if(t==="investment_source_capture")return "source"; // user-supplied capture; NOT verified issuer material
   if(t==="investment_structured_claim_register")return "structured_claim";
   // Source archive path always wins: an old archive can have type research_note.
   if(path.startsWith("07_Sources/ChatGPT/")||t==="chatgpt_archive")return "archive";
