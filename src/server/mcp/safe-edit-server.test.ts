@@ -148,6 +148,11 @@ it("gates text intake source→AI review on real same-actor readback and exact s
    }finally{await another.close();}
    const analysisPath=research.preview.path;
    expect(fs.existsSync(path.join(root,"vault",analysisPath))).toBe(false);
+   fs.appendFileSync(path.join(root,"vault",raw.preview.path),"\nChanged after the original readback.");
+   const stale=await c.client.callTool({name:"preview_investment_intake_stage",
+     arguments:{...args,stage:"research_review"}});
+   expect(stale.isError).toBe(true);
+   expect(JSON.stringify(stale)).toContain("Raw source changed after last Safe Edit receipt");
  }finally{await c.close();}
 });
 it("authorized Safe Edit MCP captures exact user PNG binary, inspects hash and cannot overwrite it",async()=>{
