@@ -57,8 +57,9 @@ async function accessToken(fetcher=fetch){
 }
 export async function uploadEncryptedBackup(file,folderId,fetcher=fetch,token=null,archiveKey=undefined){
   const basename=path.basename(file),st=fs.lstatSync(file);
-  if(!basename.endsWith(".nmbk")||!st.isFile()||st.isSymbolicLink()||st.nlink!==1||
-     st.size<40||st.size>MAX_BYTES)throw Error("Refuse non-encrypted/symlink/oversized backup upload");
+  if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,149}\.nmbk$/.test(basename)||
+     !st.isFile()||st.isSymbolicLink()||st.nlink!==1||
+     st.size<40||st.size>MAX_BYTES)throw Error("Refuse non-encrypted, unsafe-name, symlink or oversized backup upload");
   const head=Buffer.alloc(8),fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
   try{fs.readSync(fd,head,0,head.length,0);}finally{fs.closeSync(fd);}
   if(!head.equals(Buffer.from("NMBK1GCM")))throw Error("Not an encrypted NoteMesh snapshot");
