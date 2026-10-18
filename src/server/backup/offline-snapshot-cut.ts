@@ -7,6 +7,7 @@
  * independently verifiable coverage.
  */
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { SnapshotWriterFence } from "./writer-fence";
@@ -49,6 +50,69 @@ export function assertOfflineFixtureOnly(): void {
     throw Error("dr_offline_fixture_only_symlink_or_unsafe_root");
 }
 
+/** A bounded, read-only synthetic-tree fingerprint. NOT a tamper-proof
+ * filesystem snapshot: a noncooperating writer can change-and-revert bytes,
+ * and we cannot atomically inspect another process's filesystem. */
+const MAX_FIXTURE_FILES=4096;
+const MAX_FIXTURE_BYTES=256*1024*1024;
+function syntheticTreeFingerprint():string {
+  assertOfflineFixtureOnly();
+  const root=process.env.DATA_DIR!;
+  const digest=createHash("sha256");
+  let files=0,total=0;
+  const update=(value:string)=>digest.update(value,"utf8").update("\\0");
+  const walk=(dir:string,relative:string):void=>{
+    const entries=fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name,"en"));
+    for(const entry of entries){
+      const full=path.join(dir,entry.name);
+      const rel=relative?relative+"/"+entry.name:entry.name;
+      const st=fs.lstatSync(full);
+      if(st.isSymbolicLink() || (!st.isDirectory()&&!st.isFile()))
+        throw Error("dr_fixture_source_unsafe_entry");
+      if(st.isDirectory()){
+        update("dir");update(rel);update(String(st.mode));update(String(st.ino));
+        walk(full,rel);
+      }else{
+        if(++files>MAX_FIXTURE_FILES || (total+=st.size)>MAX_FIXTURE_BYTES)
+          throw Error("dr_fixture_source_fingerprint_limit");
+        // Never follow symlinks, and verify the same inode still exists when
+        // hashing completes. Hardlinks can point outside this fixture root.
+        if(st.nlink!==1)throw Error("dr_fixture_source_unsafe_entry");
+        const fd=fs.openSync(full,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
+        try{
+          const initial=fs.fstatSync(fd);
+          if(!initial.isFile()||initial.dev!==st.dev||initial.ino!==st.ino||
+             initial.size!==st.size||initial.nlink!==1)
+            throw Error("dr_fixture_source_changed_during_fingerprint");
+          update("file");update(rel);update(String(st.mode));update(String(st.dev));
+          update(String(st.ino));update(String(st.size));update(String(st.mtimeMs));
+          update(String(st.ctimeMs));
+          const contentHash=createHash("sha256");
+          const buf=Buffer.allocUnsafe(64*1024);
+          let consumed=0;
+          while(true){
+            const n=fs.readSync(fd,buf,0,buf.length,null);
+            if(!n)break;
+            consumed+=n;
+            if(consumed>st.size)throw Error("dr_fixture_source_changed_during_fingerprint");
+            contentHash.update(buf.subarray(0,n));
+          }
+          const done=fs.fstatSync(fd);
+          const pathNow=fs.lstatSync(full);
+          if(consumed!==st.size||done.dev!==st.dev||done.ino!==st.ino||
+             done.size!==st.size||done.mtimeMs!==st.mtimeMs||
+             done.ctimeMs!==st.ctimeMs||
+             pathNow.dev!==st.dev||pathNow.ino!==st.ino)
+            throw Error("dr_fixture_source_changed_during_fingerprint");
+          update(contentHash.digest("hex"));
+        }finally{fs.closeSync(fd);}
+      }
+    }
+  };
+  walk(root,"");
+  return digest.digest("hex");
+}
+
 /**
  * Freeze admissions first; wait for in-flight tickets; pause + await Sync
  * termination next; verify externally imposed fixture-only writer halt; only
@@ -61,7 +125,11 @@ export async function withOfflineFixtureCut<T>(opts: FixtureCutOptions<T>): Prom
     return opts.sync.withPausedForEdit(async () => {
       const halted = await opts.assertNoExternalWriters();
       if (halted !== true) throw Error("dr_fixture_external_writer_not_halted");
-      return await opts.capture();
+      const before=syntheticTreeFingerprint();
+      const result=await opts.capture();
+      const after=syntheticTreeFingerprint();
+      if(before!==after)throw Error("dr_fixture_source_changed_during_cut");
+      return result;
     });
   }, {drainTimeoutMs: opts.drainTimeoutMs ?? 10000});
 }
