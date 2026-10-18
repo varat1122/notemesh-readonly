@@ -80,6 +80,53 @@ describe("SnapshotWriterFence (isolated fixture only)",()=>{
     });
     expect(fence.withWriteSync(()=>7)).toBe(7);
   });
+
+  it("allows nested writes from an already-admitted async operation to complete during freeze",async()=>{
+    const fence=new SnapshotWriterFence(),resume=deferred<void>();
+    let nestedFinished=false;
+    const active=fence.withWrite(async()=>{
+      await resume.promise;
+      // A new admission would be rejected here, but this descendant belongs
+      // to a writer already counted by the drain before freeze began.
+      fence.withWriteSync(()=>{
+        const release=fence.acquireWriteTicket();
+        try{nestedFinished=true;}
+        finally{release();}
+      });
+    });
+    const capture=vi.fn(()=>{expect(nestedFinished).toBe(true);return "snapshot";});
+    const snapshot=fence.withFrozenWriters(capture);
+    expect(fence.status).toEqual({frozen:true,activeWriters:1});
+    await expect(fence.withWrite(async()=>false)).rejects.toThrow("backup_writer_freeze_active");
+    resume.resolve();
+    await active;
+    await expect(snapshot).resolves.toBe("snapshot");
+    expect(capture).toHaveBeenCalledOnce();
+    expect(fence.status).toEqual({frozen:false,activeWriters:0});
+  });
+  it("revokes inherited async admission when parent returns; rejects detached work during freeze",async()=>{
+    const fence=new SnapshotWriterFence(),gate=deferred<void>();
+    let detached!:()=>Promise<void>;
+    await fence.withWrite(async()=>{
+      detached=async()=>{await gate.promise;fence.withWriteSync(()=>42);};
+    });
+    // Constructed separately after the parent ended; no inherited privilege.
+    const snapshot=fence.withFrozenWriters(async()=>{
+      gate.resolve();
+      await expect(detached()).rejects.toThrow("backup_writer_freeze_active");
+      expect(fence.status.activeWriters).toBe(0);
+    });
+    await snapshot;
+    expect(fence.status).toEqual({frozen:false,activeWriters:0});
+  });
+  it("refuses snapshot reentry from inside a writer without deadlocking",async()=>{
+    const fence=new SnapshotWriterFence();
+    await fence.withWrite(async()=>{
+      await expect(fence.withFrozenWriters(()=>1)).rejects.toThrow("backup_freeze_cannot_run_within_writer");
+      expect(fence.status).toEqual({frozen:false,activeWriters:1});
+    });
+    expect(fence.status).toEqual({frozen:false,activeWriters:0});
+  });
   it("releases writer tickets when an async mutation rejects",async()=>{
     const fence=new SnapshotWriterFence();
     await expect(fence.withWrite(async()=>{throw Error("write_error");})).rejects.toThrow("write_error");
