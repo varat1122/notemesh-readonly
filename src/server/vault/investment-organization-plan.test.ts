@@ -114,3 +114,21 @@ it("finds only exact existing Company Hubs for dated historical notes, without a
   expect(fs.readFileSync(path.join(vault,"10_Knowledge/Company Research/TSMC 2026Q2.md"),"utf8"))
     .toContain("date: 2026-07-16");
 });
+
+it("links older research to existing concepts without inventing a business relationship or duplicating an existing backlink",async()=>{
+  await note("02_Industries_Themes/AI Networking.md",
+    "---\ntype: industry_tam_version_register\n---","# Industry");
+  await note("03_Concepts/CoWoS.md","---\ntype: concept_hub\n---","# Concept");
+  await note("10_Knowledge/Company Research/Example dated research.md",
+    "---\ntype: knowledge_note\nsource_type: chatgpt_history\ntheme: [AI Networking, CoWoS, Missing Theme]\n---",
+    "# Historical event\n[[02_Industries_Themes/AI Networking]]");
+  const {planVaultOrganization}=await import("./investment-organization-plan");
+  const queue=planVaultOrganization({focus:"historical_links"}).groups[0];
+  expect(queue.examples.some(x=>x.targetPath==="02_Industries_Themes/AI Networking.md"))
+    .toBe(false);
+  expect(queue.examples.some(x=>x.targetPath==="03_Concepts/CoWoS.md"))
+    .toBe(true);
+  expect(queue.examples.every(x=>x.relationship==="declared_entity_mention_not_business_relationship"))
+    .toBe(true);
+  expect(queue.examples.some(x=>x.targetPath?.includes("Missing Theme"))).toBe(false);
+});
