@@ -93,3 +93,24 @@ test("fails closed on a missing SQLite primary DB",()=>fixture(async ({data,out}
   assert.notEqual(processResult.status,0);
   assert.match(processResult.stderr,/app.sqlite not found/);
 }));
+
+test("rejects a fixture symlink alias to the deployed data root",()=>fixture(async ({root,data,out})=>{
+  const shortcut=path.join(root,"alias");
+  fs.symlinkSync(data,shortcut);
+  const p=spawnSync(process.execPath,[tool,"create","--data-dir",shortcut,"--out",out,"--fixture-only"],
+    {env:{...env,DATA_DIR:data},encoding:"utf8"});
+  assert.notEqual(p.status,0);
+  assert.match(p.stderr,/Fixture mode cannot operate/);
+}));
+test("refuses restoration via a symlink in the destination path",()=>fixture(async ({root,data,out})=>{
+  const {bundle}=JSON.parse(command(["create","--data-dir",data,"--out",out,"--fixture-only"]));
+  const hidden=path.join(root,"hidden");
+  fs.mkdirSync(hidden);
+  const link=path.join(root,"link");
+  fs.symlinkSync(hidden,link);
+  const p=spawnSync(process.execPath,[tool,"restore","--bundle",bundle,"--dest",path.join(link,"recovered")],
+    {env,encoding:"utf8"});
+  assert.notEqual(p.status,0);
+  assert.match(p.stderr,/unsafe/);
+  assert.deepEqual(fs.readdirSync(hidden),[]);
+}));
