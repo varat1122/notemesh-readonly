@@ -198,7 +198,7 @@ it.each(["created","deleted","replaced"])(
       capture:()=>{
         if(change==="created")fs.writeFileSync(path.join(scratch,"new.md"),"payload");
         else if(change==="deleted")fs.unlinkSync(note);
-        else {fs.unlinkSync(note);fs.writeFileSync(note,"initial");}
+        else {fs.unlinkSync(note);fs.writeFileSync(note,"replacement");}
         return "unverified-result";
       },
     })).rejects.toThrow("dr_fixture_source_changed_during_cut");
