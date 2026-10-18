@@ -26,6 +26,10 @@ async function shaFile(p) {
 const inside = (parent, child) => child === parent || child.startsWith(parent + path.sep);
 const clean = (p) => path.resolve(p);
 const nameSafe = (name) => name !== "." && name !== ".." && ![...name].some(ch=>ch.charCodeAt(0)<32);
+const MAX_TOTAL_BYTES=2_000_000_000;
+const MAX_FILES=100_000;
+const within = (root,entry) => entry.startsWith(root+path.sep);
+const sourceRoot = (value) => fs.realpathSync(value);
 
 function passphrase() {
   const value = process.env[PASS_ENV];
@@ -57,30 +61,55 @@ async function run(cmd, argv, options={}) {
   const closed = new Promise((resolve,reject) => {child.on("error",reject);child.on("close", c=>c===0?resolve():reject(Error(cmd+" failed: "+err.slice(0,256))));});
   return {child, closed};
 }
-async function copyTree(src,dst,inventory,rel="",databases=[]) {
+async function copyTree(src,dst,inventory,rel="",databases=[],folders=[],budget={bytes:0,files:0,root:""}) {
   for(const e of await fsp.readdir(src,{withFileTypes:true})) {
     if(!nameSafe(e.name)) throw Error("Unsupported filename");
     const child = path.join(src,e.name), target=path.join(dst,e.name), logical=rel ? rel+"/"+e.name:e.name;
     const st = await fsp.lstat(child);
     if(st.isSymbolicLink() || !st.isFile() && !st.isDirectory() || st.nlink !== 1 && st.isFile()) throw Error("Symlink, hardlink or non-regular file refused: "+logical);
-    if(st.isDirectory()) {await fsp.mkdir(target,{recursive:true,mode:0o700}); await copyTree(child,target,inventory,logical,databases);continue;}
+    if(st.isDirectory()) {
+      // Refuse races that turn an ancestor into a link outside DATA_DIR.
+      if(!within(budget.root,sourceRoot(child)))throw Error("Directory escaped source root: "+logical);
+      await fsp.mkdir(target,{recursive:true,mode:0o700});
+      folders.push(logical);
+      await copyTree(child,target,inventory,logical,databases,folders,budget);
+      continue;
+    }
     if(/\.sqlite(?:-(?:wal|shm|journal))?$/.test(e.name)) {
       if(e.name.endsWith(".sqlite"))databases.push(logical);
       continue;
     }
-    const before = {size:st.size,mtimeMs:st.mtimeMs,ino:st.ino};
-    await fsp.copyFile(child,target,fs.constants.COPYFILE_EXCL);
-    const after = await fsp.lstat(child);
-    if(after.size!==before.size || after.mtimeMs!==before.mtimeMs || after.ino!==before.ino) throw Error("Source changed during snapshot: "+logical);
-    inventory.push({path:logical,size:after.size,sha256:await shaFile(target)});
+    budget.files++;
+    budget.bytes+=st.size;
+    if(budget.files>MAX_FILES || budget.bytes>MAX_TOTAL_BYTES)throw Error("Snapshot exceeds bounded file/byte budget");
+    const handle=await fsp.open(child,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+    try {
+      const opened=await handle.stat();
+      if(!opened.isFile() || opened.nlink!==1 || opened.ino!==st.ino || opened.dev!==st.dev)
+        throw Error("Source changed before open: "+logical);
+      // Resolve the opened descriptor, not just the filename: a swapped ancestor
+      // symlink must never read files outside the selected DATA_DIR.
+      if(process.platform==="linux") {
+        const actual=fs.realpathSync("/proc/self/fd/"+handle.fd);
+        if(!within(budget.root,actual))throw Error("Source descriptor escaped data root: "+logical);
+      }
+      const output=fs.createWriteStream(target,{flags:"wx",mode:0o600});
+      await pipeline(handle.createReadStream({autoClose:false}),output);
+      const after=await handle.stat();
+      if(after.size!==opened.size || after.mtimeMs!==opened.mtimeMs ||
+         (await fsp.stat(target)).size!==opened.size)
+        throw Error("Source changed during snapshot: "+logical);
+      inventory.push({path:logical,size:opened.size,sha256:await shaFile(target)});
+    } finally {await handle.close();}
   }
 }
 async function stageData(data,stage) {
   const payload=path.join(stage,"payload");
   await fsp.mkdir(payload,{recursive:true,mode:0o700});
-  const inventory=[],databases=[];
-  await copyTree(data,payload,inventory,"",databases);
+  const inventory=[],databases=[],folders=[],budget={bytes:0,files:0,root:sourceRoot(data)};
+  await copyTree(data,payload,inventory,"",databases,folders,budget);
   if(!databases.includes("app.sqlite")) throw Error("app.sqlite not found; incomplete NoteMesh data directory");
+  if(inventory.length+databases.length>MAX_FILES)throw Error("Snapshot exceeds file budget");
   for(const relative of databases) {
     const liveDb=path.join(data,relative),stagedDb=path.join(payload,relative);
     // Online SQLite backup obtains committed WAL contents, never raw live DB copying.
@@ -90,12 +119,15 @@ async function stageData(data,stage) {
     try {if(check.prepare("PRAGMA integrity_check").get()?.integrity_check!=="ok") throw Error("SQLite integrity check failed: "+relative);}
     finally {check.close();}
     for(const suffix of ["-wal","-shm","-journal"]) await fsp.rm(stagedDb+suffix,{force:true});
-    inventory.push({path:relative,size:(await fsp.stat(stagedDb)).size,sha256:await shaFile(stagedDb)});
+    const size=(await fsp.stat(stagedDb)).size;
+    budget.bytes+=size;
+    if(budget.bytes>MAX_TOTAL_BYTES)throw Error("Snapshot exceeds bounded file/byte budget");
+    inventory.push({path:relative,size,sha256:await shaFile(stagedDb)});
   }
   inventory.sort((a,b)=>a.path.localeCompare(b.path));
   const meta={
     format:"notemesh-dr/1",createdAt:new Date().toISOString(),sqlite:"online-backup+integrity-check",sqliteDatabases:databases.sort(),
-    files:inventory,totalBytes:inventory.reduce((a,x)=>a+x.size,0)
+    files:inventory,folders:folders.sort(),totalBytes:inventory.reduce((a,x)=>a+x.size,0)
   };
   await fsp.writeFile(path.join(stage,"manifest.json"),JSON.stringify(meta),{mode:0o600,flag:"wx"});
   return meta;
@@ -145,7 +177,9 @@ async function inspectTar(archive) {
 }
 async function checkStage(stage) {
   const meta=JSON.parse(await fsp.readFile(path.join(stage,"manifest.json"),"utf8"));
-  if(meta.format!=="notemesh-dr/1" || !Array.isArray(meta.files) || meta.files.length>100000) throw Error("Invalid manifest");
+  if(meta.format!=="notemesh-dr/1" || !Array.isArray(meta.files) || meta.files.length>MAX_FILES ||
+     !Array.isArray(meta.folders) || meta.folders.length>MAX_FILES ||
+     !Number.isSafeInteger(meta.totalBytes) || meta.totalBytes>MAX_TOTAL_BYTES) throw Error("Invalid manifest");
   const seen=new Set();let total=0;
   for(const item of meta.files) {
     if(typeof item.path!=="string" || !item.path || item.path.startsWith("/") || item.path.split("/").some(x=>!nameSafe(x)) ||
@@ -157,16 +191,21 @@ async function checkStage(stage) {
     if(await shaFile(p)!==item.sha256) throw Error("Manifest SHA-256 mismatch");
     total+=s.size;
   }
-  const actual=[];
+  const actual=[],actualFolders=[];
   async function walk(root,rel="") {
     for(const e of await fsp.readdir(root,{withFileTypes:true})) {
       const child=rel?rel+"/"+e.name:e.name;
-      if(e.isDirectory()) await walk(path.join(root,e.name),child);
+      if(e.isDirectory()) {actualFolders.push(child);await walk(path.join(root,e.name),child);}
       else if(e.isFile()) actual.push(child);
       else throw Error("Unsafe extracted entry");
     }
   }
   await walk(path.join(stage,"payload"));
+  const folderSet=new Set(meta.folders);
+  if(folderSet.size!==meta.folders.length || meta.folders.some(x=>typeof x!=="string" || !x ||
+     x.startsWith("/") || x.split("/").some(p=>!nameSafe(p))) ||
+     actualFolders.length!==folderSet.size || actualFolders.some(x=>!folderSet.has(x)))
+    throw Error("Archive directory inventory mismatch");
   if(actual.length!==seen.size || actual.some(x=>!seen.has(x)) || total!==meta.totalBytes || !seen.has("app.sqlite"))
     throw Error("Archive file count/size mismatch (manifest="+seen.size+",actual="+actual.length+",bytes="+total+"/"+meta.totalBytes+",extra="+actual.filter(x=>!seen.has(x)).slice(0,5).join(",")+")");
   const paths=meta.sqliteDatabases;
@@ -202,6 +241,9 @@ export async function main(argv=process.argv.slice(2)) {
     if(flags.get("--fixture-only") && (inside("/data",data) || inside(clean(process.env.DATA_DIR||"/data"),data) || process.env.RAILWAY_ENVIRONMENT_ID))
       throw Error("Fixture mode cannot operate on Railway or a deployed data root");
     if(inside(data,out) || inside(out,data))throw Error("Backup output and source directories must be disjoint");
+    if(!fs.statSync(data).isDirectory())throw Error("Source must be a directory");
+    if(process.platform==="linux" && !fs.realpathSync(data).startsWith(path.sep))
+      throw Error("Invalid resolved source root");
     await fsp.mkdir(out,{recursive:true,mode:0o700});
     const stage=await fsp.mkdtemp(path.join(os.tmpdir(),"notemesh-stage-"));
     const target=path.join(out,"notemesh-"+kind+"-"+new Date().toISOString().replace(/[:.]/g,"-")+"-"+randomBytes(4).toString("hex")+".nmb");
@@ -223,6 +265,8 @@ export async function main(argv=process.argv.slice(2)) {
         await fsp.mkdir(dest,{recursive:true,mode:0o700});
         if((await fsp.readdir(dest)).length)throw Error("Restore destination must be empty");
         const manifest=JSON.parse(await fsp.readFile(path.join(stage,"manifest.json"),"utf8"));
+        for(const directory of manifest.folders)
+          await fsp.mkdir(path.join(dest,directory),{recursive:true,mode:0o700});
         for(const item of manifest.files) {
           const src=path.join(stage,"payload",item.path),target=path.join(dest,item.path);
           await fsp.mkdir(path.dirname(target),{recursive:true,mode:0o700});
