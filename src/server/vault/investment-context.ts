@@ -44,8 +44,8 @@ function namedIssuer(path: string): string | null {
     // Archived company research declares its primary company in frontmatter.
     // A title like "CrowdStrike × CLEAR" otherwise returns CLEAR as the first
     // all-caps token and incorrectly excludes the CRWD research event.
-    const indexed=db().prepare("SELECT frontmatter FROM notes WHERE path=?").get(path)
-      as {frontmatter:string|null}|undefined;
+    const indexed=db().prepare("SELECT frontmatter FROM notes WHERE path=?").get(path) as
+      {frontmatter:string|null}|undefined;
     if(indexed?.frontmatter){
       try {
         const fm=JSON.parse(indexed.frontmatter) as Record<string,unknown>;
