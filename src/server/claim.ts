@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { audit } from "./audit";
 import { db } from "./db";
 
@@ -15,6 +16,29 @@ import { db } from "./db";
 // indefinitely — and reopening it takes a restart, which is a deliberate act
 // by whoever controls the deployment.
 export const CLAIM_WINDOW_MS = 30 * 60 * 1000;
+
+/**
+ * An unclaimed Railway staging/preview instance must NEVER allow anonymous
+ * first-admin signup on the claim window alone. Production behavior is unchanged.
+ * The operator sets a distinct high-entropy secret in staging's private
+ * NOTEMESH_STAGING_CLAIM_SECRET variable, never copied from production.
+ */
+export function stagingClaimRequiresProof(): boolean {
+  return Boolean(process.env.RAILWAY_ENVIRONMENT_ID) &&
+    process.env.RAILWAY_ENVIRONMENT_NAME?.toLowerCase() !== "production";
+}
+
+export function validStagingClaimProof(presented: string | null): boolean {
+  if (!stagingClaimRequiresProof()) return true;
+  const expected = process.env.NOTEMESH_STAGING_CLAIM_SECRET;
+  // Fail closed if no staging-specific key was configured. Never fall back to
+  // the 30-minute anonymous claim window or to a production credential.
+  if (!expected || expected.length < 32 || expected.length > 256 ||
+      !presented || presented.length > 256) return false;
+  const a = crypto.createHash("sha256").update(presented, "utf8").digest();
+  const b = crypto.createHash("sha256").update(expected, "utf8").digest();
+  return crypto.timingSafeEqual(a, b);
+}
 
 // Rounded: this is user-facing copy, and a window that isn't a whole number of
 // minutes would otherwise render as a long fraction.

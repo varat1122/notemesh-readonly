@@ -17,6 +17,7 @@ import {
   MAX_WRITE_BYTES,
 } from "./paths";
 import { writeVaultFile } from "./disk";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { extractStructure, splitFrontmatter } from "./markdown";
 import { createdFor, forgetModification, isoInZone, modifiedFor } from "./modified";
 import { configuredTimeZone } from "./timezone";
@@ -288,6 +289,7 @@ export function assertNoReservedSegments(abs: string) {
 }
 
 export function createNote(notePath: string, content: string): string {
+  return inProcessDrWriterFence.withWriteSync(() => {
   const abs = resolveNotePath(notePath);
   assertNoReservedSegments(abs);
   if (fs.existsSync(abs)) {
@@ -297,6 +299,7 @@ export function createNote(notePath: string, content: string): string {
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   writeVaultFile(abs, content);
   return toVaultRelative(abs);
+  });
 }
 
 export interface UpdateOptions {
@@ -829,6 +832,7 @@ function clipLine(line: string): string {
 }
 
 export function moveNote(notePath: string, newPath: string): { from: string; to: string } {
+  return inProcessDrWriterFence.withWriteSync(() => {
   const absFrom = resolveNotePath(notePath);
   const absTo = resolveNotePath(newPath);
   if (!fs.existsSync(absFrom)) throw new VaultPathError(`Note not found: ${notePath}`);
@@ -838,14 +842,17 @@ export function moveNote(notePath: string, newPath: string): { from: string; to:
   // A rename keeps the file's own time; only the old path's record is stale.
   forgetModification(toVaultRelative(absFrom));
   return { from: toVaultRelative(absFrom), to: toVaultRelative(absTo) };
+  });
 }
 
 export function deleteNote(notePath: string): string {
+  return inProcessDrWriterFence.withWriteSync(() => {
   const abs = resolveNotePath(notePath);
   if (!fs.existsSync(abs)) throw new VaultPathError(`Note not found: ${notePath}`);
   fs.rmSync(abs);
   forgetModification(toVaultRelative(abs));
   return toVaultRelative(abs);
+  });
 }
 
 export function listNotes(folder?: string): NoteInfo[] {

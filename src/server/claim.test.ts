@@ -10,6 +10,8 @@ import {
   installSingleAdminGuard,
   isSingleAdminRefusal,
   extraAdminAccounts,
+  stagingClaimRequiresProof,
+  validStagingClaimProof,
 } from "./claim";
 
 // The bug these exist for: userCount() used to swallow every exception and
@@ -197,5 +199,35 @@ describe("the single-admin guard", () => {
     expect(extraAdminAccounts(dbWithUsers(1))).toBe(0);
     expect(extraAdminAccounts(dbWithUsers(3))).toBe(2);
     expect(extraAdminAccounts(failingDb("SQLITE_BUSY: database is locked"))).toBe(0);
+  });
+});
+
+
+describe("Railway staging private first-admin claim", () => {
+  it("fails closed when staging proof is absent, weak or wrong; preserves production behavior", () => {
+    const keys = ["RAILWAY_ENVIRONMENT_ID", "RAILWAY_ENVIRONMENT_NAME", "NOTEMESH_STAGING_CLAIM_SECRET"] as const;
+    const saved = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+    try {
+      process.env.RAILWAY_ENVIRONMENT_ID = "staging-fixture";
+      process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
+      delete process.env.NOTEMESH_STAGING_CLAIM_SECRET;
+      expect(stagingClaimRequiresProof()).toBe(true);
+      expect(validStagingClaimProof(null)).toBe(false);
+      expect(validStagingClaimProof("anything")).toBe(false);
+      process.env.NOTEMESH_STAGING_CLAIM_SECRET = "short";
+      expect(validStagingClaimProof("short")).toBe(false);
+      const proof = "fixture-only-independent-strong-staging-proof-0123456789";
+      process.env.NOTEMESH_STAGING_CLAIM_SECRET = proof;
+      expect(validStagingClaimProof("wrong-secret")).toBe(false);
+      expect(validStagingClaimProof(proof)).toBe(true);
+      process.env.RAILWAY_ENVIRONMENT_NAME = "production";
+      expect(stagingClaimRequiresProof()).toBe(false);
+      expect(validStagingClaimProof(null)).toBe(true);
+    } finally {
+      for (const k of keys) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
   });
 });

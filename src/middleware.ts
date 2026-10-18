@@ -8,17 +8,10 @@ import { applySecurityHeaders } from "./server/headers";
 import { protectedResourceMetadata } from "./server/mcp/endpoint";
 import { ensureCloudIntakeStarted } from "./server/cloud-intake";
 import { ensurePriceCollectorStarted } from "./server/market-prices/collector";
+import { isKnownApiPath } from "./server/api-paths";
 
 function redirectTo(path: string): Response {
   return new Response(null, { status: 302, headers: { Location: path } });
-}
-
-// Routes that legitimately exist under /api. Anything else under /api — and
-// any JSON-shaped request to an unknown path — must fail loudly.
-const API_PREFIXES = ["/api/health", "/api/mcp", "/api/save-analysis", "/api/safe-edit", "/api/safe-edit-approval", "/api/market-prices-drive", "/api/market-prices-drive/callback", "/api/intake-worker", "/api/auth/", "/api/rpc/", "/api/attachment"];
-
-function isKnownApiPath(pathname: string): boolean {
-  return API_PREFIXES.some((p) => (p.endsWith("/") ? pathname.startsWith(p) : pathname === p));
 }
 
 // SolidStart's catch-all serves the SPA shell for unmatched routes, so a client

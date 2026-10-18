@@ -27,8 +27,9 @@ import crypto from "node:crypto";
 import { db } from "./db";
 import { env } from "./env";
 import { authLog } from "./auth-logger";
-import { userCount, withinClaimWindow, CLAIM_WINDOW_MINUTES, installSingleAdminGuard, extraAdminAccounts } from "./claim";
+import { userCount, withinClaimWindow, CLAIM_WINDOW_MINUTES, installSingleAdminGuard, extraAdminAccounts, validStagingClaimProof } from "./claim";
 import { audit } from "./audit";
+import { inProcessDrWriterFence } from "./backup/writer-fence";
 
 // Both used to live here, and auth is where the rest of the app reaches for
 // them, so keep them importable from this module.
@@ -135,6 +136,15 @@ export const auth = betterAuth({
               `the admin account.`,
           });
         }
+        // Railway staging/preview must be claimed with an independent,
+        // operator-held proof. A public domain or service restart alone is
+        // never sufficient to claim its first administrator account.
+        if (!validStagingClaimProof(ctx.headers?.get("x-notemesh-dr-claim") ?? null)) {
+          audit("signup.rejected", { reason: "staging_claim_proof_missing_or_invalid" });
+          throw new APIError("FORBIDDEN", {
+            message: "Staging first-admin claim requires its private setup proof.",
+          });
+        }
         audit("signup.accepted", {});
       }
 
@@ -159,15 +169,23 @@ export const auth = betterAuth({
         // legitimate connector.
         let count: number | null = null;
         try {
-          d.prepare(
-            `DELETE FROM "oauthClient"
-             WHERE createdAt < ?
-               AND clientId NOT IN (SELECT clientId FROM "oauthAccessToken")
-               AND clientId NOT IN (SELECT clientId FROM "oauthRefreshToken")
-               AND clientId NOT IN (SELECT clientId FROM "oauthConsent")`,
-          ).run(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
-          count = (d.prepare('SELECT COUNT(*) AS n FROM "oauthClient"').get() as { n: number }).n;
+          // This hook is ordinarily nested inside the fenced auth endpoint.
+          // Guard its direct SQL path too, so internal auth calls cannot
+          // delete clients during the fixture's writer freeze.
+          count = inProcessDrWriterFence.withWriteSync(() => {
+            d.prepare(
+              `DELETE FROM "oauthClient"
+               WHERE createdAt < ?
+                 AND clientId NOT IN (SELECT clientId FROM "oauthAccessToken")
+                 AND clientId NOT IN (SELECT clientId FROM "oauthRefreshToken")
+                 AND clientId NOT IN (SELECT clientId FROM "oauthConsent")`,
+            ).run(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+            return (d.prepare('SELECT COUNT(*) AS n FROM "oauthClient"').get() as { n: number }).n;
+          });
         } catch (e) {
+          // Never turn freeze refusal into "unknown count, proceed anyway".
+          // Registration itself may write; fail closed before the adapter.
+          if (e instanceof Error && e.message === "backup_writer_freeze_active") throw e;
           console.error("[auth] client-cap check failed:", e);
         }
 
@@ -254,6 +272,7 @@ export const auth = betterAuth({
 });
 
 let migrated = false;
+let migrationInProgress: Promise<void> | null = null;
 
 // Creates/updates Better Auth's own tables (user, session, account,
 // apikey, OAuth client/token tables) inside app.sqlite. Runs once per boot.
@@ -278,21 +297,34 @@ function backfillAccountIssuer(): void {
 
 export async function runAuthMigrations() {
   if (migrated) return;
-  backfillAccountIssuer();
-  const { runMigrations } = await getMigrations(auth.options);
-  await runMigrations();
-  // The guard on the user table can only be created once Better Auth has
-  // created the table, so it lives here rather than with our own schema. And
-  // a database that already breaks the invariant — claimed before the guard
-  // existed, by more than one racer — is reported loudly rather than guessed
-  // about; the alert channel carries it too. Recovery is in SECURITY.md.
-  installSingleAdminGuard();
-  const extra = extraAdminAccounts();
-  if (extra > 0) {
-    console.error(
-      `[auth] this server has ${extra + 1} admin accounts and should have exactly one. ` +
-        `See SECURITY.md, "More than one admin account".`,
-    );
+  // Cold-start HTTP requests can race each other. They must all await the
+  // same initialization before any handler attempts a session lookup.
+  if (migrationInProgress) return migrationInProgress;
+  // Run migrations under their own write ticket as callers outside the
+  // /api/auth handler (RPC, MCP and setup) also initialize Better Auth.
+  // This admission must span the awaited upstream migration, not only its
+  // first synchronous SQLite statement.
+  const work = inProcessDrWriterFence.withWrite(async () => {
+    backfillAccountIssuer();
+    const { runMigrations } = await getMigrations(auth.options);
+    await runMigrations();
+    // Install the single-admin database invariant only after Better Auth
+    // creates the user table. Initialization errors remain visible and
+    // retryable, rather than marking the schema as migrated prematurely.
+    installSingleAdminGuard();
+    const extra = extraAdminAccounts();
+    if (extra > 0) {
+      console.error(
+        `[auth] this server has ${extra + 1} admin accounts and should have exactly one. ` +
+          `See SECURITY.md, "More than one admin account".`,
+      );
+    }
+    migrated = true;
+  });
+  migrationInProgress = work;
+  try {
+    await work;
+  } finally {
+    if (migrationInProgress === work) migrationInProgress = null;
   }
-  migrated = true;
 }

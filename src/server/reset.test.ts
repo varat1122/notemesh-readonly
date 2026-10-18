@@ -200,6 +200,22 @@ describe("resetting a real account", () => {
     return { m, pin, auth };
   }
 
+  it("refuses password and session mutation during a DR freeze without changing the account", async () => {
+    const { m, pin, auth } = await armedWithAdmin();
+    const { db } = await import("./db");
+    const { inProcessDrWriterFence: fence } = await import("./backup/writer-fence");
+    const before = (db().prepare('SELECT COUNT(*) AS n FROM "session"').get() as { n: number }).n;
+    await fence.withFrozenWriters(async () => {
+      await expect(m.performAdminReset(pin,"another-valid-password"))
+        .rejects.toThrow("backup_writer_freeze_active");
+      expect((db().prepare('SELECT COUNT(*) AS n FROM "session"').get() as { n: number }).n).toBe(before);
+    });
+    await expect(auth.api.signInEmail({
+      body: { email:"admin@example.com",password:"the-original-password" }
+    })).resolves.toBeTruthy();
+    expect(fence.status).toEqual({frozen:false,activeWriters:0});
+  });
+
   it("lets a correct PIN be used more than once", async () => {
     // Not single-use, on purpose. Reading the PIN means reading the
     // deployment's logs, which is already the access that could rewrite

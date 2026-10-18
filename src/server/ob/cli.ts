@@ -2,6 +2,7 @@ import { execa, type Result } from "execa";
 import fs from "node:fs";
 import path from "node:path";
 import { env, ensureDataDirs } from "../env";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 
 // Resolve the ob binary: explicit override, then PATH (Docker installs it
 // globally), then the local node_modules/.bin (dev).
@@ -49,6 +50,11 @@ export async function runOb(
   args: string[],
   opts: { timeoutMs?: number; stdinInput?: string; redactSecrets?: (string | undefined)[] } = {},
 ): Promise<ObResult> {
+  // Even seemingly read-only Obsidian CLI calls may refresh credentials or
+  // local sync state under DATA_DIR/home. Fence the whole external process,
+  // not just known file-writing subcommands. The continuous daemon is NOT
+  // covered here: the snapshot coordinator must stop and await that child.
+  return inProcessDrWriterFence.withWrite(async () => {
   ensureDataDirs();
   let res: Result;
   try {
@@ -76,6 +82,7 @@ export async function runOb(
       opts.redactSecrets ?? [],
     ),
   };
+  });
 }
 
 export function looksLikeMfaRequired(output: string): boolean {

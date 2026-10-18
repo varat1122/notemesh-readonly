@@ -14,6 +14,13 @@ afterEach(() => { vi.unstubAllEnvs(); fs.rmSync(root, { recursive: true, force: 
 const pause = vi.fn(async () => {});
 const fetcher = vi.fn(async (input: InstrumentInput, options: { now?: Date } = {}) => parseYahooChart(chartFixture(input), input, options.now ?? TEST_NOW));
 
+it("refuses market-price refresh when the process-local DR writer fence is frozen",async()=>{
+  const {inProcessDrWriterFence}=await import("../backup/writer-fence");
+  await inProcessDrWriterFence.withFrozenWriters(async()=>{
+    await expect(refreshPrices({now:TEST_NOW,fetcher,pause})).rejects.toThrow(/freeze_active/);
+    expect(fs.existsSync(priceDbPath())).toBe(false);
+  });
+});
 it("refreshes four markets once daily and permits the post-06:00 refresh after an earlier boot", async () => {
   const before = new Date("2026-10-16T03:00Z");
   expect(scheduledCutoff(before)).toBe(Date.parse("2026-10-15T06:00Z"));

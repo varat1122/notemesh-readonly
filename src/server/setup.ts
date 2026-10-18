@@ -3,7 +3,7 @@ import { deleteSetting, getSetting, setSetting } from "./db";
 import { env, detectOriginMismatch, type OriginMismatch } from "./env";
 import { runAuthMigrations } from "./auth";
 import { validateRemoteUrl } from "./sync/remote";
-import { isSetupComplete, claimWindowRemainingMs, CLAIM_WINDOW_MINUTES } from "./claim";
+import { isSetupComplete, claimWindowRemainingMs, CLAIM_WINDOW_MINUTES, stagingClaimRequiresProof } from "./claim";
 import {
   obLogin,
   obListRemoteVaults,
@@ -179,6 +179,7 @@ export async function getSetupStage(): Promise<SetupStage> {
 
 export interface ClaimState {
   claimable: boolean;
+  stagingProofRequired: boolean;
   secondsLeft: number;
   windowMinutes: number;
   /**
@@ -204,6 +205,7 @@ export async function getClaimState(): Promise<ClaimState> {
   if (await isSetupComplete()) {
     return {
       claimable: false,
+      stagingProofRequired: stagingClaimRequiresProof(),
       secondsLeft: 0,
       windowMinutes: CLAIM_WINDOW_MINUTES,
       originMismatch: mismatch,
@@ -212,6 +214,7 @@ export async function getClaimState(): Promise<ClaimState> {
   const remaining = claimWindowRemainingMs();
   return {
     claimable: remaining > 0,
+    stagingProofRequired: stagingClaimRequiresProof(),
     secondsLeft: Math.ceil(remaining / 1000),
     windowMinutes: CLAIM_WINDOW_MINUTES,
     originMismatch: mismatch,

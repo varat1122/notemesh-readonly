@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { runGit } from "../sync/git-exec";
 
 /**
@@ -60,12 +61,20 @@ function indexedCreated(relPath: string): number | null {
  * the path.
  */
 export function recordLocalModification(relPath: string, at = Date.now()) {
-  times.set(relPath, at);
+  // This exported helper can be called outside the Vault file writer.
+  // Refuse an unadmitted metadata mutation before touching the cache.
+  return inProcessDrWriterFence.withWriteSync(() => {
+    times.set(relPath, at);
+  });
 }
 
 export function forgetModification(relPath: string) {
-  times.delete(relPath);
-  born.delete(relPath);
+  // A metadata eviction is also a write: otherwise a direct caller could
+  // silently change the time cache while an offline cut is frozen.
+  return inProcessDrWriterFence.withWriteSync(() => {
+    times.delete(relPath);
+    born.delete(relPath);
+  });
 }
 
 /** Test seam: the module is a singleton, so a suite starts from nothing. */
@@ -132,6 +141,9 @@ export function applyGitTimes(map: Map<string, number>): number {
 }
 
 export function applyGitHistory(history: GitHistory): number {
+  // Acquire admission before mutating either cache or SQLite. A failed
+  // freeze admission must leave both views untouched for a later retry.
+  return inProcessDrWriterFence.withWriteSync(() => {
   for (const [p, t] of history.modified) {
     const have = times.get(p);
     if (have === undefined || have < t) times.set(p, t);
@@ -153,6 +165,7 @@ export function applyGitHistory(history: GitHistory): number {
     }
   })();
   return n;
+  });
 }
 
 /** The pass the git backend runs at start and after every pull. Null when git could not be read. */

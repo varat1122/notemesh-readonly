@@ -284,7 +284,7 @@ export class SyncSupervisor implements SyncBackend {
   private hasChild(): boolean { return this.child !== null; }
 
   /** Await daemon exit before a guarded atomic edit; no polling or forced kill. */
-  async withPausedForEdit<T>(run: () => T): Promise<T> {
+  async withPausedForEdit<T>(run: () => T | Promise<T>): Promise<T> {
     if (this.editPaused || this.manualSyncActive || !this.child || this.state !== "running") throw Error("Sync cannot be paused safely now");
     this.editPaused = true;
     const child = this.child;
@@ -295,7 +295,9 @@ export class SyncSupervisor implements SyncBackend {
         timer = setTimeout(() => reject(Error("Sync did not stop; no edit applied")), 10000);
       })]);
       if (this.hasChild() || this.status().state !== "stopped") throw Error("Sync exit was not confirmed");
-      return run();
+      // Preserve the pause for async snapshot preparation too. Returning a
+      // pending Promise here would resume Obsidian Sync before work finishes.
+      return await run();
     } finally {
       if (timer) clearTimeout(timer);
       this.editPaused = false;

@@ -15,3 +15,27 @@ it("resumes daemon after mutation failure",async()=>{
  const start=vi.spyOn(s,"start").mockImplementation(()=>{});await expect(s.withPausedForEdit(()=>{throw Error("synthetic failure");})).rejects.toThrow(/synthetic/);expect(start).toHaveBeenCalledOnce();
 });
 it("fails closed without a running child",async()=>{const s=new SyncSupervisor(),run=vi.fn();await expect(s.withPausedForEdit(run)).rejects.toThrow();expect(run).not.toHaveBeenCalled();});
+
+it("holds Obsidian Sync paused throughout an asynchronous snapshot callback",async()=>{
+ const s=new SyncSupervisor();
+ const stopPromise=Promise.resolve();
+ (s as any).child=Object.assign(stopPromise,{kill:()=>{(s as any).child=null;s.state="stopped";}});
+ s.state="running";
+ const start=vi.spyOn(s,"start").mockImplementation(()=>{});
+ let complete!: (value:string)=>void;
+ const pending=new Promise<string>(resolve=>{complete=resolve;});
+ let reached=false;
+ const result=s.withPausedForEdit(async()=>{
+   reached=true;
+   expect((s as any).editPaused).toBe(true);
+   expect((s as any).child).toBeNull();
+   return pending;
+ });
+ await vi.waitFor(()=>expect(reached).toBe(true));
+ expect(start).not.toHaveBeenCalled();
+ expect((s as any).editPaused).toBe(true);
+ await expect(s.withPausedForEdit(()=>"overlap")).rejects.toThrow(/paused safely/);
+ complete("complete");
+ await expect(result).resolves.toBe("complete");
+ expect(start).toHaveBeenCalledOnce();
+});

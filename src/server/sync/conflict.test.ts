@@ -322,3 +322,18 @@ describe("a conflict where one side deleted", () => {
     expect(filesWithMarkers(server)).toEqual([]);
   });
 });
+
+it("DR P2.8: direct conflict resolution is refused before git reset or copy writes during freeze", async () => {
+  const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+  const before = fs.readdirSync(root);
+  await fence.withFrozenWriters(async () => {
+    await expect(resolveConflict({
+      dir: path.join(root, "unconfigured"),
+      remoteRef: "origin/main",
+      paths: ["Private.md"],
+    })).rejects.toThrow("backup_writer_freeze_active");
+    expect(fs.readdirSync(root)).toEqual(before);
+    expect(fence.status.activeWriters).toBe(0);
+  });
+  expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
+});

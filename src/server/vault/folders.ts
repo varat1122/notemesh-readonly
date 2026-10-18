@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { env } from "../env";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { VaultPathError, resolveFolderPath, toVaultRelative } from "./paths";
 import { assertNoReservedSegments, isMarkdown } from "./notes";
 import { rewriteLinksForMoves, type RewriteResult } from "./links";
@@ -46,6 +47,8 @@ function filesBeneath(dir: string, out: string[], depth = 0) {
  * knows who linked where.
  */
 export function moveFolder(folder: string, newFolder: string): FolderMove {
+  // Hold admission across the directory rename AND all cascading link rewrites.
+  return inProcessDrWriterFence.withWriteSync(() => {
   const absFrom = resolveExistingFolder(folder);
   const absTo = resolveFolderPath(newFolder);
   assertNoReservedSegments(absTo);
@@ -79,10 +82,12 @@ export function moveFolder(folder: string, newFolder: string): FolderMove {
   }
   const rewritten = rewriteLinksForMoves(linkable);
   return { from, to, moved, rewritten };
+  });
 }
 
 /** Removes an empty folder. Anything inside it is a reason to refuse. */
 export function deleteFolder(folder: string): string {
+  return inProcessDrWriterFence.withWriteSync(() => {
   const abs = resolveExistingFolder(folder);
   const entries = fs.readdirSync(abs);
   if (entries.length > 0) {
@@ -93,6 +98,7 @@ export function deleteFolder(folder: string): string {
   }
   fs.rmdirSync(abs);
   return toVaultRelative(abs);
+  });
 }
 
 export { isMarkdown };

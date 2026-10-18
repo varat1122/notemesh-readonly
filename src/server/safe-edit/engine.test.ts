@@ -20,6 +20,16 @@ beforeEach(()=>{
   fs.writeFileSync(path.join(vault,"05_Thesis","NVDA - Change Log.md"),original);
 });
 afterAll(async()=>{vi.restoreAllMocks();(await import("../db")).db().close();fs.rmSync(root,{recursive:true,force:true});for(const key of ["DATA_DIR","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[key];});
+it("refuses Safe Edit preview, approval and writes during a DR freeze",async()=>{
+ const {inProcessDrWriterFence}=await import("../backup/writer-fence");
+ await inProcessDrWriterFence.withFrozenWriters(async()=>{
+   expect(()=>engine.preview(input(),actor)).toThrow(/backup_writer_freeze_active/);
+   expect(()=>engine.approve("test","admin","hash")).toThrow(/backup_writer_freeze_active/);
+   expect(()=>engine.apply({},actor)).toThrow(/backup_writer_freeze_active/);
+   expect(()=>engine.status("test",actor)).toThrow(/backup_writer_freeze_active/);
+   expect(fs.readFileSync(path.join(vault,"Fixture.md"),"utf8")).toBe(original);
+ });
+});
 it("previews exact diff without writing, then atomically applies, backs up, indexes and returns idempotent receipt",()=>{
  const p=engine.preview(input(),actor);expect(fs.readFileSync(path.join(vault,"Fixture.md"),"utf8")).toBe(original);
  expect(p.diff.removed).toEqual(["Existing statement."]);expect(p.diff.added).toEqual(["Updated statement."]);

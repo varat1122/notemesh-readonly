@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   cloneVault,
+  gitBackend,
   gitVersionOk,
   isGitRepo,
   looksLikeAuthFailure,
@@ -240,5 +241,95 @@ describe("runGitBuffer", () => {
     const res = await runGitBuffer(["show", "HEAD:nope"], { cwd: root });
     expect(res.ok).toBe(false);
     expect(res.stdout.length).toBe(0);
+  });
+});
+
+describe("DR Phase 2.4 — Git sync writer admission", () => {
+  it("absorbs freeze refusal during startup Git metadata refresh and continues startup", async () => {
+    const { setSetting } = await import("../db");
+    setSetting("git_remote", remote);
+    const backend = gitBackend();
+    const refresh = vi.spyOn(backend as any, "refreshTimes")
+      .mockRejectedValueOnce(new Error("backup_writer_freeze_active"));
+    const cycle = vi.spyOn(backend as any, "cycle").mockResolvedValue(true);
+    try {
+      backend.start();
+      await vi.waitFor(() => expect(cycle).toHaveBeenCalledWith("startup"), { timeout: 1000 });
+      expect(backend.getLogs().some(l => l.line.includes("metadata refresh deferred"))).toBe(true);
+    } finally {
+      backend.stop();
+      refresh.mockRestore();
+      cycle.mockRestore();
+    }
+  });
+
+  it("refuses setup clone during freeze without initializing a working tree", async () => {
+    seedRemote();
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const dir = path.join(root, "data", "vault");
+    await fence.withFrozenWriters(async () => {
+      await expect(cloneVault(remote, "main")).rejects.toThrow("backup_writer_freeze_active");
+      expect(fs.existsSync(dir)).toBe(false);
+    });
+    expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
+    expect((await cloneVault(remote, "main")).ok).toBe(true);
+  });
+
+  it("skips a frozen Git reconcile without latching a healthy backend into backoff", async () => {
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const backend = gitBackend();
+    const before = backend.status().state;
+    await fence.withFrozenWriters(async () => {
+      const response = await backend.syncNow();
+      expect(response.ok).toBe(false);
+      expect(response.output).toContain("DR writer freeze active");
+      expect(backend.status().state).toBe(before);
+      expect(backend.status().activity.active).toBe(false);
+    });
+    expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
+  });
+});
+
+describe("DR Phase 2.8 — direct Git execution freeze", () => {
+  it("refuses both text and binary Git entry points before spawning while frozen", async () => {
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const cwd = path.join(root, "nonexistent-working-tree");
+    await fence.withFrozenWriters(async () => {
+      await expect(runGit(["init"], { cwd })).rejects.toThrow("backup_writer_freeze_active");
+      await expect(runGitBuffer(["show", "HEAD:note.md"], { cwd }))
+        .rejects.toThrow("backup_writer_freeze_active");
+      expect(fs.existsSync(cwd)).toBe(false);
+      expect(fence.status.activeWriters).toBe(0);
+    });
+    expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
+  });
+
+  it("holds a direct Git process ticket until the child exits before snapshot", async () => {
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const bin = path.join(root, "dr-git-shim");
+    fs.mkdirSync(bin);
+    const started = path.join(root, "dr-git-started");
+    const release = path.join(root, "dr-git-release");
+    fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh
+echo started > "${started}"
+while [ ! -f "${release}" ]; do sleep 0.05; done
+exit 0
+`, { mode: 0o755 });
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH ?? ""}`);
+    try {
+      const active = runGit(["status"], { cwd: root, timeoutMs: 5000 });
+      await vi.waitFor(() => expect(fs.existsSync(started)).toBe(true), { timeout: 3000 });
+      expect(fence.status.activeWriters).toBeGreaterThanOrEqual(1);
+      let captured = false;
+      const cut = fence.withFrozenWriters(() => { captured = true; return "snapshot"; },
+        { drainTimeoutMs: 4000 });
+      expect(captured).toBe(false);
+      await expect(runGit(["status"], { cwd: root })).rejects
+        .toThrow("backup_writer_freeze_active");
+      fs.writeFileSync(release, "go");
+      expect((await active).ok).toBe(true);
+      await expect(cut).resolves.toBe("snapshot");
+      expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
+    } finally { vi.unstubAllEnvs(); }
   });
 });

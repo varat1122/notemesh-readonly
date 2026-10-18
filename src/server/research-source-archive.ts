@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { db } from "./db";
 import { env } from "./env";
+import { inProcessDrWriterFence } from "./backup/writer-fence";
 
 /**
  * Internal, authenticated-ingest ADAPTER DEPENDENCY — not an MCP write action.
@@ -111,9 +112,12 @@ function safeBlobWrite(bytes:Buffer,digest:string){
       const stored=fs.readFileSync(target);
       if(sha256(stored)!==digest)throw new Error("source_blob_existing_hash_mismatch");
     }
-  }finally{if(tmpPresent)try{fs.unlinkSync(tmp);}catch{}}
+  }finally{if(tmpPresent)try{fs.unlinkSync(tmp);}catch{ /* Best-effort cleanup; do not mask the original failure. */ }}
 }
-export function captureOriginalDocumentBytes(input:DocumentArchiveInput):DocumentSnapshot{
+export function captureOriginalDocumentBytes(input:DocumentArchiveInput):DocumentSnapshot {
+  return inProcessDrWriterFence.withWriteSync(()=>captureOriginalBytesUnderFence(input));
+}
+function captureOriginalBytesUnderFence(input:DocumentArchiveInput):DocumentSnapshot{
   if(!Buffer.isBuffer(input.bytes)||input.bytes.length<16||input.bytes.length>MAX_DOCUMENT_BYTES)
     throw new Error("source_document_invalid_size");
   if(!validTimestamp(input.capturedAt))throw new Error("capture_timestamp_invalid");

@@ -133,7 +133,7 @@ jobs:
 
       - name: Drive setup routes reach their admin guards in the container
         run: |
-          docker exec nm node --input-type=module -e "for (const path of ['/api/market-prices-drive','/api/market-prices-drive/callback']) { const r = await fetch('http://127.0.0.1:3000'+path); if (r.status !== 401 || r.headers.get('cache-control') !== 'no-store') { console.error(path, r.status); process.exit(1); } }"
+          docker exec nm node --input-type=module -e "for (const path of ['/api/market-prices-drive','/api/market-prices-drive/callback','/api/backup-drive','/api/backup-drive/callback']) { const r = await fetch('http://127.0.0.1:3000'+path); if (r.status !== 401 || r.headers.get('cache-control') !== 'no-store') { console.error(path, r.status); process.exit(1); } }"
 
       # /proc rather than ps: the slim image has no procps, and /proc is the
       # source ps reads anyway.
@@ -144,7 +144,7 @@ jobs:
           test "$pid1" = "tini"
           # By command line, not by the Name: field: Node 24 names its main
           # thread, so status reports MainThread rather than node.
-          children=$(docker exec nm sh -c 'for p in /proc/[0-9]*; do grep -q "^PPid:[[:space:]]*1$" "$p/status" 2>/dev/null && tr "\\0" " " < "$p/cmdline" && echo; done')
+          children=$(docker exec nm sh -c 'for p in /proc/[0-9]*; do if grep -q "^PPid:[[:space:]]*1$" "$p/status" 2>/dev/null; then tr "\\0" " " < "$p/cmdline" && echo; fi; done; true')
           echo "children of PID 1: $children"
           echo "$children" | grep -q "^node "
 
