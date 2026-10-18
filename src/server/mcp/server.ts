@@ -4,6 +4,7 @@ import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
+import { planVaultOrganization } from "../vault/investment-organization-plan";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import { buildInvestmentDecisionPacket } from "../vault/investment-decision-packet";
@@ -1124,6 +1125,28 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     safe(({ tag, limit, offset }: { tag: string; limit?: number; offset?: number }) =>
       page(notesByTag(tag), limit, offset),
     ),
+  );
+
+  // Read-only prioritized organization actions. No mass moves or silent edits.
+  server.registerTool(
+    "plan_vault_organization",
+    {
+      title: "Plan Investment OS Vault organization",
+      annotations: READ,
+      description:
+        "Source-first read-only organization queue: group unresolved archive originals, "+
+        "other broken links, unreviewed inbox items and metadata that may require targeted correction. "+
+        "Keep original ChatGPT archive links, legacy provenance and dates unchanged. "+
+        "Returns exact note paths, human review actions, protected thesis gates and safe-edit preview prerequisites; "+
+        "never claims missing originals are lost and never writes/moves/deletes files.",
+      inputSchema:{
+        focus:z.enum(["all","source_archives","other_links","metadata","inbox"]).optional(),
+        maxExamples:z.number().int().min(1).max(12).optional(),
+      },
+    },
+    safe(({focus,maxExamples}:{
+      focus?:"all"|"source_archives"|"other_links"|"metadata"|"inbox";maxExamples?:number
+    })=>json(withBoundary(planVaultOrganization({focus,maxExamples})))),
   );
 
   // ---- Vault ----
