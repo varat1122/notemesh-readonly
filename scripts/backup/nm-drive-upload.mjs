@@ -9,6 +9,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { openStoredDrCredential } from "./nm-drive-credential.mjs";
 
 const CHUNK=8*1024*1024;
 const FOLDER=/^[a-zA-Z0-9_-]{10,150}$/;
@@ -33,13 +34,16 @@ function assertGoogleUrl(str) {
 export async function refreshAccessToken(fetcher=fetch) {
   const id=process.env.NOTEMESH_DRIVE_CLIENT_ID;
   const secret=process.env.NOTEMESH_DRIVE_CLIENT_SECRET;
-  const refresh=process.env.NOTEMESH_DRIVE_REFRESH_TOKEN;
-  if(!id || !secret || !refresh)throw Error("Dedicated Drive OAuth credentials are not configured");
+  const {refreshToken:refresh,clientId}=openStoredDrCredential();
+  if(!id || !secret || id!==clientId)throw Error("Dedicated Drive OAuth credentials are not configured");
   const data=new URLSearchParams({client_id:id,client_secret:secret,refresh_token:refresh,grant_type:"refresh_token"});
   const r=await fetcher(TOKEN_URL,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},
     body:data,redirect:"error",signal:AbortSignal.timeout(30_000)});
   const json=await getJson(r,"Token refresh");
-  if(typeof json.access_token!=="string" || !json.access_token)throw Error("Missing access token");
+  if(typeof json.access_token!=="string" || !json.access_token || json.token_type!=="Bearer" ||
+     (json.scope && json.scope!=="https://www.googleapis.com/auth/drive.file") ||
+     (json.refresh_token && json.refresh_token!==refresh))
+       throw Error("DR OAuth token invalid, scope changed or refresh token rotated; reauthorize");
   return json.access_token;
 }
 function headers(token,extra={}) {return {...extra,Authorization:"Bearer "+token};}
