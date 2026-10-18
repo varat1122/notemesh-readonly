@@ -52,6 +52,10 @@ export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
  if(req.extractedText.includes("\0"))throw Error("Binary data cannot enter a Markdown note");
  if(req.analysisText&&req.analysisText.length>14000)throw Error("AI analysis exceeds note review limit");
  if(req.analysisText?.includes("\0"))throw Error("AI analysis is not valid text");
+ if(Buffer.from(req.extractedText,"utf8").toString("utf8")!==req.extractedText)
+  throw Error("Original user text must be lossless UTF-8 (unpaired surrogate)");
+ if(req.analysisText&&Buffer.from(req.analysisText,"utf8").toString("utf8")!==req.analysisText)
+  throw Error("AI interpretation must be lossless UTF-8 (unpaired surrogate)");
  const originalRoles=req.sourceKind==="archived_chat"?"archived_ai":"user_supplied";
  const fm=(role:string,source:string,extras:string[])=>[
   "---","type: "+role,"source_type: "+source,"verification: not_reverified",
