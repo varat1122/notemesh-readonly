@@ -97,6 +97,13 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(!T(input.extractedText)||input.extractedText.length>MAX_TEXT)
     throw Error("Provide faithful extractedText, 1 to 12000 characters");
   if(input.analysisText&&input.analysisText.length>14000)throw Error("analysisText max 14000 characters");
+  // JS can hold unpaired UTF-16 surrogate code units which UTF-8 encoding
+  // silently replaces with U+FFFD. Reject these before claiming lossless
+  // preservation or computing a source identity.
+  if(Buffer.from(input.extractedText,"utf8").toString("utf8")!==input.extractedText)
+    throw Error("Original text contains invalid Unicode and cannot be preserved losslessly");
+  if(input.analysisText&&Buffer.from(input.analysisText,"utf8").toString("utf8")!==input.analysisText)
+    throw Error("Analysis text contains invalid Unicode");
   if(input.sourceUrl&&input.sourceUrl.length>1000)throw Error("sourceUrl too long");
   if(input.rawAttachmentPath&&input.rawAttachmentPath.length>600)throw Error("attachment path too long");
   if(Boolean(input.rawAttachmentSha256)!==Boolean(input.rawAttachmentContentType))
