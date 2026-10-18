@@ -4,7 +4,7 @@ const API_PREFIXES = [
   "/api/health", "/api/mcp", "/api/save-analysis", "/api/safe-edit",
   "/api/safe-edit-approval", "/api/market-prices-drive",
   "/api/market-prices-drive/callback", "/api/backup-drive",
-  "/api/backup-drive/callback", "/api/backup-drive/credential-check",
+  "/api/backup-drive/callback", "/api/backup-drive/credential-check", "/api/backup-drive/fixture-upload",
   "/api/intake-worker", "/api/auth/", "/api/rpc/", "/api/attachment",
 ] as const;
 
