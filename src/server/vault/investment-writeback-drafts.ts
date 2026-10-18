@@ -41,7 +41,10 @@ const list=(v:string[])=>JSON.stringify(v);
 function fence(text:string):string {
  const runs=[...text.matchAll(/~+/g)].map(x=>x[0].length);
  const tag="~".repeat(Math.max(4,...runs.map(n=>n+1)));
- return tag+"text\n"+text+(text.endsWith("\n")?"":"\n")+tag;
+ // This final newline is a structural delimiter, separate from any
+ // newline already present in the user's bytes. Without it, texts ending
+ // with one LF and with zero LFs serialize to an identical fenced block.
+ return tag+"text\n"+text+"\n"+tag;
 }
 export function composeWritebackDrafts(req:DraftRequest):DraftPacket {
  if(!/^IN-[A-F0-9]{16}$/.test(req.planId))throw Error("Invalid intake plan ID");
