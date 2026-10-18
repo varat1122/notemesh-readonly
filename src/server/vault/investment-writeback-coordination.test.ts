@@ -113,8 +113,11 @@ describe("P1a coordinated writeback plan (never applies edits)",()=>{
     expect(reconcileCoordinatedWriteback(p,statuses)[2].state).toBe("conflict");
   });
   it("inspects a pre-existing raw path rather than treating mere existence as idempotent success",()=>{
-    const input=makeInput();
-    input.routes[0]={...input.routes[0],action:"link_existing_or_hold"};
+    // CoordinatorInput.routes is deliberately readonly. Derive a new input
+    // rather than mutating the route array that production code treats as immutable.
+    const base=makeInput();
+    const input:CoordinatorInput={...base,routes:base.routes.map((route,index)=>
+      index===0?{...route,action:"link_existing_or_hold"}:route)};
     const p=buildCoordinatedWriteback(input);
     expect(reconcileCoordinatedWriteback(p,[]).map(x=>x.state))
       .toEqual(["inspect_existing","awaiting_dependency","hold"]);
