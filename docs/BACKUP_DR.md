@@ -78,3 +78,16 @@ SyncSupervisor.withPausedForEdit now awaits asynchronous callbacks while keeping
 Production remains gated: other Vault writers and the price collector need cross-component coordination. The system must restore sync on error, preserve secrets, verify disk staging capacity, and forbid any backup job that cannot establish writer quiescence. Do not invoke the offline CLI on the live Railway volume or assume a CLI confirmation flag proves safe quiescence.
 
 Recovery hardening: restore now refuses any existing destination (including an empty directory), rejects symlink ancestors, and requires a new sandbox directory under an existing normal parent. Fixture-only mode checks the real path of its source so a symlink alias to a deployed data root is not accepted.
+
+## Phase 1.2 development — writer admissions and full local DR drill (NOT DEPLOYED)
+
+- `src/server/backup/writer-fence.ts` implements a fail-closed, in-process freeze primitive. It rejects new mutators while frozen, drains tracked writers before invoking an asynchronous snapshot, and unfreezes even if an operation throws or reaches the bounded drain timeout. The associated Vitest suite covers overlap, exclusion, timeout, mutation failure, and async snapshot lifecycle. **It is not integrated with all production writers, so it does not authorize any live snapshot.** Obsidian Sync must independently be stopped and awaited, and each Vault, attachment, original-source, application-SQLite, and market-price mutator must join a proven shared freeze boundary. Multiple replicas and out-of-process writers remain blockers.
+
+- `scripts/backup/nm-dr-drill.mjs` provides a **self-cleaning, OFFLINE FIXTURE ONLY** recovery exercise: encrypted local create → decrypt/verify → isolated restore → compare source and recovered regular-file SHA-256, empty directory structure, SQLite schema, row content, and integrity across all discovered SQLite DBs. The report prints aggregate counts and digests only; raw notes, row values, filenames and tokens are not logged. The script refuses Railway and the configured deployed DATA_DIR.
+
+```
+NOTEMESH_BACKUP_PASSPHRASE="<secure 32+ byte fixture passphrase>" \
+  node scripts/backup/nm-dr-drill.mjs --fixture-data /path/to/ISOLATED-fixture
+```
+
+This drill **does not** prove Google Drive readback, production consistency, restored OAuth usability, or end-to-end disaster recovery. A production recovery rehearsal needs dedicated OAuth authorization, an isolated environment, coordinated writer pause, off-production archive handling, and explicit review of credentials, retention and possible costs. No merge or production deployment is authorized by fixture success.
