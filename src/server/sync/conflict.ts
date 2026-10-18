@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { runGit, runGitBuffer } from "./git-exec";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 
 // What to do when git can't reconcile two versions on its own.
 //
@@ -90,6 +91,9 @@ export interface ResolveOptions {
 // sync cycle proceeds normally rather than finding a half-finished merge — and
 // so the caller has nothing to wait on. A handled conflict is not a state.
 export async function resolveConflict(opts: ResolveOptions): Promise<ConflictOutcome> {
+  // The caller may be a maintenance tool outside GitBackend.cycle(). Keep a
+  // single ticket across reset, conflict file writes, add and commit.
+  return inProcessDrWriterFence.withWrite(async () => {
   const { dir, remoteRef, paths } = opts;
   const now = opts.now ?? new Date();
   const local = (await runGit(["rev-parse", "HEAD"], { cwd: dir })).stdout.trim();
@@ -155,4 +159,5 @@ export async function resolveConflict(opts: ResolveOptions): Promise<ConflictOut
         )
         .join("; ")}. Your other devices' version kept the original filename.`,
   };
+  });
 }
