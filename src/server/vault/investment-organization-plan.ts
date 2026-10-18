@@ -31,7 +31,6 @@ type Group = {
 const MAX_LINK_ROWS=5000;
 const MAX_NOTE_ROWS=10000;
 const maxExamplesBound=(n:number|undefined)=>Math.min(12,Math.max(1,n??5));
-const safe=(path:string)=>path.replace(/\\/g,"/");
 const isProtected=(path:string)=>
   /^05_Thesis\//.test(path) || /^06_Portfolio\//.test(path) ||
   /(?:^|\/)Evidence Register(?:\.|\b)/i.test(path);
