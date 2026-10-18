@@ -304,3 +304,50 @@ describe("DR Phase 2.4 — Git metadata freeze", () => {
     expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
   });
 });
+
+
+describe("DR Phase 2.10 — direct Git time-cache admission", () => {
+  it("rejects direct local timestamp and eviction changes during freeze without changing caches", async () => {
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const { applyGitHistory, recordLocalModification, forgetModification, modifiedFor, createdFor } =
+      await import("./modified");
+    recordLocalModification("direct.md", 5000);
+    applyGitHistory({ modified: new Map(), created: new Map([["direct.md", 1000]]) });
+
+    await fence.withFrozenWriters(() => {
+      expect(() => recordLocalModification("direct.md", 9000)).toThrow("backup_writer_freeze_active");
+      expect(() => forgetModification("direct.md")).toThrow("backup_writer_freeze_active");
+      expect(modifiedFor("direct.md", 1)).toBe(5000);
+      expect(createdFor("direct.md", { birthtimeMs: 2000, mtimeMs: 6000 })).toBe(1000);
+      expect(fence.status.activeWriters).toBe(0);
+    });
+
+    recordLocalModification("direct.md", 9000);
+    expect(modifiedFor("direct.md", 1)).toBe(9000);
+    forgetModification("direct.md");
+    expect(modifiedFor("direct.md", 1)).toBe(1);
+    expect(createdFor("direct.md", { birthtimeMs: 2000, mtimeMs: 6000 })).toBe(2000);
+    expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
+  });
+
+  it("permits nested metadata changes only from a live pre-admitted writer that drains before capture", async () => {
+    const { inProcessDrWriterFence: fence } = await import("../backup/writer-fence");
+    const { recordLocalModification, modifiedFor } = await import("./modified");
+    let release!: () => void;
+    const delayed = new Promise<void>(resolve => { release = resolve; });
+    const writer = fence.withWrite(async () => {
+      await delayed;
+      recordLocalModification("nested.md", 7500);
+    });
+    const snapshot = fence.withFrozenWriters(() => {
+      expect(modifiedFor("nested.md", 1)).toBe(7500);
+      expect(fence.status.activeWriters).toBe(0);
+      return "consistent";
+    });
+    expect(fence.status).toEqual({ frozen: true, activeWriters: 1 });
+    release();
+    await writer;
+    await expect(snapshot).resolves.toBe("consistent");
+    expect(fence.status).toEqual({ frozen: false, activeWriters: 0 });
+  });
+});
