@@ -85,8 +85,17 @@ export async function finishDrDriveConsent(userId: string, state: string, code: 
       method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body, redirect: "error", signal: AbortSignal.timeout(25_000),
     });
-  } catch { throw Error("dr_oauth_token_exchange_failed"); }
-  if (!response.ok) { await response.body?.cancel(); throw Error("dr_oauth_token_exchange_failed"); }
+  } catch {
+    console.warn("[dr-oauth] token_exchange_network_error");
+    throw Error("dr_oauth_token_exchange_failed");
+  }
+  if (!response.ok) {
+    // Only HTTP status is safe for observability: never log Google response
+    // JSON, the authorization code, client secret or bearer credentials.
+    console.warn("[dr-oauth] token_exchange_http_failure", { status: response.status });
+    await response.body?.cancel();
+    throw Error("dr_oauth_token_exchange_failed");
+  }
   // Never echo Google's response/error JSON (could contain bearer credentials).
   const buffer = await response.arrayBuffer();
   if (buffer.byteLength > 32_768) throw Error("dr_oauth_token_response_too_large");
