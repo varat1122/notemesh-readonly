@@ -15,21 +15,31 @@ export class SnapshotWriterFence {
     return {frozen:this.frozen, activeWriters:this.activeWriters};
   }
 
+  private releaseWrite() {
+    this.activeWriters--;
+    if(this.activeWriters===0){
+      for(const wake of this.waiting)wake();
+      this.waiting.clear();
+    }
+  }
+
+  /** Gate an entirely synchronous mutator; release its ticket before return. */
+  withWriteSync<T>(perform:()=>T):T {
+    if(this.frozen)throw Error("backup_writer_freeze_active");
+    this.activeWriters++;
+    try{return perform();}
+    finally {this.releaseWrite();}
+  }
+
   /**
-   * Every mutator must enter this guard synchronously BEFORE its first write.
-   * Reject rather than wait if the backup has already frozen admissions.
+   * Every async mutator must enter BEFORE its first write and retain the
+   * ticket through asynchronous I/O. Reject if a freeze is already active.
    */
   async withWrite<T>(perform:()=>T|Promise<T>):Promise<T> {
     if(this.frozen)throw Error("backup_writer_freeze_active");
     this.activeWriters++;
     try{return await perform();}
-    finally {
-      this.activeWriters--;
-      if(this.activeWriters===0){
-        for(const wake of this.waiting)wake();
-        this.waiting.clear();
-      }
-    }
+    finally {this.releaseWrite();}
   }
 
   /**
@@ -67,3 +77,6 @@ export class SnapshotWriterFence {
     }finally{this.frozen=false;}
   }
 }
+
+/** One shared process-local admission gate. NOT proof of external writer quiescence. */
+export const inProcessDrWriterFence=new SnapshotWriterFence();
