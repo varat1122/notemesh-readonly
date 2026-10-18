@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { runGit } from "../sync/git-exec";
 
 /**
@@ -132,6 +133,9 @@ export function applyGitTimes(map: Map<string, number>): number {
 }
 
 export function applyGitHistory(history: GitHistory): number {
+  // Acquire admission before mutating either cache or SQLite. A failed
+  // freeze admission must leave both views untouched for a later retry.
+  return inProcessDrWriterFence.withWriteSync(() => {
   for (const [p, t] of history.modified) {
     const have = times.get(p);
     if (have === undefined || have < t) times.set(p, t);
@@ -153,6 +157,7 @@ export function applyGitHistory(history: GitHistory): number {
     }
   })();
   return n;
+  });
 }
 
 /** The pass the git backend runs at start and after every pull. Null when git could not be read. */
