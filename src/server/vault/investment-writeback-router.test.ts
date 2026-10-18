@@ -89,6 +89,24 @@ describe("multilingual read-only writeback router",()=>{
   expect(route({...base,extractedText:" "+base.extractedText}).planId).not.toBe(a.planId);
   expect(route({...base,extractedText:base.extractedText+"\\n"}).planId).not.toBe(a.planId);
  });
+ it("does not conflate identically worded originals with different event or attribution metadata",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const b={domain:"company" as const,entities:["MDB"],topic:"Broker analysis 1",
+    inputFormat:"text" as const,sourceKind:"archived_chat" as const,
+    extractedText:"Same captured words, but possibly different underlying event.",
+    publisher:"Attributed source A",sourceLanguage:"th",eventDate:"2026-10-14",
+    publicationDate:"2026-10-15"};
+  const first=route(b);
+  for(const changed of [
+    {topic:"Broker analysis 2"},{publisher:"Attributed source B"},
+    {sourceLanguage:"en"},{eventDate:"2026-10-15"},
+    {publicationDate:"2026-10-16"},{entities:["mdb"]},
+  ])expect(route({...b,...changed}).planId).not.toBe(first.planId);
+  expect(route({...b,analysisText:"AI interpretation A"}).planId).toBe(first.planId);
+  expect(route({...b,analysisText:"AI interpretation B"}).planId).toBe(first.planId);
+  expect(route(b).safeEditDrafts.expectedOriginalSha256)
+    .toBe(first.safeEditDrafts.expectedOriginalSha256);
+ });
  it("does not auto-create a claim for an exact structured duplicate from an original URL",async()=>{
   const u="https://www.sec.gov/Archives/edgar/data/2488/fake-Q2.htm";
   await add("08_Daily_Weekly/Research Indexes/AMD source.md",[
