@@ -86,8 +86,8 @@ test("unsafe directory symlinks and filenames fail closed, without leaking outsi
   const backupDir=fs.existsSync(out)?fs.readdirSync(out):[];
   assert.equal(backupDir.some(x=>x.endsWith(".nmb")),false);
 }));
-test("fails closed on a missing SQLite primary DB",()=>fixture(async ({data,out,db})=>{
-  db.close();
+test("fails closed on a missing SQLite primary DB",()=>fixture(async ({data,out})=>{
+  // Unix unlink is legal on an open SQLite descriptor; fixture() closes it at teardown.
   fs.rmSync(path.join(data,"app.sqlite"),{force:true});
   const processResult=spawnSync(process.execPath,[tool,"create","--data-dir",data,"--out",out,"--fixture-only"],{env,encoding:"utf8"});
   assert.notEqual(processResult.status,0);
