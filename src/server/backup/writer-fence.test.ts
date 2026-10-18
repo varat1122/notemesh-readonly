@@ -53,6 +53,21 @@ describe("SnapshotWriterFence (isolated fixture only)",()=>{
     await expect(fence.withFrozenWriters(()=>0,{drainTimeoutMs:0})).rejects.toThrow(/invalid_backup_drain_timeout/);
     expect(fence.status.frozen).toBe(false);
   });
+  it("tracks synchronous mutators and refuses admission during a freeze", async()=>{
+    const fence=new SnapshotWriterFence();
+    expect(fence.withWriteSync(()=>{
+      expect(fence.status.activeWriters).toBe(1);
+      return 23;
+    })).toBe(23);
+    expect(fence.status.activeWriters).toBe(0);
+    expect(()=>fence.withWriteSync(()=>{throw Error("sync_write_failed");})).toThrow("sync_write_failed");
+    expect(fence.status.activeWriters).toBe(0);
+    await fence.withFrozenWriters(()=>{
+      expect(()=>fence.withWriteSync(()=>99)).toThrow(/freeze_active/);
+      expect(fence.status.activeWriters).toBe(0);
+    });
+    expect(fence.withWriteSync(()=>7)).toBe(7);
+  });
   it("releases writer tickets when an async mutation rejects",async()=>{
     const fence=new SnapshotWriterFence();
     await expect(fence.withWrite(async()=>{throw Error("write_error");})).rejects.toThrow("write_error");
