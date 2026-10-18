@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { auth } from "../auth";
 import { db } from "../db";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import type { McpAccess } from "./server";
 
 // A JWT has exactly two dots and three base64url segments.
@@ -75,11 +76,14 @@ export async function accessFromApiKey(request: Request): Promise<McpAccess | nu
     bearerToken(request);
   if (!headerKey) return null;
   try {
-    const res = await auth.api.verifyApiKey({ body: { key: headerKey } });
+    const res = await inProcessDrWriterFence.withWrite(() => auth.api.verifyApiKey({ body: { key: headerKey } }));
     if (res.valid && res.key) {
       return { read: true, write: false, label: `api-key:${res.key.name ?? res.key.id}` };
     }
-  } catch {
+  } catch (e) {
+    // No fallback from freeze refusal: unlike invalid credentials, this means
+    // the adapter was not admitted and must not be retried via another path.
+    if (e instanceof Error && e.message === "backup_writer_freeze_active") throw e;
     // fall through — not a valid API key; may be an OAuth JWT instead
   }
   return null;
