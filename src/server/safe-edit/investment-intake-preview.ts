@@ -28,7 +28,8 @@ export function previewInvestmentIntakeStage(
  if(stage==="research_review") {
    const receipts=inspectCoordinatedWritebackBatch(plan.planId,actor);
    const raw=receipts.stages.find(step=>step.kind==="raw_input");
-   if(raw?.state!=="locally_verified"||raw.operationId!==plan.coordination.steps[0].operationId||
+   if(raw?.state!=="locally_verified"||typeof raw.path!=="string"||
+      raw.operationId!==plan.coordination.steps[0].operationId||
       raw.path!==plan.coordination.steps[0].path||
       raw.afterHash!==plan.safeEditDrafts.expectedOriginalSha256)
      throw Error("Independent, same-OAuth raw source write/readback/reindex receipt required before research review preview");
@@ -45,7 +46,6 @@ export function previewInvestmentIntakeStage(
      if(liveHash!==raw.afterHash)
        throw Error("Raw source changed after last Safe Edit receipt; historical input review and re-approval required");
    } finally {fs.closeSync(fd);}
-
  }
  const result=preview({
    operationId:current.operationId,path:current.path,
