@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "./db";
 import fs from "node:fs";
 import { env } from "./env";
+import { inProcessDrWriterFence } from "./backup/writer-fence";
 
 export const intakeSchema = z.object({
   sourceChat: z.string().min(1).max(120).describe("Exact chat title, e.g. Micro 121026"),
@@ -23,6 +24,9 @@ function table() {
   return d;
 }
 export function enqueue(input: unknown) {
+  return inProcessDrWriterFence.withWriteSync(()=>enqueueUnderFence(input));
+}
+function enqueueUnderFence(input: unknown) {
   const payload = JSON.stringify(intakeSchema.parse(input));
   if (Buffer.byteLength(payload) > 300000) throw Error("Package exceeds 300 KB; split into smaller batches");
   const id = crypto.createHash("sha256").update(payload).digest("hex");
@@ -42,4 +46,7 @@ function summary(r: Row) {return {id:r.id,status:r.status,created:r.created,rece
 export function intakeStatus(id:string) {const r=table().prepare("SELECT * FROM intake_queue WHERE id=?").get(id) as Row|undefined; if(!r)throw Error("Unknown submission");return summary(r);}
 export function nextIntake() {const r=table().prepare("SELECT * FROM intake_queue WHERE status='queued' ORDER BY created LIMIT 1").get() as Row|undefined; return r?{id:r.id,payload:JSON.parse(r.payload),created:r.created}:null;}
 export const receiptSchema=z.object({id:z.string().regex(/^[a-f0-9]{64}$/),status:z.enum(["imported","blocked"]),paths:z.array(z.string().max(500)).max(25),message:z.string().max(1000)}).strict();
-export function acknowledge(input:unknown){const r=receiptSchema.parse(input);const d=table();const row=d.prepare("SELECT * FROM intake_queue WHERE id=?").get(r.id) as Row|undefined;if(!row)throw Error("Unknown submission");if(row.status!=="queued")return summary(row);d.prepare("UPDATE intake_queue SET status=?,receipt=? WHERE id=? AND status='queued'").run(r.status,JSON.stringify({...r,receivedAt:new Date().toISOString()}),r.id);return intakeStatus(r.id);}
+export function acknowledge(input:unknown){
+  return inProcessDrWriterFence.withWriteSync(()=>acknowledgeUnderFence(input));
+}
+function acknowledgeUnderFence(input:unknown){const r=receiptSchema.parse(input);const d=table();const row=d.prepare("SELECT * FROM intake_queue WHERE id=?").get(r.id) as Row|undefined;if(!row)throw Error("Unknown submission");if(row.status!=="queued")return summary(row);d.prepare("UPDATE intake_queue SET status=?,receipt=? WHERE id=? AND status='queued'").run(r.status,JSON.stringify({...r,receivedAt:new Date().toISOString()}),r.id);return intakeStatus(r.id);}
