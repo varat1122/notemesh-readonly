@@ -19,7 +19,6 @@ const HEADER_BYTES = MAGIC.length + 16 + 12;
 const PASS_ENV = "NOTEMESH_BACKUP_PASSPHRASE";
 const KINDS = new Set(["daily", "weekly", "monthly", "predeploy", "fixture"]);
 const EXCLUDE = new Set(["app.sqlite-wal", "app.sqlite-shm", "app.sqlite-journal"]);
-const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 async function shaFile(p) {
   const hash=createHash("sha256");
   for await(const chunk of fs.createReadStream(p)) hash.update(chunk);
@@ -27,7 +26,7 @@ async function shaFile(p) {
 }
 const inside = (parent, child) => child === parent || child.startsWith(parent + path.sep);
 const clean = (p) => path.resolve(p);
-const nameSafe = (name) => name !== "." && name !== ".." && !/[\x00-\x1f]/u.test(name);
+const nameSafe = (name) => name !== "." && name !== ".." && ![...name].some(ch=>ch.charCodeAt(0)<32);
 
 function passphrase() {
   const value = process.env[PASS_ENV];
@@ -143,7 +142,7 @@ async function inspectTar(archive) {
     const match=/\s(?:manifest\.json|payload(?:\/.*)?)$/u.exec(line);
     if(!match) throw Error("Unexpected archive member");
     const member=match[0].trim();
-    if(member.startsWith("/") || member.split("/").includes("..") || /[\r\n\x00]/u.test(member)) throw Error("Unsafe archive path");
+    if(member.startsWith("/") || member.split("/").includes("..") || [...member].some(ch=>ch.charCodeAt(0)<32)) throw Error("Unsafe archive path");
   }
 }
 async function checkStage(stage) {
