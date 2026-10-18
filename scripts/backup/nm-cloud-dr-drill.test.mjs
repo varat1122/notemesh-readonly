@@ -91,8 +91,8 @@ function assertRestored(dest) {
   try {
     assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check,"ok");
     assert.equal(prices.prepare("PRAGMA integrity_check").get().integrity_check,"ok");
-    assert.deepEqual(db.prepare("SELECT id,note FROM claims").all(),[{id:1,note:"fixture"}]);
-    assert.deepEqual(prices.prepare("SELECT ticker,value FROM quotes").all(),[{ticker:"TEST",value:42}]);
+    assert.deepEqual(db.prepare("SELECT id,note FROM claims").all().map(row=>({...row})),[{id:1,note:"fixture"}]);
+    assert.deepEqual(prices.prepare("SELECT ticker,value FROM quotes").all().map(row=>({...row})),[{ticker:"TEST",value:42}]);
   } finally {db.close();prices.close();}
 }
 test("full isolated fixture backup -> mock Drive upload/readback -> independent restore",async()=>{
