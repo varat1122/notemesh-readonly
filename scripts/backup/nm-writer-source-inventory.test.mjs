@@ -16,7 +16,7 @@ test("source inventory identifies direct SQL, disk and child-process writers wit
       'import {inProcessDrWriterFence} from "./backup/writer-fence";\n'+
       'export const writer=()=>fs.renameSync("a","b");\n');
     fs.writeFileSync(path.join(root,"src/routes","command.ts"),
-      'export const command=()=>runGit(["fetch"]);\n');
+      'export const command=()=>runGit(["fetch"]);\nexport const verify=()=>auth.api.verifyApiKey({body:{key:"fixture"}});\n');
     fs.writeFileSync(path.join(root,"src/server","test-only.test.ts"),
       'fs.writeFileSync("not production code","x");\n');
     const report=inventoryWriterSurfaces(root);
@@ -25,8 +25,9 @@ test("source inventory identifies direct SQL, disk and child-process writers wit
     assert.equal(report.externalWriterQuiescenceVerified,false);
     assert.equal(report.evidenceClassification,"source_heuristic_human_review_required");
     assert.equal(report.analyzedFiles,3);
-    assert.equal(report.candidateCount,4);
-    assert.equal(report.noFenceReferenceCount,3);
+    assert.equal(report.candidateCount,5);
+    assert.equal(report.noFenceReferenceCount,4);
+    assert.ok(report.candidates.some(x=>x.kind==="auth_adapter" && !x.fenceReferencedSomewhereInFile));
     assert.ok(report.candidates.some(x=>x.kind==="sqlite_statement" && !x.fenceReferencedSomewhereInFile));
     assert.ok(report.candidates.some(x=>x.kind==="filesystem" && x.fenceReferencedSomewhereInFile && !x.verified));
     assert.ok(!JSON.stringify(report).includes("sample"));
