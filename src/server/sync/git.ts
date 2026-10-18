@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { env } from "../env";
 import { getSetting } from "../db";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { runGit } from "./git-exec";
 import { refreshGitTimes } from "../vault/modified";
 import type { ConflictRecord } from "./types";
@@ -221,10 +222,14 @@ class GitBackend implements SyncBackend {
   // Serialized — overlapping cycles would race on the index and the ref.
   private async cycle(reason: string): Promise<boolean> {
     if (this.busy) return true;
-    const cfg = gitConfig();
-    if (!cfg) return false;
+    // One admission ticket spans the entire asynchronous reconcile, including
+    // fetch, merge, conflict-copy writes, metadata refresh and push. Starting
+    // Git operations during freeze is refused before opening any Vault writer.
     this.busy = true;
     try {
+      return await inProcessDrWriterFence.withWrite(async () => {
+      const cfg = gitConfig();
+      if (!cfg) return false;
       const committed = await this.commitPending(cfg);
       const fetched = await this.fetch(cfg);
       if (!fetched) return false;
@@ -234,7 +239,14 @@ class GitBackend implements SyncBackend {
         return await this.push(cfg);
       }
       return true;
+      });
     } catch (e: any) {
+      // Normal while a fixture cut is frozen. Do not incorrectly latch a
+      // healthy Git sync backend into backoff on a temporary admission refusal.
+      if (e instanceof Error && e.message === "backup_writer_freeze_active") {
+        this.log("[git] reconciliation skipped: DR writer freeze active", "warn");
+        return false;
+      }
       this.log(`[git] ${reason} cycle failed: ${String(e?.message ?? e)}`, "error");
       this.state = "backoff";
       return false;
@@ -452,6 +464,9 @@ export async function cloneVault(
   remote: string,
   branch: string,
 ): Promise<{ ok: boolean; message?: string }> {
+  // The setup clone writes a complete working tree and Git metadata. Hold a
+  // ticket through its last checkout, including failures and async I/O.
+  return inProcessDrWriterFence.withWrite(async () => {
   const dir = env.vaultDir;
   if (isGitRepo(dir)) {
     const cur = await runGit(["remote", "get-url", "origin"]);
@@ -493,6 +508,7 @@ export async function cloneVault(
     if (!co.ok) return { ok: false, message: co.combined.trim() };
   }
   return { ok: true };
+  });
 }
 
 // Repo name, for display where the Obsidian backend shows a vault name.
