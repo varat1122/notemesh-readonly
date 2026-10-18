@@ -62,6 +62,19 @@ This is NOT a cross-process lease or general SQL transaction coordinator. Remain
 
 **Never infer consistency from a green CI, process-local ticket counts, mocked Google Drive transport or isolated fixture snapshots.** PR #36 remains Draft and Production remains out of scope.
 
+### Phase 2.6 — isolated interprocess exclusion rehearsal (Draft, 18 October 2026)
+
+**Purpose:** prove that two distinct Node.js processes can refuse a conflicting synthetic write/snapshot on a shared local filesystem. This is NOT an active server lock, a durable distributed fencing system, or a production backup coordinator.
+
+- Added `scripts/backup/nm-interprocess-fixture-gate.mjs`: a separate **opt-in** exclusive directory lock (atomic `mkdir`) for both fixture writer and fixture snapshot callbacks. It accepts only freshly created `nm-dr-ipc-fixture-*` directories directly beneath the resolved OS temporary directory, refuses Railway identifiers and any deployed data root, rejects symlink aliases, and never accesses Production volumes.
+- Only **cooperating fixture processes** using the gate are serialized. Unregistered HTTP/ORM operations, other containers/replicas, external Obsidian desktop/mobile sync, CLI commands and non-cooperating writers continue unaffected. This helper is intentionally **not wired to NoteMesh runtime or the live Snapshot Coordinator**.
+- Stale locks remain sticky after a crash or SIGKILL. No PID-age expiration, TTL guess, forced unlock or automatic stale-lock cleanup. A lock ownership mismatch forbids deletion. An operator must prove process quiescence before manually clearing a fixture lock; the helper must never auto-delete production data.
+- Added `scripts/backup/nm-interprocess-fixture-gate.test.mjs`: launches a real second Node.js process that owns the writer lock, verifies capture is refused while it is alive, succeeds only after it exits normally, and verifies crash-sticky and tampered-owner fail-closed behavior. This exercises a real local OS process boundary, **not** actual distributed deployment behavior.
+
+**Production NO-GO remains:** no live writer has enrolled in an interprocess protocol. Before enabling any production snapshot, prove that *every* writer class obeys a shared, durable coordination mechanism; that lock acquisition is atomic on the actual Railway volume/filesystem; that a losing or stale owner cannot write after a lease changes hands; that sync/SQLite writers are quiescent across all processes; and that takeover, network partition, crash, retry and restart do not violate consistency. A single-instance process-local freeze or an optional fixture lock cannot establish these facts.
+
+**Restoration evidence still outstanding:** the real-format `.nmb` archive was verified and restored with a mock Google transport; the previous real Drive Staging test used a different synthetic envelope. A complete real-Drive `.nmb` upload → independent download → isolated restore, using *synthetic data only*, needs a separately approved, protected Staging session and user OAuth consent. No Production activation, Merge, new billable Railway resources or expanded Drive permissions are authorized.
+
 ### Production safety blockers: hard NO-GO
 
 1. PROVE COMPLETE WRITE FREEZE: Obsidian Sync must be stopped and awaited, and EVERY writer class must enroll in the same admission and drain mechanism. The shared in-process SnapshotWriterFence has only PARTIAL wiring in this Draft branch, not comprehensive coverage.
