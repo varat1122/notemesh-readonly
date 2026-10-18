@@ -240,6 +240,10 @@ it("DR P2.9 integrates a stable offline fixture cut with genuine encrypted .nmb 
     RAILWAY_PROJECT_ID:"",RAILWAY_SERVICE_ID:"",RAILWAY_ENVIRONMENT_ID:"",
     RAILWAY_ENVIRONMENT_NAME:"",RAILWAY_PROJECT_NAME:"",RAILWAY_SERVICE_NAME:"",
   };
+  // The CLI correctly refuses backing up the process's own live DATA_DIR,
+  // even with --fixture-only. This subprocess is deliberately offline and
+  // must not inherit the coordinator's synthetic live-root setting.
+  delete env.DATA_DIR;
   const exec=(args:string[])=>JSON.parse(execFileSync(process.execPath,[cli,...args],{
     env,encoding:"utf8",timeout:60000,maxBuffer:1024*1024,
   }).trim()) as Record<string,unknown>;
