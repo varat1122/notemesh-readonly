@@ -18,9 +18,12 @@ function fixture(fn) {
   fs.mkdirSync(path.join(data,"home"),{recursive:true});
   fs.writeFileSync(path.join(data,"vault","05_Thesis","NVDA.md"),"# Thesis\nทดสอบ");
   fs.writeFileSync(path.join(data,"home","auth.conf"),"fixture secret in encrypted bundle");
+  fs.mkdirSync(path.join(data,"market-prices"),{recursive:true});
+  const prices=new DatabaseSync(path.join(data,"market-prices","prices.sqlite"));
+  prices.exec("PRAGMA journal_mode=WAL; CREATE TABLE bars (ticker TEXT, close REAL); INSERT INTO bars VALUES ('NVDA', 100.25);");
   const db=new DatabaseSync(path.join(data,"app.sqlite"));
   db.exec("PRAGMA journal_mode=WAL; CREATE TABLE claims (id INTEGER PRIMARY KEY, value TEXT); INSERT INTO claims(value) VALUES ('committed wal');");
-  return Promise.resolve().then(()=>fn({root,data,out,db})).finally(()=>{db.close();fs.rmSync(root,{recursive:true,force:true});});
+  return Promise.resolve().then(()=>fn({root,data,out,db,prices})).finally(()=>{db.close();prices.close();fs.rmSync(root,{recursive:true,force:true});});
 }
 test("encrypted fixture snapshot, SHA readback, SQLite WAL recovery and non-destructive restore",()=>fixture(async ({root,data,out,db})=>{
   const created=JSON.parse(command(["create","--data-dir",data,"--out",out,"--kind","fixture","--fixture-only"]));
@@ -33,7 +36,7 @@ test("encrypted fixture snapshot, SHA readback, SQLite WAL recovery and non-dest
   assert.equal(plain.includes(Buffer.from("# Thesis")),false);
   const checked=JSON.parse(command(["verify","--bundle",created.bundle]));
   assert.equal(checked.verified,true);
-  assert.equal(checked.files,3);
+  assert.equal(checked.files,4);
   const target=path.join(root,"restored");
   const restored=JSON.parse(command(["restore","--bundle",created.bundle,"--dest",target]));
   assert.equal(restored.restored,true);
@@ -41,6 +44,9 @@ test("encrypted fixture snapshot, SHA readback, SQLite WAL recovery and non-dest
   const d=new DatabaseSync(path.join(target,"app.sqlite"),{readOnly:true});
   assert.equal(d.prepare("SELECT value FROM claims").get().value,"committed wal");
   d.close();
+  const p=new DatabaseSync(path.join(target,"market-prices","prices.sqlite"),{readOnly:true});
+  assert.equal(p.prepare("SELECT close FROM bars WHERE ticker='NVDA'").get().close,100.25);
+  p.close();
   assert.throws(()=>command(["restore","--bundle",created.bundle,"--dest",target]),/Restore destination must be empty/);
   // A later committed transaction is not silently added to the original snapshot.
   db.exec("INSERT INTO claims(value) VALUES ('later')");
