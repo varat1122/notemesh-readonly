@@ -84,7 +84,7 @@ export function inspectUserAttachment({sha256,contentType}:{sha256:string;conten
     claimVerified:false,remoteSyncVerified:false,mobileSyncVerified:false};
 }
 export function storeUserAttachment(input:{base64:string;contentType:AttachmentType}) {
-  return inProcessDrWriterFence.withWriteSync(()=>storeUserAttachmentUnderFence(input));
+  return inProcessDrWriterFence.withWriteSync(()=>storeUserAttachmentUnderFence(input), "user_attachments");
 }
 function storeUserAttachmentUnderFence({base64,contentType}:{
   base64:string;contentType:AttachmentType;
