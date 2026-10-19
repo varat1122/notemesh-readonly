@@ -390,6 +390,12 @@ index, the sync backend's state, and disk headroom: `disk.level` is `ok`,
 `warn` under 100 MB free, or `critical` under 50 MB, at which point writes
 that would not leave the reserve are refused.
 
+### get_legacy_review_decision_plan — read
+
+Prepare a **draft-only decision worksheet** using a fresh exact-note dossier from `get_legacy_review_dossier`. Inputs: `sourcePath`, a caller-selected disposition (`no_change_needed`, `missing_evidence`, `needs_source_verification`, `metadata_correction_candidate`, `navigation_link_candidate`, `duplicate_or_conflicting_evidence`, `unresolved`) and optional unverified rationale.
+
+Returns current note hash, existing resolved-link sample, bounded review findings and source pointers, decision-specific required original evidence, candidate destination paths when applicable, and an **unapproved, unsaved** change-log draft. A disposition supplied by a model or caller does not prove an authenticated human reviewed the original. No independent source/claim verification, confirmation of lost originals, Safe Edit preview, persistent decision, approval, Thesis revision, Vault write or device Sync occurs. A later edit needs human authorization and separate one-note Safe Edit validation with fresh hash/version checks.
+
 ### get_legacy_review_dossier — read
 
 Review **one explicitly selected** historical/review Markdown note against the entire completed Vault SQLite index. The tool returns a bounded P1/P2/P3 human review dossier: exact indexed source path, SHA-256 and size from current descriptor-anchored note bytes, declared legacy provenance (bounded), a list of indexed resolved outgoing wikilinks, and exact target-status checks for source-record or canonical hub candidates. It checks the current source bytes and frontmatter against indexed metadata and holds on index incompleteness, disallowed role/path or stale snapshot.

@@ -356,3 +356,8 @@ not independent evidence. No Safe Edit preview/apply/authorization is created.
   lineage and typed economic relationships (beyond navigation pointers).
 - Explicit staged Safe Edit previews for a manually selected set of approved
   changes, one note at a time, never a silent vault-wide migration.
+
+
+### Draft human-review decision worksheet (PR #71 development)
+
+After checking a specific note through `get_legacy_review_dossier`, an analyst may request `get_legacy_review_decision_plan(sourcePath, disposition, reviewRationale?)`. The seven supported dispositions classify **review work**, not verified issuer facts. Current note SHA-256 and indexed source/link pointers are included, but are **not evidence of claim truth or authenticated human approval**. The tool offers a bounded, unapproved change-log draft and required external/source evidence. It does not store decisions, produce an executable Safe Edit request, or modify Vault/Thesis/Portfolio. PR #70 and this extension are development-only; do not interpret metadata as proof that an original file is permanently unavailable.

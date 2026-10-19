@@ -5,6 +5,7 @@ import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
 import { getLegacyReviewDossier } from "../vault/legacy-review-dossier";
+import { prepareLegacyReviewDecision, REVIEW_DISPOSITIONS, type ReviewDisposition } from "../vault/legacy-review-decision";
 import { prepareHistoricalLinkEdit } from "../vault/historical-link-handoff";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
@@ -1172,6 +1173,33 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     },
     safe(({sourcePath}:{sourcePath:string})=>
       json(withBoundary(getLegacyReviewDossier(sourcePath)))),
+  );
+
+  // A caller-supplied review disposition is NOT authenticated human consent.
+  // Produces a draft decision worksheet only, never an edit/approval/claim fact.
+  server.registerTool(
+    "get_legacy_review_decision_plan",
+    {
+      title: "Prepare historical review decision worksheet",
+      annotations: READ,
+      description:
+        "Read-only worksheet built from one fresh exact-note review dossier. The " +
+        "caller selects a tentative disposition; this is NOT authenticated human " +
+        "approval, source verification, verified duplication or an edit. Returns " +
+        "required evidence, existing links, draft change log and explicit holds. " +
+        "Never modifies Vault or prepares an executable edit.",
+      inputSchema: {
+        sourcePath:z.string().min(4).max(350)
+          .describe("Exact Vault-relative eligible historical/review Markdown note path"),
+        disposition:z.enum(REVIEW_DISPOSITIONS)
+          .describe("Tentative human-review category supplied by the caller, NOT an approved finding"),
+        reviewRationale:z.string().max(600).optional()
+          .describe("Optional unverified caller explanation; must not be treated as verified evidence or approval"),
+      },
+    },
+    safe(({sourcePath,disposition,reviewRationale}:{
+      sourcePath:string;disposition:ReviewDisposition;reviewRationale?:string;
+    })=>json(withBoundary(prepareLegacyReviewDecision(sourcePath,disposition,reviewRationale)))),
   );
 
   // A read-only handoff: no Safe Edit OAuth scope, preview journal or Vault
