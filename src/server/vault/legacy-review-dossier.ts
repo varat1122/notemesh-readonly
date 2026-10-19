@@ -116,9 +116,14 @@ export function getLegacyReviewDossier(sourcePath:string){
       const current=readCurrent(record);
       targetChecks.push({targetPath,status:"indexed_current_bytes_read" as const,
         sha256:current.sha256,independentOriginalVerified:false});
-    }catch{
-      targetChecks.push({targetPath,status:"manual_read_required_or_index_changed" as const,
-        sha256:null,independentOriginalVerified:false});
+    }catch(error){
+      const stale=error instanceof Error&&error.message==="legacy_dossier_stale_index_hold";
+      targetChecks.push({
+        targetPath,
+        status:stale?"indexed_target_stale_hold" as const:
+          "manual_read_required_or_index_changed" as const,
+        sha256:null,independentOriginalVerified:false,
+      });
     }
   }
   return {
@@ -129,7 +134,22 @@ export function getLegacyReviewDossier(sourcePath:string){
       indexedMtimeMs:source.indexedMtimeMs,declaredMetadata:bounded(source.metadata),
       verificationInterpreted:false as const},
     priorityCounts:plan.countsByPriority,
-    findings:plan.samples,
+    findings:plan.samples.map(item=>({
+      ...item,
+      humanDecisionRequired:item.kind==="declared_source_path_not_indexed"?
+        "Check source location and original-byte archive; absent from Markdown index is not proof that the original is lost.":
+        item.kind==="explicit_event_date_needs_review"?
+        "Verify the true event date from original evidence; do not convert legacy date/import time into event time.":
+        item.kind==="invalid_source_records_metadata"?
+        "Read full historical note and reconstruct exact source references before proposing a correction.":
+        item.kind==="conflicting_single_company_metadata"?
+        "Verify issuer identifiers from source context; do not select a primary ticker from conflicting metadata.":
+        item.kind==="declared_source_path_without_resolved_link"?
+        "Check intended original-source citation against existing resolved links before any navigation edit.":
+        "Read both historical note and canonical hub before considering an optional navigation link.",
+      originalClaimFactCheckedThisCall:false as const,
+      requiresHumanReview:true as const,
+    })),
     targetChecks,
     indexedOutgoingLinks:{
       count:linksCount,
