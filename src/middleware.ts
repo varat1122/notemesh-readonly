@@ -9,6 +9,7 @@ import { protectedResourceMetadata } from "./server/mcp/endpoint";
 import { ensureCloudIntakeStarted } from "./server/cloud-intake";
 import { ensurePriceCollectorStarted } from "./server/market-prices/collector";
 import { isKnownApiPath } from "./server/api-paths";
+import { inProcessDrWriterFence } from "./server/backup/writer-fence";
 
 function redirectTo(path: string): Response {
   return new Response(null, { status: 302, headers: { Location: path } });
@@ -99,7 +100,7 @@ export default createMiddleware({
         const { auth, isSetupComplete, runAuthMigrations } = await import("./server/auth");
         await runAuthMigrations();
         if (!(await isSetupComplete())) return redirectTo("/setup");
-        const session = await auth.api.getSession({ headers: event.request.headers });
+        const session = await inProcessDrWriterFence.withWrite(() => auth.api.getSession({ headers: event.request.headers }), "better_auth_adapter");
         if (!session) return redirectTo("/login");
         // The admin account is created at wizard step 1, so "an admin exists"
         // isn't the same as "the wizard finished". Send a signed-in admin whose
@@ -117,13 +118,13 @@ export default createMiddleware({
         const { oauthProviderAuthServerMetadata } = await import("@better-auth/oauth-provider");
         const { auth, runAuthMigrations } = await import("./server/auth");
         await runAuthMigrations();
-        return stripIssParamSupport(await oauthProviderAuthServerMetadata(auth)(event.request));
+        return stripIssParamSupport(await inProcessDrWriterFence.withWrite(() => oauthProviderAuthServerMetadata(auth)(event.request), "better_auth_adapter"));
       }
       if (discovery === "openid") {
         const { oauthProviderOpenIdConfigMetadata } = await import("@better-auth/oauth-provider");
         const { auth, runAuthMigrations } = await import("./server/auth");
         await runAuthMigrations();
-        return stripIssParamSupport(await oauthProviderOpenIdConfigMetadata(auth)(event.request));
+        return stripIssParamSupport(await inProcessDrWriterFence.withWrite(() => oauthProviderOpenIdConfigMetadata(auth)(event.request), "better_auth_adapter"));
       }
       if (discovery === "protected-resource" || discovery === "save-protected-resource" || discovery === "edit-protected-resource") {
         return new Response(
