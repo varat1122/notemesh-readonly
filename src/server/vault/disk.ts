@@ -260,7 +260,7 @@ export function writeVaultFile(abs: string, content: string, opts: WriteOptions 
   // Written, so this is its modification time from here on, whatever git
   // remembers about the path from before (vault/modified.ts).
   recordLocalModification(toVaultRelative(abs));
-  });
+  }, "vault_atomic_edits");
 }
 
 function lstatOrNull(p: string): fs.Stats | null {
