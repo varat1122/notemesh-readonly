@@ -1,5 +1,14 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## P0 direct SQLite admin-trigger DDL admission (2026-10-19; development-only)
+
+Source audit identified an exported raw SQLite mutator: `installSingleAdminGuard(source = db())` in `src/server/claim.ts` performs `source.exec(SINGLE_ADMIN_TRIGGER)`. The existing `runAuthMigrations()` caller was already admitted, but the exported helper itself did not fail closed when called outside that entry point during a writer freeze. Its `CREATE TRIGGER IF NOT EXISTS` is a schema mutation in `app.sqlite`, not a read.
+
+The helper now acquires `inProcessDrWriterFence.withWriteSync(..., "better_auth_adapter")` before executing the trigger DDL, reusing an admitted parent ticket when nested inside Auth migration. Real in-memory SQLite regression tests cover direct freeze rejection (no trigger created), a previously admitted async Auth migration that must drain before snapshot observation, and released admission after DDL failure. Source witnesses also pin the protected direct SQLite path for future drift detection.
+
+**Scope limit:** This hardens one directly callable schema mutator; it does **not** establish that all `app.sqlite` callers use the fence, that Better Auth adapter internals/transactions have complete runtime coverage, or that WAL/checkpoint, cross-process or Obsidian Sync writers are quiesced. The existing `db()` API still exposes raw mutable handles. This development-only test is not evidence of consistent Production snapshots, and Production DR remains **NO-GO**.
+
+
 ## P0 async Git History refresh writer lifetime (2026-10-19)
 
 Source review found an **unregistered asynchronous phase** in the Git-backed vault's startup refresh. `GitBackend.start()` invokes `refreshGitTimes()` outside its normally fenced `cycle()`; the `git log` subprocess could still be reading and building history when a snapshot freeze started. The final `applyGitHistory()` SQLite/cache mutation was independently fenced, but **the async refresh operation as a whole was not admitted**. This is an admission-lifecycle gap, not proof the Git reader modified disk or that Production has been corrupted.
