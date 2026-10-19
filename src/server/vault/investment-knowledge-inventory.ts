@@ -9,6 +9,7 @@
 import { db } from "../db";
 import { indexer } from "./indexer";
 import { inspectCanonicalKnowledgeMetadata } from "./investment-knowledge-schema";
+import { planHistoricalLinkReview, type LinkReviewNote } from "./historical-link-review";
 
 type FM = Record<string,unknown>;
 type Row = {path:string;frontmatter:string|null};
@@ -55,6 +56,7 @@ export function auditVaultKnowledgeIndex() {
   const claimIssueSamples:Record<string,string[]>={};
   const eventGroups=new Map<string,string[]>();
   const claimGroups=new Map<string,string[]>();
+  const historicalLinkNotes:LinkReviewNote[]=[];
   let invalidIndexedFrontmatter=0, structuredClaimNotes=0, declaredClaims=0;
   let possibleMissingSource=0, noKnownPrimaryHash=0;
   for(const row of scanned){
@@ -65,6 +67,9 @@ export function auditVaultKnowledgeIndex() {
       else invalidIndexedFrontmatter++;
     }catch{invalidIndexedFrontmatter++;}
     const inspect=inspectCanonicalKnowledgeMetadata(row.path,fm);
+    // An entity in legacy frontmatter is only note-declared metadata.
+    // It is never inferred from the note title or treated as verified fact.
+    historicalLinkNotes.push({path:row.path,entity:s(fm.entity),role:inspect.role});
     bump(roleCounts,inspect.role);
     if(inspect.role==="other")bump(unmappedRoleTypes,s(fm.type)??"(not_declared)");
     bump(folderCounts,row.path.split("/")[0]||"(root)");
@@ -122,6 +127,14 @@ export function auditVaultKnowledgeIndex() {
   const orphanTotal=(database.prepare(
     "SELECT COUNT(*) AS n FROM notes n WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.resolved_path=n.path)"
   ).get() as {n:number}).n;
+  const linked=database.prepare(
+    "SELECT 1 FROM links WHERE source_path=? AND resolved_path=? LIMIT 1"
+  );
+  const historicalReview=planHistoricalLinkReview(
+    historicalLinkNotes,
+    indexReady&&!capped,
+    (source,target)=>Boolean(linked.get(source,target)),
+  );
   const toTop=(obj:Record<string,number>,limit=15)=>Object.fromEntries(
     Object.entries(obj).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,limit));
   const sortedSamples=(cnt:Record<string,number>,samples:Record<string,string[]>,limit=12)=>{
@@ -147,7 +160,8 @@ export function auditVaultKnowledgeIndex() {
       samples:sortedSamples(warningCounts,warningSamples)},
     duplicateCandidates:{sameEventKey:candidates(eventGroups),sameExactSourceMetricPeriod:candidates(claimGroups)},
     linkHealth:{unresolvedReferences:linksTotal,examples:linkRows,
-      orphanNotes:orphanTotal,orphanExamples:orphanRows.map(x=>x.path)},
+      orphanNotes:orphanTotal,orphanExamples:orphanRows.map(x=>x.path),
+      historicalReview},
     invalidIndexedFrontmatter,
     notes:[
       "Audit covers only the currently indexed metadata; note body truth and unindexed/missing raw original files are not verified.",
@@ -155,6 +169,8 @@ export function auditVaultKnowledgeIndex() {
       "Legacy date fields are not automatically event dates; source_type aliases outside canonical vocabulary require manual mapping.",
       "Counts of missing claim-specific fields only apply to structured claim registers, not every archived chat or concept note.",
       "Unresolved archive JSON/ZIP links may be external references absent from the server, not safe to repair by inventing files.",
+      "Historical link suggestions require EXACT declared entity metadata and a complete index. Co-mentions, aliases, shared tickers in prose and relation direction have not been independently validated.",
+      "Review the entire source note and its proposed target, then use the existing one-note Safe Edit preview/diff/approval workflow; no bulk repair or automatic historical link mutation is authorized.",
       "No Obsidian note, original source, protected Thesis, Evidence Register or Portfolio was modified by this audit.",
     ],
   };
