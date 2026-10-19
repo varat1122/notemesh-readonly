@@ -14,7 +14,7 @@ Investment OS uses one canonical Company/Industry/Timeline knowledge graph. Sour
 
 ### Safely report missing historical source packages
 
-- The Source Recovery Register tracks 54 indexed unresolved links: 14 JSON, 10 ZIP, 30 TXT. Only three referenced paths had direct `read_attachment` missing errors; the rest remain `indexed_unresolved_not_byte_opened`.
+- The Source Recovery Register tracks 54 indexed unresolved references to **34 distinct source paths** (14 JSON, 10 ZIP, 30 TXT references). All 34 distinct paths were individually checked by NoteMesh `read_attachment` on 2026-10-19 and were missing on the **server Vault only**. This does not establish that the original bytes are missing from the user's desktop, phone, alternate cloud account or legacy export.
 - Do **not** generate reconstructed JSON/ZIP/TXT from ChatGPT analysis and label it original. A Drive folder appearing empty does not prove no local device copy exists.
 - Keep the original referencing Markdown unchanged until exact source bytes can be inspected and verified. Once recovered, store actual bytes with hash/version and update the relevant source provenance record before altering any link.
 
@@ -39,3 +39,8 @@ Only Gate 1 has a durable Safe Edit receipt today. The new `get_sync_delivery_ev
 - Ship code under reviewed PR and green CI, check API OAuth read/write scope, then verify a fresh source archive receipt through the connected MCP action; test repeat capture idempotency and byte rehash.
 - If the ChatGPT plugin only advertises seven Safe Edit actions but the server registers more, **plugin connection/tool-schema refresh is required** before the assistant can call missing actions. Server implementation alone is NOT proof of client availability.
 - Never claim archive completed until the receipt includes the actual hash and `intact_stored_bytes`. Never claim mobile/desktop synced until device-specific evidence is obtained.
+
+
+### No-refresh operational inspection (2026-10-19)
+
+The existing read-only `get_vault_info` tool now includes `sourceArchive` with snapshot/source counts, declared stored byte count, and a **bounded SHA-256 byte re-read** of at most 16 recent stored snapshot blobs and 64 MiB. `checked_intact` means those particular stored bytes matched their hashes; `partial_scan` marks records left unchecked and `empty_no_originals` is NOT a healthy full archive. Even fully intact local blobs do **not** prove original publisher authenticity, source revisions captured, or off-server backup. Fields `offServerBackupVerified:false` and `remoteObsidianSyncVerified:false` are deliberately conservative until independently confirmed. This status tool is read-only and should not be used as an excuse to skip the user-authorized `archive_original_source` action and its full per-document inspection receipt.
