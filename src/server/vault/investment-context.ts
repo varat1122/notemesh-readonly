@@ -179,6 +179,26 @@ export function buildInvestmentContextPack(req: Input): Pack {
     if(present.length) for(const p of present)pool.set(p,120);
     else absent.push("No legacy Company Index found for "+ticker+" (both known locations checked).");
   }
+  // Retrieve existing, explicitly resolved Industry Hubs linked from the
+  // issuer's canonical Timeline. A generic earnings query may contain no
+  // industry search term, but the company already has a curator-reviewed
+  // cross-link. Trust only the indexed exact resolved_path (not co-mentions).
+  // If the caller explicitly provided industry scope, respect that choice.
+  if(issuers.length && !req.industry){
+    for(const ticker of issuers){
+      const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - "+ticker+".md";
+      if(!exists(timeline))continue;
+      const rows=db().prepare(
+        "SELECT DISTINCT resolved_path FROM links WHERE source_path=? AND resolved_path LIKE ? ORDER BY resolved_path LIMIT 12"
+      ).all(timeline,"02_Industries_Themes/%.md") as {resolved_path:string|null}[];
+      for(const row of rows){
+        const target=row.resolved_path;
+        if(target && target.startsWith("02_Industries_Themes/") &&
+           roleOf(target)==="industry" && exists(target))
+          pool.set(target,Math.max(pool.get(target)||0,116));
+      }
+    }
+  }
   // Explicit issuer-source discovery: a broad "NVDA" lexical query can be
   // flooded by archived chat and miss the actual issuer IR reviews. Never
   // let search-result popularity determine whether primary documents exist.
