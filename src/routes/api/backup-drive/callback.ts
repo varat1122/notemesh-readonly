@@ -1,4 +1,5 @@
 import type { APIEvent } from "@solidjs/start/server";
+import { inProcessDrWriterFence } from "~/server/backup/writer-fence";
 import { auth, runAuthMigrations } from "~/server/auth";
 import { env } from "~/server/env";
 import { driveSetupEnabled, finishDrDriveConsent } from "~/server/backup/drive-auth";
@@ -6,7 +7,7 @@ import { drDriveHeaders as headers, prepareDrCredential } from "~/server/backup/
 
 export async function GET({ request }: APIEvent) {
   await runAuthMigrations();
-  const admin = await auth.api.getSession({ headers: request.headers });
+  const admin = await inProcessDrWriterFence.withWrite(() => auth.api.getSession({ headers: request.headers }), "better_auth_adapter");
   if (!admin) return new Response("Admin session required; reconnect from signed-in dashboard.", { status: 401, headers });
   if (!driveSetupEnabled()) return new Response("DR OAuth disabled", { status: 403, headers });
   const url = new URL(request.url);
