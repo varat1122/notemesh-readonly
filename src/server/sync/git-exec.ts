@@ -64,7 +64,7 @@ export async function runGit(
     const msg = redact(String(e?.message ?? e), [getGitCredentials()?.token]);
     return { ok: false, stdout: "", stderr: msg, combined: msg, code: null };
   }
-  });
+  }, "git_sync");
 }
 
 
@@ -91,5 +91,5 @@ export async function runGitBuffer(
   } catch {
     return { ok: false, stdout: Buffer.alloc(0) };
   }
-  });
+  }, "git_sync");
 }

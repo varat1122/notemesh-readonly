@@ -20,6 +20,8 @@ it("a writable PriceStore holds its ticket across direct SQLite writes until clo
   const store=new PriceStore(filename,true);
   try {
     expect(fence.status.activeWriters).toBeGreaterThanOrEqual(1);
+    expect(fence.getAdmissionEvidence().activeByClass.market_price_sqlite).toBeGreaterThanOrEqual(1);
+    expect(fence.getAdmissionEvidence().productionSnapshotReady).toBe(false);
     store.db.exec("CREATE TABLE IF NOT EXISTS dr_fixture(x INTEGER)");
     store.db.prepare("INSERT INTO dr_fixture VALUES(1)").run();
     await expect(fence.withFrozenWriters(()=>false,{drainTimeoutMs:15}))
@@ -37,6 +39,7 @@ it("a writable PriceStore holds its ticket across direct SQLite writes until clo
   const after=new PriceStore(filename,true);
   after.close();
   expect(fence.status).toEqual({frozen:false,activeWriters:0});
+  expect(fence.getAdmissionEvidence().activeByClass).toEqual({});
 });
 
 it("releases lifetime ticket if a writable PriceStore constructor fails before opening",async()=>{

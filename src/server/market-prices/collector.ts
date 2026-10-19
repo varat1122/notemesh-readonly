@@ -44,7 +44,7 @@ export async function refreshPrices(options: RefreshOptions = {}) {
   priceWatchlistFrom(options);
   const store = new PriceStore(options.filename ?? priceDbPath(), true);
   try { return await collectIntoPriceStore(store, options); } finally { store.close(); }
-  });
+  }, "background_price_collector");
 }
 export function priceWatchlistFrom(options: RefreshOptions) {
   const list = z.array(instrumentSchema).min(1).max(MAX_PRICE_INSTRUMENTS).parse(options.watchlist ?? priceWatchlist());

@@ -82,7 +82,7 @@ export async function runOb(
       opts.redactSecrets ?? [],
     ),
   };
-  });
+  }, "obsidian_cli");
 }
 
 export function looksLikeMfaRequired(output: string): boolean {

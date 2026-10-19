@@ -202,7 +202,7 @@ function requiresApproval(r:RecordRow) {
   });
 }
 export function preview(input:unknown,actor:string) {
-  return inProcessDrWriterFence.withWriteSync(()=>previewUnderFence(input,actor));
+  return inProcessDrWriterFence.withWriteSync(()=>previewUnderFence(input,actor), "protected_safe_edits");
 }
 function previewUnderFence(input:unknown,actor:string) {
   assertEnabled();const p=previewSchema.parse(input);const t=target(p.path);p.path=t.rel;
@@ -241,10 +241,10 @@ function previewUnderFence(input:unknown,actor:string) {
   return {...publicPreview(row(p.operationId)),previewToken:token};
 }
 export function adminPreview(id:string) {
-  return inProcessDrWriterFence.withWriteSync(()=>{ assertEnabled();return publicPreview(row(id)); });
+  return inProcessDrWriterFence.withWriteSync(()=>{ assertEnabled();return publicPreview(row(id)); }, "protected_safe_edits");
 }
 export function approve(id:string,adminId:string,afterHash:string) {
-  return inProcessDrWriterFence.withWriteSync(()=>approveUnderFence(id,adminId,afterHash));
+  return inProcessDrWriterFence.withWriteSync(()=>approveUnderFence(id,adminId,afterHash), "protected_safe_edits");
 }
 function approveUnderFence(id:string,adminId:string,afterHash:string) {
   assertEnabled();const r=row(id);
@@ -294,7 +294,7 @@ function atomic(r:RecordRow,p:PreviewInput) {
   } finally {if(temp) fs.rmSync(temp,{force:true});fs.closeSync(fd);}
 }
 export function status(id:string,actor:string) {
-  return inProcessDrWriterFence.withWriteSync(()=>statusUnderFence(id,actor));
+  return inProcessDrWriterFence.withWriteSync(()=>statusUnderFence(id,actor), "protected_safe_edits");
 }
 function statusUnderFence(id:string,actor:string) {
   const r=owned(id,actor);
@@ -302,7 +302,7 @@ function statusUnderFence(id:string,actor:string) {
     beforeHash:r.before_hash,afterHash:r.after_hash,receipt:r.receipt?JSON.parse(r.receipt):null};
 }
 export function apply(input:unknown,actor:string) {
-  return inProcessDrWriterFence.withWriteSync(()=>applyUnderFence(input,actor));
+  return inProcessDrWriterFence.withWriteSync(()=>applyUnderFence(input,actor), "protected_safe_edits");
 }
 function applyUnderFence(input:unknown,actor:string) {
   assertEnabled();const args=applySchema.parse(input),r=owned(args.operationId,actor);

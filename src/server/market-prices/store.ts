@@ -42,7 +42,7 @@ export class PriceStore {
     // handle lifetime, including direct PriceStore.db calls. Otherwise the
     // freeze could begin between write methods while a caller held the DB.
     this.releaseWriter = writable && !this.memory ?
-      inProcessDrWriterFence.acquireWriteTicket() : null;
+      inProcessDrWriterFence.acquireWriteTicket("market_price_sqlite") : null;
     let opened: Database.Database | null = null;
     try {
     if (!this.memory) try {

@@ -197,7 +197,7 @@ export class DrivePriceCache {
         scope: "bounded_batch", universeSize: watchlist.length, remainingDue, results,
         storage: { backend: "google-drive", catalogueId: this.catalogueId, verifiedAt: this.verifiedAt, readBackVerified: !!this.catalogueId } };
     } catch (error) { throw this.failed(error); } finally { this.busy = false; }
-    });
+    }, "market_price_drive");
   }
   close() { for (const item of this.cache.values()) item.store.close(); this.cache.clear(); }
 }

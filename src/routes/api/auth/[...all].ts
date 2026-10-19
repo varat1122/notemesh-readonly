@@ -59,7 +59,7 @@ async function withMigrations(
     }
   }
   return res;
-  });
+  }, "better_auth_adapter");
 }
 
 export const GET = (event: { request: Request }) => withMigrations(handler.GET, event);
