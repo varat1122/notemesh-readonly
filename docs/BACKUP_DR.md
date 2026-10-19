@@ -3,6 +3,14 @@
 **2026-10-18.** This branch is a *pre-deployment, offline/fixture* implementation. The current production Vault has **not** been backed up by this code. Do not merge, schedule or deploy until the gates below pass.
 
 
+## Direct Market Prices Drive refresh writer admission — development-only (2026-10-19)
+
+Previously, the high-level `refreshPrices()` function entered the DR process-local Writer Fence, but a caller could directly invoke `DrivePriceCache.refresh()`. The direct method is a separate write-capable entry point that can publish remote Google Drive price archive and catalogue generations after asynchronous network I/O without acquiring admission itself.
+
+This Draft now wraps the entire direct `DrivePriceCache.refresh()` lifecycle in `inProcessDrWriterFence.withWrite(async ...)`: an already-running refresh must drain before a fixture snapshot proceeds; any refresh initiated after a freeze begins fails before attempting a Drive publish or loading a catalogue; nested calls already admitted by `refreshPrices()` reuse their existing AsyncLocalStorage scope. Regression tests exercise refusal before remote work and draining an in-flight asynchronous refresh.
+
+**Strict boundary:** This covers **one NoteMesh process** only. Google Drive writes from other replicas, independent worker processes, external tools or credentials cannot be frozen by a local Writer Fence. It also does not prove that read/write access to the on-disk Vault/SQLite, Obsidian continuous Sync, or device-synced Markdown files is globally coordinated. No Production snapshot coordinator, schedule, remote Backup or Restore is activated.
+
 ## Nonstandard SQLite file gate — development-only (2026-10-19)
 
 The offline snapshot builder now refuses `*.db`, `*.sqlite3`, `*.db3` and their `-wal`/`-shm`/`-journal` sidecars. It also reads the first 16 bytes of other regular files and refuses a raw SQLite database with the standard `SQLite format 3\\0` magic under an unrecognized extension.
