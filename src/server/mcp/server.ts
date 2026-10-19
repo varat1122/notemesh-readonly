@@ -1165,7 +1165,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         "Read-only whole-index P1/P2/P3 review queue with bounded cursor pages " +
         "of exact historical/review note paths. Counts are indexed-metadata-only; " +
         "a completed Markdown index cannot verify archived originals or claims. " +
-        "Live pagination is not a stable cross-request snapshot. Never edits Vault.",
+        "Pass the returned index fingerprint on subsequent pages and fail closed if indexed metadata or links changed. This is not an immutable Vault snapshot. Never edits Vault.",
       inputSchema: {
         priority:z.enum(["all","P1_provenance_or_chronology",
           "P2_attribution_or_scope","P3_navigation_only"]).optional()
@@ -1173,13 +1173,15 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         limit:z.number().int().min(1).max(30).optional()
           .describe("Maximum note entries returned per page (default 20; maximum 30)"),
         afterPath:z.string().min(4).max(350).optional()
-          .describe("Exact next-cursor path from a previous queue page; live pages are not snapshot-isolated"),
+          .describe("Exact next-cursor path from previous page; requires expectedIndexFingerprint"),
+        expectedIndexFingerprint:z.string().regex(/^[0-9a-f]{64}$/).optional()
+          .describe("64-hex indexed metadata+link fingerprint from page one; required on every subsequent page, holds on index changes"),
       },
     },
-    safe(({priority,limit,afterPath}:{
+    safe(({priority,limit,afterPath,expectedIndexFingerprint}:{
       priority?:"all"|"P1_provenance_or_chronology"|"P2_attribution_or_scope"|"P3_navigation_only";
-      limit?:number;afterPath?:string;
-    })=>json(withBoundary(listLegacyReviewQueue(priority,limit,afterPath)))),
+      limit?:number;afterPath?:string;expectedIndexFingerprint?:string;
+    })=>json(withBoundary(listLegacyReviewQueue(priority,limit,afterPath,expectedIndexFingerprint)))),
   );
 
   // Human-review dossier: exact indexed path, current on-disk hash and
