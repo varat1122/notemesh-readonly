@@ -104,8 +104,8 @@ test("resolved symlink output alias cannot overlap source or its ancestor",()=>f
     {env,encoding:"utf8"});
   assert.notEqual(p.status,0);
   assert.match(p.stderr,/Resolved backup output overlaps source data directory/);
-  if(fs.existsSync(viaSource))
-    assert.equal(fs.readdirSync(viaSource).some(n=>n.endsWith(".nmb")),false);
+  assert.equal(fs.existsSync(viaSource),false,
+    "a rejected symlinked output must not create directories inside DATA_DIR");
 
   const parentAlias=path.join(root,"alias-parent");
   fs.symlinkSync(root,parentAlias);
