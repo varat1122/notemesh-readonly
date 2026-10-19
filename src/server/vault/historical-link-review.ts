@@ -7,9 +7,8 @@
  * Never edits the Vault, picks between equally ranked targets, creates a
  * backlink automatically, or changes Thesis/Portfolio/Source contents.
  */
-export type LinkRole =
-  | "thesis" | "company" | "timeline" | "evidence_register"
-  | "historical_analysis" | "review" | "other";
+import type { SchemaInspection } from "./investment-knowledge-schema";
+export type LinkRole = SchemaInspection["role"];
 export interface LinkReviewNote {
   path:string;
   entity:string|null;
