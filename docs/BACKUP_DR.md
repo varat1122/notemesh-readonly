@@ -1,5 +1,13 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## P0 direct Better Auth adapter entry points — no more unadmitted session calls (2026-10-19)
+
+Review found several **direct** Better Auth `auth.api.getSession()` calls not themselves retaining DR admission (the protected page middleware, DR Drive setup/callback/credential-check/fixture-upload routes, and market-price Drive setup/callback), despite other auth/RPC/MCP entry points already being fenced. Better Auth's database adapter may mutate sessions, rate-limiter state, or related SQLite metadata during otherwise read-oriented APIs. `admin.ts` also called `auth.api.listApiKeys()` without its own async admission. This was a **writer-coverage gap**, not evidence of known production corruption.
+
+This development fix wraps those direct calls in `inProcessDrWriterFence.withWrite(..., "better_auth_adapter")` over their **entire awaited adapter lifetime**; protected middleware OIDC metadata generators also hold an admission. The admin key-list fallbacks still handle ordinary adapter errors, but do **not** swallow a deliberate `backup_writer_freeze_active` refusal. New route-level and middleware mock tests check rejection *before* invoking the adapter, count live async admissions, and verify freeze waits for completion. The existing P0 static source register now pins these direct paths as drift witnesses.
+
+No real OAuth credentials, Staging Google connection, production Vault, or backup endpoint were used in these fixture tests. **Remaining NO-GO blockers:** unclassified raw `app.sqlite` handles and any call paths not registered at runtime, Better Auth internals beyond the fenced entry points, child processes, multi-replica coordination, active external Obsidian clients, cross-file snapshot consistency and independent off-server recovery. Process-local admission evidence **does not** prove that Production Snapshot is safe.
+
 ## P0 writer gap: whole async Vault Indexer rebuild admission (2026-10-19)
 
 Audit found `VaultIndexer.rebuild()` executes an initially transactional SQLite wipe, then re-indexes notes/FTS and attachments in **many separate synchronous SQL batches separated by `setImmediate` yields**. Previously each individual write was fenced but the complete rebuild was not. The freeze could therefore drain between batches and capture an intentionally incomplete index, while the outer async rebuild was still running.
