@@ -366,3 +366,8 @@ After checking a specific note through `get_legacy_review_dossier`, an analyst m
 ### Whole-index review queue pagination (PR #72 development only)
 
 `list_legacy_review_queue(priority?, limit?, afterPath?)` scans the **entire complete indexed Markdown metadata set**, not merely the four/eight global audit samples. P1/P2/P3 selects review *work* by exact source path, and `all` lists notes with any finding. Pages are deterministic within one stable index but **not transactionally isolated across multiple live calls**. Use an isolated immutable Vault snapshot for reproducible coverage/acceptance and compare final queue counts with audit `legacyReviewPriorities`. Only indexed metadata/links are assessed; unindexed originals, SHA truth, verified claims, protected Thesis authorization and user-device Sync remain outside scope. No writes or edit templates.
+
+
+### Fail-closed multi-page index fingerprint (PR #73, development only)
+
+The first `list_legacy_review_queue` page returns `indexFingerprint` covering raw indexed Markdown note path/frontmatter/mtime/size, resolved/unresolved link rows, count of unindexed notes, and priority scope. Every continuation with `afterPath` must supply that value as `expectedIndexFingerprint`; a mismatch fails closed (`legacy_review_queue_index_fingerprint_changed_hold`). This prevents silent cross-call **index** drift. It is not a content-addressed snapshot of the Obsidian folder, independent raw source archive, publisher verification, review approval, or multi-device Sync receipt. To claim full historical coverage, repeat against an explicitly isolated immutable Vault + SQLite fixture/snapshot and reconcile path counts. Production changes remain forbidden until acceptance.
