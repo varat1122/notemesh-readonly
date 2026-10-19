@@ -4,6 +4,7 @@ import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
+import { getLegacyReviewDossier } from "../vault/legacy-review-dossier";
 import { prepareHistoricalLinkEdit } from "../vault/historical-link-handoff";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
@@ -1149,6 +1150,28 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       submissionRequires: "vault:read inbox:submit",
       ...(access.label.startsWith("oauth:") ? { grantDiagnostics: oauthScopeDiagnostics(access.label.slice(6)) } : {}),
     } })),
+  );
+
+  // Human-review dossier: exact indexed path, current on-disk hash and
+  // historical provenance pointers only. No independent source verification,
+  // Safe Edit preview, approval or any Vault mutation.
+  server.registerTool(
+    "get_legacy_review_dossier",
+    {
+      title: "Review historical evidence dossier",
+      annotations: READ,
+      description:
+        "Read-only P1/P2/P3 review dossier for one exact existing historical/review " +
+        "Markdown path. Checks index readiness, current file metadata/version/hash, " +
+        "source-record locators and existing resolved Obsidian links. Presents bounded " +
+        "findings and evidence gaps, never edits the Vault or verifies the underlying investment claim.",
+      inputSchema: {
+        sourcePath:z.string().min(4).max(350)
+          .describe("Exact Vault-relative historical/review Markdown note path from the completed knowledge audit"),
+      },
+    },
+    safe(({sourcePath}:{sourcePath:string})=>
+      json(withBoundary(getLegacyReviewDossier(sourcePath)))),
   );
 
   // A read-only handoff: no Safe Edit OAuth scope, preview journal or Vault
