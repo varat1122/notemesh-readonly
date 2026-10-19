@@ -127,6 +127,52 @@ or prepare cross-domain relationships. Cross-domain Safe Edit needs a distinct
 verified, owner-approved handoff and independent direct-source review before
 any one-note preview/apply. No existing note has been changed.
 
+## Vault-wide Metadata Readiness — all indexed roles, no bulk edits
+
+The **read-only** `get_vault_info().knowledgeAudit.metadataReadiness` is a
+whole-index inventory (up to 10,000 indexed notes) to guide which legacy
+research areas deserve human attention first. It is NOT a migration, note
+verification, or instruction to rewrite all files.
+
+It counts indexed notes by **role** and their top-level **Vault folder**,
+with separate indicators for declared `entity`, `related_paths`,
+`related_claim_ids`, `event_date`, `published_at` and `imported_at`.
+Legacy `date` without `event_date` is reported as a field-presence gap;
+the system does not silently turn import/publication dates into event dates.
+
+For *eligible* historical-analysis, review, industry and company Notes outside
+protected folders it also distinguishes:
+- Notes with at least one declared navigation-reference array vs no declared
+  reference. **No declared relation is not an error or proof a link is missing**.
+- Historical derivative notes whose issuer/domain is **not explicitly
+  declared**. Never derive entity identity from a filename, headline or
+  co-mentions.
+- Malformed relation-reference fields (not bounded arrays of nonempty
+  strings), which require manual cleanup before link proposals.
+
+The output gives deterministic **eight-note example lists** for each review
+category, full aggregate counts, and a truncation indicator. It never
+rewrites frontmatter, creates YAML metadata, edits sources or produces
+automatic Thesis changes. Protected Thesis, Portfolio, Sources and Templates
+are counted for context but excluded as edit-source candidates. Partial or
+still-rebuilding indexes return an explicit **hold** instead of presenting
+coverage as a complete Vault census.
+
+### Uniqueness correction to cross-domain Claim ID review
+
+`crossDomainReview` now treats **two identical Claim IDs inside one claim
+register as ambiguous**, even when those IDs belong to the same file path.
+If *any* indexed register declares more than the 100 scanned claim rows
+allowed by the source schema adapter, the planner holds **all Claim-ID-based
+links** because global uniqueness cannot be established from a truncated
+scan. Explicit literal-path navigation remains independently reviewable.
+The response exposes `claimIndexTruncated` and `heldClaimReferences`.
+
+These safeguards avoid creating false confidence that a referenced financial
+figure has one owner or is independent evidence. The next step is human
+normalization of selected metadata and source/claim verification; no
+Production Vault mutation or global automated rewrite is authorized.
+
 ## Future extensions (not implemented)
 
 - Human-reviewed synonym/alias matching for cross-company and sector context.
