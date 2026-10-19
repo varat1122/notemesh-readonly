@@ -182,3 +182,29 @@ describe("P0 new-intake reconciliation against archived company events", () => {
     .toContain(plan.historicalEventReview.status);
  });
 });
+
+
+describe("intake identity marker blocks repeat Timeline append", () => {
+ it("routes repeated identical intake to existing Timeline link without a duplicate event", async () => {
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const request={domain:"company" as const,entities:["MCKT"],topic:"Synthetic one-off milestone 2026-10-19",
+   inputFormat:"text" as const,sourceKind:"user_commentary" as const,
+   extractedText:"Synthetic MCKT milestone supplied by user for test purposes, no independent issuer verification."};
+  const first=route(request);
+  const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - MCKT.md";
+  await add(timeline,"# Synthetic MCKT Timeline\n## Chronology\nExisting archival item only.\n");
+  const before=route(request);
+  expect(before.routes.find(x=>x.kind==="company_timeline_candidate")?.action)
+    .toBe("candidate_append_after_review");
+  await add(timeline,"# Synthetic MCKT Timeline\n## Chronology\n<!-- investment-intake:"+first.planId+" -->\n");
+  const after=route(request);
+  expect(after.planId).toBe(first.planId);
+  expect(after.routes.find(x=>x.kind==="company_timeline_candidate")).toMatchObject({
+    action:"link_existing_or_hold"
+  });
+  expect(after.routes.find(x=>x.kind==="company_timeline_candidate")?.reason)
+    .toContain("already recorded");
+  expect(after.gates.canAutoWrite).toBe(false);
+  expect(after.gates.canAutoUpdateThesis).toBe(false);
+ });
+});
