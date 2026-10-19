@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const current = vi.hoisted(() => ({ userId: "test-admin" as string | null }));
+const current = vi.hoisted(() => ({ userId: "test-admin" as string | null, calls: 0, hold: null as Promise<void> | null }));
 vi.mock("~/server/auth", () => ({
   runAuthMigrations: async () => {},
-  auth: { api: { getSession: async () => current.userId ? { user: { id: current.userId } } : null } }
+  auth: { api: { getSession: async () => { current.calls++; if(current.hold) await current.hold; return current.userId ? { user: { id: current.userId } } : null; } } }
 }));
 import { GET, POST } from "./backup-drive";
 import { GET as callback } from "./backup-drive/callback";
@@ -13,7 +13,7 @@ const event = (request: Request) => ({ request }) as Parameters<typeof GET>[0];
 const post = (headers: Record<string,string> = { Origin: origin }) =>
   POST(event(new Request(origin + "/api/backup-drive", { method: "POST", headers })));
 beforeEach(() => {
-  current.userId = "test-admin";
+  current.userId = "test-admin"; current.calls = 0; current.hold = null;
   vi.stubEnv("BASE_URL", origin);
   vi.stubEnv("ENCRYPTION_KEY", "31".repeat(32));
   vi.stubEnv("NOTEMESH_DRIVE_CLIENT_ID", "test-dr-client.apps.googleusercontent.com");
@@ -123,4 +123,35 @@ it("seals credential with a DR-specific key and rejects tamper, client mismatch,
   vi.stubEnv("NOTEMESH_DRIVE_CLIENT_ID", "test-dr-client.apps.googleusercontent.com");
   vi.stubEnv("ENCRYPTION_KEY", "32".repeat(32));
   expect(() => openDrCredential(sealed)).toThrow("invalid_or_missing");
+});
+
+
+it("freezes direct DR Drive setup and OAuth callback BEFORE entering Better Auth adapter",async()=>{
+  const {inProcessDrWriterFence:fence}=await import("~/server/backup/writer-fence");
+  await fence.withFrozenWriters(async()=>{
+    await expect(GET(event(new Request(origin+"/api/backup-drive")))).rejects.toThrow("backup_writer_freeze_active");
+    await expect(post()).rejects.toThrow("backup_writer_freeze_active");
+    await expect(callback(event(new Request(origin+"/api/backup-drive/callback?state=synthetic")))).rejects.toThrow("backup_writer_freeze_active");
+    expect(current.calls).toBe(0);
+    expect(fence.getAdmissionEvidence().activeWriters).toBe(0);
+  });
+  expect((await GET(event(new Request(origin+"/api/backup-drive")))).status).toBe(200);
+});
+
+it("counts a direct DR Drive admin session for the COMPLETE asynchronous adapter lifetime",async()=>{
+  const {inProcessDrWriterFence:fence}=await import("~/server/backup/writer-fence");
+  let release!:()=>void;
+  current.hold=new Promise<void>(resolve=>{release=resolve;});
+  const pending=GET(event(new Request(origin+"/api/backup-drive")));
+  await vi.waitFor(()=>expect(current.calls).toBe(1));
+  expect(fence.getAdmissionEvidence().activeByClass.better_auth_adapter).toBe(1);
+  let captured=false;
+  const freeze=fence.withFrozenWriters(()=>{captured=true;return "synthetic-cut";});
+  expect(captured).toBe(false);
+  await expect(post()).rejects.toThrow("backup_writer_freeze_active");
+  expect(current.calls).toBe(1);
+  release();
+  expect((await pending).status).toBe(200);
+  await expect(freeze).resolves.toBe("synthetic-cut");
+  expect(fence.status).toEqual({frozen:false,activeWriters:0});
 });
