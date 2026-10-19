@@ -13,6 +13,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { uploadVerifiedBundle } from "./nm-drive-upload.mjs";
+import { recoverVerifiedBundle } from "./nm-drive-recover.mjs";
 
 const backupScript = new URL("./nm-backup.mjs", import.meta.url).pathname;
 const passphrase = "offline-fixture-only-not-a-real-secret-0123456789";
@@ -43,7 +44,7 @@ function fakeVault(root) {
 }
 function fakeGoogleDrive(parentId, {corruptReadback=false}={}) {
   const id="offline_fixture_blob_0123456";
-  let metadata,bytes=null;
+  let metadata,bytes=null,corruptLater=corruptReadback;
   const requests=[];
   async function fetcher(url, options={}) {
     requests.push({url,method:options.method??"GET"});
@@ -67,7 +68,7 @@ function fakeGoogleDrive(parentId, {corruptReadback=false}={}) {
     if(url.includes("?alt=media")) {
       assert.ok(bytes,"No uploaded ciphertext");
       const sent=Buffer.from(bytes);
-      if(corruptReadback)sent[sent.length-24]^=1;
+      if(corruptLater)sent[sent.length-24]^=1;
       return new Response(new Uint8Array(sent),{status:200});
     }
     if(url.includes("/drive/v3/files/")) {
@@ -77,7 +78,7 @@ function fakeGoogleDrive(parentId, {corruptReadback=false}={}) {
     }
     throw Error("Unexpected Google Drive request");
   }
-  return {fetcher,requests,uploadedBytes:()=>bytes};
+  return {fetcher,requests,uploadedBytes:()=>bytes,corruptNextReadback:()=>{corruptLater=true;}};
 }
 function assertRestored(dest) {
   assert.equal(fs.readFileSync(path.join(dest,"vault/05_Thesis/FIXTURE.md"),"utf8"),
@@ -119,16 +120,26 @@ test("full isolated fixture backup -> mock Drive upload/readback -> independent 
     assert.equal(cloudBytes.includes(Buffer.from("Synthetic thesis")),false);
     assert.equal(cloudBytes.includes(Buffer.from("not-a-real-secret")),false);
 
-    // Restore from a *new* bundle copy representing separately downloaded
-    // cloud ciphertext, never from the original local backup.
-    const downloaded=path.join(root,"independent-download.nmb");
-    fs.writeFileSync(downloaded,cloudBytes,{flag:"wx",mode:0o600});
-    assert.equal(cli(["verify","--bundle",downloaded]).verified,true);
+    // Full recovery uses the REAL independently invoked Drive downloader
+    // from the user-facing offline tool (mock HTTP transport only), not a
+    // shortcut that writes the original upload buffer into the restore path.
+    const recoveryDir=path.join(root,"recovered-ciphertext");
+    fs.mkdirSync(recoveryDir);
+    const recovery=await recoverVerifiedBundle({
+      receipt:result,outDir:recoveryDir,accessToken:"offline-fixture-access-token",
+      fetcher:google.fetcher,
+    });
+    assert.equal(recovery.downloaded,true);
+    assert.equal(recovery.cryptographicBundleVerified,false);
+    assert.equal(recovery.productionRecoveryVerified,false);
+    assert.deepEqual(fs.readFileSync(recovery.localPath),cloudBytes);
+    assert.deepEqual(google.requests.map(x=>x.method),["POST","PUT","GET","GET","GET","GET"]);
+    assert.equal(cli(["verify","--bundle",recovery.localPath]).verified,true);
     const restored=path.join(root,"isolated-restore");
-    const receipt=cli(["restore","--bundle",downloaded,"--dest",restored]);
+    const receipt=cli(["restore","--bundle",recovery.localPath,"--dest",restored]);
     assert.equal(receipt.restored,true);
     assertRestored(restored);
-    const second=spawnSync(process.execPath,[backupScript,"restore","--bundle",downloaded,
+    const second=spawnSync(process.execPath,[backupScript,"restore","--bundle",recovery.localPath,
       "--dest",restored],{env:isolatedEnv(),encoding:"utf8"});
     assert.notEqual(second.status,0,"Never overwrite an existing recovery target");
   } finally { db.close();prices.close();fs.rmSync(root,{recursive:true,force:true}); }
@@ -145,6 +156,31 @@ test("tampered Google ciphertext is never given a verified receipt",async()=>{
       folderId:"fixture_app_owned_folder_id_012345678",
       accessToken:"offline-fixture-access-token",fetcher:cloud.fetcher
     }),/SHA-256 mismatch/);
+    assert.equal(fs.existsSync(path.join(root,"isolated-restore")),false);
+  } finally {db.close();prices.close();fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("Drive recovery refuses bytes tampered AFTER a successful upload and removes partial output",async()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"nm-dr-postupload-corrupt-"));
+  const {data,db,prices}=fakeVault(root);
+  try {
+    const created=cli(["create","--data-dir",data,"--out",path.join(root,"encrypted"),
+      "--kind","fixture","--fixture-only"]);
+    const folderId="fixture_app_owned_folder_id_012345678";
+    const drive=fakeGoogleDrive(folderId);
+    const uploaded=await uploadVerifiedBundle({
+      bundle:created.bundle,folderId,accessToken:"offline-fixture-access-token",
+      fetcher:drive.fetcher,
+    });
+    assert.equal(uploaded.verified,true);
+    drive.corruptNextReadback(); // Remote object changes AFTER the upload receipt.
+    const recoveryDir=path.join(root,"new-download");
+    fs.mkdirSync(recoveryDir);
+    await assert.rejects(recoverVerifiedBundle({
+      receipt:uploaded,outDir:recoveryDir,
+      accessToken:"offline-fixture-access-token",fetcher:drive.fetcher,
+    }),/SHA-256 mismatch/);
+    assert.deepEqual(fs.readdirSync(recoveryDir),[]);
     assert.equal(fs.existsSync(path.join(root,"isolated-restore")),false);
   } finally {db.close();prices.close();fs.rmSync(root,{recursive:true,force:true});}
 });
