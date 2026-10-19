@@ -92,12 +92,13 @@ export function listLegacyReviewQueue(
       notes,true,(source,target)=>Boolean(linked.get(source,target)),undefined,
       {priority,limit,afterPath},
     );
-    if(review.status!=="review_queue_index_complete_not_verified"||!review.queue)
+    const queue=review.queue;
+    if(review.status!=="review_queue_index_complete_not_verified"||!queue)
       throw Error("legacy_review_queue_incomplete_index_hold");
-    return {review,indexFingerprint,indexedLinkCount,unindexedNotes};
+    return {review,queue,indexFingerprint,indexedLinkCount,unindexedNotes};
   })();
 
-  const {review,indexFingerprint,indexedLinkCount,unindexedNotes}=result;
+  const {review,queue,indexFingerprint,indexedLinkCount,unindexedNotes}=result;
   return {
     status:"bounded_read_only_indexed_review_queue" as const,
     scope:"all_currently_indexed_markdown_notes_not_all_original_bytes" as const,
@@ -110,7 +111,7 @@ export function listLegacyReviewQueue(
     totalFindings:review.findingsTotal,
     priorityFindingCounts:review.countsByPriority,
     priorityKindCounts:review.countsByKind,
-    page:review.queue,
+    page:queue,
     // Clients must pass this SAME token as expectedIndexFingerprint on each
     // subsequent page. Filter priority is bound to the token; limit is not.
     indexFingerprint,
