@@ -238,6 +238,14 @@ export async function main(argv=process.argv.slice(2)) {
     const kind=flags.get("--kind")||"fixture";
     if(!flags.has("--data-dir")||!flags.has("--out") || !KINDS.has(kind))throw Error("Require --data-dir, --out and valid --kind");
     if(!flags.get("--offline-confirmed") && !flags.get("--fixture-only"))throw Error("Refusing live data: --offline-confirmed or --fixture-only required");
+    // Fail closed on any Railway process: a manual --offline-confirmed flag
+    // cannot prove that the deployed service, Sync and SQLite writers stopped.
+    // This CLI remains offline/fixture-only until a separately audited,
+    // service-wide snapshot coordinator and cross-process lease exist.
+    if (process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID ||
+        process.env.RAILWAY_ENVIRONMENT_ID || process.env.RAILWAY_ENVIRONMENT_NAME ||
+        process.env.RAILWAY_PROJECT_NAME || process.env.RAILWAY_SERVICE_NAME)
+      throw Error("backup_create_refused_on_railway_without_coordinated_snapshot");
     const resolvedData=fs.realpathSync(data);
     if(flags.get("--fixture-only") && (inside("/data",resolvedData) ||
       inside(clean(process.env.DATA_DIR||"/data"),resolvedData) ||
@@ -247,7 +255,26 @@ export async function main(argv=process.argv.slice(2)) {
     if(!fs.statSync(data).isDirectory())throw Error("Source must be a directory");
     if(process.platform==="linux" && !fs.realpathSync(data).startsWith(path.sep))
       throw Error("Invalid resolved source root");
+    // Resolve the closest existing ancestor BEFORE mkdir. A backup output
+    // routed through a symlink into DATA_DIR must fail without even creating
+    // an empty directory in the source. Relative suffixes are appended after
+    // canonicalizing that ancestor.
+    let existingOutAncestor=out;
+    while(!fs.existsSync(existingOutAncestor)) {
+      const next=path.dirname(existingOutAncestor);
+      if(next===existingOutAncestor)throw Error("Unresolvable backup output parent");
+      existingOutAncestor=next;
+    }
+    const prospectiveOut=path.resolve(fs.realpathSync(existingOutAncestor),
+      path.relative(existingOutAncestor,out));
+    if(inside(resolvedData,prospectiveOut) || inside(prospectiveOut,resolvedData))
+      throw Error("Resolved backup output overlaps source data directory");
     await fsp.mkdir(out,{recursive:true,mode:0o700});
+    // Repeat after creation: a pre-existing symlink can change while mkdir
+    // runs. This is a fail-closed check, not an atomic cross-process lease.
+    const resolvedOut=fs.realpathSync(out);
+    if(inside(resolvedData,resolvedOut) || inside(resolvedOut,resolvedData))
+      throw Error("Resolved backup output overlaps source data directory");
     const stage=await fsp.mkdtemp(path.join(os.tmpdir(),"notemesh-stage-"));
     const target=path.join(out,"notemesh-"+kind+"-"+new Date().toISOString().replace(/[:.]/g,"-")+"-"+randomBytes(4).toString("hex")+".nmb");
     try {
