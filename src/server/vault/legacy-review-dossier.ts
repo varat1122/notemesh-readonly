@@ -69,7 +69,7 @@ const bounded=(fm:Record<string,unknown>)=>{
 export function getLegacyReviewDossier(sourcePath:string){
   if(typeof sourcePath!=="string"||sourcePath.length<4||
     sourcePath.length>350||!sourcePath.endsWith(".md")||
-    /^(?:05_Thesis|06_Portfolio|07_Sources|09_Templates)(?:\\/|$)/i.test(sourcePath))
+    /^(?:05_Thesis|06_Portfolio|07_Sources|09_Templates)(?:\/|$)/i.test(sourcePath))
     throw Error("legacy_dossier_invalid_source_path");
   if(!indexer().ready)throw Error("legacy_dossier_index_not_ready");
   const database=db();
