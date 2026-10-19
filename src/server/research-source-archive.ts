@@ -115,7 +115,7 @@ function safeBlobWrite(bytes:Buffer,digest:string){
   }finally{if(tmpPresent)try{fs.unlinkSync(tmp);}catch{ /* Best-effort cleanup; do not mask the original failure. */ }}
 }
 export function captureOriginalDocumentBytes(input:DocumentArchiveInput):DocumentSnapshot {
-  return inProcessDrWriterFence.withWriteSync(()=>captureOriginalBytesUnderFence(input));
+  return inProcessDrWriterFence.withWriteSync(()=>captureOriginalBytesUnderFence(input), "original_source_archive");
 }
 function captureOriginalBytesUnderFence(input:DocumentArchiveInput):DocumentSnapshot{
   if(!Buffer.isBuffer(input.bytes)||input.bytes.length<16||input.bytes.length>MAX_DOCUMENT_BYTES)
