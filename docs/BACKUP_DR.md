@@ -3,6 +3,33 @@
 **2026-10-18.** This branch is a *pre-deployment, offline/fixture* implementation. The current production Vault has **not** been backed up by this code. Do not merge, schedule or deploy until the gates below pass.
 
 
+## Offline Drive recovery readback — development-only (2026-10-19)
+
+The new `scripts/backup/nm-drive-recover.mjs` can recover a **previously uploaded, immutable encrypted NMDR1 bundle** from Google Drive **into a new local offline directory**. It does not create a snapshot, change Railway configuration, update Vault notes, or start a restore in Production.
+
+- Prerequisites: existing **verified** `nm-drive-upload.mjs` receipt (`fileId`, `folderId`, byte count and SHA-256), dedicated `drive.file` OAuth credential sealed with the original `ENCRYPTION_KEY`, **separately retained** `NOTEMESH_BACKUP_PASSPHRASE`, Node 24, GNU tar, and writable **existing absolute** offline destination.
+- The CLI validates the Drive file's ID, name, parent folder, byte size, appProperties hash, downloads the entire encrypted object and recomputes SHA-256 locally. It opens the destination with `O_EXCL | O_NOFOLLOW` and never overwrites an existing file. A partial/mismatched download is deleted.
+- After transport readback it additionally calls the existing `nm-backup.mjs verify` to authenticate AES-GCM, validate manifest entries and check SQLite integrity. An unverified bundle is removed.
+- The tool refuses Railway runtime markers, deployed `/data` and configured `DATA_DIR`, symlinked output directories and receipts not marked verified. It does **not** automatically run `restore`: the operator must separately initiate an offline isolated restore.
+- Preserve the two private recovery secrets **outside the uploaded Drive bundle**: the bundle passphrase and the original application encryption key. A downloaded bundle without them may be unrecoverable.
+- Synthetic/mock Drive tests and CI do **not** establish that an actual Production snapshot exists, that Google credentials remain usable later, that Drive retains the file, or that a real Production dataset restores correctly.
+
+```bash
+# OFFLINE, explicitly authorized operator workflow ONLY — never execute on Railway.
+# Provide secrets through a private mechanism. Do not paste them in chat or commit.
+node scripts/backup/nm-drive-recover.mjs \
+  --authorize-recovery \
+  --receipt /private/receipts/notemesh-predeploy-....nmb.receipt.json \
+  --out-dir /offline/empty-existing-folder
+
+# Only after verify succeeds, do a separate isolated offline restore:
+node scripts/backup/nm-backup.mjs restore \
+  --bundle /offline/empty-existing-folder/notemesh-predeploy-....nmb \
+  --dest /offline/new-nonexisting-restore-folder
+```
+
+**P0 release blockers remain unchanged:** no proven globally consistent Production writer pause, durable cross-process lease, true off-server Production .nmb receipt, isolated Production restore, or recovery key escrow. This feature alone does not authorize Merge/Deploy of PR #36 or #47.
+
 ## Phase 1.4 — verified Staging cloud test and complete offline fixture chain (18 October 2026)
 
 This section supersedes the initial PRE-TEST status further below; earlier notes remain preserved as historical development records. Never treat a staging fixture as a real production recovery.
