@@ -268,3 +268,40 @@ describe("same-source economic event reconciliation despite changed input text",
    expect(p.sourceEventReview.duplicateAdjudicated).toBe(false);
  });
 });
+
+
+describe("date-scoped intake identity with v1 source preservation",()=>{
+ const original="https://www.sec.gov/Archives/edgar/data/88941/smtc-source-2026.htm";
+ const baseRequest={domain:"company" as const,entities:["SMTC"],
+   topic:"Same exact source transcript about two dated events",inputFormat:"text" as const,
+   sourceKind:"regulatory_filing" as const,sourceUrl:original,
+   eventDate:"2026-10-15",publicationDate:"2026-10-15",
+   extractedText:"Synthetic Semtech original text verbatim repeated despite a later fiscal event date."};
+ it("does not assign one raw intake ID to two distinct declared economic event dates",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const a=route(baseRequest),b=route({...baseRequest,eventDate:"2026-10-16"});
+  expect(a.planId).not.toBe(b.planId);
+  expect(a.routes.find(x=>x.kind==="raw_input")?.path).not.toBe(b.routes.find(x=>x.kind==="raw_input")?.path);
+  expect(a.chronology.eventDate).toBe("2026-10-15");
+  expect(b.chronology.eventDate).toBe("2026-10-16");
+  expect(route(baseRequest).planId).toBe(a.planId);
+ });
+ it("keeps the original v1 ID for an already indexed matching dated raw note",async()=>{
+  const {createHash}=await import("node:crypto");
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const legacy=createHash("sha256").update([
+    "investment_os_intake_v1","company","text","regulatory_filing",
+    "smtc",original,"",baseRequest.extractedText
+  ].join("\n")).digest("hex");
+  const legacyId="IN-"+legacy.slice(0,16).toUpperCase();
+  await add("00_Inbox/ChatGPT/Investment Intake - "+legacyId+".md",[
+    "---","company: [SMTC]","event_date: 2026-10-15","published_at: 2026-10-15",
+    "verification: not_reverified","---","# Previously saved raw source","Synthetic source record"
+  ].join("\n"));
+  const matched=route(baseRequest);
+  expect(matched.planId).toBe(legacyId);
+  expect(matched.routes.find(x=>x.kind==="raw_input")?.action).toBe("link_existing_or_hold");
+  expect(route({...baseRequest,eventDate:"2026-10-16"}).planId).not.toBe(legacyId);
+  expect(route({...baseRequest,publicationDate:"2026-10-16"}).planId).not.toBe(legacyId);
+ });
+});
