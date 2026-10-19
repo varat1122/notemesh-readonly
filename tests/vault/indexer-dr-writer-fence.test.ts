@@ -94,7 +94,7 @@ it("holds one writer admission across ALL async rebuild yields; DR capture sees 
   const {inProcessDrWriterFence:fence}=await import("~/server/backup/writer-fence");
   const total=350;
   for(let n=0;n<total;n++)
-    fs.writeFileSync(path.join(vault,`fixture-${n}.md`),`# Fixture ${n}\\n\\nindexed token ${n}\\n`);
+    fs.writeFileSync(path.join(vault,`fixture-${n}.md`),`# Fixture ${n}\n\nindexed token ${n}\n`);
   const count=(table:string)=>
     (db().prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as {n:number}).n;
   const work=indexer().rebuild();
@@ -120,7 +120,7 @@ it("holds one writer admission across ALL async rebuild yields; DR capture sees 
   expect(captured).toBe(false);
   // A new watcher-initiated mutation is blocked, but admitted rebuild
   // descendants can finish their SQL batches during the drain.
-  fs.writeFileSync(path.join(vault,"late.md"),"# Late\\n");
+  fs.writeFileSync(path.join(vault,"late.md"),"# Late\n");
   // Direct reindexPath deliberately retries after thaw rather than modifying
   // SQLite under the frozen snapshot.
   reindexPath("late.md");
