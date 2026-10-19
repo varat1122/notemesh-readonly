@@ -1,5 +1,16 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## Runtime writer-admission observations (development only, 2026-10-19)
+
+A new `SnapshotWriterFence.getAdmissionEvidence()` returns **read-only process-local observations**: current `activeWriters`, `frozen`, and `activeByClass` for named tickets. It explicitly reports `scope: "this_node_process_only"`, `completeRuntimeWriterCoverageVerified: false`, `externalWriterQuiescenceVerified: false` and `productionSnapshotReady: false`.
+
+Existing writer entry points can now provide a typed, optional class label without changing admission policy or the original `fence.status` compatibility shape. This Draft labels selected actual paths: app SQLite bootstrap, writable market-price SQLite connection lifetime, original-source archive, user attachments, Vault atomic writes, protected Safe Edit, Better Auth HTTP handler, Git command children, bounded Obsidian CLI commands, market-price collector and direct Drive price refresh. Anonymous/untagged calls remain `unclassified`. Named nested calls are recorded under their admitted parent; **nested class counts must not be summed to infer distinct writers**.
+
+Unit and integration tests verify active labels while actual async Better Auth requests and writable PriceStore connections hold their tickets, nested admission, freeze refusal, timeout, exception cleanup and double-release. The observer opens **no new HTTP/MCP endpoint**, performs no Vault scan and writes no persistent audit data.
+
+**Critical limits:** these are in-memory labels supplied by selected call sites, not independently measured I/O. A direct `db()` handle may be mutated outside a tagged helper; not all Better Auth entry points, external subprocess lifetimes, background jobs, other Node replicas, CLI processes, SQLite WAL/checkpoint writers or remote device activity are proven included. An empty map, green test or `frozen: true` **cannot** authorize a Production snapshot. The existing writer-coverage register and all Production DR NO-GO/approval gates remain authoritative.
+
+
 ## Writer-class coverage register — read-only release blockers (2026-10-19)
 
 `node scripts/backup/nm-writer-coverage-register.mjs` emits a machine-readable, **source-only** writer-risk register. It **does not inspect the live Vault, Google Drive or device state** and is **not** wired into the Production create, restore or scheduling paths. It builds on the earlier source-heuristic inventory, rather than competing with it.
