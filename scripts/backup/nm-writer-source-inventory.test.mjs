@@ -46,3 +46,36 @@ test("real repository inventory does not silently promote green tests into snaps
   // This is a prioritized, intentionally incomplete human review register.
   // No source heuristic is a distributed lock, runtime attestation or approval.
 });
+
+test("source audit catches async fs writers, named-import aliases, streams and filehandles", () => {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"nm-dr-async-writer-audit-"));
+  try {
+    fs.mkdirSync(path.join(root,"src/server"),{recursive:true});
+    fs.mkdirSync(path.join(root,"src/routes"),{recursive:true});
+    fs.writeFileSync(path.join(root,"src/server","async-writers.ts"), [
+      'import { writeFile as persist, readFile } from "node:fs/promises";',
+      'import { createWriteStream } from "node:fs";',
+      'export async function candidates() {',
+      '  await fs.promises.rename("old","new");',
+      '  await fsp.copyFile("old","new");',
+      '  await fsPromises.open("new","w");',
+      '  await persist("new","payload");',
+      '  const handle = await fs.promises.open("new","w");',
+      '  await handle.writeFile("payload");',
+      '  fs.createWriteStream("new");',
+      '  createWriteStream("new");',
+      '  await readFile("new");',
+      '}',
+    ].join("\\n"));
+    const report=inventoryWriterSurfaces(root);
+    const detected=new Set(report.candidates.map(x=>x.kind));
+    assert.ok(detected.has("filesystem_async"));
+    assert.ok(detected.has("filesystem_named_import"));
+    assert.ok(detected.has("filesystem_filehandle"));
+    assert.ok(detected.has("filesystem_stream"));
+    assert.ok(!report.candidates.some(x=>x.line===12), "read-only import must not be promoted as a writer");
+    assert.ok(report.candidates.every(x=>x.verified===false));
+    assert.equal(report.productionSnapshotReady,false);
+    assert.equal(report.externalWriterQuiescenceVerified,false);
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
