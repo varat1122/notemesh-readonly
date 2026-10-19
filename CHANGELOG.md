@@ -2,6 +2,8 @@
 
 ## Unreleased (development branch only; no production deployment)
 
+- Added a SHA-256 index-only fingerprint to bound multi-page P1/P2/P3 review enumeration. Subsequent cursor pages now require the prior fingerprint and reject altered SQLite note metadata, indexed versions, link graph, or priority scope; still **not** a filesystem snapshot, archive authenticity validation, or permission to write.
+
 - Added P1/P2/P3 read-only, whole-index historical review queue pages with deterministic cursor selection. Output is capped to 30 notes per call; link/evidence correctness, immutable snapshots and device sync are NOT implied.
 
 - Added a read-only, caller-selected legacy review disposition worksheet linked to an exact current dossier, with explicit evidence gaps and unapproved change-log draft. No persistent review approval, Vault edit, Safe Edit preview, or independent claim verification.
