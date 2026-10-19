@@ -15,8 +15,34 @@ const MUTATORS = [
   ["auth_adapter", /\bauth\.api\.[A-Za-z_$][\w$]*\s*\(/],
   ["filesystem", /\bfs\.(?:writeFileSync|appendFileSync|copyFileSync|renameSync|rmSync|rmdirSync|mkdirSync|unlinkSync|linkSync|truncateSync)\s*\(/],
   ["filesystem_handle", /\bfs\.openSync\s*\(/],
+  // A common blind spot: native async fs writes often bypass the sync fs.*
+  // signatures above. An open() is only a candidate; its flag may be read-only.
+  ["filesystem_async", /\b(?:fs(?:\.promises)?|fsp|fsPromises)\.(?:writeFile|appendFile|copyFile|rename|rm|rmdir|mkdir|unlink|link|truncate|cp|open)\s*\(/],
+  ["filesystem_stream", /\bfs\.createWriteStream\s*\(/],
+  ["filesystem_filehandle", /\.\s*(?:writeFile|appendFile|truncate)\s*\(/],
   ["external_process", /\b(?:runGit|runOb|spawn|execa|execFileSync)\s*\(/],
 ];
+
+// Named imports from node:fs/promises can be renamed and called with no "fs."
+// qualifier. Discover only explicit imports from Node fs modules. As elsewhere,
+// this is candidate identification, not proof of a real write or fence coverage.
+const NAMED_FS_MUTATORS = new Set([
+  "writeFile","appendFile","copyFile","rename","rm","rmdir","mkdir",
+  "unlink","link","truncate","cp","open","createWriteStream",
+]);
+function namedFsWritePattern(source) {
+  const aliases=[];
+  const re=/\bimport\s*\{([^}]+)\}\s*from\s*["'](?:node:)?fs(?:\/promises)?["']/g;
+  for (const match of source.matchAll(re)) {
+    for(const token of match[1].split(",")) {
+      const name=token.trim().match(/^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+      if(name && NAMED_FS_MUTATORS.has(name[1]))aliases.push(name[2]??name[1]);
+    }
+  }
+  return aliases.length
+    ? new RegExp(`\\b(?:${[...new Set(aliases)].join("|")})\\s*\\(`)
+    : null;
+}
 
 function visit(dir, relative, collected) {
   if (!fs.existsSync(dir)) return;
@@ -40,10 +66,14 @@ export function inventoryWriterSurfaces(repoRoot) {
     const source=fs.readFileSync(filename,"utf8");
     const referencesFence=source.includes("inProcessDrWriterFence") ||
       source.includes("SnapshotWriterFence");
+    const importedFsWrites=namedFsWritePattern(source);
     source.split("\n").forEach((line,i)=>{
       const trimmed=line.trim();
       if(trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*"))return;
-      for(const [kind,pattern] of MUTATORS)if(pattern.test(line)){
+      const patterns=importedFsWrites
+        ? [...MUTATORS,["filesystem_named_import",importedFsWrites]]
+        : MUTATORS;
+      for(const [kind,pattern] of patterns)if(pattern.test(line)){
         candidates.push({file:relative,line:i+1,kind,
           // Presence of a reference is NOT proof the particular write is fenced.
           fenceReferencedSomewhereInFile:referencesFence,
