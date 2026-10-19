@@ -65,6 +65,22 @@ describe("historical link reviewer (no Vault writes)",()=>{
     expect(plan.samples[0].targetPath).toBe(hub.path);
     expect(plan.samples[0].proposedWikilink).toBe("[[01_Companies/NVDA]]");
   });
+  it("refuses wikilink destinations with structural link syntax in their filename",()=>{
+    for(const suffix of ["#Heading","^block","\\\\unsafe","[alias]","|other"]) {
+      const unsafe:LinkReviewNote={...thesis,path:"05_Thesis/NVDA "+suffix+".md"};
+      expect(planHistoricalLinkReview([source,unsafe],true,absent).samples).toEqual([]);
+    }
+  });
+  it("selects exactly one source for a targeted review rather than the bounded first-eight sample",()=>{
+    const sources=Array.from({length:12},(_,i):LinkReviewNote=>({
+      path:`10_Knowledge/Company Research/NVDA - History ${String(i).padStart(2,"0")}.md`,
+      role:"historical_analysis",entity:"NVDA",
+    }));
+    const path=sources[11].path;
+    const report=planHistoricalLinkReview([...sources,thesis],true,absent,path);
+    expect(report).toMatchObject({candidatesFound:1,sampleTruncated:false});
+    expect(report.samples[0].sourcePath).toBe(path);
+  });
   it("bounds deterministic output to eight proposed links",()=>{
     const sources=Array.from({length:12},(_,i):LinkReviewNote=>({
       path:`10_Knowledge/Company Research/NVDA - History ${String(i).padStart(2,"0")}.md`,

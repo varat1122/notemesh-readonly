@@ -45,8 +45,8 @@ const explicitEntity=(value:string|null):string|null=>{
 const permittedSource=(p:string)=>
   !/^(?:05_Thesis|06_Portfolio|07_Sources|09_Templates)(?:\/|$)/i.test(p);
 const safeTarget=(p:string)=>
-  p.toLowerCase().endsWith(".md")&&!p.includes("[")&&!p.includes("]")&&
-  !p.includes("|")&&!/[\r\n]/.test(p);
+  p.toLowerCase().endsWith(".md")&&
+  !/[\r\n]/.test(p)&&!["[","]","|","#","^","\\"].some(ch=>p.includes(ch));
 
 /**
  * All input must come from the CURRENT completed SQLite index. An incomplete
@@ -57,6 +57,7 @@ export function planHistoricalLinkReview(
   notes:readonly LinkReviewNote[],
   indexComplete:boolean,
   alreadyLinked:(source:string,target:string)=>boolean,
+  onlySourcePath?:string,
 ):HistoricalLinkReview {
   const hold:HistoricalLinkReview={
     status:"incomplete_index_hold",candidatesFound:0,ambiguousTopRankGroups:0,
@@ -76,7 +77,8 @@ export function planHistoricalLinkReview(
       a.path.localeCompare(b.path));
   let candidatesFound=0,ambiguousTopRankGroups=0;
   const samples:HistoricalLinkSuggestion[]=[];
-  const sources=notes.filter(n=>SOURCE_ROLES.has(n.role)&&permittedSource(n.path))
+  const sources=notes.filter(n=>SOURCE_ROLES.has(n.role)&&permittedSource(n.path)&&
+    (onlySourcePath===undefined||n.path===onlySourcePath))
     .slice().sort((a,b)=>a.path.localeCompare(b.path));
   for(const source of sources){
     const key=explicitEntity(source.entity);

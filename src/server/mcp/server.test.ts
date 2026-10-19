@@ -58,6 +58,7 @@ const READ_TOOLS = [
   "list_tasks",
   "notes_by_tag",
   "plan_investment_writeback",
+  "prepare_historical_link_edit",
   "preview_edit",
   "random_note",
   "read_attachment",

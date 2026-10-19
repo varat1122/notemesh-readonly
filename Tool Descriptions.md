@@ -390,6 +390,22 @@ index, the sync backend's state, and disk headroom: `disk.level` is `ok`,
 `warn` under 100 MB free, or `critical` under 50 MB, at which point writes
 that would not leave the reserve are refused.
 
+### prepare_historical_link_edit — read
+
+A **read-only**, exact-line handoff for a human-selected historical link from
+the completed Vault knowledge audit. Input: sourcePath, targetPath, and
+anchorLine (an exact, unique prose line in the source). It independently checks
+the current indexed entity/role match, uniqueness of the recommended destination,
+existing resolved links, and actual source and destination file hashes. Refuses
+unsafe/missing/ambiguous anchors, code fences, changed metadata and incomplete
+index coverage.
+
+Returns only a non-submitted Safe Edit-compatible body replacement template,
+source/target SHA-256 digests and explicit needs-review flags. It does NOT write
+or approve any note, authenticate a primary source, create an operation ID, or
+escalate OAuth privileges. Read and verify both full notes, then separately
+invoke the Safe Edit preview/approval/apply workflow if a link makes sense.
+
 ### get_outline — read
 
 Each heading with its level, fenced text and 1-based file line, for finding
