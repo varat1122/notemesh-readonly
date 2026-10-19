@@ -1,5 +1,16 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## Writer-surface inventory blind-spot review — development only (2026-10-19)
+
+On top of Draft PR #51, the read-only `nm-writer-source-inventory.mjs` now flags additional potential writer entry points previously missed by its synchronous `fs.*Sync` matcher:
+
+- `fs.promises.*`, common `fsp`/`fsPromises` aliases, explicit named `node:fs` / `node:fs/promises` imports and aliases, `createWriteStream`, and asynchronous file-handle mutation calls.
+- `open` without flag analysis is a **candidate**, not necessarily a mutator; `fenceReferencedSomewhereInFile` is NEVER proof that the detected call is covered by the fence.
+- New isolated regression fixture checks candidate capture and keeps `productionSnapshotReady: false`, `externalWriterQuiescenceVerified: false` and `verified: false`. The scanner remains incomplete: dynamic imports, custom wrappers, HTTP/API writes, subprocess writes, raw SQLite extensions, Better Auth/background writers, cross-process Git/Obsidian Sync and writes outside `src/server` / `src/routes` require separate explicit review.
+
+**Fail-closed gate remains:** no coordinator on this branch attests every writer class, no global process/device freeze exists, and this inventory improvement is NOT a Production consistent snapshot or permission to run `nm-backup.mjs create` on Railway. Next engineer must inventory and test each external/process write admission, SQLite WAL checkpoint policy and quiescence evidence *before* lifting any Railway guard.
+
+
 **2026-10-18.** This branch is a *pre-deployment, offline/fixture* implementation. The current production Vault has **not** been backed up by this code. Do not merge, schedule or deploy until the gates below pass.
 
 
