@@ -337,7 +337,12 @@ class VaultIndexer {
   // dead. Callers can await it; readiness is exposed via `ready`.
   async rebuild(): Promise<void> {
     if (this.building) return this.building;
-    this.building = (async () => {
+    // A rebuild mutates app.sqlite across MANY awaited event-loop yields.
+    // Fencing each SQL batch alone leaves an open window where a DR freeze
+    // can drain to zero and capture the deliberately partial FTS/notes index.
+    // Hold a single admission for the complete async rebuild lifetime.
+    // The inner sync writer tickets remain nested in this admitted scope.
+    this.building = inProcessDrWriterFence.withWrite(async () => {
       // Cleared before the wipe, not after the first build only. It used to be
       // set once and never unset, so a rebuild from the Status tab — which
       // empties every table and refills them over the better part of a minute
@@ -397,7 +402,7 @@ class VaultIndexer {
       resolveAllLinks();
       this.lastFullIndexAt = Date.now();
       this.ready = true;
-    })()
+    }, "indexer_rebuild")
       .then(
         () => {
           this.lastRebuildError = null;
