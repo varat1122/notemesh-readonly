@@ -54,6 +54,7 @@ const READ_TOOLS = [
   "list_attachments",
   "list_directory",
   "list_folders",
+  "list_legacy_review_queue",
   "list_link_issues",
   "list_notes",
   "list_tags",
