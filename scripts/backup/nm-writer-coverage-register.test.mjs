@@ -80,10 +80,10 @@ test("a symlinked witness never satisfies a source audit", () => {
     fs.copyFileSync(target,path.join(external,"auth.ts"));
     fs.unlinkSync(target);
     fs.symlinkSync(path.join(external,"auth.ts"),target);
-    const report=inspectWriterCoverageRegister(root);
-    assert.ok(report.witnessDrift.some(w=>w.classId==="better_auth_adapter"));
-    assert.throws(()=>assertSourceWitnessRegisterStable(root),
-      /dr_writer_source_witness_drift_fail_closed/);
+    // The underlying inventory rejects symlinks before examining contents.
+    // Rejecting the audit itself is the safest fail-closed behavior.
+    assert.throws(()=>inspectWriterCoverageRegister(root),/writer_audit_symlink_refused/);
+    assert.throws(()=>assertSourceWitnessRegisterStable(root),/writer_audit_symlink_refused/);
   } finally {
     fs.rmSync(root,{recursive:true,force:true});
     fs.rmSync(external,{recursive:true,force:true});
