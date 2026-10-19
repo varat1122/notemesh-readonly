@@ -66,6 +66,9 @@ function sourceDir():string {
 }
 const blobPath=(hash:string)=>path.join(sourceDir(),"blobs",hash.slice(0,2),hash+".bin");
 function getRow(row:Row,validateBytes:boolean):DocumentSnapshot{
+  // A corrupted database row must never become a filesystem traversal,
+  // even when this audit runs against an untrusted restored index.
+  if(!/^[a-f0-9]{64}$/.test(row.sha256))throw Error("source_archive_hash_invalid");
   let archiveStatus:DocumentSnapshot["archiveStatus"]="stored_original_bytes_unattributed";
   if(validateBytes){
     try{
@@ -158,4 +161,51 @@ export function inspectOriginalSourceHistory(originalSource:string,validateBytes
   const snapshots=all.slice(0,100).map(x=>getRow(x,validateBytes));
   return {status:"source_byte_archive_inspection_only",originalSource,revisionCount:snapshots.length,
     snapshots,changesObserved:snapshots.length>1,limitReached:truncated,publisherAuthenticityVerified:false};
+}
+
+
+/**
+ * Low-cost operational health summary for the existing get_vault_info read
+ * tool. It never exports source bytes, URLs or operator identifiers.
+ * Scan is bounded so a populated archive cannot stall ordinary research.
+ * This is NOT an off-server backup or an issuer signature verification.
+ */
+export function sourceArchiveHealth():{
+  status:"empty_no_originals"|"checked_intact"|"partial_scan"|"integrity_warning";
+  snapshotCount:number;distinctSources:number;declaredBytes:number;
+  hashCheckedSnapshots:number;hashCheckedBytes:number;
+  intactSnapshots:number;damagedOrMissingSnapshots:number;
+  uncheckedSnapshots:number;fullByteScanComplete:boolean;
+  originalByteArchiveInsideObsidianVault:false;
+  offServerBackupVerified:false;remoteObsidianSyncVerified:false;
+}{
+  const d=db();
+  const stats=d.prepare(
+    "SELECT COUNT(*) AS count,COUNT(DISTINCT source_key) AS sources,"+
+    "COALESCE(SUM(byte_length),0) AS bytes FROM source_snapshots"
+  ).get() as {count:number;sources:number;bytes:number};
+  const limit=16,maxBytes=64*1024*1024;
+  const recent=d.prepare("SELECT * FROM source_snapshots ORDER BY captured_at DESC,snapshot_id DESC LIMIT ?")
+    .all(limit) as Row[];
+  let checked=0,bytes=0,intact=0,damaged=0;
+  for(const row of recent){
+    if(row.byte_length>maxBytes-bytes)break;
+    checked++;bytes+=row.byte_length;
+    try{
+      const status=getRow(row,true).archiveStatus;
+      if(status==="intact_stored_bytes")intact++;
+      else damaged++;
+    }catch{damaged++;}
+  }
+  const remaining=Math.max(0,stats.count-checked);
+  return {
+    status:stats.count===0?"empty_no_originals":damaged>0?"integrity_warning":
+      remaining>0?"partial_scan":"checked_intact",
+    snapshotCount:stats.count,distinctSources:stats.sources,declaredBytes:stats.bytes,
+    hashCheckedSnapshots:checked,hashCheckedBytes:bytes,
+    intactSnapshots:intact,damagedOrMissingSnapshots:damaged,
+    uncheckedSnapshots:remaining,fullByteScanComplete:stats.count>0&&remaining===0,
+    originalByteArchiveInsideObsidianVault:false,
+    offServerBackupVerified:false,remoteObsidianSyncVerified:false
+  };
 }
