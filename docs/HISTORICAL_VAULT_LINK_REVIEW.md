@@ -361,3 +361,8 @@ not independent evidence. No Safe Edit preview/apply/authorization is created.
 ### Draft human-review decision worksheet (PR #71 development)
 
 After checking a specific note through `get_legacy_review_dossier`, an analyst may request `get_legacy_review_decision_plan(sourcePath, disposition, reviewRationale?)`. The seven supported dispositions classify **review work**, not verified issuer facts. Current note SHA-256 and indexed source/link pointers are included, but are **not evidence of claim truth or authenticated human approval**. The tool offers a bounded, unapproved change-log draft and required external/source evidence. It does not store decisions, produce an executable Safe Edit request, or modify Vault/Thesis/Portfolio. PR #70 and this extension are development-only; do not interpret metadata as proof that an original file is permanently unavailable.
+
+
+### Whole-index review queue pagination (PR #72 development only)
+
+`list_legacy_review_queue(priority?, limit?, afterPath?)` scans the **entire complete indexed Markdown metadata set**, not merely the four/eight global audit samples. P1/P2/P3 selects review *work* by exact source path, and `all` lists notes with any finding. Pages are deterministic within one stable index but **not transactionally isolated across multiple live calls**. Use an isolated immutable Vault snapshot for reproducible coverage/acceptance and compare final queue counts with audit `legacyReviewPriorities`. Only indexed metadata/links are assessed; unindexed originals, SHA truth, verified claims, protected Thesis authorization and user-device Sync remain outside scope. No writes or edit templates.
