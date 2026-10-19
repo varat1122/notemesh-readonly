@@ -12,6 +12,7 @@ import { inspectCanonicalKnowledgeMetadata } from "./investment-knowledge-schema
 import { planHistoricalLinkReview, type LinkReviewNote } from "./historical-link-review";
 import { planCrossDomainLinkReview, type KnowledgeLinkNote } from "./cross-domain-link-review";
 import { inventoryVaultMetadataReadiness, type ReadinessNote } from "./metadata-readiness";
+import { reviewLegacyCompanyNavigation, type LegacyNavigationNote } from "./legacy-company-navigation";
 
 type FM = Record<string,unknown>;
 type Row = {path:string;frontmatter:string|null};
@@ -61,6 +62,7 @@ export function auditVaultKnowledgeIndex() {
   const historicalLinkNotes:LinkReviewNote[]=[];
   const crossDomainLinkNotes:KnowledgeLinkNote[]=[];
   const readinessNotes:ReadinessNote[]=[];
+  const legacyNavigationNotes:LegacyNavigationNote[]=[];
   let invalidIndexedFrontmatter=0, structuredClaimNotes=0, declaredClaims=0;
   let possibleMissingSource=0, noKnownPrimaryHash=0;
   for(const row of scanned){
@@ -76,6 +78,7 @@ export function auditVaultKnowledgeIndex() {
     historicalLinkNotes.push({path:row.path,entity:s(fm.entity),role:inspect.role});
     crossDomainLinkNotes.push({path:row.path,role:inspect.role,metadata:fm});
     readinessNotes.push({path:row.path,role:inspect.role,metadata:fm});
+    legacyNavigationNotes.push({path:row.path,role:inspect.role,metadata:fm});
     bump(roleCounts,inspect.role);
     if(inspect.role==="other")bump(unmappedRoleTypes,s(fm.type)??"(not_declared)");
     bump(folderCounts,row.path.split("/")[0]||"(root)");
@@ -146,6 +149,12 @@ export function auditVaultKnowledgeIndex() {
     (source,target)=>Boolean(linked.get(source,target)),
   );
   const metadataReadiness=inventoryVaultMetadataReadiness(readinessNotes,indexReady&&!capped);
+  const outgoing=database.prepare("SELECT 1 FROM links WHERE source_path=? LIMIT 1");
+  const legacyCompanyReview=reviewLegacyCompanyNavigation(
+    legacyNavigationNotes,indexReady&&!capped,
+    (source,target)=>Boolean(linked.get(source,target)),
+    source=>Boolean(outgoing.get(source)),
+  );
   const toTop=(obj:Record<string,number>,limit=15)=>Object.fromEntries(
     Object.entries(obj).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,limit));
   const sortedSamples=(cnt:Record<string,number>,samples:Record<string,string[]>,limit=12)=>{
@@ -173,7 +182,7 @@ export function auditVaultKnowledgeIndex() {
     duplicateCandidates:{sameEventKey:candidates(eventGroups),sameExactSourceMetricPeriod:candidates(claimGroups)},
     linkHealth:{unresolvedReferences:linksTotal,examples:linkRows,
       orphanNotes:orphanTotal,orphanExamples:orphanRows.map(x=>x.path),
-      historicalReview,crossDomainReview},
+      historicalReview,crossDomainReview,legacyCompanyReview},
     invalidIndexedFrontmatter,
     notes:[
       "Audit covers only the currently indexed metadata; note body truth and unindexed/missing raw original files are not verified.",
@@ -185,6 +194,8 @@ export function auditVaultKnowledgeIndex() {
       "Cross-domain link proposals are metadata-only navigation candidates from related_paths and unique related_claim_ids. An exact claim ID match is not source independence, issuer attribution, causation or verification.",
       "Missing, invalid or ambiguous cross-domain references must be manually resolved; no automatic link insertion or claim/thesis update is authorized.",
       "Metadata readiness is a declared-field inventory for all indexed roles, not proof that a note needs editing, that all source material is present, or that the proposed links are semantically correct.",
+      "Legacy metadata company/ticker arrays and the existing indexed outgoing wikilinks are considered in a separate review; missing entity/related_paths is NOT evidence of missing navigational links.",
+      "A legacy single-company field can propose a link only to one exact existing canonical ticker filename in 01_Companies; verify both full notes and existing context before considering a Safe Edit.",
       "Repeated Claim IDs within a single register and registries with truncated claim arrays cannot justify unique destination links.",
       "Review the entire source note and its proposed target, then use the existing one-note Safe Edit preview/diff/approval workflow; no bulk repair or automatic historical link mutation is authorized.",
       "No Obsidian note, original source, protected Thesis, Evidence Register or Portfolio was modified by this audit.",
