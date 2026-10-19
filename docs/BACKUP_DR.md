@@ -1,5 +1,14 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## Cross-database and Original-Source recovery evidence (2026-10-19, offline fixtures)
+
+Added `cross-data-restore-evidence.test.ts` to exercise the **real offline coordinated cut** from Draft PR #56 with two separately generated SQLite databases (`app.sqlite` and `market-prices/prices.sqlite`), a Vault note, an Original Source byte file and synthetic Obsidian home state. Both SQLite databases are closed after a WAL-to-DELETE checkpoint so the source tree is stable during the cut. The test creates a real encrypted NMDR1 bundle, authenticates/verifies it using `nm-backup.mjs`, independently restores into an empty directory, reopens **both SQLite files read-only** and checks `integrity_check`, their synthetic logical epoch, the original-source SHA-256 and the note's exact reference.
+
+Two deliberately **invalid but cryptographically well-formed bundles** are also round-tripped: (1) app and prices databases from different logical epochs, and (2) an app record referring to a different original-source hash. The normal `.nmb` verification/restore succeeds for both because encryption, file checksums and individual SQLite integrity are necessary but **do not prove business-level referential coherence**; the independent synthetic recovery-evidence check correctly rejects each.
+
+This synthetic relation is test-only: it does not claim every Investment OS note, source archive or price database has a shared epoch or enforce these toy invariants in Production. **Release blockers remain:** full production writer enrollment across processes/devices, SQLite/WAL temporal alignment, source archive completeness, independent off-server recovery, real secrets/keys recovery and observed Obsidian mobile Sync are all unverified. Production Backup remains NO-GO.
+
+
 ## Offline coordinated cut — explicit interprocess gate, independent fixture restore (2026-10-19)
 
 This Draft adds `withCoordinatedOfflineFixtureCut()` beside (not in place of) the earlier `withOfflineFixtureCut()`. It composes **the existing process-local Writer Fence → awaited Sync pause → existing crash-sticky interprocess exclusion → external halt attestation → pre/post source fingerprint → capture**, keeping all protections active across asynchronous work. It is **offline fixture-only** and rejects every Railway environment.
