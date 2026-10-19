@@ -1,5 +1,13 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## P0 async Git History refresh writer lifetime (2026-10-19)
+
+Source review found an **unregistered asynchronous phase** in the Git-backed vault's startup refresh. `GitBackend.start()` invokes `refreshGitTimes()` outside its normally fenced `cycle()`; the `git log` subprocess could still be reading and building history when a snapshot freeze started. The final `applyGitHistory()` SQLite/cache mutation was independently fenced, but **the async refresh operation as a whole was not admitted**. This is an admission-lifecycle gap, not proof the Git reader modified disk or that Production has been corrupted.
+
+The development fix wraps **`loadGitHistory(dir)` through the final `applyGitHistory(history)`** in `inProcessDrWriterFence.withWrite(..., "git_sync")`. Nested calls from a fenced reconcile reuse the existing parent ticket. An isolated mocked-Git/real-SQLite integration test holds the Git history result across an awaited Promise and demonstrates that `withFrozenWriters()` does not run its snapshot callback until both cache and SQLite metadata have updated. A second test checks Git failure releases admission without partial mutation; a new Git metadata writer witness guards against source drift.
+
+**Not a Production release assertion.** This only covers the application-managed background Git-history path in one Node process. Actual Git children spawned outside an admitted path, raw `db()` handles, independent CLI writers, other service replicas, the continuous Obsidian Sync daemon and remote devices remain unresolved. Global quiescence, consistent Vault+SQLite snapshots, independent off-server restore and operator approval are all still NO-GO.
+
 ## P0 direct Better Auth adapter entry points — no more unadmitted session calls (2026-10-19)
 
 Review found several **direct** Better Auth `auth.api.getSession()` calls not themselves retaining DR admission (the protected page middleware, DR Drive setup/callback/credential-check/fixture-upload routes, and market-price Drive setup/callback), despite other auth/RPC/MCP entry points already being fenced. Better Auth's database adapter may mutate sessions, rate-limiter state, or related SQLite metadata during otherwise read-oriented APIs. `admin.ts` also called `auth.api.listApiKeys()` without its own async admission. This was a **writer-coverage gap**, not evidence of known production corruption.
