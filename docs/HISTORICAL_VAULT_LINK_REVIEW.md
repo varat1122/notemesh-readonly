@@ -235,6 +235,56 @@ without asserting that the Draft functionality has run against the entire
 live Vault. Review full notes and source provenance before choosing a
 separate approved Safe Edit preview.
 
+## Human Review Priority Queue — provenance before navigation
+
+This development-only PR introduces
+`get_vault_info().knowledgeAudit.legacyReviewPriorities`, a bounded,
+deterministic **read-only review queue** derived from the complete indexed
+notes and existing **resolved** Obsidian wikilinks. It is a planning order for
+a human reviewer, **not** investment materiality, earnings impact, "Price In",
+verified facts, edit authorization or a migration.
+
+The queue is computed for **all** eligible historical/review Markdown notes
+outside protected Thesis, Portfolio, raw Sources and Templates (up to the
+10,000-row index cap), without presuming that missing `entity` or
+`related_paths` means there is a missing relationship. It checks:
+
+| Priority | Exact metadata signal | Required manual decision |
+| --- | --- | --- |
+| P1 provenance | A declared safe `source_records[].md` path is **not in the current index** | Verify archive/export location and whether original data exists; no invented source |
+| P1 chronology | An explicit `event_date` is not a valid date or zoned datetime (e.g. `Unknown`) | Determine event/publication/import dates independently; do not guess |
+| P2 traceability | A declared indexed `source_records` target has **no indexed resolved outgoing wikilink** from source note | Read the original note and link conventions before considering a navigation fix |
+| P2 metadata | Malformed `source_records` array, or conflicting single-code `company` vs `ticker` | Verify declaration/issuer scope before any proposed update |
+| P3 navigation | One explicitly declared legacy uppercase company code matches an **existing literal** `01_Companies/<CODE>.md` path but has no resolved link | Decide if linking improves research navigation without duplicating context |
+
+The classifications are **review signals, not error verdicts**. Notes that
+intentionally contain multiple companies are not mislabeled defective or
+force-mapped to an issuer; old `date` / `imported_on` values are never
+silently promoted to `event_date`. References in a JSON/ZIP archive may be
+absent from the Markdown index by design; separate source-archive integrity
+and device Sync checks remain necessary.
+
+The full queue is counted by kind and P1/P2/P3, but only **four examples per
+kind** (maximum 24) are returned, in a deterministic order, with source and
+exact declared target path where available. If the index is incomplete or
+over 10,000 notes, it returns `incomplete_index_hold` and no proposed edits.
+
+This PR adds **no** new MCP tool, grant/scope, write endpoint or background
+job. It never calls Safe Edit, changes a note, infers causal supplier
+relationships, assigns current financial figures or promotes an archived AI
+summary into primary evidence. If a human approves a correction, the *separate
+one-note* Safe Edit workflow still requires a fresh preview, diff, version,
+approval, apply, readback and independent Sync verification.
+
+### Evidence boundaries
+
+The read-only Production survey of 2026-10-19 observed 3,375 fully indexed
+Markdown notes with legacy metadata and substantial pre-existing links. **The
+new review queue has only been tested on isolated Development fixtures**:
+actual P1/P2/P3 counts for this new function cannot be claimed until the
+corresponding reviewed branch is deployed and the authenticated live
+read-only audit is invoked. This PR is not authorization to deploy.
+
 ## Future extensions (not implemented)
 
 - Human-reviewed synonym/alias matching for cross-company and sector context.

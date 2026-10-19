@@ -13,6 +13,7 @@ import { planHistoricalLinkReview, type LinkReviewNote } from "./historical-link
 import { planCrossDomainLinkReview, type KnowledgeLinkNote } from "./cross-domain-link-review";
 import { inventoryVaultMetadataReadiness, type ReadinessNote } from "./metadata-readiness";
 import { reviewLegacyCompanyNavigation, type LegacyNavigationNote } from "./legacy-company-navigation";
+import { planKnowledgeReviewPriorities, type TriageNote } from "./knowledge-review-priority";
 
 type FM = Record<string,unknown>;
 type Row = {path:string;frontmatter:string|null};
@@ -63,6 +64,7 @@ export function auditVaultKnowledgeIndex() {
   const crossDomainLinkNotes:KnowledgeLinkNote[]=[];
   const readinessNotes:ReadinessNote[]=[];
   const legacyNavigationNotes:LegacyNavigationNote[]=[];
+  const priorityNotes:TriageNote[]=[];
   let invalidIndexedFrontmatter=0, structuredClaimNotes=0, declaredClaims=0;
   let possibleMissingSource=0, noKnownPrimaryHash=0;
   for(const row of scanned){
@@ -79,6 +81,7 @@ export function auditVaultKnowledgeIndex() {
     crossDomainLinkNotes.push({path:row.path,role:inspect.role,metadata:fm});
     readinessNotes.push({path:row.path,role:inspect.role,metadata:fm});
     legacyNavigationNotes.push({path:row.path,role:inspect.role,metadata:fm});
+    priorityNotes.push({path:row.path,role:inspect.role,metadata:fm});
     bump(roleCounts,inspect.role);
     if(inspect.role==="other")bump(unmappedRoleTypes,s(fm.type)??"(not_declared)");
     bump(folderCounts,row.path.split("/")[0]||"(root)");
@@ -155,6 +158,9 @@ export function auditVaultKnowledgeIndex() {
     (source,target)=>Boolean(linked.get(source,target)),
     source=>Boolean(outgoing.get(source)),
   );
+  const legacyReviewPriorities=planKnowledgeReviewPriorities(
+    priorityNotes,indexReady&&!capped,(source,target)=>Boolean(linked.get(source,target)),
+  );
   const toTop=(obj:Record<string,number>,limit=15)=>Object.fromEntries(
     Object.entries(obj).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,limit));
   const sortedSamples=(cnt:Record<string,number>,samples:Record<string,string[]>,limit=12)=>{
@@ -167,7 +173,7 @@ export function auditVaultKnowledgeIndex() {
     indexReady,scanLimit:MAX_ROWS,scanTruncated:capped,
     scope:"indexed_markdown_frontmatter_and_indexed_wikilinks_only",
     roleCounts,folderCounts:toTop(folderCounts,20),fieldPresence,
-    metadataReadiness,
+    metadataReadiness,legacyReviewPriorities,
     verificationCounts:toTop(verificationCounts,16),sourceTypeCounts:toTop(sourceTypes,16),
     rawSourceTypeCounts:toTop(rawSourceTypes,20),unknownRoleTypeCounts:toTop(unmappedRoleTypes,20),
     normalizedSourceTypeCounts:toTop(normalizedSourceTypes,20),
@@ -195,6 +201,7 @@ export function auditVaultKnowledgeIndex() {
       "Missing, invalid or ambiguous cross-domain references must be manually resolved; no automatic link insertion or claim/thesis update is authorized.",
       "Metadata readiness is a declared-field inventory for all indexed roles, not proof that a note needs editing, that all source material is present, or that the proposed links are semantically correct.",
       "Legacy metadata company/ticker arrays and the existing indexed outgoing wikilinks are considered in a separate review; missing entity/related_paths is NOT evidence of missing navigational links.",
+      "Legacy review priorities rank HUMAN source/chronology checks ahead of navigation candidates. They cannot verify original source bytes, claim relevance or investment materiality, and authorize no migration.",
       "A legacy single-company field can propose a link only to one exact existing canonical ticker filename in 01_Companies; verify both full notes and existing context before considering a Safe Edit.",
       "Repeated Claim IDs within a single register and registries with truncated claim arrays cannot justify unique destination links.",
       "Review the entire source note and its proposed target, then use the existing one-note Safe Edit preview/diff/approval workflow; no bulk repair or automatic historical link mutation is authorized.",

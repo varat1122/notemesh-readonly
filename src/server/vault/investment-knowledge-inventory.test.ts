@@ -258,6 +258,58 @@ describe("full indexed vault metadata audit",()=>{
    }));
    expect(paths.map(p=>fs.readFileSync(path.join(vault,p),"utf8"))).toEqual(original);
  });
+ it("builds a provenance-first review batch from indexed historical content without editing source bytes",async()=>{
+   const historical="10_Knowledge/Company Research/ASML - Prior Broker Update.md";
+   const source="07_Sources/ChatGPT/Entries/Stock 160726/Stock 160726 - 0007.md";
+   const hub="01_Companies/ASML.md";
+   const date="10_Knowledge/Company Research/Storage - Undated Event.md";
+   await add(historical,["---","type: knowledge_note","company: ['ASML']",
+     "theme: ['AI Infrastructure', 'Semiconductor Equipment']",
+     "source_type: chatgpt_history","verification: not_reverified",
+     "date: '2026-07-16'","source_records:",
+     "  - "+source,"---"].join("\n"),"# Historical analysis, not independently verified");
+   await add(source,["---","type: chatgpt_archive","---"].join("\n"),"# Archived user input");
+   await add(hub,["---","type: company_hub","---"].join("\n"),"# Canonical ASML hub");
+   await add(date,["---","type: dated_evidence_review",
+     "event_date: Unknown","verification: not_reverified","---"].join("\n"),
+     "# Date unknown; cannot infer this from ingestion time.");
+   const paths=[historical,source,hub,date];
+   const bytes=paths.map(p=>fs.readFileSync(path.join(vault,p),"utf8"));
+   const {indexer}=await import("./indexer");await indexer().rebuild();
+   const a=await report();
+   const priorities=a.legacyReviewPriorities;
+   expect(priorities).toMatchObject({
+     status:"review_queue_index_complete_not_verified",
+     indexedNotesConsidered:4,eligibleSourceNotes:2,
+     notesWithAtLeastOneFinding:2,findingsTotal:3,
+     canAutoWrite:false,canAutoUpdateThesis:false,
+   });
+   expect(priorities.samples.map(x=>x.kind)).toEqual([
+     "explicit_event_date_needs_review",
+     "declared_source_path_without_resolved_link",
+     "legacy_company_hub_navigation_candidate",
+   ]);
+   expect(priorities.samples.find(x=>x.kind==="declared_source_path_without_resolved_link"))
+     .toMatchObject({sourcePath:historical,targetPath:source});
+   expect(paths.map(p=>fs.readFileSync(path.join(vault,p),"utf8"))).toEqual(bytes);
+ });
+ it("suppresses missing-source and duplicate-nav findings when historical note already links to original and hub",async()=>{
+   const historical="10_Knowledge/Company Research/ASML - Connected History.md";
+   const source="07_Sources/ChatGPT/Entries/Stock 160726/Stock 160726 - 0007.md";
+   const hub="01_Companies/ASML.md";
+   await add(source,["---","type: chatgpt_archive","---"].join("\n"),"# Source");
+   await add(hub,["---","type: company_hub","---"].join("\n"),"# ASML");
+   await add(historical,["---","type: knowledge_note",
+     "source_type: chatgpt_history","company: ['ASML']","date: '2026-07-16'",
+     "source_records:","  - "+source,"---"].join("\n"),
+     "# Linked history\n[[01_Companies/ASML]]\n[[07_Sources/ChatGPT/Entries/Stock 160726/Stock 160726 - 0007]]");
+   const {indexer}=await import("./indexer");await indexer().rebuild();
+   const review=(await report()).legacyReviewPriorities;
+   expect(review).toMatchObject({
+     status:"review_queue_index_complete_not_verified",findingsTotal:0,
+     notesWithAtLeastOneFinding:0,samples:[],
+   });
+ });
  it("detects missing source, bad claim fields and unresolved wikilinks while preserving counts",async()=>{
   await add("08_Daily_Weekly/Research Indexes/Bad Claim.md",
     ["---","type: investment_structured_claim_register","domain: company","entity: AMD",
