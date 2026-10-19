@@ -208,3 +208,63 @@ describe("intake identity marker blocks repeat Timeline append", () => {
   expect(after.gates.canAutoUpdateThesis).toBe(false);
  });
 });
+
+
+describe("same-source economic event reconciliation despite changed input text",()=>{
+ const url="https://www.sec.gov/Archives/edgar/data/88941/000008894126000041/smtc-20261015.htm";
+ const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - SMTC.md";
+ const evidence="08_Daily_Weekly/Research Indexes/Primary Evidence - SMTC 2026-10-15 Analyst Day.md";
+ const intake={
+   domain:"company" as const,entities:["SMTC"],
+   topic:"Semtech analyst day FY2030 target",sourceKind:"regulatory_filing" as const,
+   inputFormat:"text" as const,eventDate:"2026-10-15",publicationDate:"2026-10-15",
+   sourceUrl:url,extractedText:"Semtech 15 October FY2030 targets reviewed in user supplied regulator excerpt."
+ };
+ it("holds a different paraphrase of the *same issuer/event date/original URL* before append",async()=>{
+   await add(timeline,"---\ncompany: SMTC\n---\n# SMTC chronology\nPreviously dated events.");
+   await add(evidence,[
+     "---","type: primary_ir_evidence_review","company: SMTC",
+     "event_date: 2026-10-15","published_at: 2026-10-15",
+     "verification: not_reverified","---","# Synthetic primary excerpt",url
+   ].join("\n"));
+   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+   const first=route(intake);
+   const second=route({...intake,extractedText:intake.extractedText+" New wording about adjusted margins."});
+   expect(first.planId).not.toBe(second.planId);
+   for(const plan of [first,second]){
+     expect(plan.sourceEventReview).toMatchObject({
+       status:"possible_same_source_event_candidates",
+       candidatePaths:[evidence],duplicateAdjudicated:false,scanTruncated:false
+     });
+     expect(plan.routes.find(x=>x.kind==="company_timeline_candidate")?.action).toBe("link_existing_or_hold");
+     expect(plan.gates.canAutoWrite).toBe(false);
+     expect(plan.gates.canAutoUpdateThesis).toBe(false);
+   }
+   const tracked=route({...intake,sourceUrl:url+"?utm_campaign=test"});
+   expect(tracked.sourceEventReview.candidatePaths).toContain(evidence);
+ });
+ it("does not merge different event dates from a reused source URL",async()=>{
+   await add(timeline,"# SMTC chronology.");
+   await add(evidence,[
+     "---","company: SMTC","event_date: 2026-10-15","verification: not_reverified",
+     "original_source: "+url,"---","# Existing prior event"
+   ].join("\n"));
+   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+   const later=route({...intake,eventDate:"2026-12-15"});
+   expect(later.sourceEventReview.status).toBe("no_structured_match_not_proof_new");
+   expect(later.sourceEventReview.candidatePaths).toHaveLength(0);
+   expect(later.routes.find(x=>x.kind==="company_timeline_candidate")?.action).toBe("candidate_append_after_review");
+   expect(later.gates.canAutoWrite).toBe(false);
+ });
+ it("rejects issuer co-mentions as distinct company event evidence",async()=>{
+   await add(timeline,"# SMTC chronology.");
+   await add("10_Knowledge/Company Research/2026-10-15 - LITE industry review.md",[
+     "---","company: [LITE]","event_date: 2026-10-15","---",
+     "# LITE research with passing mention of SMTC",url
+   ].join("\n"));
+   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+   const p=route(intake);
+   expect(p.sourceEventReview.candidatePaths).toHaveLength(0);
+   expect(p.sourceEventReview.duplicateAdjudicated).toBe(false);
+ });
+});
