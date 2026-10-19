@@ -56,6 +56,12 @@ export const MANDATORY_WRITER_CLASSES = Object.freeze([
     witnesses: [
       ["src/server/auth.ts", "database: db()"],
       ["src/server/auth.ts", "await getMigrations(auth.options)"],
+      ["src/middleware.ts", 'inProcessDrWriterFence.withWrite(() => auth.api.getSession({ headers: event.request.headers }), "better_auth_adapter")'],
+      ["src/routes/api/backup-drive.ts", 'inProcessDrWriterFence.withWrite(() => auth.api.getSession({ headers: request.headers }), "better_auth_adapter")'],
+      ["src/routes/api/market-prices-drive.ts", 'inProcessDrWriterFence.withWrite(() => auth.api.getSession({ headers: request.headers }), "better_auth_adapter")'],
+      ["src/routes/api/backup-drive/credential-check.ts", 'inProcessDrWriterFence.withWrite(() => auth.api.getSession({ headers: request.headers }), "better_auth_adapter")'],
+      ["src/routes/api/backup-drive/fixture-upload.ts", 'inProcessDrWriterFence.withWrite(() => auth.api.getSession({headers:request.headers}), "better_auth_adapter")'],
+      ["src/server/admin.ts", 'auth.api.listApiKeys({ headers: headers() })'],
     ],
     requiredEvidence: "Better Auth API, session, OAuth and schema migration writes fenced end-to-end",
   },
