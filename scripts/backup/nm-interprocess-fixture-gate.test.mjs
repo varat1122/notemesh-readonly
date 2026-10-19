@@ -214,3 +214,34 @@ test("unregistered external writer bypasses cooperative lock: NO Production proo
     });
   } finally { fs.rmSync(root,{recursive:true,force:true}); }
 });
+
+
+test("snapshot ticket blocks a REAL cooperating writer process from changing fixture bytes", async () => {
+  const root = fixture(), url=new URL("./nm-interprocess-fixture-gate.mjs",import.meta.url).href;
+  const file = path.join(root,"cooperating.txt");
+  const writer = `import {withFixtureInterprocessExclusion} from ${JSON.stringify(url)};
+    import fs from "node:fs";
+    try {
+      await withFixtureInterprocessExclusion(process.argv[1],"writer",()=>fs.writeFileSync(process.argv[2],"changed"));
+    } catch (e) {
+      process.stderr.write(String(e.message));
+      process.exitCode=4;
+    }`;
+  const env={...process.env,RAILWAY_PROJECT_ID:"",RAILWAY_SERVICE_ID:"",
+    RAILWAY_ENVIRONMENT_ID:"",RAILWAY_ENVIRONMENT_NAME:"",
+    RAILWAY_PROJECT_NAME:"",RAILWAY_SERVICE_NAME:""};
+  try {
+    fs.writeFileSync(file,"stable");
+    await withFixtureInterprocessExclusion(root,"snapshot",async()=>{
+      const blocked=spawnSync(process.execPath,["--input-type=module","-e",writer,root,file],
+        {env,encoding:"utf8",timeout:5000});
+      assert.equal(blocked.status,4,blocked.stderr);
+      assert.match(blocked.stderr,/occupied_fail_closed/);
+      assert.equal(fs.readFileSync(file,"utf8"),"stable");
+    });
+    const admitted=spawnSync(process.execPath,["--input-type=module","-e",writer,root,file],
+      {env,encoding:"utf8",timeout:5000});
+    assert.equal(admitted.status,0,admitted.stderr);
+    assert.equal(fs.readFileSync(file,"utf8"),"changed");
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
