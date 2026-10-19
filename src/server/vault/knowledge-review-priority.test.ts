@@ -6,7 +6,6 @@ const note=(path:string,role:TriageNote["role"],metadata:Record<string,unknown>=
 const historical="10_Knowledge/Company Research/ASML — Old Research.md";
 const source="07_Sources/ChatGPT/Entries/Stock 160726/Stock 160726 - 0007.md";
 const hub="01_Companies/ASML.md";
-const linked=()=>true;
 const missing=()=>false;
 describe("evidence-first human legacy note review priorities",()=>{
   it("puts source availability and explicit invalid chronology ahead of link cosmetics",()=>{
@@ -90,6 +89,16 @@ describe("evidence-first human legacy note review priorities",()=>{
       kind:"conflicting_single_company_metadata",priority:"P2_attribution_or_scope",
       targetPath:null,
     })]);
+  });
+  it("holds company-hub links when another provided legacy issuer field is invalid",()=>{
+    const r=planKnowledgeReviewPriorities([
+      note(historical,"historical_analysis",{
+        company:["ASML"],ticker:"ASML Holding",
+      }),
+      note(hub,"company"),
+    ],true,missing);
+    expect(r.countsByKind.legacy_company_hub_navigation_candidate).toBe(0);
+    expect(r.samples.every(s=>s.kind!=="legacy_company_hub_navigation_candidate")).toBe(true);
   });
   it("never marks protected source, portfolio or draft thesis for review editing",()=>{
     const fields={source_records:[source],event_date:"Unknown",company:["ASML"]};
