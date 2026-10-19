@@ -146,8 +146,10 @@ describe("review queue index-fingerprint fence and evidence safety",()=>{
     await index();
     const {listLegacyReviewQueue}=await import("./legacy-review-queue");
     const first=listLegacyReviewQueue("all",1);
-    put(primary,hist("company: ['ASML']")+"\n[[01_Companies/ASML]]\n[[01_Companies/ASML|ASML]]");
-    await index();
+    const {db}=await import("../db");
+    db().prepare("INSERT INTO links (source_path,target,resolved_path) VALUES (?,?,?)")
+      .run(primary,"10_Knowledge/Company Research/ASML - Other",
+        "10_Knowledge/Company Research/ASML - Other.md");
     const current=listLegacyReviewQueue("all",1);
     expect(current.indexedNotesConsidered).toBe(first.indexedNotesConsidered);
     expect(current.indexFingerprint).not.toBe(first.indexFingerprint);
