@@ -6,6 +6,7 @@
  * Never edits the vault or upgrades protected investment decisions.
  */
 import { createHash } from "node:crypto";
+import { readNote } from "./notes";
 import { db } from "../db";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
@@ -129,6 +130,11 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     "08_Daily_Weekly/Research Indexes/Company Evolution - "+subject+".md":null;
   const exists=(path:string)=>Boolean(db().prepare("SELECT 1 FROM notes WHERE path=? LIMIT 1").get(path));
   const rawExists=exists(rawPath),reviewExists=exists(reviewPath),timelineExists=timelinePath?exists(timelinePath):false;
+  // A deterministic intake marker is added only after a reviewed Timeline
+  // append. Repeated submission of identical source text must not propose
+  // a second Timeline event even when a new research note already exists.
+  const timelineRecorded=Boolean(timelinePath && timelineExists &&
+    readNote(timelinePath).content.includes("<!-- investment-intake:"+planId+" -->"));
   const focus=input.focus??(input.sourceKind==="broker_research"?"broker":input.domain==="macro"?"macro":"general");
   const pack=buildInvestmentContextPack({
     question:(T(input.topic)+" "+entities.join(" ")+" "+text.slice(0,450)).slice(0,1150),
@@ -184,10 +190,11 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   ];
   if(timelinePath)
     routes.push({kind:"company_timeline_candidate",
-      action:timelineExists&&!duplicates?"candidate_append_after_review":"link_existing_or_hold",
+      action:timelineExists&&!duplicates&&!timelineRecorded?"candidate_append_after_review":"link_existing_or_hold",
       path:timelinePath,requiresReview:true,
-      reason:duplicates?"Exact numeric claim duplicate candidate: link existing event, no repeated timeline proof.":
-        timelineExists?"Timeline exists; append only when dated source/event dedup and materiality confirmed.":
+      reason:timelineRecorded?"Intake ID already recorded in this Timeline; do not append the same text a second time.":
+        duplicates?"Exact numeric claim duplicate candidate: link existing event, no repeated timeline proof.":
+        timelineExists?"Timeline exists; append only when dated source/event dedup and materiality confirmed; include <!-- investment-intake:"+planId+" --> in the approved append for idempotent retries.":
         "No canonical company timeline indexed; never invent one from a partial screenshot."});
   else routes.push({kind:"industry_context_candidate",action:"link_existing_or_hold",path:null,requiresReview:true,
     reason:"Multi-issuer, non-ticker or macro item: identify existing relevant Industry/Macro notes before any additive update."});
