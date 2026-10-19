@@ -167,12 +167,31 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const publicationDate=validDate(input.publicationDate);
   const text=T(input.extractedText);
   const entities=[...new Set(input.entities.map(T))];
-  const digest=createHash("sha256").update([
+  const legacyDigest=createHash("sha256").update([
     "investment_os_intake_v1",input.domain,input.inputFormat,input.sourceKind,
     ...entities.map(x=>x.toLowerCase()),T(input.sourceUrl||""),T(input.rawAttachmentSha256||""),
-    // Hash the exact text (apart from leading/trailing whitespace) to avoid
-    // claiming that translated summaries are identical to raw originals.
+    // Preserve older IDs only for a stored raw intake with matching dates.
     text
+  ].join("\n")).digest("hex");
+  const legacyPlanId="IN-"+legacyDigest.slice(0,16).toUpperCase();
+  const legacyRawPath="00_Inbox/ChatGPT/Investment Intake - "+legacyPlanId+".md";
+  const old=db().prepare("SELECT frontmatter FROM notes WHERE path=? LIMIT 1").get(legacyRawPath)
+    as {frontmatter:string|null}|undefined;
+  let compatibleLegacy=false;
+  if(old?.frontmatter){
+    try{
+      const fm=JSON.parse(old.frontmatter) as Record<string,unknown>;
+      const recordedEvent=typeof fm.event_date==="string"?fm.event_date:null;
+      const recordedPublished=typeof fm.published_at==="string"?fm.published_at:null;
+      compatibleLegacy=recordedEvent===eventDate&&recordedPublished===publicationDate;
+    }catch{/* Invalid old metadata must not collide with a new dated intake. */}
+  }
+  // v2 includes separate economic event and publication dates so unchanged
+  // extracted text cannot alias two distinct events. An already-saved v1 raw
+  // note keeps its original path if and only if both declared dates match.
+  const digest=compatibleLegacy?legacyDigest:createHash("sha256").update([
+    "investment_os_intake_v2",legacyDigest,eventDate??"unknown_event_date",
+    publicationDate??"unknown_publication_date"
   ].join("\n")).digest("hex");
   const planId="IN-"+digest.slice(0,16).toUpperCase();
   const rawPath="00_Inbox/ChatGPT/Investment Intake - "+planId+".md";
