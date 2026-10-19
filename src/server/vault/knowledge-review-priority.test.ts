@@ -173,3 +173,60 @@ describe("evidence-first human legacy note review priorities",()=>{
     expect(bad.countsByKind.explicit_event_date_needs_review).toBe(1);
   });
 });
+
+describe("complete-index cursor pagination beyond global eight-item samples",()=>{
+  const rows=Array.from({length:22},(_,i)=>note(
+    `10_Knowledge/Company Research/Old ${String(i).padStart(2,"0")}.md`,
+    "historical_analysis",
+    i<15?{event_date:"Unknown"}:{company:["ASML"]},
+  )).concat(note(hub,"company"));
+  it("returns every selected P1 note exactly once across three bounded pages",()=>{
+    const collect:string[]=[];
+    let cursor:string|undefined;
+    for(let i=0;i<4;i++){
+      const res=planKnowledgeReviewPriorities(rows,true,missing,undefined,{
+        priority:"P1_provenance_or_chronology",limit:6,afterPath:cursor,
+      });
+      const page=res.queue!;
+      expect(page.items.length).toBeLessThanOrEqual(6);
+      expect(page.matchedNotesAcrossCompleteIndex).toBe(15);
+      expect(page.evidenceVerified).toBe(false);
+      collect.push(...page.items.map(x=>x.sourcePath));
+      if(!page.hasMore)break;
+      expect(page.nextCursor).not.toBeNull();
+      cursor=page.nextCursor!;
+    }
+    expect(collect).toEqual(rows.slice(0,15).map(x=>x.path));
+    expect(new Set(collect).size).toBe(15);
+  });
+  it("filters P3 while still scanning the full index, without promoting shared company metadata",()=>{
+    const p3=planKnowledgeReviewPriorities(rows,true,missing,undefined,{
+      priority:"P3_navigation_only",limit:30,
+    }).queue!;
+    expect(p3.matchedNotesAcrossCompleteIndex).toBe(7);
+    expect(p3.hasMore).toBe(false);
+    expect(p3.items.every(x=>x.highestPriority==="P3_navigation_only")).toBe(true);
+    expect(p3.items.every(x=>x.findings.some(f=>
+      f.kind==="legacy_company_hub_navigation_candidate"))).toBe(true);
+  });
+  it("rejects cursor paths absent from the completed index or unsafe pagination inputs",()=>{
+    expect(()=>planKnowledgeReviewPriorities(rows,true,missing,undefined,{
+      priority:"all",limit:10,afterPath:"10_Knowledge/Nope.md",
+    })).toThrow("legacy_review_queue_cursor_not_indexed");
+    for(const limit of [0,31,NaN]){
+      expect(()=>planKnowledgeReviewPriorities(rows,true,missing,undefined,{
+        priority:"all",limit,
+      })).toThrow("legacy_review_queue_invalid_request");
+    }
+    expect(()=>planKnowledgeReviewPriorities(rows,true,missing,undefined,{
+      priority:"all",limit:5,afterPath:"../secret.md",
+    })).toThrow("legacy_review_queue_invalid_request");
+  });
+  it("does not imply a completed index when the index is still building",()=>{
+    const partial=planKnowledgeReviewPriorities(rows,false,missing,undefined,{
+      priority:"all",limit:5,
+    });
+    expect(partial.status).toBe("incomplete_index_hold");
+    expect(partial.queue).toBeUndefined();
+  });
+});
