@@ -9,11 +9,10 @@ async function smallBody(request:Request) {
   finally {await reader.cancel().catch(()=>{});reader.releaseLock();}
   return Buffer.concat(chunks).toString("utf8");
 }
-const headers={"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","X-Frame-Options":"DENY","Content-Security-Policy":"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",// Permit browser same-origin HTML form POSTs to retain a concrete Origin.
-// no-referrer can produce Origin: null on non-CORS form submissions, which
-// correctly fails the strict CSRF guard below and locks out real admins.
-// same-origin never sends the approval URL (including its ID) off-site.
-"Referrer-Policy":"same-origin"};
+// A browser HTML form using "no-referrer" may submit Origin: null, which
+// correctly fails our exact-origin CSRF guard below. Retain same-origin
+// referrals only; the approval URL (including its ID) is never sent off-site.
+const headers={"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","X-Frame-Options":"DENY","Content-Security-Policy":"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'","Referrer-Policy":"same-origin"};
 const escape=(s:string)=>s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]!);
 async function session(request:Request) {await runAuthMigrations();return auth.api.getSession({headers:request.headers});}
 export async function GET({request}:APIEvent) {
