@@ -37,6 +37,8 @@ it("holds writer ticket until the asynchronous Better Auth operation completes",
   const existing=GET(ev("GET"));
   await vi.waitFor(()=>expect(flow.get).toBe(1));
   expect(inProcessDrWriterFence.status.activeWriters).toBe(1);
+  expect(inProcessDrWriterFence.getAdmissionEvidence().activeByClass.better_auth_adapter).toBe(1);
+  expect(inProcessDrWriterFence.getAdmissionEvidence().productionSnapshotReady).toBe(false);
   let cutStarted=false;
   const cut=inProcessDrWriterFence.withFrozenWriters(()=>{cutStarted=true;return "snapshot";});
   expect(inProcessDrWriterFence.status.frozen).toBe(true);
@@ -46,4 +48,5 @@ it("holds writer ticket until the asynchronous Better Auth operation completes",
   release();await existing;
   await expect(cut).resolves.toBe("snapshot");
   expect(inProcessDrWriterFence.status).toEqual({frozen:false,activeWriters:0});
+  expect(inProcessDrWriterFence.getAdmissionEvidence().activeByClass).toEqual({});
 });
