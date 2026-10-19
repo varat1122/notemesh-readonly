@@ -3,6 +3,14 @@
 **2026-10-18.** This branch is a *pre-deployment, offline/fixture* implementation. The current production Vault has **not** been backed up by this code. Do not merge, schedule or deploy until the gates below pass.
 
 
+## Nonstandard SQLite file gate — development-only (2026-10-19)
+
+The offline snapshot builder now refuses `*.db`, `*.sqlite3`, `*.db3` and their `-wal`/`-shm`/`-journal` sidecars. It also reads the first 16 bytes of other regular files and refuses a raw SQLite database with the standard `SQLite format 3\\0` magic under an unrecognized extension.
+
+**Why:** the encrypted snapshot previously copied unrecognized SQLite files as ordinary files. A live journal/WAL database can be torn or missing committed data if copied without SQLite's online backup protocol. Explicit fail-closed refusal avoids a deceptively successful recovery receipt. Supported `*.sqlite` files still use the online SQLite backup API followed by integrity checks.
+
+**Residual gaps:** encrypted SQLite containers, databases using an unusual header, arbitrary binary databases, SQLite snapshots that are each individually valid but taken at different instants, unknown database writers and uncoordinated Obsidian Sync are **not** proven safe. The schema/filename check is not a globally consistent production snapshot. Production create remains disabled on Railway and all DR PRs remain Draft.
+
 ## Offline Drive recovery readback — development-only (2026-10-19)
 
 The new `scripts/backup/nm-drive-recover.mjs` can recover a **previously uploaded, immutable encrypted NMDR1 bundle** from Google Drive **into a new local offline directory**. It does not create a snapshot, change Railway configuration, update Vault notes, or start a restore in Production.
