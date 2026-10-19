@@ -285,6 +285,70 @@ actual P1/P2/P3 counts for this new function cannot be claimed until the
 corresponding reviewed branch is deployed and the authenticated live
 read-only audit is invoked. This PR is not authorization to deploy.
 
+## P1/P2/P3 Dossier for a Human-Selected Note — no writes
+
+The new **read-only** `get_legacy_review_dossier(sourcePath)` MCP tool
+takes **one exact indexed historical/review Markdown path** from the
+Vault-wide P1/P2/P3 priority queue. It is not limited to NVDA or any other
+company and can drill down beyond the first four samples of any global
+issue category. It does **not** accept raw source/archive/protected
+Thesis/Portfolio/Template files as mutation candidates.
+
+The dossier returns:
+
+- The source's **actual current SHA-256 and byte length**, read from one
+  descriptor-anchored non-symlink file open; current frontmatter, size and
+  rounded mtime must still match the indexed copy or the dossier **holds**.
+- Bounded literal note-declared metadata, including historical
+  `source_records`, legacy `company`/`ticker`, `verification` and
+  `event_date`. A legacy `date` is never silently elevated to an event date.
+- Source-specific P1/P2/P3 findings evaluated against the **whole completed
+  index**, with the exact original reference/canonical hub path where found.
+- Counts and up to eight existing indexed outgoing links. Current hashes of
+  review destinations are reported only if they are safely readable. A
+  destination absent from the Markdown index is marked
+  `not_in_markdown_index`, **not "deleted"**.
+
+For P1 source provenance, the correct next action is to read the original
+source and check date/source lineage. `sourceSha256` is a checksum of
+the current Note, **not** issuer-file authenticity or original-byte archive
+preservation. Even hashing a target ChatGPT archive proves only those
+server-local bytes were read, **not** that they are independently verified.
+
+This is **not a Safe Edit preview**, a proposed body replacement or
+approval. It cannot execute any edit, update Current Thesis, verify market
+prices, trigger backups, or assert mobile Obsidian Sync. Full human review
+and a separately authorized one-note preview/diff/approval/apply/readback
+remain mandatory for any later approved correction.
+
+The entire pipeline is Development-only in stacked Draft PRs; the new
+dossier's accuracy and outcomes have been checked on temporary fixture
+Vaults and CI only. **No report of real Production P1/P2/P3 review counts
+or mutation is implied**.
+
+## Single-tool dossier hardening
+
+The existing `get_legacy_review_dossier(sourcePath)` remains the **sole**
+read-only per-note P1/P2/P3 drilldown. A second overlapping endpoint is not
+introduced. Each finding now carries a short, type-specific **human evidence
+decision** and explicit flags that no external claim was fact-checked or
+automatic write is authorized.
+
+For indexed referenced target files, `targetChecks.status` distinguishes:
+
+- `indexed_current_bytes_read`: actual local bytes observed, SHA-256 returned;
+  does **not** verify original issuer/source claims.
+- `indexed_target_stale_hold`: target disk metadata/size/mtime differs from
+  index; rebuild/reconcile before interpreting the link as current.
+- `manual_read_required_or_index_changed`: target unavailable, unsafe,
+  oversized or otherwise unreadable; **not** proof of deletion.
+- `not_in_markdown_index`: declared target absent from the indexed Markdown
+  table; do not invent archive bytes or conflate with device Sync failure.
+
+The source note itself already fails closed on stale index, hardlink/symlink,
+invalid UTF-8 or oversized bytes. All target statuses are observations,
+not independent evidence. No Safe Edit preview/apply/authorization is created.
+
 ## Future extensions (not implemented)
 
 - Human-reviewed synonym/alias matching for cross-company and sector context.

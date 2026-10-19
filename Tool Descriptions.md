@@ -390,6 +390,12 @@ index, the sync backend's state, and disk headroom: `disk.level` is `ok`,
 `warn` under 100 MB free, or `critical` under 50 MB, at which point writes
 that would not leave the reserve are refused.
 
+### get_legacy_review_dossier — read
+
+Review **one explicitly selected** historical/review Markdown note against the entire completed Vault SQLite index. The tool returns a bounded P1/P2/P3 human review dossier: exact indexed source path, SHA-256 and size from current descriptor-anchored note bytes, declared legacy provenance (bounded), a list of indexed resolved outgoing wikilinks, and exact target-status checks for source-record or canonical hub candidates. It checks the current source bytes and frontmatter against indexed metadata and holds on index incompleteness, disallowed role/path or stale snapshot.
+
+This is a **read-only metadata/traceability checklist**, not a source authenticity check, a full semantic interpretation, a financial valuation, a preview/diff/apply, or permission to change any Note. Missing from the Markdown index is NOT proof original source file is lost. Hash of a ChatGPT archive means only the bytes read, not an independent source verification.
+
 ### prepare_historical_link_edit — read
 
 A **read-only**, exact-line handoff for a human-selected historical link from

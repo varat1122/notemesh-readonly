@@ -1,6 +1,6 @@
 # Changelog
 
-Deployment surface: 27 tools covering read-only investment retrieval, historical link edit handoff (proposal only), claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
+Deployment surface: 28 tools covering read-only investment retrieval, historical link edit handoff (proposal only), claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
 Safe Edit offers ten tools on a separate resource (including original-source archive and two user attachment byte-store/inspect actions); see docs/SAFE_EDIT.md.
 Historical upstream release descriptions below are preserved.
 
@@ -740,7 +740,7 @@ and exposes it to AI assistants. One deployment per person.
 
 **What assistants can do**
 
-27 tools covering notes, attachments, daily notes, full-text search, frontmatter
+28 tools covering notes, attachments, daily notes, full-text search, frontmatter
 properties, tasks, links and tags. `delete_note` is on by default and can be
 turned off on the Settings tab — deletions stay recoverable either way, from
 Obsidian Sync's version history or the previous git commit.

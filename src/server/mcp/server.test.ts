@@ -45,6 +45,7 @@ const READ_TOOLS = [
   "assess_thesis_change_proposal",
   "daily_note",
   "find_in_note",
+  "get_legacy_review_dossier",
   "get_links",
   "get_outline",
   "get_vault_info",

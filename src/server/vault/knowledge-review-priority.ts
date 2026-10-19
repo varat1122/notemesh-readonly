@@ -110,6 +110,7 @@ export function planKnowledgeReviewPriorities(
   notes:readonly TriageNote[],
   indexComplete:boolean,
   hasResolvedLink:(source:string,target:string)=>boolean,
+  onlySourcePath?:string,
 ):KnowledgeReviewPriority {
   const countsByKind=emptyCounts(),countsByPriority=emptyBands();
   const out:KnowledgeReviewPriority={
@@ -128,7 +129,7 @@ export function planKnowledgeReviewPriorities(
   const canonicalHubs=new Set(notes.filter(n=>n.role==="company"&&
     /^01_Companies\/[A-Z][A-Z0-9.-]{0,11}\.md$/.test(n.path)).map(n=>n.path));
   for(const note of sorted){
-    if(!eligibility(note))continue;
+    if(!eligibility(note)||(onlySourcePath!==undefined&&note.path!==onlySourcePath))continue;
     out.eligibleSourceNotes++;
     let noteHasFinding=false;
     const emit=(kind:Kind,targetPath:string|null)=>{

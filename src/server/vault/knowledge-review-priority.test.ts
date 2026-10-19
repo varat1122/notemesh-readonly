@@ -148,6 +148,20 @@ describe("evidence-first human legacy note review priorities",()=>{
     expect(r.samples[0].sourcePath).toContain("Old 00.md");
     expect(r.samples[4].kind).toBe("explicit_event_date_needs_review");
   });
+  it("retrieves a selected note beyond the first four samples without weakening complete-index checks",()=>{
+    const rows=Array.from({length:12},(_,i)=>
+      note(`10_Knowledge/Company Research/Legacy Note ${String(i).padStart(2,"0")}.md`,
+        "historical_analysis",{event_date:"Unknown"}));
+    const selected=rows[11].path;
+    const one=planKnowledgeReviewPriorities(rows,true,missing,selected);
+    expect(one).toMatchObject({
+      indexedNotesConsidered:12,eligibleSourceNotes:1,findingsTotal:1,
+      sampledFindings:1,sampleTruncated:false,
+    });
+    expect(one.samples[0].sourcePath).toBe(selected);
+    const held=planKnowledgeReviewPriorities(rows,false,missing,selected);
+    expect(held).toMatchObject({status:"incomplete_index_hold",findingsTotal:0});
+  });
   it("accepts real valid zoned timestamps but rejects garbage after a valid date prefix",()=>{
     const good=planKnowledgeReviewPriorities([
       note(historical,"historical_analysis",{event_date:"2026-10-19T18:00:00+07:00"}),
