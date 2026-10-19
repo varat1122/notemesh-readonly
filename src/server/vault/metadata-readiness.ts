@@ -95,9 +95,6 @@ export function inventoryVaultMetadataReadiness(
   if(report.status!=="indexed_metadata_readiness_not_verified")return report;
   const byFolder=new Map<string,Counter>();
   const ordered=notes.slice().sort((a,b)=>a.path.localeCompare(b.path));
-  const buckets=[report.examples.historicalWithoutEntity,report.examples.withoutNavigationReferences,
-    report.examples.malformedReferenceFields];
-  let hidden=false;
   for(const n of ordered){
     const role=report.byRole[n.role]??(report.byRole[n.role]=empty());
     const folder=n.path.split("/")[0]||"(root)";
@@ -141,9 +138,8 @@ export function inventoryVaultMetadataReadiness(
       report.malformedReferenceFields++;
       sample(report.examples.malformedReferenceFields,n.path);
     }
-    if(buckets.some((b,i)=>[historicalMissing,!any,malformed][i]&&b.length===SAMPLE_LIMIT))hidden=true;
   }
-  report.sampleTruncated=hidden||report.historicalNotesWithoutEntity>SAMPLE_LIMIT||
+  report.sampleTruncated=report.historicalNotesWithoutEntity>SAMPLE_LIMIT||
     report.notesWithoutReference>SAMPLE_LIMIT||report.malformedReferenceFields>SAMPLE_LIMIT;
   report.byFolder=Object.fromEntries([...byFolder].sort(
     (a,b)=>b[1].notes-a[1].notes||a[0].localeCompare(b[0]),
