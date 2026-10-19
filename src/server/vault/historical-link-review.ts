@@ -45,7 +45,8 @@ const explicitEntity=(value:string|null):string|null=>{
 const permittedSource=(p:string)=>
   !/^(?:05_Thesis|06_Portfolio|07_Sources|09_Templates)(?:\/|$)/i.test(p);
 const safeTarget=(p:string)=>
-  p.toLowerCase().endsWith(".md")&&!/[\[\]|\r\n]/.test(p);
+  p.toLowerCase().endsWith(".md")&&!p.includes("[")&&!p.includes("]")&&
+  !p.includes("|")&&!/[\r\n]/.test(p);
 
 /**
  * All input must come from the CURRENT completed SQLite index. An incomplete
