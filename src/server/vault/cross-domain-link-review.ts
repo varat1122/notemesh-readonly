@@ -41,7 +41,8 @@ const excludedSource=(path:string,role:SchemaInspection["role"])=>
   /^(?:05_Thesis|06_Portfolio|07_Sources|09_Templates)(?:\/|$)/i.test(path);
 const validPath=(path:string)=>
   path.length<=350&&path.endsWith(".md")&&!path.startsWith("/")&&
-  !path.includes("\\")&&!/[\[\]|#^\r\n\0]/.test(path)&&
+  !path.includes("\\")&&!["[","]","|","#","^"].some(ch=>path.includes(ch))&&
+  !/[\r\n\0]/.test(path)&&
   !path.split("/").some(part=>part==="."||part===".."||part.startsWith(".")||!part);
 const validClaimId=(id:string)=>
   id.length<=120&&/^[\p{L}\p{N}][\p{L}\p{N}._:-]*$/u.test(id);
