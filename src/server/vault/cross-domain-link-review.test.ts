@@ -28,6 +28,32 @@ describe("cross-domain metadata-only review",()=>{
       provenance:"note_declared_unverified",requiresHumanReview:true,canAutoWrite:false,
     });
   });
+  it("rejects a repeated Claim ID twice inside one register, not just across files",()=>{
+    const duplicate:KnowledgeLinkNote={...register,metadata:{
+      ...register.metadata,claims:[
+        {claim_id:"AMD-OCF-FY26",metric:"operating_cash_flow",period:"FY26"},
+        {claim_id:"AMD-OCF-FY26",metric:"net_revenue",period:"FY26"},
+      ],
+    }};
+    const result=planCrossDomainLinkReview([macro,duplicate],true,none);
+    expect(result).toMatchObject({
+      candidateCount:0,ambiguousClaimReferences:1,
+      claimIndexTruncated:false,samples:[],canAutoWrite:false,
+    });
+  });
+  it("holds all Claim ID links when any indexed register exceeds its inspected row cap",()=>{
+    const huge:KnowledgeLinkNote={...register,path:"08_Daily_Weekly/Research Indexes/Large Claim Register.md",
+      metadata:{claims:Array.from({length:101},(_,i)=>({claim_id:"UNSEEN-"+i}))}};
+    const result=planCrossDomainLinkReview([macro,register,huge],true,none);
+    expect(result).toMatchObject({
+      candidateCount:0,claimIndexTruncated:true,
+      heldClaimReferences:1,ambiguousClaimReferences:0,samples:[],
+    });
+    // Explicit literal paths remain reviewable even while ID uniqueness holds.
+    const both=planCrossDomainLinkReview([industry,company,macro,register,huge],true,none);
+    expect(both).toMatchObject({candidateCount:1,claimIndexTruncated:true,heldClaimReferences:1});
+    expect(both.samples[0].relation).toBe("explicit_related_path");
+  });
   it("halts all link proposals if the index is not complete",()=>{
     const plan=planCrossDomainLinkReview([macro,industry,register,company],false,none);
     expect(plan).toMatchObject({status:"incomplete_index_hold",candidateCount:0,samples:[],
