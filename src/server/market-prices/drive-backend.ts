@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { PriceStore } from "./store.ts";
 import { PRICE_POLICY, PriceError, instrument, type InstrumentInput } from "./model.ts";
 import { collectIntoPriceStore, priceWatchlistFrom, scheduledCutoff, type RefreshOptions } from "./collector.ts";
@@ -132,6 +133,10 @@ export class DrivePriceCache {
     } finally { this.queuedQueries--; }
   }
   async refresh(options: RefreshOptions = {}) {
+    // A direct cache.refresh() is a write entry point too, not just refreshPrices().
+    // Hold admission across remote archive/catalogue publish and asynchronous
+    // collector work; callers already inside refreshPrices() reuse the scope.
+    return inProcessDrWriterFence.withWrite(async () => {
     const watchlist = priceWatchlistFrom(options), count = batchSize(), now = options.now ?? new Date();
     if (process.env.MARKET_PRICES_DRIVE_SINGLE_WRITER !== "1") throw new PriceError("drive_single_writer_required");
     if (this.busy) return { status: "collector_busy", results: [] };
@@ -192,6 +197,7 @@ export class DrivePriceCache {
         scope: "bounded_batch", universeSize: watchlist.length, remainingDue, results,
         storage: { backend: "google-drive", catalogueId: this.catalogueId, verifiedAt: this.verifiedAt, readBackVerified: !!this.catalogueId } };
     } catch (error) { throw this.failed(error); } finally { this.busy = false; }
+    });
   }
   close() { for (const item of this.cache.values()) item.store.close(); this.cache.clear(); }
 }
