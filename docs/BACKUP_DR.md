@@ -1,5 +1,20 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## Writer-class coverage register — read-only release blockers (2026-10-19)
+
+`node scripts/backup/nm-writer-coverage-register.mjs` emits a machine-readable, **source-only** writer-risk register. It **does not inspect the live Vault, Google Drive or device state** and is **not** wired into the Production create, restore or scheduling paths. It builds on the earlier source-heuristic inventory, rather than competing with it.
+
+- The register explicitly names **13 mandatory risk classes**: Vault writes, protected Safe Edit, user attachments, original-source archive, app SQLite/WAL, Better Auth, market price SQLite, Drive price publish, Git Sync, Obsidian Sync, background price collection, other processes/replicas and external devices.
+- Each locally inspectable class has exact source witnesses (path + literal token); if a known witness moves or disappears, `assertSourceWitnessRegisterStable` fails closed in the existing DR fixture CI test suite. Source mutation is a **review trigger**, never a conclusion that the writer has gone away.
+- The report separately counts write candidates outside registered witness files and lists those paths for next human investigation. These are **unclassified source candidates**, not definitive mutating operations.
+- External replica/device classes have no meaningful source-only witness. They require independent runtime quiescence evidence that a source scan cannot supply.
+- The report deliberately retains `runtimeCoverage: "not_verified"` for **every class**, `productionSnapshotReady: false`, `approvalStatus: "NO_GO"`, `independentRestoreVerified: false`. No user input, environment flag or green static test can promote them.
+
+**Known limitations:** literal witnesses may be moved into comments, or dynamic reflection/indirect libraries may hide writes; the scanner does not detect every external writer. This is an inventory stability check, **not comprehensive coverage, a production admission gate, an owner approval or a restore certificate**.
+
+**Next development milestone:** assign testable, runtime-evidence requirements for each writer class; instrument actual writer admission/drain across every relevant process and SQLite handle; independently prove Obsidian/Git subprocess exit and off-server snapshot restoration. Keep all Production backup creation guards and approval boundaries unchanged.
+
+
 ## Resource-lifetime interprocess ticket — offline fixture only (2026-10-19)
 
 Development extension of the existing `nm-interprocess-fixture-gate.mjs` — **not a replacement lock service, not a Production gate**.
