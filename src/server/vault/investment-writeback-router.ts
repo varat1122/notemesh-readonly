@@ -60,6 +60,11 @@ export interface WritebackPlan {
     paths:string[];
     missing:string[];
   };
+  historicalEventReview:{
+    status:"possible_same_event_candidates"|"none_selected_not_proof_new";
+    candidatePaths:string[];
+    duplicateAdjudicated:false;
+  };
   exactClaimReview:{status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
     classification:ReviewClass|null;matchingClaimPaths:string[];scanTruncated:boolean|null};
   routes:Route[];
@@ -131,6 +136,13 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     industry:input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
     focus,maxNotes:10,maxChars:8500
   });
+  // Only high-scoring, issuer-scoped Company Research excerpts are candidate
+  // prior events; legacy archived AI is NOT a verified fact or duplicate verdict.
+  // No similarity score by itself establishes identical original source/vintage.
+  const candidateEventPaths=pack.items.filter(x=>
+    input.domain==="company" && x.role==="research" &&
+    x.path.startsWith("10_Knowledge/Company Research/") && x.score>=110
+  ).slice(0,4).map(x=>x.path);
   const claim=input.claim;
   const claimReady=Boolean(claim&&T(claim.metric)&&T(claim.period)&&T(claim.statement).length>=8&&
     claim.value?.trim()&&claim.unit?.trim()&&input.sourceUrl?.trim()&&entities.length===1);
@@ -159,13 +171,16 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(input.sourceKind==="issuer_release"||input.sourceKind==="regulatory_filing")
     warnings.push("Source URL supplied is not proof that the original was fetched or verified.");
   if(!input.sourceUrl)warnings.push("Original source URL absent; screenshots and snippets are attributed inputs, not independently validated source records.");
+  if(candidateEventPaths.length)warnings.push("Matching-title historical research candidates require same original event/source/date review before creating a new distinct analysis; selection is not a deduplication verdict.");
   if(input.inputFormat!=="text"&&!verifiedAttachment)
     warnings.push("No verified, matching original image/PDF attachment bytes; call scoped Safe Edit store_user_attachment first.");
   const routes:Route[]=[
     {kind:"raw_input",action:rawExists?"link_existing_or_hold":"candidate_create",path:rawPath,
       reason:rawExists?"A note with the deterministic intake ID already exists; inspect identity/hash before linking.":"Preserve exact supplied text and attribution with a traceable link to actual image/PDF if available.",requiresReview:true},
     {kind:"research_review",action:reviewExists?"link_existing_or_hold":"candidate_create",path:reviewPath,
-      reason:"Separate sourced statements, user input, broker/management commentary, AI interpretation, contrary evidence, event chronology and thesis delta.",requiresReview:true}
+      reason:candidateEventPaths.length?
+        "Possible prior event research exists: inspect original source, event date, metric and period before creating a distinct analysis; never count reposts twice.":
+        "Separate sourced statements, user input, broker/management commentary, AI interpretation, contrary evidence, event chronology and thesis delta.",requiresReview:true}
   ];
   if(timelinePath)
     routes.push({kind:"company_timeline_candidate",
@@ -202,6 +217,10 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     chronology:{eventDate,publicationDate,importedAt:"not_yet_written"},
     historical:{source:"bounded_lexical_context_not_exhaustive",
       selected:pack.selected,paths:pack.items.map(x=>x.path),missing:pack.incomplete},
+    historicalEventReview:{
+      status:candidateEventPaths.length?"possible_same_event_candidates":"none_selected_not_proof_new",
+      candidatePaths:candidateEventPaths,duplicateAdjudicated:false
+    },
     exactClaimReview:{status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
     routes,gates:{

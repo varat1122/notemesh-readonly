@@ -12,7 +12,7 @@ beforeEach(()=>{
   vi.resetModules();
 });
 afterEach(()=>{
-  try{const store=requireDb();store?.close();}catch{}
+  try{const store=requireDb();store?.close();}catch{/* Fixture may not have opened a database. */}
   fs.rmSync(root,{recursive:true,force:true});
   delete process.env.DATA_DIR;
 });

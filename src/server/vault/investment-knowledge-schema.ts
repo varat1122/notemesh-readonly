@@ -105,7 +105,7 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   const independenceAssessment:SchemaInspection["independenceAssessment"]=
     normalizedSourceType==="archived_ai"||(!normalizedSourceType&&role==="archive")
       ?"not_independent_archived_ai":
-    Boolean(sourceRaw&&["user_supplied_chatgpt_summary","user_supplied_chat_summary",
+    (sourceRaw!==null&&["user_supplied_chatgpt_summary","user_supplied_chat_summary",
       "user_supplied_chat_archive_summary"].includes(sourceRaw.toLowerCase()))
       ?"not_independent_derivative_summary":"not_assessed";
   if(sourceRaw&&!declaredSourceType&&!alias)

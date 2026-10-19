@@ -133,3 +133,52 @@ describe("multilingual read-only writeback router",()=>{
   expect(p.routes.find(x=>x.kind==="industry_context_candidate")).toBeDefined();
  });
 });
+
+
+describe("new intake reconciles legacy company navigation before proposing Vault writes", () => {
+ it("links to the retained historical issuer index and never implies absent history", async () => {
+  await add("10_Knowledge/Indexes/Company - MDB.md",
+   "# Legacy MDB history\\n\\nArchived notes in older Company Index; not independently verified.");
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route(base);
+  expect(p.status).toBe("read_only_plan_not_written");
+  expect(p.historical.paths).toContain("10_Knowledge/Indexes/Company - MDB.md");
+  expect(p.historical.missing.some(x=>x.includes("No legacy Company Index found for MDB"))).toBe(false);
+  expect(p.historical.missing).not.toContain("08_Daily_Weekly/Research Indexes/Company - MDB.md");
+  expect(p.gates.canAutoWrite).toBe(false);
+  expect(p.gates.canAutoUpdateThesis).toBe(false);
+ });
+});
+
+
+describe("P0 new-intake reconciliation against archived company events", () => {
+ it("flags possible same-event CRWD CLEAR archive before proposing a distinct research review", async () => {
+  const event="10_Knowledge/Company Research/2026-08-31 - CrowdStrike × CLEAR - Stock160726-190.md";
+  await add(event,[
+    "---","company: [CRWD]","verification: not_reverified","source_type: chatgpt_history","---",
+    "# CrowdStrike × CLEAR identity verification",
+    "CRWD historical user-shared CLEAR enterprise identity collaboration."
+  ].join("\n"));
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const plan=route({
+    domain:"company",entities:["CRWD"],
+    topic:"CrowdStrike CLEAR identity verification partnership",
+    inputFormat:"text",sourceKind:"archived_chat",
+    extractedText:"CrowdStrike $CRWD CLEAR partnership biometric identity verification: this is a historical user-shared account, not newly issuer-verified evidence."
+  });
+  expect(plan.historical.paths).toContain(event);
+  expect(plan.historicalEventReview.status).toBe("possible_same_event_candidates");
+  expect(plan.historicalEventReview.candidatePaths).toContain(event);
+  expect(plan.historicalEventReview.duplicateAdjudicated).toBe(false);
+  expect(plan.routes.find(x=>x.kind==="research_review")?.reason).toContain("Possible prior event");
+  expect(plan.gates.canAutoWrite).toBe(false);
+  expect(plan.gates.canAutoUpdateThesis).toBe(false);
+ });
+ it("does not label a missing selected historical event as proven new", async () => {
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const plan=route(base);
+  expect(plan.historicalEventReview.duplicateAdjudicated).toBe(false);
+  expect(["possible_same_event_candidates","none_selected_not_proof_new"])
+    .toContain(plan.historicalEventReview.status);
+ });
+});

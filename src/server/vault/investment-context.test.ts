@@ -174,3 +174,75 @@ Official-file source candidate (no verified numeric facts in this synthetic test
     expect(()=>build({question:"  "})).toThrow(/Question/);
   });
 });
+
+
+describe("legacy Company Index routing across both retained Vault locations", () => {
+  it("retrieves a canonical older history index and never falsely reports it missing", async () => {
+    const build=await fixture();
+    const legacy="10_Knowledge/Indexes/Company - NVDA.md";
+    await addExtra(legacy,"# Company - NVDA\\n\\nArchived historical NVIDIA source-linked events; not new issuer verification.");
+    const p=build({question:"NVDA historical investment research", issuers:["NVDA"], maxNotes:16});
+    expect(p.items.map(x=>x.path)).toContain(legacy);
+    expect(p.incomplete.some(x=>x.includes("No legacy Company Index found for NVDA"))).toBe(false);
+    expect(p.incomplete).not.toContain("08_Daily_Weekly/Research Indexes/Company - NVDA.md");
+    // Old navigation must not be mistaken for independently verified primary evidence.
+    expect(p.items.find(x=>x.path===legacy)?.role).toBe("research");
+    expect(p.items.find(x=>x.path===legacy)?.schemaCompatibility.canAutoUpdateThesis).toBe(false);
+  });
+  it("preserves discoverability of both indexes if both coexist without bulk moving history", async () => {
+    const build=await fixture();
+    const newer="08_Daily_Weekly/Research Indexes/Company - NVDA.md";
+    const older="10_Knowledge/Indexes/Company - NVDA.md";
+    await addExtra(newer,"# Newer navigational view NVDA\\nExisting source note links.");
+    await addExtra(older,"# Older navigational view NVDA\\nHistorical chat event links.");
+    const p=build({question:"NVDA historic company events", issuers:["NVDA"],maxNotes:16});
+    expect(p.items.map(x=>x.path)).toContain(newer);
+    expect(p.items.map(x=>x.path)).toContain(older);
+    expect(p.incomplete.some(x=>x.includes("No legacy Company Index"))).toBe(false);
+  });
+});
+
+
+describe("old event retrieval for safe new-input reconciliation", () => {
+  it("prefers the original CRWD × CLEAR archived analysis over generic CRWD recaps", async () => {
+    const build=await fixture();
+    await addExtra("01_Companies/CRWD.md", "# CRWD\nCrowdStrike enterprise cybersecurity.");
+    const eventPath="10_Knowledge/Company Research/2026-08-31 - CrowdStrike × CLEAR - Stock160726-190.md";
+    await addExtra(eventPath, [
+      "---", "type: knowledge_note", "company: [CRWD]", "verification: not_reverified",
+      "source_records:", "  - 07_Sources/ChatGPT/Entries/Stock 160726/Stock 160726 - 0190.md",
+      "---", "# CrowdStrike × CLEAR biometric identity partnership",
+      "CRWD x CLEAR archived user conversation, not issuer verified."
+    ].join("\n"));
+    await addExtra("10_Knowledge/Company Research/CRWD - Generic software recap.md",
+      "# CRWD software overview\nHistoric CRWD AI security growth overview; no CLEAR partnership.");
+    await addExtra("10_Knowledge/Company Research/ASML - CLEAR wafer process.md",
+      "# ASML CLEAR wafer process\nASML source unrelated to CRWD security.");
+    const p=build({
+      question:"CRWD CrowdStrike CLEAR biometric identity partnership Stock160726 190",
+      issuers:["CRWD"],maxNotes:14,maxChars:14000
+    });
+    const paths=p.items.map(x=>x.path);
+    expect(paths).toContain(eventPath);
+    expect(paths).not.toContain("10_Knowledge/Company Research/ASML - CLEAR wafer process.md");
+    const event=p.items.find(x=>x.path===eventPath);
+    expect(event?.declaredVerification).toBe("not_reverified");
+    expect(event?.schemaCompatibility.canAutoUpdateThesis).toBe(false);
+  });
+});
+
+
+describe("multi-issuer archived research matching", () => {
+  it("retains a jointly tagged INTC/CRWD archived security event for the CRWD question", async () => {
+    const build=await fixture();
+    const target="10_Knowledge/Company Research/2026-09-02 - INTC × CRWD security.md";
+    await addExtra(target, [
+      "---", "company: [INTC, CRWD]", "verification: not_reverified", "---",
+      "# Intel INTC and CRWD security",
+      "CRWD silicon and cloud security discussion from archived chat, not issuer verified."
+    ].join("\n"));
+    const p=build({question:"CRWD INTC silicon security historical event",issuers:["CRWD"],maxNotes:14});
+    expect(p.items.map(x=>x.path)).toContain(target);
+    expect(p.items.find(x=>x.path===target)?.declaredVerification).toBe("not_reverified");
+  });
+});
