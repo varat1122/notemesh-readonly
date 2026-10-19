@@ -60,6 +60,35 @@ backup activation or deployment. A source-level unit test and scratch Vault +
 SQLite integration tests cover incomplete index, exact issuer matching,
 ambiguous destinations, protected paths and unchanged original note bytes.
 
+## Targeted read-only handoff to Safe Edit (development-only)
+
+The read-only MCP endpoint now exposes `prepare_historical_link_edit` with
+`sourcePath`, `targetPath`, and `anchorLine`. Use it only **after reading
+and understanding both notes**. The operator selects one exact, unique prose
+line in the existing source note; the service refuses to guess a placement or
+reuse a line from frontmatter, code fences, tables or ambiguous text.
+
+The handoff independently confirms that the complete index still matches
+an eligible exact-entity historical link proposal, that the source has no
+indexed link to the destination, and that actual on-disk metadata still agrees
+with the index. Both files are read through descriptor-anchored non-symlink
+opens; before/target SHA-256 hashes are returned. Size, UTF-8 validity and
+Safe Edit's 100 KB Markdown write cap are checked before proposing a patch.
+
+The response contains a **not-yet-submitted** Safe Edit-compatible
+`{path,reason,change:{kind:"replace",oldText,newText}}` template. The new
+text inserts a neutral **navigation-only** wikilink after the selected prose
+line; it never implies source verification or thesis endorsement. A separately
+chosen fresh `operationId` is needed when explicitly invoking Safe Edit's
+`preview_edit`. Its own version, conflict, admin approval, exact-token
+apply, readback and Sync checks are **not bypassed**.
+
+There is no automatic note editing, Safe Edit OAuth grant or automatic
+operation ID reuse. If the index is incomplete, the source changed, a link
+already resolves, the role/entity is inconsistent or the anchor is unsafe,
+the handoff fails closed. The returned SHA is evidence of what was read, **not**
+proof that the source remains unchanged when approval/apply occurs.
+
 ## Future extensions (not implemented)
 
 - Human-reviewed synonym/alias matching for cross-company and sector context.
