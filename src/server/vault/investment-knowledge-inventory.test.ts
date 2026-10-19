@@ -202,6 +202,31 @@ describe("full indexed vault metadata audit",()=>{
      candidateCount:0,ambiguousClaimReferences:1,samples:[],
    });
  });
+ it("profiles readiness across protected archives, historical notes and macro without editing existing Vault bytes",async()=>{
+   const historical="10_Knowledge/Company Research/Old Semiconductor Research.md";
+   const macro="10_Knowledge/Macro and Markets/US Rates.md";
+   const thesis="05_Thesis/AMD - Current Thesis.md";
+   await add(historical,["---","type: knowledge_note","source_type: chatgpt_history",
+     "verification: not_reverified","date: 2026-08-01","---"].join("\n"),"# Historical research");
+   await add(macro,["---","type: macro_research_note","entity: United States",
+     "related_paths:","  - 05_Thesis/AMD - Current Thesis.md","---"].join("\n"),"# US Rates");
+   await add(thesis,["---","type: current_thesis","entity: AMD","status: draft",
+     "related_claim_ids:","  - AMD-OCF-FY26","---"].join("\n"),"# Unendorsed Thesis");
+   const paths=[historical,macro,thesis];
+   const before=paths.map(p=>fs.readFileSync(path.join(vault,p),"utf8"));
+   const {indexer}=await import("./indexer");
+   await indexer().rebuild();
+   const out=(await report()).metadataReadiness;
+   expect(out).toMatchObject({
+     status:"indexed_metadata_readiness_not_verified",scanned:3,
+     eligibleNavigationSources:2,notesWithAnyReference:1,
+     notesWithoutReference:1,historicalNotesWithoutEntity:1,
+     canAutoWrite:false,canAutoUpdateThesis:false,
+   });
+   expect(out.examples.historicalWithoutEntity).toEqual([historical]);
+   expect(out.byRole.thesis).toMatchObject({notes:1,editableNavigationSources:0});
+   expect(paths.map(p=>fs.readFileSync(path.join(vault,p),"utf8"))).toEqual(before);
+ });
  it("detects missing source, bad claim fields and unresolved wikilinks while preserving counts",async()=>{
   await add("08_Daily_Weekly/Research Indexes/Bad Claim.md",
     ["---","type: investment_structured_claim_register","domain: company","entity: AMD",
