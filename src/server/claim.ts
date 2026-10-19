@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { audit } from "./audit";
 import { db } from "./db";
+import { inProcessDrWriterFence } from "./backup/writer-fence";
 
 // Claiming an unconfigured instance.
 //
@@ -121,7 +122,12 @@ type ExecSource = { exec(sql: string): unknown };
 
 /** Install the guard. Idempotent; the user table must already exist. */
 export function installSingleAdminGuard(source: ExecSource = db()): void {
-  source.exec(SINGLE_ADMIN_TRIGGER);
+  // The migration caller already holds an async Better Auth writer ticket, but
+  // this exported DDL helper must reject a direct invocation during a DR cut.
+  // Admit before SQLite exec; nested calls reuse their parent admission.
+  inProcessDrWriterFence.withWriteSync(() => {
+    source.exec(SINGLE_ADMIN_TRIGGER);
+  }, "better_auth_adapter");
 }
 
 /** True for the error an insert gets when the guard refuses it. */
