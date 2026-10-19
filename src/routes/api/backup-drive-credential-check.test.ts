@@ -91,3 +91,11 @@ it("rejects Google scope escalation", async () => {
   expect(response.status).toBe(502);
   expect(await response.text()).toContain("dr_refresh_scope_invalid");
 });
+
+it("blocks direct Better Auth adapter before staging credential smoke test during freeze",async()=>{
+  const {inProcessDrWriterFence:fence}=await import("~/server/backup/writer-fence");
+  await fence.withFrozenWriters(async()=>{
+    await expect(call({origin})).rejects.toThrow("backup_writer_freeze_active");
+    expect(fence.getAdmissionEvidence().activeWriters).toBe(0);
+  });
+});

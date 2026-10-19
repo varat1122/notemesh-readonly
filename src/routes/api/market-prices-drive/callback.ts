@@ -1,11 +1,12 @@
 import type { APIEvent } from "@solidjs/start/server";
+import { inProcessDrWriterFence } from "~/server/backup/writer-fence";
 import { auth, runAuthMigrations } from "~/server/auth";
 import { env } from "~/server/env";
 import { finishDriveConsent } from "~/server/market-prices/drive-auth";
 import { driveAdminHeaders as headers, prepareDriveCredential } from "~/server/market-prices/drive-admin";
 
 export async function GET({ request }: APIEvent) {
-  await runAuthMigrations(); const admin = await auth.api.getSession({ headers: request.headers });
+  await runAuthMigrations(); const admin = await inProcessDrWriterFence.withWrite(() => auth.api.getSession({ headers: request.headers }), "better_auth_adapter");
   if (!admin) return new Response("Administrator session required. Reconnect from the signed-in setup page.", { status: 401, headers });
   const url = new URL(request.url);
   try {

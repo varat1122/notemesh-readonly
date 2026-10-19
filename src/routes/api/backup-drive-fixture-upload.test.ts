@@ -75,3 +75,12 @@ it("issues exactly one explicit Google Drive synthetic write after admin CSRF pr
   expect((await POST(event({origin}))).status).toBe(409);
   expect(vars.driveRuns).toBe(1);
 });
+
+it("blocks staging fixture-upload authentication during DR freeze before Drive side effects",async()=>{
+  const {inProcessDrWriterFence:fence}=await import("~/server/backup/writer-fence");
+  await fence.withFrozenWriters(async()=>{
+    await expect(POST(event({origin}))).rejects.toThrow("backup_writer_freeze_active");
+    expect(vars.driveRuns).toBe(0);
+    expect(fence.getAdmissionEvidence().activeWriters).toBe(0);
+  });
+});

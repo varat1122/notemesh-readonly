@@ -104,7 +104,14 @@ export async function getSetupPage() {
 export async function getKeysPage() {
   "use server";
   await requireAdmin();
-  const keys = await auth.api.listApiKeys({ headers: headers() }).catch(() => []);
+  const keys = await inProcessDrWriterFence.withWrite(
+    () => auth.api.listApiKeys({ headers: headers() }),
+    "better_auth_adapter",
+  ).catch((error: unknown) => {
+    // A DR freeze is admission refusal, not an empty API-key list.
+    if (error instanceof Error && error.message === "backup_writer_freeze_active") throw error;
+    return [];
+  });
   return {
     baseUrl: env.baseUrl,
     apiKeys: (Array.isArray(keys) ? keys : ((keys as any)?.apiKeys ?? [])).map((k: any) => ({
@@ -187,7 +194,14 @@ export async function getSecurityPage() {
   await requireAdmin();
   const d = db();
   const count = (sql: string) => (d.prepare(sql).get() as { n: number }).n;
-  const keys = await auth.api.listApiKeys({ headers: headers() }).catch(() => []);
+  const keys = await inProcessDrWriterFence.withWrite(
+    () => auth.api.listApiKeys({ headers: headers() }),
+    "better_auth_adapter",
+  ).catch((error: unknown) => {
+    // A DR freeze is admission refusal, not an empty API-key list.
+    if (error instanceof Error && error.message === "backup_writer_freeze_active") throw error;
+    return [];
+  });
   const keyCount = (Array.isArray(keys) ? keys : ((keys as any)?.apiKeys ?? [])).length;
   const url = env.baseUrl;
   return {
