@@ -390,6 +390,12 @@ index, the sync backend's state, and disk headroom: `disk.level` is `ok`,
 `warn` under 100 MB free, or `critical` under 50 MB, at which point writes
 that would not leave the reserve are refused.
 
+### list_legacy_review_queue — read
+
+Enumerate **every eligible historical/review note in the complete current Markdown index**, then show a bounded page of exact note paths with P1 (source/chronology), P2 (attribution), P3 (navigation), or `all` filtering. Inputs: `priority`, `limit` (1–30, default 20), `afterPath` (exact path cursor from preceding page). Each response includes index-scoped counts, per-note metadata findings, a next cursor when applicable, and explicit no-write/no-verification markers.
+
+This is **not** a scan of absent original bytes, a verified primary evidence census, an approval, or a stable transactional snapshot across live calls. The order can change when Sync or indexing changes. For coverage acceptance, test against an independently isolated immutable Vault snapshot; for full note inspection continue with `get_legacy_review_dossier` and then an evidence-driven human review. No Safe Edit proposal, bulk rewrite, or Production mutation is executed.
+
 ### get_legacy_review_decision_plan — read
 
 Prepare a **draft-only decision worksheet** using a fresh exact-note dossier from `get_legacy_review_dossier`. Inputs: `sourcePath`, a caller-selected disposition (`no_change_needed`, `missing_evidence`, `needs_source_verification`, `metadata_correction_candidate`, `navigation_link_candidate`, `duplicate_or_conflicting_evidence`, `unresolved`) and optional unverified rationale.

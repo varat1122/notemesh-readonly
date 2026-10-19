@@ -32,6 +32,31 @@ export interface ReviewPriorityItem {
   requiresFullNoteAndSourceReview:true;
   canAutoWrite:false;
 }
+export type ReviewQueuePriority="all"|"P1_provenance_or_chronology"|
+  "P2_attribution_or_scope"|"P3_navigation_only";
+export interface ReviewQueueSpec {
+  priority:ReviewQueuePriority;
+  afterPath?:string;
+  limit:number;
+}
+export interface ReviewQueueItem {
+  sourcePath:string;
+  highestPriority:Band;
+  findings:ReviewPriorityItem[];
+  canAutoWrite:false;
+}
+export interface ReviewQueuePage {
+  priority:ReviewQueuePriority;
+  afterPath:string|null;
+  limit:number;
+  matchedNotesAcrossCompleteIndex:number;
+  matchedNotesAfterCursor:number;
+  hasMore:boolean;
+  nextCursor:string|null;
+  items:ReviewQueueItem[];
+  evidenceVerified:false;
+  stableAcrossRequests:false;
+}
 export interface KnowledgeReviewPriority {
   status:"review_queue_index_complete_not_verified"|"incomplete_index_hold";
   indexedNotesConsidered:number;
@@ -44,6 +69,7 @@ export interface KnowledgeReviewPriority {
   sampleTruncated:boolean;
   samples:ReviewPriorityItem[];
   recommendations:string[];
+  queue?:ReviewQueuePage;
   canAutoWrite:false;
   canAutoUpdateThesis:false;
 }
@@ -111,7 +137,20 @@ export function planKnowledgeReviewPriorities(
   indexComplete:boolean,
   hasResolvedLink:(source:string,target:string)=>boolean,
   onlySourcePath?:string,
+  queueSpec?:ReviewQueueSpec,
 ):KnowledgeReviewPriority {
+  // Pagination is deliberately read-only and based on a completed, *current*
+  // index. This is not an atomic snapshot across separate MCP requests.
+  if(queueSpec&&(
+    !Number.isInteger(queueSpec.limit)||queueSpec.limit<1||queueSpec.limit>30||
+    !["all",...BANDS].includes(queueSpec.priority)||
+    (queueSpec.afterPath!==undefined&&(
+      typeof queueSpec.afterPath!=="string"||!validPath(queueSpec.afterPath)
+    ))
+  ))throw Error("legacy_review_queue_invalid_request");
+  const queueItems:ReviewQueueItem[]=[];
+  let matchedNotesAcrossCompleteIndex=0,matchedNotesAfterCursor=0;
+  let queueHasMore=false;
   const countsByKind=emptyCounts(),countsByPriority=emptyBands();
   const out:KnowledgeReviewPriority={
     status:indexComplete&&notes.length<=MAX_NOTES?
@@ -123,6 +162,8 @@ export function planKnowledgeReviewPriorities(
     canAutoWrite:false,canAutoUpdateThesis:false,
   };
   if(out.status==="incomplete_index_hold")return out;
+  if(queueSpec?.afterPath&&!notes.some(n=>n.path===queueSpec.afterPath))
+    throw Error("legacy_review_queue_cursor_not_indexed");
   const allPaths=new Set(notes.map(n=>n.path));
   const byKind=new Map<Kind,ReviewPriorityItem[]>();
   const sorted=notes.slice().sort((a,b)=>a.path.localeCompare(b.path));
@@ -132,6 +173,7 @@ export function planKnowledgeReviewPriorities(
     if(!eligibility(note)||(onlySourcePath!==undefined&&note.path!==onlySourcePath))continue;
     out.eligibleSourceNotes++;
     let noteHasFinding=false;
+    const noteFindings:ReviewPriorityItem[]=[];
     const emit=(kind:Kind,targetPath:string|null)=>{
       // Deduplicate by (note, category). The sample path is the first exact
       // matching declared target, not a guessed "most relevant" source.
@@ -146,6 +188,11 @@ export function planKnowledgeReviewPriorities(
           requiresFullNoteAndSourceReview:true,canAutoWrite:false});
       }
       byKind.set(kind,group);
+      if(queueSpec)noteFindings.push({
+        sourcePath:note.path,targetPath,priority:priority(kind),kind,
+        reason:"indexed_metadata_review_only_not_a_verified_error",
+        requiresFullNoteAndSourceReview:true,canAutoWrite:false,
+      });
     };
     const fm=note.metadata;
     const raw=fm.source_records;
@@ -189,9 +236,28 @@ export function planKnowledgeReviewPriorities(
       }
     }
     if(noteHasFinding)out.notesWithAtLeastOneFinding++;
+    if(queueSpec&&noteFindings.some(f=>
+      queueSpec.priority==="all"||f.priority===queueSpec.priority)){
+      matchedNotesAcrossCompleteIndex++;
+      if(!queueSpec.afterPath||note.path.localeCompare(queueSpec.afterPath)>0){
+        matchedNotesAfterCursor++;
+        if(queueItems.length<queueSpec.limit){
+          const highestPriority=BANDS.find(b=>noteFindings.some(f=>f.priority===b))!;
+          queueItems.push({sourcePath:note.path,highestPriority,
+            findings:noteFindings,canAutoWrite:false});
+        }else queueHasMore=true;
+      }
+    }
   }
   out.samples=KIND_ORDER.flatMap(kind=>byKind.get(kind)??[]);
   out.sampledFindings=out.samples.length;
   out.sampleTruncated=out.findingsTotal>out.sampledFindings;
+  if(queueSpec)out.queue={
+    priority:queueSpec.priority,afterPath:queueSpec.afterPath??null,
+    limit:queueSpec.limit,matchedNotesAcrossCompleteIndex,
+    matchedNotesAfterCursor,hasMore:queueHasMore,
+    nextCursor:queueHasMore?queueItems[queueItems.length-1].sourcePath:null,
+    items:queueItems,evidenceVerified:false,stableAcrossRequests:false,
+  };
   return out;
 }

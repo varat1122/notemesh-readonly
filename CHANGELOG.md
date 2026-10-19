@@ -2,9 +2,11 @@
 
 ## Unreleased (development branch only; no production deployment)
 
+- Added P1/P2/P3 read-only, whole-index historical review queue pages with deterministic cursor selection. Output is capped to 30 notes per call; link/evidence correctness, immutable snapshots and device sync are NOT implied.
+
 - Added a read-only, caller-selected legacy review disposition worksheet linked to an exact current dossier, with explicit evidence gaps and unapproved change-log draft. No persistent review approval, Vault edit, Safe Edit preview, or independent claim verification.
 
-Deployment surface: 29 tools covering read-only investment retrieval, historical link edit handoff (proposal only), claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
+Deployment surface: 30 tools covering read-only investment retrieval, historical link edit handoff (proposal only), claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
 Safe Edit offers ten tools on a separate resource (including original-source archive and two user attachment byte-store/inspect actions); see docs/SAFE_EDIT.md.
 Historical upstream release descriptions below are preserved.
 
