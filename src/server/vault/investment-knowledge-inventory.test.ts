@@ -227,6 +227,37 @@ describe("full indexed vault metadata audit",()=>{
    expect(out.byRole.thesis).toMatchObject({notes:1,editableNavigationSources:0});
    expect(paths.map(p=>fs.readFileSync(path.join(vault,p),"utf8"))).toEqual(before);
  });
+ it("recognizes actual legacy company arrays and canonical hubs while preserving all historical bytes",async()=>{
+   const hub="01_Companies/ASML.md";
+   const history="10_Knowledge/Company Research/ASML — Historical Research.md";
+   const linked="10_Knowledge/Company Research/ASML — Already Linked.md";
+   const source="07_Sources/ChatGPT/Entries/ASML Original.md";
+   await add(hub,["---","type: company_hub","status: historical_research",
+     "verification: not_reverified","---"].join("\n"),"# ASML canonical hub");
+   const legacy=["---","type: knowledge_note","date: '2026-07-16'",
+     "company: ['ASML']","theme: ['AI Infrastructure', 'Semiconductor Equipment']",
+     "source_type: chatgpt_history","verification: not_reverified",
+     "source_records:","  - 07_Sources/ChatGPT/Entries/ASML Original.md","---"].join("\n");
+   await add(history,legacy,"# Archived historical analysis\nThis is not independently verified.");
+   await add(linked,legacy,"# Prior research\n[[01_Companies/ASML]]");
+   await add(source,["---","type: chatgpt_archive","---"].join("\n"),"# Original source");
+   const paths=[hub,history,linked,source];
+   const original=paths.map(p=>fs.readFileSync(path.join(vault,p),"utf8"));
+   const {indexer}=await import("./indexer");await indexer().rebuild();
+   const reportResult=await report();
+   const r=reportResult.linkHealth.legacyCompanyReview;
+   expect(r).toMatchObject({
+     status:"read_only_proposals",indexedNotesConsidered:4,
+     eligibleHistoricalAndReviewNotes:2,singleLegacyCompanyCandidates:1,
+     alreadyLinkedToHub:1,canAutoWrite:false,canAutoUpdateThesis:false,
+   });
+   expect(r.declaredFieldCounts).toMatchObject({company:2,theme:2,source_records:2});
+   expect(r.samples).toContainEqual(expect.objectContaining({
+     sourcePath:history,targetPath:hub,declaredField:"company",
+     provenance:"legacy_frontmatter_not_primary_verified",
+   }));
+   expect(paths.map(p=>fs.readFileSync(path.join(vault,p),"utf8"))).toEqual(original);
+ });
  it("detects missing source, bad claim fields and unresolved wikilinks while preserving counts",async()=>{
   await add("08_Daily_Weekly/Research Indexes/Bad Claim.md",
     ["---","type: investment_structured_claim_register","domain: company","entity: AMD",
