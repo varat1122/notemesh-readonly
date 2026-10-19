@@ -238,6 +238,14 @@ export async function main(argv=process.argv.slice(2)) {
     const kind=flags.get("--kind")||"fixture";
     if(!flags.has("--data-dir")||!flags.has("--out") || !KINDS.has(kind))throw Error("Require --data-dir, --out and valid --kind");
     if(!flags.get("--offline-confirmed") && !flags.get("--fixture-only"))throw Error("Refusing live data: --offline-confirmed or --fixture-only required");
+    // Fail closed on any Railway process: a manual --offline-confirmed flag
+    // cannot prove that the deployed service, Sync and SQLite writers stopped.
+    // This CLI remains offline/fixture-only until a separately audited,
+    // service-wide snapshot coordinator and cross-process lease exist.
+    if (process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID ||
+        process.env.RAILWAY_ENVIRONMENT_ID || process.env.RAILWAY_ENVIRONMENT_NAME ||
+        process.env.RAILWAY_PROJECT_NAME || process.env.RAILWAY_SERVICE_NAME)
+      throw Error("backup_create_refused_on_railway_without_coordinated_snapshot");
     const resolvedData=fs.realpathSync(data);
     if(flags.get("--fixture-only") && (inside("/data",resolvedData) ||
       inside(clean(process.env.DATA_DIR||"/data"),resolvedData) ||
@@ -248,6 +256,12 @@ export async function main(argv=process.argv.slice(2)) {
     if(process.platform==="linux" && !fs.realpathSync(data).startsWith(path.sep))
       throw Error("Invalid resolved source root");
     await fsp.mkdir(out,{recursive:true,mode:0o700});
+    // Lexical comparisons above do not catch aliases: --out may traverse a
+    // symlink into the source (or its parent), causing recursive self-capture.
+    // Check the real destination BEFORE writing any encrypted bundle.
+    const resolvedOut=fs.realpathSync(out);
+    if(inside(resolvedData,resolvedOut) || inside(resolvedOut,resolvedData))
+      throw Error("Resolved backup output overlaps source data directory");
     const stage=await fsp.mkdtemp(path.join(os.tmpdir(),"notemesh-stage-"));
     const target=path.join(out,"notemesh-"+kind+"-"+new Date().toISOString().replace(/[:.]/g,"-")+"-"+randomBytes(4).toString("hex")+".nmb");
     try {
