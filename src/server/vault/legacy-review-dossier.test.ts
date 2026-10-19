@@ -121,6 +121,31 @@ describe("read-only exact-source historical P1/P2/P3 dossier",()=>{
     expect(res.indexedOutgoingLinks.count).toBe(2);
     expect(res.indexedOutgoingLinks.truncated).toBe(false);
   });
+  it("separates changed indexed target from physically unreadable target, without auto repair",async()=>{
+    put(old,fm,"# Historical note requiring original review");
+    put(rawSource,"---\ntype: chatgpt_archive\n---","# Captured source");
+    put(hub,"---\ntype: company_hub\n---","# Hub");
+    await rebuild();
+    const {getLegacyReviewDossier}=await import("./legacy-review-dossier");
+    fs.appendFileSync(path.join(vault,rawSource),"\nChanged since index");
+    const changed=getLegacyReviewDossier(old);
+    expect(changed.targetChecks).toContainEqual({
+      targetPath:rawSource,status:"indexed_target_stale_hold",
+      sha256:null,independentOriginalVerified:false,
+    });
+    expect(changed.findings.find(x=>x.kind==="declared_source_path_without_resolved_link"))
+      .toMatchObject({
+        originalClaimFactCheckedThisCall:false,requiresHumanReview:true,
+      });
+    expect(changed.findings[0].humanDecisionRequired).toContain("event date");
+    fs.unlinkSync(path.join(vault,rawSource));
+    const unavailable=getLegacyReviewDossier(old);
+    expect(unavailable.targetChecks).toContainEqual({
+      targetPath:rawSource,status:"manual_read_required_or_index_changed",
+      sha256:null,independentOriginalVerified:false,
+    });
+    expect(unavailable.canAutoWrite).toBe(false);
+  });
   it("flags absent source locator in markdown index without claiming real source deleted",async()=>{
     put(old,fm,"# Dated historical note");
     put(hub,"---\ntype: company_hub\n---","# Hub");
