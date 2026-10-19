@@ -96,7 +96,10 @@ function declaredCodes(v:unknown):null|string[] {
 const isCalendar=(v:string)=> {
   if(!/^\d{4}-\d\d-\d\d(?:T.*)?$/.test(v))return false;
   const date=v.slice(0,10),d=new Date(date+"T00:00:00Z");
-  return !Number.isNaN(d.valueOf())&&d.toISOString().slice(0,10)===date;
+  if(Number.isNaN(d.valueOf())||d.toISOString().slice(0,10)!==date)return false;
+  if(v.length===10)return true;
+  if(!/^\d{4}-\d\d-\d\dT(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(v))return false;
+  return !Number.isNaN(Date.parse(v));
 };
 
 /**
