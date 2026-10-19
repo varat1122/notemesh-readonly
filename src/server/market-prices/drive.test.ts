@@ -5,6 +5,7 @@ import path from "node:path";
 import { PriceStore } from "./store";
 import { PriceError, instrument, type PriceBar, type InstrumentInput } from "./model";
 import { DrivePriceCache } from "./drive-backend";
+import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { packDriveArchive, unpackDriveArchive, GoogleDriveArchives, DRIVE_DB_LIMIT, type ArchiveRepository } from "./drive-archive";
 import { beginDriveConsent, finishDriveConsent, sealDriveCredential, driveAccessToken, DRIVE_SCOPE } from "./drive-auth";
 import { prepareDriveCredential, claimDriveCredential } from "./drive-admin";
@@ -32,6 +33,52 @@ class MemoryRepository implements ArchiveRepository {
   async get(id: string) { this.reads++; const value = this.files.get(id); if (!value) throw Error("missing fixture"); return value; }
   async publish(bytes: Buffer) { const id = "archive" + ++this.writes; const copy = Buffer.from(bytes); this.files.set(id, copy); return { bytes: copy, id }; }
 }
+
+it("DR freeze refuses direct DrivePriceCache.refresh before any remote or local writer work",async()=>{
+  const partitions = new MemoryRepository(),catalogues = new MemoryRepository();
+  const latest=vi.spyOn(catalogues,"latest"),publish=vi.spyOn(partitions,"publish");
+  const cache=new DrivePriceCache(partitions,catalogues);
+  try {
+    await inProcessDrWriterFence.withFrozenWriters(async()=>{
+      await expect(cache.refresh(options)).rejects.toThrow("backup_writer_freeze_active");
+      expect(latest).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      expect(inProcessDrWriterFence.status.activeWriters).toBe(0);
+    });
+    expect(inProcessDrWriterFence.status).toEqual({frozen:false,activeWriters:0});
+  }finally{cache.close();}
+});
+
+it("DR freeze waits for direct async Drive cache refresh before allowing snapshot",async()=>{
+  const partitions=new MemoryRepository(),catalogues=new MemoryRepository();
+  const cache=new DrivePriceCache(partitions,catalogues);
+  let unpause!:()=>void,fetchEntered=false,snapshotStarted=false;
+  const gate=new Promise<void>(resolve=>{unpause=resolve;});
+  const fetcher=async(input:InstrumentInput)=>{
+    fetchEntered=true;
+    await gate;
+    return parseYahooChart(chartFixture(input),input,TEST_NOW);
+  };
+  try {
+    const writer=cache.refresh({...options,fetcher});
+    await vi.waitFor(()=>expect(fetchEntered).toBe(true));
+    const snapshot=inProcessDrWriterFence.withFrozenWriters(()=>{
+      snapshotStarted=true;
+      expect(inProcessDrWriterFence.status.activeWriters).toBe(0);
+      expect(catalogues.writes).toBeGreaterThan(0);
+    });
+    expect(inProcessDrWriterFence.status.frozen).toBe(true);
+    expect(inProcessDrWriterFence.status.activeWriters).toBeGreaterThan(0);
+    expect(snapshotStarted).toBe(false);
+    await expect(cache.refresh(options)).rejects.toThrow("backup_writer_freeze_active");
+    expect(catalogues.writes).toBe(0);
+    unpause();
+    await writer;
+    await snapshot;
+    expect(snapshotStarted).toBe(true);
+    expect(inProcessDrWriterFence.status).toEqual({frozen:false,activeWriters:0});
+  }finally{unpause();cache.close();}
+});
 
 it("opens a bounded memory DB without touching a filesystem and authenticates a closed archive", () => {
   const disk = vi.spyOn(fs, "statfsSync").mockImplementation(() => { throw Error("no disk"); });
