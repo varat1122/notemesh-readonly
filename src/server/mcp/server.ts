@@ -1165,9 +1165,9 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         "unique existing prose line selected by the reviewer; returns the original note " +
         "hash and an unsubmitted Safe Edit replace template. Never writes or approves a link.",
       inputSchema: {
-        sourcePath:z.string().min(1).max(350),
-        targetPath:z.string().min(1).max(350),
-        anchorLine:z.string().min(8).max(2000),
+        sourcePath:z.string().min(1).max(350).describe("Exact existing historical or review note path from a complete knowledge audit"),
+        targetPath:z.string().min(1).max(350).describe("Exact unique company hub/thesis/timeline/evidence note proposed by the audit"),
+        anchorLine:z.string().min(8).max(2000).describe("One exact unique existing prose line in the source note chosen by a human reviewer"),
       },
     },
     safe(({sourcePath,targetPath,anchorLine}:{
