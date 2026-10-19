@@ -20,6 +20,7 @@ async function report(){
  const {auditVaultKnowledgeIndex}=await import("./investment-knowledge-inventory");
  return auditVaultKnowledgeIndex();
 }
+async function auditCrossDomain(){return (await report()).linkHealth.crossDomainReview;}
 const sec="https://www.sec.gov/Archives/edgar/data/2488/amd-Q2.htm";
 const nvda="https://www.sec.gov/Archives/nvda-Q2.htm";
 describe("full indexed vault metadata audit",()=>{
@@ -147,6 +148,59 @@ describe("full indexed vault metadata audit",()=>{
   expect(a.linkHealth.historicalReview.status).toBe("read_only_proposals");
   expect(a.linkHealth.historicalReview.candidatesFound).toBe(0);
   expect(a.linkHealth.historicalReview.samples).toEqual([]);
+ });
+ it("links across industry, company and macro review metadata without ever rewriting source notes",async()=>{
+   const company="01_Companies/AMD.md";
+   const industry="02_Industries_Themes/AI Infrastructure.md";
+   const claim="08_Daily_Weekly/Research Indexes/AMD OCF Claims.md";
+   const macro="10_Knowledge/Macro and Markets/US Policy.md";
+   await add(company,["---","type: company","entity: AMD","---"].join("\n"),"# AMD");
+   await add(industry,["---","type: industry_tam_version_register",
+     "entity: AI Infrastructure","related_paths:","  - 01_Companies/AMD.md","---"].join("\n"),
+     "# Hardware supply chain\nThis industry note describes a model, not proven issuer earnings.");
+   await add(claim,["---","type: investment_structured_claim_register","domain: company",
+     "entity: AMD","event_key: AMD|FY26|OCF","original_source: https://example.test/issuer-filing",
+     "claims:","  - claim_id: AMD-OCF-FY26","    metric: operating_cash_flow",
+     "    period: FY26","    value: '123'","    unit: USD millions","---"].join("\n"),
+     "# Structured source metadata");
+   await add(macro,["---","type: macro_research_note","domain: macro",
+     "entity: United States","related_claim_ids:","  - AMD-OCF-FY26","---"].join("\n"),
+     "# Macro review\nAn analyst-supplied explicit claim reference.");
+   const paths=[company,industry,claim,macro];
+   const previous=paths.map(p=>fs.readFileSync(path.join(vault,p),"utf8"));
+   const {indexer}=await import("./indexer");
+   await indexer().rebuild();
+   const report=await auditCrossDomain();
+   expect(report).toMatchObject({
+     status:"read_only_proposals",candidateCount:2,unresolvedReferences:0,
+     ambiguousClaimReferences:0,canAutoWrite:false,canAutoUpdateThesis:false,
+   });
+   expect(report.samples).toContainEqual(expect.objectContaining({
+     sourcePath:industry,targetPath:company,relation:"explicit_related_path",
+   }));
+   expect(report.samples).toContainEqual(expect.objectContaining({
+     sourcePath:macro,targetPath:claim,relation:"unique_exact_claim_id",
+   }));
+   expect(paths.map(p=>fs.readFileSync(path.join(vault,p),"utf8"))).toEqual(previous);
+ });
+ it("holds ambiguous cross-domain claim references across two indexed register files",async()=>{
+   const macro="10_Knowledge/Macro and Markets/Thailand Policy.md";
+   await add(macro,["---","type: macro_research_note","entity: Thailand",
+     "related_claim_ids:","  - COMMON-ID","---"].join("\n"));
+   for(const symbol of ["AMD","NVDA"]){
+     await add("08_Daily_Weekly/Research Indexes/"+symbol+" Claim.md",[
+       "---","type: investment_structured_claim_register","entity: "+symbol,
+       "domain: company","original_source: https://example.test/"+symbol,
+       "claims:","  - claim_id: COMMON-ID","    metric: net_revenue",
+       "    period: FY26","    value: '123'","    unit: USD millions","---",
+     ].join("\n"));
+   }
+   const {indexer}=await import("./indexer");
+   await indexer().rebuild();
+   const r=await auditCrossDomain();
+   expect(r).toMatchObject({
+     candidateCount:0,ambiguousClaimReferences:1,samples:[],
+   });
  });
  it("detects missing source, bad claim fields and unresolved wikilinks while preserving counts",async()=>{
   await add("08_Daily_Weekly/Research Indexes/Bad Claim.md",
