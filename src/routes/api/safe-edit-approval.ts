@@ -1,5 +1,6 @@
 import type { APIEvent } from "@solidjs/start/server";
 import { auth, runAuthMigrations } from "~/server/auth";
+import { inProcessDrWriterFence } from "~/server/backup/writer-fence";
 import { adminPreview, approve } from "~/server/safe-edit/engine";
 import { env } from "~/server/env";
 async function smallBody(request:Request) {
@@ -11,7 +12,16 @@ async function smallBody(request:Request) {
 }
 const headers={"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","X-Frame-Options":"DENY","Content-Security-Policy":"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'","Referrer-Policy":"no-referrer"};
 const escape=(s:string)=>s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]!);
-async function session(request:Request) {await runAuthMigrations();return auth.api.getSession({headers:request.headers});}
+async function session(request:Request) {
+  await runAuthMigrations();
+  // Session reads may refresh tokens or touch Better Auth's SQLite adapter.
+  // Admit across the complete awaited adapter call for BOTH approval routes;
+  // an admission after the first await would permit a mid-session DR cut.
+  return inProcessDrWriterFence.withWrite(
+    () => auth.api.getSession({headers:request.headers}),
+    "better_auth_adapter",
+  );
+}
 export async function GET({request}:APIEvent) {
   if(!await session(request)) return new Response("Sign in to the Investment OS administrator dashboard, then reopen this exact approval URL.",{status:401,headers});
   try {
