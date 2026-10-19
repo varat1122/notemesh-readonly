@@ -117,6 +117,38 @@ test("resolved symlink output alias cannot overlap source or its ancestor",()=>f
   assert.equal(fs.readdirSync(root).some(n=>n.endsWith(".nmb")),false);
 }));
 
+test("refuses unsupported .db and .sqlite3 database families instead of copying active WAL bytes",()=>fixture(async ({data,out})=>{
+  for(const ext of ["legacy.db","legacy.sqlite3","legacy.db-wal"]) {
+    const file=path.join(data,"market-prices",ext);
+    if(ext.endsWith("-wal"))fs.writeFileSync(file,Buffer.from([0x37,0x7f,0x06,0x82]));
+    else {
+      const extra=new DatabaseSync(file);
+      extra.exec("CREATE TABLE test (v INTEGER); INSERT INTO test VALUES(42)");
+      extra.close();
+    }
+    const processResult=spawnSync(process.execPath,[
+      tool,"create","--data-dir",data,"--out",out,"--fixture-only"
+    ],{env,encoding:"utf8"});
+    assert.notEqual(processResult.status,0);
+    assert.match(processResult.stderr,/Unsupported database file extension in snapshot/);
+    assert.equal(fs.existsSync(out)&&fs.readdirSync(out).some(x=>x.endsWith(".nmb")),false);
+    fs.unlinkSync(file);
+  }
+}));
+
+test("detects an unknown-extension live SQLite by header and refuses a misleading backup receipt",()=>fixture(async ({data,out})=>{
+  const extra=path.join(data,"market-prices","opaque.live");
+  const sqlite=new DatabaseSync(extra);
+  sqlite.exec("CREATE TABLE secret_data (v TEXT); INSERT INTO secret_data VALUES ('must not copy raw')");
+  sqlite.close();
+  const proc=spawnSync(process.execPath,[
+    tool,"create","--data-dir",data,"--out",out,"--fixture-only"
+  ],{env,encoding:"utf8"});
+  assert.notEqual(proc.status,0);
+  assert.match(proc.stderr,/Unrecognized SQLite database file in snapshot/);
+  assert.equal(fs.existsSync(out)&&fs.readdirSync(out).some(x=>x.endsWith(".nmb")),false);
+}));
+
 test("fails closed on a missing SQLite primary DB",()=>fixture(async ({data,out})=>{
   // Unix unlink is legal on an open SQLite descriptor; fixture() closes it at teardown.
   fs.rmSync(path.join(data,"app.sqlite"),{force:true});
