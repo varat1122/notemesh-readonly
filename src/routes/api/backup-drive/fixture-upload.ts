@@ -3,6 +3,7 @@
  */
 import type { APIEvent } from "@solidjs/start/server";
 import { auth, runAuthMigrations } from "~/server/auth";
+import { inProcessDrWriterFence } from "~/server/backup/writer-fence";
 import { env } from "~/server/env";
 import { drConsentRequestOriginAllowed, validDrConsentFormProof } from "~/server/backup/drive-consent-form";
 import { driveSetupClient, driveSetupEnabled, openDrCredential, DR_DRIVE_SCOPE } from "~/server/backup/drive-auth";
@@ -16,7 +17,7 @@ export async function POST({request}: APIEvent) {
       process.env.NOTEMESH_DRIVE_FIXTURE_TEST_ENABLED !== "1" || !driveSetupEnabled())
     return safe("Synthetic DR fixture test not explicitly enabled for Staging.",403);
   await runAuthMigrations();
-  const admin = await auth.api.getSession({headers:request.headers});
+  const admin = await inProcessDrWriterFence.withWrite(() => auth.api.getSession({headers:request.headers}), "better_auth_adapter");
   if (!admin) return safe("Admin session required.",401);
   if (!drConsentRequestOriginAllowed(request.headers,env.baseUrl))
     return safe("Forbidden request origin.",403);
