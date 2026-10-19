@@ -11,6 +11,7 @@ import { assessThesisProposal } from "../vault/thesis-proposal-gate";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
 import { getSetting } from "../db";
 import { cloudIntakeStatus } from "../cloud-intake";
+import { sourceArchiveHealth } from "../research-source-archive";
 import { withBoundary, fenceEach, fenceDeep } from "./boundary";
 import { signAttachmentUrl } from "../vault/attachment-url";
 import { syncBackend } from "../sync";
@@ -1135,10 +1136,11 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         "Vault name, note count, word totals, how many notes are too large to be searchable " +
         "(unindexedNotes), sync daemon status, and disk headroom: disk.availableBytes with disk.level ok, " +
         "warn (under 100 MB free) or critical (under 50 MB; writes that would not leave the reserve are refused). " +
-        "Also includes a bounded, read-only whole-index knowledgeAudit of metadata, claim identity candidates and link health, not source verification.",
+        "Also includes a bounded, read-only whole-index knowledgeAudit of metadata, claim identity candidates and link health, not source verification. " +
+        "sourceArchive is a capped SHA-256 byte-integrity sample of stored external source blobs, explicitly NOT remote device Sync or off-server backup proof.",
       inputSchema: {},
     },
-    safe(() => json({ ...vaultInfo(), knowledgeAudit: withBoundary(auditVaultKnowledgeIndex()), sync: syncBackend().status(), connection: {
+    safe(() => json({ ...vaultInfo(), knowledgeAudit: withBoundary(auditVaultKnowledgeIndex()), sourceArchive: sourceArchiveHealth(), sync: syncBackend().status(), connection: {
       build: "intake-cloud-receiver-20261015",
       saving: cloudIntakeStatus(),
       credentialType: access.label.startsWith("oauth:") ? "oauth" : access.label.startsWith("api-key:") ? "api-key" : "other",

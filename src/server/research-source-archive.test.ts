@@ -100,3 +100,48 @@ describe("immutable source snapshot byte archive",()=>{
     expect(snap.publisherAuthenticityVerified).toBe(false);
   });
 });
+
+
+describe("vault status original-byte archive health",()=>{
+  it("reports an empty archive as empty, not verified or backed up",async()=>{
+    const {sourceArchiveHealth}=await import("./research-source-archive");
+    expect(sourceArchiveHealth()).toMatchObject({
+      status:"empty_no_originals",snapshotCount:0,distinctSources:0,
+      hashCheckedSnapshots:0,fullByteScanComplete:false,
+      offServerBackupVerified:false,remoteObsidianSyncVerified:false,
+      originalByteArchiveInsideObsidianVault:false
+    });
+  });
+  it("rehashes actual archived bytes and detects later corruption",async()=>{
+    const {captureOriginalDocumentBytes,sourceArchiveHealth}=await import("./research-source-archive");
+    const snap=captureOriginalDocumentBytes(example());
+    expect(sourceArchiveHealth()).toMatchObject({
+      status:"checked_intact",snapshotCount:1,distinctSources:1,
+      hashCheckedSnapshots:1,intactSnapshots:1,damagedOrMissingSnapshots:0,
+      uncheckedSnapshots:0,fullByteScanComplete:true,
+      offServerBackupVerified:false
+    });
+    const loc=path.join(root,"source-archive","blobs",snap.sha256.slice(0,2),snap.sha256+".bin");
+    fs.writeFileSync(loc,Buffer.alloc(snap.byteLength,0x58));
+    expect(sourceArchiveHealth()).toMatchObject({
+      status:"integrity_warning",snapshotCount:1,
+      hashCheckedSnapshots:1,intactSnapshots:0,damagedOrMissingSnapshots:1,
+      offServerBackupVerified:false
+    });
+  });
+  it("caps status scans without asserting completeness of uninspected bytes",async()=>{
+    const {captureOriginalDocumentBytes,sourceArchiveHealth}=await import("./research-source-archive");
+    for(let n=0;n<17;n++){
+      captureOriginalDocumentBytes({
+        ...example("<html><body>Separate synthetic SEC report "+n+"</body></html>"),
+        originalSource:url+"?report="+n,retrievedFrom:url+"?report="+n
+      });
+    }
+    const result=sourceArchiveHealth();
+    expect(result).toMatchObject({
+      status:"partial_scan",snapshotCount:17,distinctSources:17,
+      hashCheckedSnapshots:16,intactSnapshots:16,
+      uncheckedSnapshots:1,fullByteScanComplete:false
+    });
+  });
+});
