@@ -4,6 +4,7 @@ import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
+import { prepareHistoricalLinkEdit } from "../vault/historical-link-handoff";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import { buildInvestmentDecisionPacket } from "../vault/investment-decision-packet";
@@ -1148,6 +1149,30 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       submissionRequires: "vault:read inbox:submit",
       ...(access.label.startsWith("oauth:") ? { grantDiagnostics: oauthScopeDiagnostics(access.label.slice(6)) } : {}),
     } })),
+  );
+
+  // A read-only handoff: no Safe Edit OAuth scope, preview journal or Vault
+  // mutation. The caller must inspect both notes and separately authorize the
+  // exact change through Safe Edit after supplying a NEW operation ID.
+  server.registerTool(
+    "prepare_historical_link_edit",
+    {
+      title: "Prepare historical link review",
+      annotations: READ,
+      description:
+        "Read-only handoff for one historical note link candidate from the completed " +
+        "Vault knowledge audit. Requires explicit source and target paths plus an EXACT " +
+        "unique existing prose line selected by the reviewer; returns the original note " +
+        "hash and an unsubmitted Safe Edit replace template. Never writes or approves a link.",
+      inputSchema: {
+        sourcePath:z.string().min(1).max(350),
+        targetPath:z.string().min(1).max(350),
+        anchorLine:z.string().min(8).max(2000),
+      },
+    },
+    safe(({sourcePath,targetPath,anchorLine}:{
+      sourcePath:string;targetPath:string;anchorLine:string;
+    })=>json(withBoundary(prepareHistoricalLinkEdit({sourcePath,targetPath,anchorLine})))),
   );
 
   server.registerTool(
