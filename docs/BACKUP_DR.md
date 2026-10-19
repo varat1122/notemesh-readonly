@@ -1,5 +1,14 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## P0 writer gap: whole async Vault Indexer rebuild admission (2026-10-19)
+
+Audit found `VaultIndexer.rebuild()` executes an initially transactional SQLite wipe, then re-indexes notes/FTS and attachments in **many separate synchronous SQL batches separated by `setImmediate` yields**. Previously each individual write was fenced but the complete rebuild was not. The freeze could therefore drain between batches and capture an intentionally incomplete index, while the outer async rebuild was still running.
+
+The development fix wraps the **entire awaited rebuild lifecycle** in one `inProcessDrWriterFence.withWrite(..., "indexer_rebuild")` admission. Internal note/FTS/attachment SQL helpers remain nested, and the release occurs only after the last indexed note and link resolution. A new indexed-writer risk class was added to the source register (now 14 mandatory classes, **none production-verified**). An isolated, real SQLite + hundreds-of-notes fixture test freezes after the first yield, confirms the writer remains active, refuses new writes, and verifies capture starts only after both notes and FTS tables are complete.
+
+**Limits:** the Vault Indexer may legitimately be partially indexed outside a freeze while a rebuild is in progress, and this change does not turn the complete rebuild into one SQLite transaction. A crash may still leave a partial index, repaired on next boot. A currently running rebuild may delay a snapshot until completion or drain timeout. Other app.sqlite writes via raw handles, other Node processes, Better Auth adapters, external sync daemons, and real Vault source temporal consistency still require separate proof. No Production snapshot activation or claim.
+
+
 ## Cross-database and Original-Source recovery evidence (2026-10-19, offline fixtures)
 
 Added `cross-data-restore-evidence.test.ts` to exercise the **real offline coordinated cut** from Draft PR #56 with two separately generated SQLite databases (`app.sqlite` and `market-prices/prices.sqlite`), a Vault note, an Original Source byte file and synthetic Obsidian home state. Both SQLite databases are closed after a WAL-to-DELETE checkpoint so the source tree is stable during the cut. The test creates a real encrypted NMDR1 bundle, authenticates/verifies it using `nm-backup.mjs`, independently restores into an empty directory, reopens **both SQLite files read-only** and checks `integrity_check`, their synthetic logical epoch, the original-source SHA-256 and the note's exact reference.

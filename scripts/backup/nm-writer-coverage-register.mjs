@@ -44,6 +44,14 @@ export const MANDATORY_WRITER_CLASSES = Object.freeze([
     requiredEvidence: "all app.sqlite handles and WAL/checkpoint writers drained with SQLite-consistent snapshot policy",
   },
   {
+    id: "indexer_rebuild",
+    witnesses: [
+      ["src/server/vault/indexer.ts", 'this.building = inProcessDrWriterFence.withWrite(async () => {'],
+      ["src/server/vault/indexer.ts", '}, "indexer_rebuild")'],
+    ],
+    requiredEvidence: "whole async Vault indexer rebuild holds admission across event-loop yields and all FTS/SQLite batches; external watchers/rebuilds still require global quiescence",
+  },
+  {
     id: "better_auth_adapter",
     witnesses: [
       ["src/server/auth.ts", "database: db()"],
