@@ -6,6 +6,7 @@ import { buildInvestmentContextPack, type Focus } from "../vault/investment-cont
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
 import { getLegacyReviewDossier } from "../vault/legacy-review-dossier";
 import { prepareHistoricalLinkEdit } from "../vault/historical-link-handoff";
+import { inspectHistoricalReviewDossier } from "../vault/historical-review-dossier";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import { buildInvestmentDecisionPacket } from "../vault/investment-decision-packet";
@@ -1172,6 +1173,29 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     },
     safe(({sourcePath}:{sourcePath:string})=>
       json(withBoundary(getLegacyReviewDossier(sourcePath)))),
+  );
+
+  // No write scope: one-note P1/P2/P3 evidence inspection against current
+  // index and descriptor-bound on-disk hashes. This is NOT a Safe Edit preview.
+  server.registerTool(
+    "inspect_historical_review_dossier",
+    {
+      title: "Inspect one historical review item",
+      annotations: READ,
+      description:
+        "Read-only drilldown for an exact indexed historical/review Note after the " +
+        "P1/P2/P3 knowledge review audit. Rechecks complete index, current source " +
+        "metadata and on-disk SHA-256, then reports bounded current target status, " +
+        "provenance and chronology gaps. Does not edit a Vault Note, authenticate " +
+        "a source, or create a Safe Edit preview.",
+      inputSchema: {
+        sourcePath:z.string().min(4).max(350).describe(
+          "Exact vault-relative indexed historical/review .md path; never infer from ticker or title"
+        ),
+      },
+    },
+    safe(({sourcePath}:{sourcePath:string})=>
+      json(withBoundary(inspectHistoricalReviewDossier(sourcePath)))),
   );
 
   // A read-only handoff: no Safe Edit OAuth scope, preview journal or Vault
