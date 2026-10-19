@@ -60,7 +60,6 @@ const READ_TOOLS = [
   "notes_by_tag",
   "plan_investment_writeback",
   "prepare_historical_link_edit",
-  "inspect_historical_review_dossier",
   "preview_edit",
   "random_note",
   "read_attachment",
