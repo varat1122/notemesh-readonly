@@ -326,6 +326,29 @@ dossier's accuracy and outcomes have been checked on temporary fixture
 Vaults and CI only. **No report of real Production P1/P2/P3 review counts
 or mutation is implied**.
 
+## Single-tool dossier hardening
+
+The existing `get_legacy_review_dossier(sourcePath)` remains the **sole**
+read-only per-note P1/P2/P3 drilldown. A second overlapping endpoint is not
+introduced. Each finding now carries a short, type-specific **human evidence
+decision** and explicit flags that no external claim was fact-checked or
+automatic write is authorized.
+
+For indexed referenced target files, `targetChecks.status` distinguishes:
+
+- `indexed_current_bytes_read`: actual local bytes observed, SHA-256 returned;
+  does **not** verify original issuer/source claims.
+- `indexed_target_stale_hold`: target disk metadata/size/mtime differs from
+  index; rebuild/reconcile before interpreting the link as current.
+- `manual_read_required_or_index_changed`: target unavailable, unsafe,
+  oversized or otherwise unreadable; **not** proof of deletion.
+- `not_in_markdown_index`: declared target absent from the indexed Markdown
+  table; do not invent archive bytes or conflate with device Sync failure.
+
+The source note itself already fails closed on stale index, hardlink/symlink,
+invalid UTF-8 or oversized bytes. All target statuses are observations,
+not independent evidence. No Safe Edit preview/apply/authorization is created.
+
 ## Future extensions (not implemented)
 
 - Human-reviewed synonym/alias matching for cross-company and sector context.
