@@ -175,8 +175,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   ].join("\n")).digest("hex");
   const legacyPlanId="IN-"+legacyDigest.slice(0,16).toUpperCase();
   const legacyRawPath="00_Inbox/ChatGPT/Investment Intake - "+legacyPlanId+".md";
-  const old=db().prepare("SELECT frontmatter FROM notes WHERE path=? LIMIT 1").get(legacyRawPath)
-    as {frontmatter:string|null}|undefined;
+  const old=db().prepare("SELECT frontmatter FROM notes WHERE path=? LIMIT 1").get(legacyRawPath) as
+    {frontmatter:string|null}|undefined;
   let compatibleLegacy=false;
   if(old?.frontmatter){
     try{
