@@ -24,7 +24,7 @@ export function db(): Database.Database {
       try { opened.close(); } catch { /* Retain the original migration error. */ }
       throw error;
     }
-  });
+  }, "app_sqlite_wal");
 }
 
 // App-owned tables. Better Auth manages its own tables in the same file via
