@@ -1,5 +1,14 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## P0 Better Auth — Safe Edit approval session admission (development-only, 2026-10-19)
+
+Source audit found that `src/routes/api/safe-edit-approval.ts::session()`, shared by the GET preview page and POST approval endpoint, called `auth.api.getSession()` directly after an already-admitted `runAuthMigrations()`. The session method could reach the Better Auth SQLite adapter and refresh session-related records **after** the migration writer ticket was released. During a DR writer freeze, an unadmitted session call could proceed; this is a potential write coverage gap, **not** evidence of a confirmed SQLite mutation from this particular call.
+
+The handler now acquires `inProcessDrWriterFence.withWrite(..., "better_auth_adapter")` across the entire awaited `auth.api.getSession()`. Existing Safe Edit approval, origin, HTML escaping and hash checks are unchanged. Route-level mocked-adapter regression tests cover GET and POST freeze rejection before adapter invocation, a held asynchronous session preventing the snapshot callback, rejection of new sessions while frozen, and cleanup after a rejected asynchronous session. Static writer witness checking pins the protected route to detect future source drift.
+
+**Scope and limitations:** These route tests are mocked; they do not inspect Better Auth adapter internals or establish the absence of additional raw SQLite writers. No protected Vault data, production backup, production config, OAuth credentials, Google Drive resources or production deployment was changed. Cross-process quiescence, WAL/SQLite consistency, independent real restore and Obsidian Sync are still **NOT VERIFIED**. Production DR remains **NO-GO**.
+
+
 ## P0 direct SQLite admin-trigger DDL admission (2026-10-19; development-only)
 
 Source audit identified an exported raw SQLite mutator: `installSingleAdminGuard(source = db())` in `src/server/claim.ts` performs `source.exec(SINGLE_ADMIN_TRIGGER)`. The existing `runAuthMigrations()` caller was already admitted, but the exported helper itself did not fail closed when called outside that entry point during a writer freeze. Its `CREATE TRIGGER IF NOT EXISTS` is a schema mutation in `app.sqlite`, not a read.
