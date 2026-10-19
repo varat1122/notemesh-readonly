@@ -20,6 +20,7 @@ export type WriterAdmissionClass =
   | "user_attachments"
   | "original_source_archive"
   | "app_sqlite_wal"
+  | "indexer_rebuild"
   | "better_auth_adapter"
   | "market_price_sqlite"
   | "market_price_drive"
