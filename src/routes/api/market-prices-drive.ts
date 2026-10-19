@@ -1,11 +1,12 @@
 import type { APIEvent } from "@solidjs/start/server";
+import { inProcessDrWriterFence } from "~/server/backup/writer-fence";
 import { auth, runAuthMigrations } from "~/server/auth";
 import { env } from "~/server/env";
 import { beginDriveConsent, DRIVE_CALLBACK_PATH, driveClient } from "~/server/market-prices/drive-auth";
 import { driveAdminHeaders as headers, htmlEscape as escape, claimDriveCredential } from "~/server/market-prices/drive-admin";
 import { readCachedPrices } from "~/server/market-prices/backend";
 
-async function session(request: Request) { await runAuthMigrations(); return auth.api.getSession({ headers: request.headers }); }
+async function session(request: Request) { await runAuthMigrations(); return inProcessDrWriterFence.withWrite(() => auth.api.getSession({ headers: request.headers }), "better_auth_adapter"); }
 export async function GET({ request }: APIEvent) {
   const admin = await session(request);
   if (!admin) return new Response("Sign in to the existing Investment OS administrator dashboard, then reopen /api/market-prices-drive.", { status: 401, headers });
