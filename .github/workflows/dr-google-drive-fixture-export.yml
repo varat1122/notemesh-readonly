@@ -1,0 +1,78 @@
+name: DR Google Drive synthetic bundle export
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/dr-google-drive-fixture-export.yml"
+      - "scripts/backup/nm-backup.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Prepare isolated fake-only Vault and SQLite (no Production access)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p fixture-source/{vault,home,source-archive,market-prices} fixture-export
+          printf '# SYNTHETIC NoteMesh restore check\nNo real investments.\n' > fixture-source/vault/Synthetic.md
+          printf 'MOCK_Obsidian_Identity_DO_NOT_USE' > fixture-source/home/mock-identity.txt
+          printf 'Original source TEST BYTES (not SEC)' > fixture-source/source-archive/fixture-source.txt
+          node --input-type=module <<'NODE'
+          import { DatabaseSync } from 'node:sqlite';
+          const primary=new DatabaseSync('fixture-source/app.sqlite');
+          primary.exec("PRAGMA journal_mode=WAL; CREATE TABLE fake_claims(id TEXT PRIMARY KEY, data TEXT); INSERT INTO fake_claims VALUES('TEST_ONLY', 'not real investment data');");
+          primary.close();
+          const prices=new DatabaseSync('fixture-source/market-prices/prices.sqlite');
+          prices.exec("PRAGMA journal_mode=WAL; CREATE TABLE fake_prices(ticker TEXT PRIMARY KEY,price INTEGER); INSERT INTO fake_prices VALUES('TEST', 42);");
+          prices.close();
+          NODE
+      - name: Create, verify and restore genuine encrypted NMDR1 bundle locally
+        shell: bash
+        env:
+          # Public fixture password, NEVER use it for Production backups.
+          NOTEMESH_BACKUP_PASSPHRASE: "PUBLIC_ONLY_TEST_FIXTURE_NOT_A_REAL_SECRET_2026"
+        run: |
+          set -euo pipefail
+          node scripts/backup/nm-backup.mjs create --data-dir "$PWD/fixture-source" --out "$PWD/fixture-output" --kind fixture --fixture-only > fixture-receipt.json
+          bundle=$(find fixture-output -maxdepth 1 -name 'notemesh-fixture-*.nmb' -type f -print -quit)
+          test -n "$bundle"
+          cp "$bundle" fixture-export/notemesh-fixture-google-drive-real-20261019.nmb
+          node scripts/backup/nm-backup.mjs verify --bundle "$PWD/fixture-export/notemesh-fixture-google-drive-real-20261019.nmb" > fixture-verification.json
+          node scripts/backup/nm-backup.mjs restore --bundle "$PWD/fixture-export/notemesh-fixture-google-drive-real-20261019.nmb" --dest "$PWD/fixture-restored" > fixture-restore.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { DatabaseSync } from 'node:sqlite';
+          const note=fs.readFileSync('fixture-restored/vault/Synthetic.md','utf8');
+          if (!note.includes('SYNTHETIC NoteMesh')) throw Error('note fixture missing');
+          if (fs.readFileSync('fixture-restored/source-archive/fixture-source.txt','utf8')!=='Original source TEST BYTES (not SEC)') throw Error('source fixture missing');
+          if (fs.readFileSync('fixture-restored/home/mock-identity.txt','utf8')!=='MOCK_Obsidian_Identity_DO_NOT_USE') throw Error('home fixture missing');
+          for (const [f,query,expected] of [
+            ['fixture-restored/app.sqlite','SELECT data FROM fake_claims','not real investment data'],
+            ['fixture-restored/market-prices/prices.sqlite','SELECT price FROM fake_prices',42],
+          ]) {
+            const db=new DatabaseSync(f,{readOnly:true});
+            try {
+              if(db.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')throw Error('SQLite failed integrity check');
+              if(!Object.values(db.prepare(query).get()).includes(expected))throw Error('SQLite content mismatch');
+            }finally{db.close();}
+          }
+          NODE
+          sha256sum fixture-export/notemesh-fixture-google-drive-real-20261019.nmb | sed 's#fixture-export/##' > fixture-export/expected.sha256
+          printf 'SYNTHETIC ONLY. Public test encryption passphrase. NOT a Production backup.\n' > fixture-export/README.txt
+          cat fixture-export/expected.sha256
+      - name: Publish tiny synthetic bundle for one-time Google Drive connector readback
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: notemesh-synthetic-google-drive-validation-20261019
+          path: fixture-export/*
+          retention-days: 1
+          if-no-files-found: error
