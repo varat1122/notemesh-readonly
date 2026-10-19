@@ -170,9 +170,17 @@ export function applyGitHistory(history: GitHistory): number {
 
 /** The pass the git backend runs at start and after every pull. Null when git could not be read. */
 export async function refreshGitTimes(dir: string): Promise<number | null> {
-  const history = await loadGitHistory(dir);
-  if (!history) return null;
-  return applyGitHistory(history);
+  // Startup refresh runs outside GitBackend.cycle's writer ticket. The Git
+  // history child may remain alive over async I/O before the eventual SQLite
+  // update. Admit the ENTIRE logical refresh (child + cache + database), not
+  // just applyGitHistory's synchronous final mutation. Nested refreshes from
+  // a fenced Git cycle reuse the parent ticket; no new Git commands may start
+  // after a DR freeze begins.
+  return inProcessDrWriterFence.withWrite(async () => {
+    const history = await loadGitHistory(dir);
+    if (!history) return null;
+    return applyGitHistory(history);
+  }, "git_sync");
 }
 
 // ---- Presentation --------------------------------------------------------
