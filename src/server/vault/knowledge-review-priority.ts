@@ -167,14 +167,19 @@ export function planKnowledgeReviewPriorities(
       (typeof fm.event_date!=="string"||!isCalendar(fm.event_date)))
       emit("explicit_event_date_needs_review",null);
     if(fm.entity===undefined||fm.entity===null){
-      const declarations=[fm.company,fm.companies,fm.ticker]
-        .map(declaredCodes).filter(v=>v!==null&&v.length>0) as string[][];
+      const rawCodes=[fm.company,fm.companies,fm.ticker]
+        .filter(v=>v!==undefined&&v!==null);
+      const parsed=rawCodes.map(declaredCodes);
+      // Hold on invalid or unparseable *additional* issuer declarations too.
+      // A valid company: [ASML] does not override ticker: "ASML Holding".
+      const allSafe=parsed.every(v=>v!==null&&v.length>0);
+      const declarations=parsed.filter((v):v is string[]=>v!==null&&v.length>0);
       // Multi-company topical notes are legitimate: do not "fix" them by
       // arbitrarily choosing a main company or declaring them erroneous.
       const singleton=declarations.filter(v=>v.length===1);
-      if(singleton.length>=2&&new Set(singleton.map(v=>v[0])).size>1){
+      if(allSafe&&singleton.length>=2&&new Set(singleton.map(v=>v[0])).size>1){
         emit("conflicting_single_company_metadata",null);
-      }else if(declarations.length&&declarations.every(v=>v.length===1)&&
+      }else if(allSafe&&declarations.length&&declarations.every(v=>v.length===1)&&
         new Set(declarations.map(v=>v[0])).size===1){
         const ticker=declarations[0][0];
         const hub=`01_Companies/${ticker}.md`;
