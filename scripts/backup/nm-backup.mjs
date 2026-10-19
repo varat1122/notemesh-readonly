@@ -79,6 +79,12 @@ async function copyTree(src,dst,inventory,rel="",databases=[],folders=[],budget=
       if(e.name.endsWith(".sqlite"))databases.push(logical);
       continue;
     }
+    // The online SQLite API below is deliberately restricted to known
+    // *.sqlite files. Copying .db/.sqlite3 or their WAL sidecars as ordinary
+    // files would silently produce a torn/unrecoverable multi-database backup.
+    // Fail closed rather than claim the snapshot covers unknown DB formats.
+    if(/\.(?:db|db3|sqlite3)(?:-(?:wal|shm|journal))?$/i.test(e.name))
+      throw Error("Unsupported database file extension in snapshot: "+logical);
     budget.files++;
     budget.bytes+=st.size;
     if(budget.files>MAX_FILES || budget.bytes>MAX_TOTAL_BYTES)throw Error("Snapshot exceeds bounded file/byte budget");
@@ -93,8 +99,17 @@ async function copyTree(src,dst,inventory,rel="",databases=[],folders=[],budget=
         const actual=fs.realpathSync("/proc/self/fd/"+handle.fd);
         if(!within(budget.root,actual))throw Error("Source descriptor escaped data root: "+logical);
       }
+      // Catch SQLite files with arbitrary suffixes too (e.g. private.data).
+      // This check is conservative: encrypted or custom database formats
+      // remain a separate inventory/recovery gate, not implicitly supported.
+      if(opened.size>=16) {
+        const prefix=Buffer.alloc(16);
+        const {bytesRead}=await handle.read(prefix,0,16,0);
+        if(bytesRead===16 && prefix.equals(Buffer.from("SQLite format 3\0")))
+          throw Error("Unrecognized SQLite database file in snapshot: "+logical);
+      }
       const output=fs.createWriteStream(target,{flags:"wx",mode:0o600});
-      await pipeline(handle.createReadStream({autoClose:false}),output);
+      await pipeline(handle.createReadStream({autoClose:false,start:0}),output);
       const after=await handle.stat();
       if(after.size!==opened.size || after.mtimeMs!==opened.mtimeMs ||
          (await fsp.stat(target)).size!==opened.size)
