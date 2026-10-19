@@ -179,6 +179,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
     if(present.length) for(const p of present)pool.set(p,120);
     else absent.push("No legacy Company Index found for "+ticker+" (both known locations checked).");
   }
+  const linkedIndustryPaths=new Set<string>();
   // Retrieve existing, explicitly resolved Industry Hubs linked from the
   // issuer's canonical Timeline. A generic earnings query may contain no
   // industry search term, but the company already has a curator-reviewed
@@ -194,8 +195,10 @@ export function buildInvestmentContextPack(req: Input): Pack {
       for(const row of rows){
         const target=row.resolved_path;
         if(target && target.startsWith("02_Industries_Themes/") &&
-           roleOf(target)==="industry" && exists(target))
+           roleOf(target)==="industry" && exists(target)){
           pool.set(target,Math.max(pool.get(target)||0,116));
+          linkedIndustryPaths.add(target);
+        }
       }
     }
   }
@@ -257,6 +260,20 @@ export function buildInvestmentContextPack(req: Input): Pack {
            (req.industry && !industryMatches.has(h.path))))continue;
         if(issuers.length && role==="industry" && req.industry &&
           !industryMatches.has(h.path))continue;
+        // For generic company queries, a canonical Industry Hub merely
+        // mentioning the issuer is NOT a business linkage. Require either
+        // a resolved link from its own Company Timeline or clear title-topic
+        // alignment with the user's stated query. This constraint applies
+        // to curated 02_Industries hubs; 03_Concepts retain their prior scope.
+        if(issuers.length && role==="industry" && !req.industry &&
+           h.path.startsWith("02_Industries_Themes/") &&
+           !linkedIndustryPaths.has(h.path)){
+          const title=(h.path.split("/").at(-1)||"").replace(/\.md$/i,"").toUpperCase();
+          const titleWords=new Set(title.split(/[^\p{L}\p{N}]+/u));
+          const explicitWords=question.toUpperCase().split(/[^\p{L}\p{N}]+/u)
+            .filter(w=>w.length>=4&&!issuers.includes(w));
+          if(!explicitWords.some(w=>titleWords.has(w)))continue;
+        }
         if(issuers.length && !issuerPaths.has(h.path) &&
           role!=="industry" && role!=="rules" && !pool.has(h.path)) continue;
         if(macroScope){
