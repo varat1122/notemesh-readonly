@@ -57,6 +57,83 @@ test("Drive uploader refuses ciphertext mismatch on readback, no verified receip
   finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 
+test("resumable Drive upload checks each 308 acknowledgement across two ciphertext chunks",async()=>{
+  const temp=fs.mkdtempSync(path.join(os.tmpdir(),"nm-dr-chunked-upload-"));
+  const name="notemesh-fixture-two-chunks.nmb";
+  const bundle=path.join(temp,name);
+  const full=Buffer.concat([Buffer.from("NMDR1"),Buffer.alloc(8*1024*1024+127,0x6a)]);
+  fs.writeFileSync(bundle,full);
+  const folderId="1UcwzEvoisX0Crocwnm7HYiCeqNyDBiUe";
+  const received=[],steps=[];
+  let metadata;
+  const mock=async (url,options)=>{
+    if(url.includes("uploadType=resumable")) {
+      steps.push("init");
+      metadata=JSON.parse(options.body);
+      return new Response(null,{status:200,
+        headers:{location:"https://www.googleapis.com/upload/drive/v3/files?upload_id=two-chunks"}});
+    }
+    if(url.includes("upload_id=two-chunks")) {
+      const value=Buffer.from(options.body);
+      received.push(value);
+      if(received.length===1) {
+        steps.push("chunk-308");
+        assert.equal(value.length,8*1024*1024);
+        assert.equal(options.headers["Content-Range"],"bytes 0-8388607/"+full.length);
+        return new Response(null,{status:308,headers:{range:"bytes=0-8388607"}});
+      }
+      steps.push("final");
+      assert.equal(received.length,2);
+      assert.equal(options.headers["Content-Range"],
+        "bytes 8388608-"+(full.length-1)+"/"+full.length);
+      assert.deepEqual(Buffer.concat(received),full);
+      return Response.json({id:"two_chunk_final"});
+    }
+    if(url.includes("alt=media")) {
+      steps.push("download");
+      return new Response(new Uint8Array(full),{status:200});
+    }
+    if(url.includes("/drive/v3/files/")) {
+      steps.push("metadata");
+      return Response.json({id:"two_chunk_final",name,size:String(full.length),
+        parents:[folderId],appProperties:metadata.appProperties});
+    }
+    throw Error("Unexpected mock Drive request");
+  };
+  try {
+    const result=await uploadVerifiedBundle({bundle,folderId,accessToken:"fixture-token",fetcher:mock});
+    assert.equal(result.verified,true);
+    assert.equal(result.size,full.length);
+    assert.equal(result.readbackBytes,full.length);
+    assert.deepEqual(steps,["init","chunk-308","final","metadata","download"]);
+  }finally{fs.rmSync(temp,{recursive:true,force:true});}
+});
+
+test("resumable Drive refuses a wrong intermediate acknowledgement before a verified receipt",async()=>{
+  const temp=fs.mkdtempSync(path.join(os.tmpdir(),"nm-dr-bad-range-"));
+  const name="notemesh-fixture-wrong-range.nmb";
+  const bundle=path.join(temp,name);
+  fs.writeFileSync(bundle,Buffer.concat([Buffer.from("NMDR1"),Buffer.alloc(8*1024*1024+13)]));
+  let uploads=0;
+  const mock=async (url)=>{
+    if(url.includes("uploadType=resumable"))
+      return new Response(null,{status:200,
+        headers:{location:"https://www.googleapis.com/upload/drive/v3/files?upload_id=wrong-range"}});
+    if(url.includes("upload_id=wrong-range")) {
+      uploads++;
+      return new Response(null,{status:308,headers:{range:"bytes=0-42"}});
+    }
+    throw Error("Metadata/readback must not run on wrong acknowledgement");
+  };
+  try {
+    await assert.rejects(uploadVerifiedBundle({
+      bundle,folderId:"1UcwzEvoisX0Crocwnm7HYiCeqNyDBiUe",
+      accessToken:"fixture-token",fetcher:mock,
+    }),/partial-range acknowledgement differs/);
+    assert.equal(uploads,1);
+  }finally{fs.rmSync(temp,{recursive:true,force:true});}
+});
+
 function encryptedTestCredential(clientId,refreshToken,key) {
   const iv=randomBytes(12);
   const derived=Buffer.from(hkdfSync("sha256",Buffer.from(key,"hex"),
