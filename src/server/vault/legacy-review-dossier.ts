@@ -53,15 +53,23 @@ function readCurrent(row:Row){
 }
 const bounded=(fm:Record<string,unknown>)=>{
   const fields:Record<string,unknown>={};
-  for(const key of metadataFields)
-    if(fm[key]!==undefined&&fm[key]!==null)fields[key]=fm[key];
+  for(const key of metadataFields){
+    const v=fm[key];
+    if(v===undefined||v===null)continue;
+    if(typeof v==="string")fields[key]=v.slice(0,500);
+    else if(Array.isArray(v))fields[key]={
+      declaredCount:v.length,
+      sample:v.slice(0,8).map(x=>typeof x==="string"?x.slice(0,350):"[non-string]"),
+      truncated:v.length>8,
+    };
+    else fields[key]="[non-scalar field; inspect original note]";
+  }
   return fields;
 };
 export function getLegacyReviewDossier(sourcePath:string){
   if(typeof sourcePath!=="string"||sourcePath.length<4||
     sourcePath.length>350||!sourcePath.endsWith(".md")||
-    !sourcePath.startsWith("10_Knowledge/")&&!sourcePath.startsWith("00_Inbox/")&&
-    !sourcePath.startsWith("08_Daily_Weekly/"))
+    /^(?:05_Thesis|06_Portfolio|07_Sources|09_Templates)(?:\\/|$)/i.test(sourcePath))
     throw Error("legacy_dossier_invalid_source_path");
   if(!indexer().ready)throw Error("legacy_dossier_index_not_ready");
   const database=db();
