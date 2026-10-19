@@ -19,9 +19,15 @@ export const intakeSchema = z.object({
 export type Intake = z.infer<typeof intakeSchema>;
 type Row = { id: string; payload: string; status: string; created: string; receipt: string | null };
 function table() {
-  const d = db();
-  d.exec("CREATE TABLE IF NOT EXISTS intake_queue (id TEXT PRIMARY KEY, payload TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL, receipt TEXT)");
-  return d;
+  // Status/worker reads call this helper too, but its IF NOT EXISTS is DDL.
+  // Admit before DB access and schema creation; the caller's read may follow
+  // safely outside this ticket, while enqueues/acknowledgements retain their
+  // already-admitted outer writer scope.
+  return inProcessDrWriterFence.withWriteSync(() => {
+    const d = db();
+    d.exec("CREATE TABLE IF NOT EXISTS intake_queue (id TEXT PRIMARY KEY, payload TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL, receipt TEXT)");
+    return d;
+  }, "app_sqlite_wal");
 }
 export function enqueue(input: unknown) {
   return inProcessDrWriterFence.withWriteSync(()=>enqueueUnderFence(input));

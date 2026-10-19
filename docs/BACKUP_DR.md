@@ -1,5 +1,14 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## P0 direct SQLite — lazy intake_queue schema DDL (development-only, 2026-10-19)
+
+`src/server/intake.ts::table()` uses `CREATE TABLE IF NOT EXISTS intake_queue` on every invocation, including exported **read-oriented** `intakeStatus()` and `nextIntake()` calls. The enqueue/acknowledge paths already held a sync writer admission, but direct status/worker reads could run this schema DDL without admission during a freeze. An `IF NOT EXISTS` DDL remains a mutation-capable SQLite path, even if it is a no-op on databases where the table already exists.
+
+The common `table()` helper now acquires `inProcessDrWriterFence.withWriteSync(..., "app_sqlite_wal")` before accessing the DB and executing the DDL. Existing admitted mutation callers reuse their parent's scope. Real scratch-database adversarial regression tests cover direct status/queue reads while frozen with no `intake_queue` table created, a pre-admitted asynchronous writer draining completely before snapshot observation, and cleanup after a real SQLite `query_only` error. Added mandatory source witness.
+
+**Not Production proof:** Only application-managed calls through this helper are covered. Raw SQLite handles, Better Auth internals, WAL/checkpoint lifetime, cross-process writers and continuous Obsidian Sync remain unverified. No Production Vault, backup scheduler, secrets or deployed service changed. Production DR stays **NO-GO**.
+
+
 ## P0 Better Auth — Safe Edit approval session admission (development-only, 2026-10-19)
 
 Source audit found that `src/routes/api/safe-edit-approval.ts::session()`, shared by the GET preview page and POST approval endpoint, called `auth.api.getSession()` directly after an already-admitted `runAuthMigrations()`. The session method could reach the Better Auth SQLite adapter and refresh session-related records **after** the migration writer ticket was released. During a DR writer freeze, an unadmitted session call could proceed; this is a potential write coverage gap, **not** evidence of a confirmed SQLite mutation from this particular call.
