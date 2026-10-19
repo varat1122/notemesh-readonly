@@ -66,7 +66,7 @@ test("source audit catches async fs writers, named-import aliases, streams and f
       '  createWriteStream("new");',
       '  await readFile("new");',
       '}',
-    ].join("\\n"));
+    ].join("\n"));
     const report=inventoryWriterSurfaces(root);
     const detected=new Set(report.candidates.map(x=>x.kind));
     assert.ok(detected.has("filesystem_async"));
