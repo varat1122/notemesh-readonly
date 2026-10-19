@@ -64,7 +64,7 @@ async function holdSqliteWriter() {
 async function endChild(child:ReturnType<typeof spawn>,crash=false){
   const exited=once(child,"exit");
   if(crash)child.kill("SIGKILL");
-  else child.stdin!.write("release\n");
+  else child.stdin!.end("release\n");
   const [code,signal]=await exited;
   if(crash)expect(signal).toBe("SIGKILL");
   else expect(code).toBe(0);
@@ -184,6 +184,10 @@ it("coordinated fixture creates, verifies and restores encrypted SQLite and Vaul
     db.pragma("journal_mode = WAL");
     db.exec("CREATE TABLE research(id INTEGER PRIMARY KEY,note TEXT)");
     db.prepare("INSERT INTO research(note) VALUES(?)").run("test only");
+    // This restore case requires a stable, fully checkpointed source tree.
+    // Separate tests above assert an active second-process WAL writer blocks
+    // the cut; do NOT mask live WAL metadata churn or relax the fingerprint.
+    db.pragma("journal_mode = DELETE");
   }finally{db.close();}
   const cli=path.resolve("scripts/backup/nm-backup.mjs");
   const env:NodeJS.ProcessEnv={...process.env,
