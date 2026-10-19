@@ -105,7 +105,7 @@ async function copyTree(src,dst,inventory,rel="",databases=[],folders=[],budget=
       if(opened.size>=16) {
         const prefix=Buffer.alloc(16);
         const {bytesRead}=await handle.read(prefix,0,16,0);
-        if(bytesRead===16 && prefix.equals(Buffer.from("SQLite format 3\\0")))
+        if(bytesRead===16 && prefix.equals(Buffer.from("SQLite format 3\0")))
           throw Error("Unrecognized SQLite database file in snapshot: "+logical);
       }
       const output=fs.createWriteStream(target,{flags:"wx",mode:0o600});
