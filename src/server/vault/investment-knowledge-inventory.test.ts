@@ -105,6 +105,49 @@ describe("full indexed vault metadata audit",()=>{
    expect(a.rawSourceTypeCounts.chatgpt_history).toBe(1);
    expect(a.duplicateCandidates.sameExactSourceMetricPeriod.totalGroups).toBe(0);
  });
+ it("suggests historical-note navigation to a uniquely identified company thesis without editing originals",async()=>{
+  const history="10_Knowledge/Company Research/NVDA - History.md";
+  const thesis="05_Thesis/NVDA - Current Thesis.md";
+  await add(history,["---","type: knowledge_note","source_type: chatgpt_history",
+    "verification: not_reverified","entity: NVDA","---"].join("\n"),
+    "# Prior research\nThis historical narrative is unverified.");
+  await add(thesis,["---","type: current_thesis","entity: NVDA",
+    "status: draft","---"].join("\n"),"# Working Thesis");
+  const hBefore=fs.readFileSync(path.join(vault,history),"utf8");
+  const tBefore=fs.readFileSync(path.join(vault,thesis),"utf8");
+  const {indexer}=await import("./indexer");
+  await indexer().rebuild();
+  const a=await report();
+  expect(a.indexReady).toBe(true);
+  expect(a.linkHealth.historicalReview).toMatchObject({
+    status:"read_only_proposals",candidatesFound:1,
+    canAutoWrite:false,canAutoUpdateThesis:false,
+  });
+  const proposed=a.linkHealth.historicalReview.samples[0];
+  expect(proposed).toMatchObject({
+    sourcePath:history,targetPath:thesis,declaredEntity:"NVDA",
+    proposedWikilink:"[[05_Thesis/NVDA - Current Thesis]]",
+    requiresHumanReview:true,canAutoWrite:false,
+  });
+  expect(fs.readFileSync(path.join(vault,history),"utf8")).toBe(hBefore);
+  expect(fs.readFileSync(path.join(vault,thesis),"utf8")).toBe(tBefore);
+  expect(a.notes.join(" ")).toContain("No Obsidian note");
+ });
+ it("suppresses historical edit proposals once the exact resolved link already exists",async()=>{
+  const history="10_Knowledge/Company Research/NVDA - History.md";
+  const thesis="05_Thesis/NVDA - Current Thesis.md";
+  await add(history,["---","type: knowledge_note","source_type: chatgpt_history",
+    "entity: NVDA","---"].join("\n"),
+    "# History\n[[05_Thesis/NVDA - Current Thesis]]");
+  await add(thesis,["---","type: current_thesis","entity: NVDA",
+    "status: draft","---"].join("\n"),"# Working Thesis");
+  const {indexer}=await import("./indexer");
+  await indexer().rebuild();
+  const a=await report();
+  expect(a.linkHealth.historicalReview.status).toBe("read_only_proposals");
+  expect(a.linkHealth.historicalReview.candidatesFound).toBe(0);
+  expect(a.linkHealth.historicalReview.samples).toEqual([]);
+ });
  it("detects missing source, bad claim fields and unresolved wikilinks while preserving counts",async()=>{
   await add("08_Daily_Weekly/Research Indexes/Bad Claim.md",
     ["---","type: investment_structured_claim_register","domain: company","entity: AMD",
