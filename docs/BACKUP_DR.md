@@ -3,6 +3,16 @@
 **2026-10-18.** This branch is a *pre-deployment, offline/fixture* implementation. The current production Vault has **not** been backed up by this code. Do not merge, schedule or deploy until the gates below pass.
 
 
+## Integrated DR offline recovery acceptance chain — development-only (2026-10-19)
+
+The existing `nm-cloud-dr-drill.test.mjs` has been expanded to call **both real DR transport modules** in sequence: a synthetic NoteMesh dataset (Vault note, original-source file, Obsidian home fixture, app SQLite WAL, market-price SQLite WAL) → genuine AES-GCM `.nmb` builder → local authenticated verify → `nm-drive-upload.mjs` using **mocked Google HTTP** → upload receipt plus complete remote ciphertext readback → **independent `nm-drive-recover.mjs` invocation** using its verified receipt, metadata checks and full local SHA-256 download → local authenticated verify → restore into fresh isolated directory → exact synthetic notes/originals/home and SQLite schema/data integrity checks.
+
+Previously, that end-to-end test bypassed the recovery module by copying the original mock-upload buffer directly to the offline restore folder. The new test passes through the actual offline downloader instead.
+
+A second negative-path test simulates a Drive object that becomes corrupted **after** a successful upload/readback receipt. The recovery attempt must reject the changed remote bytes, delete its partial downloaded file, and leave no restoration artifact. This prevents an old upload success from being mistaken for evidence of subsequent retrieval success.
+
+**Boundary and no-go:** Google transport remains mocked, fixture writers are synthetic, and the tests run in GitHub Actions (not live Staging OAuth, not Production). They do NOT prove a global Production writer cut, a real Google Drive `.nmb` upload/download, a full off-server Production backup, key escrow or a restore of current Investment OS data. All Deployment and protected Vault write gates remain intact.
+
 ## Direct Market Prices Drive refresh writer admission — development-only (2026-10-19)
 
 Previously, the high-level `refreshPrices()` function entered the DR process-local Writer Fence, but a caller could directly invoke `DrivePriceCache.refresh()`. The direct method is a separate write-capable entry point that can publish remote Google Drive price archive and catalogue generations after asynchronous network I/O without acquiring admission itself.
