@@ -255,10 +255,23 @@ export async function main(argv=process.argv.slice(2)) {
     if(!fs.statSync(data).isDirectory())throw Error("Source must be a directory");
     if(process.platform==="linux" && !fs.realpathSync(data).startsWith(path.sep))
       throw Error("Invalid resolved source root");
+    // Resolve the closest existing ancestor BEFORE mkdir. A backup output
+    // routed through a symlink into DATA_DIR must fail without even creating
+    // an empty directory in the source. Relative suffixes are appended after
+    // canonicalizing that ancestor.
+    let existingOutAncestor=out;
+    while(!fs.existsSync(existingOutAncestor)) {
+      const next=path.dirname(existingOutAncestor);
+      if(next===existingOutAncestor)throw Error("Unresolvable backup output parent");
+      existingOutAncestor=next;
+    }
+    const prospectiveOut=path.resolve(fs.realpathSync(existingOutAncestor),
+      path.relative(existingOutAncestor,out));
+    if(inside(resolvedData,prospectiveOut) || inside(prospectiveOut,resolvedData))
+      throw Error("Resolved backup output overlaps source data directory");
     await fsp.mkdir(out,{recursive:true,mode:0o700});
-    // Lexical comparisons above do not catch aliases: --out may traverse a
-    // symlink into the source (or its parent), causing recursive self-capture.
-    // Check the real destination BEFORE writing any encrypted bundle.
+    // Repeat after creation: a pre-existing symlink can change while mkdir
+    // runs. This is a fail-closed check, not an atomic cross-process lease.
     const resolvedOut=fs.realpathSync(out);
     if(inside(resolvedData,resolvedOut) || inside(resolvedOut,resolvedData))
       throw Error("Resolved backup output overlaps source data directory");
