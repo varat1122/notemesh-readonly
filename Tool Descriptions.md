@@ -396,12 +396,6 @@ Review **one explicitly selected** historical/review Markdown note against the e
 
 This is a **read-only metadata/traceability checklist**, not a source authenticity check, a full semantic interpretation, a financial valuation, a preview/diff/apply, or permission to change any Note. Missing from the Markdown index is NOT proof original source file is lost. Hash of a ChatGPT archive means only the bytes read, not an independent source verification.
 
-### inspect_historical_review_dossier — read
-
-Read-only **one-note drilldown** after the P1/P2/P3 complete-index audit. Supply the exact existing historical/review `sourcePath`. It checks current disk bytes via descriptor-anchored, symlink-safe read, produces a SHA-256 of bytes observed, verifies the source's indexed size/mtime/frontmatter, and shows bounded priority issues and referenced target's current index/disk status.
-
-This does not establish publisher authenticity, full original archival coverage, event date truth, independent evidence, semantic relation, remote Obsidian Sync or owner approval. A declared target not present in the Markdown index is reported as **not indexed — disk not assessed**, not as a proven deleted file. The tool never edits a note, creates a Safe Edit preview, or applies a change. A separate approved Safe Edit process is required after reading complete source and target notes.
-
 ### prepare_historical_link_edit — read
 
 A **read-only**, exact-line handoff for a human-selected historical link from
