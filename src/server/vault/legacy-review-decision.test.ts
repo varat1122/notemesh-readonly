@@ -10,7 +10,7 @@ const source="07_Sources/ChatGPT/Archive/ASML chat.md";
 const hub="01_Companies/ASML.md";
 const fm=[
   "---","type: knowledge_note","company: ['ASML']",
-  "verification: not_reverified","event_date: Unknown",
+  "verification: not_reverified","source_type: chatgpt_history","event_date: Unknown",
   "source_records:","  - "+source,"---",
 ].join("\n");
 beforeEach(()=>{
@@ -78,7 +78,7 @@ describe("human-facing review decision worksheet: read-only and unapproved",()=>
   });
   it("holds unsupported metadata/navigation proposals instead of inventing changes",async()=>{
     put(note,["---","type: knowledge_note","company: ['ASML']",
-      "event_date: '2026-07-16'","---","# Historical",
+      "event_date: '2026-07-16'","source_type: chatgpt_history","---","# Historical",
       "[[01_Companies/ASML]]"].join("\n"));
     put(hub,"---\ntype: company_hub\n---\n# ASML");
     await ready();
