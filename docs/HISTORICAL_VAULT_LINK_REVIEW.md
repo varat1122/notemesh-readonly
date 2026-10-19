@@ -173,6 +173,68 @@ figure has one owner or is independent evidence. The next step is human
 normalization of selected metadata and source/claim verification; no
 Production Vault mutation or global automated rewrite is authorized.
 
+## Legacy Metadata Compatibility — evidence-informed read-only development
+
+### Read-only Production observation (2026-10-19, not a migration)
+
+The authenticated `Investment OS — NoteMesh Read Only` tool's
+`get_vault_info` and `read_properties` were queried on 2026-10-19.
+Its deployed version remained at Production commit `b563c55` and **does not
+yet contain the Draft PR features** in this section.
+
+At that snapshot there were **3,375 indexed of 3,375 Notes**, including
+**1,195 historical-analysis**, **1,322 ChatGPT archives**, **203 company**,
+**49 industry** and **244 review** entries. The indexed link table had **4
+orphans** and **54 unresolved link targets**; several unresolved samples are
+historical ChatGPT archive JSON locators, *not* permission to fabricate or
+change an archive. These are indexed metadata counts, not a full semantic
+truth/primary-source verification.
+
+The Vault's existing metadata-property survey reported `company` in
+**1,417 notes**, `theme` in **2,617**, `related_notes` in **33**, but
+`entity` in only **245** (property counts; a field may be an array or scalar).
+A sampled 2026-07-16 historical ASML note explicitly declared
+`company: ["ASML"]`, `theme: [...]`, `source_records: [...]` and
+`verification: not_reverified`, while `01_Companies/AMD.md` was an
+existing company hub without a canonical `entity` field. Existing industry
+and macro hubs already had outgoing Obsidian wikilinks in their note bodies.
+This makes "missing entity / related_paths" a poor proxy for "not linked".
+
+### Review-only compatibility in this Draft PR
+
+`knowledgeAudit.linkHealth.legacyCompanyReview` counts selected **legacy
+frontmatter field presence** for `company`, `companies`, `ticker`,
+`theme`, `related_notes`, `source_records`, `related_paths`, and
+`related_claim_ids`. It also counts **existing indexed outgoing links** for
+eligible historical-analysis/review notes before suggesting anything.
+
+It may suggest a **navigation-only** missing wikilink when **all** hold:
+
+1. Source role is review/historical-analysis outside Sources/Thesis/Portfolio/
+   Templates, with no already-canonical `entity` field.
+2. Legacy `company`, `companies`, or `ticker` is a **single explicit
+   safe uppercase code** (e.g. `ASML`), not a multi-company list; if multiple
+   declared fields coexist they must **agree exactly**.
+3. Exactly one existing indexed Company Hub has the **literal canonical
+   filename** `01_Companies/<CODE>.md`. Company names/aliases, fuzzy title
+   matches and guessed tickers are **not** substituted for the literal code.
+4. The existing indexed link table confirms that the source does **not**
+   already link to that exact destination. No additional link is needed when
+   already connected.
+
+It never treats `theme` as proof of supplier exposure or revenue
+contribution. `source_records` and `related_notes` are **legacy
+reference declarations**, not newly minted independent sources. It does not
+write metadata or link content, modify protected Thesis, authorize Safe Edit
+or claim that an outgoing backlink makes the historical reasoning correct.
+Samples are bounded to eight with full review counts; incomplete index
+returns `incomplete_index_hold`.
+
+This fills an *actual compatibility gap* visible in the Production metadata
+without asserting that the Draft functionality has run against the entire
+live Vault. Review full notes and source provenance before choosing a
+separate approved Safe Edit preview.
+
 ## Future extensions (not implemented)
 
 - Human-reviewed synonym/alias matching for cross-company and sector context.
