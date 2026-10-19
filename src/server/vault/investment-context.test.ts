@@ -246,3 +246,35 @@ describe("multi-issuer archived research matching", () => {
     expect(p.items.find(x=>x.path===target)?.declaredVerification).toBe("not_reverified");
   });
 });
+
+
+describe("bounded canonical Timeline → Industry retrieval",()=>{
+  it("selects the exact linked existing Industry even when issuer question lacks sector terms",async()=>{
+    const build=await fixture();
+    await addExtra("08_Daily_Weekly/Research Indexes/Company Evolution - NVDA.md",
+      "# NVDA Evolution\nNVDA earnings\n[[02_Industries_Themes/AI Infrastructure|AI Infrastructure]]");
+    const pack=build({question:"NVDA company cash conversion and valuation risk",issuers:["NVDA"],maxNotes:12,maxChars:16000});
+    expect(pack.items.map(x=>x.path)).toContain("02_Industries_Themes/AI Infrastructure.md");
+    expect(pack.items.find(x=>x.path==="02_Industries_Themes/AI Infrastructure.md")?.role).toBe("industry");
+    expect(pack.incomplete.some(x=>x.includes("No industry/TAM"))).toBe(false);
+  });
+  it("ignores incidental co-mention and a nonexistent/noncanonical Industry link",async()=>{
+    const build=await fixture();
+    await addExtra("02_Industries_Themes/Unrelated Banking.md",
+      "# Unrelated Banking\nLegacy banking note also says NVDA but is not linked from NVIDIA's Timeline.");
+    await addExtra("08_Daily_Weekly/Research Indexes/Company Evolution - NVDA.md",
+      "# NVDA\n[[02_Industries_Themes/AI Infrastructure]]\n[[02_Industries_Themes/Nonexistent Concept]]");
+    const pack=build({question:"NVDA operating cash generation",issuers:["NVDA"],maxNotes:12,maxChars:16000});
+    expect(pack.items.map(x=>x.path)).toContain("02_Industries_Themes/AI Infrastructure.md");
+    expect(pack.items.map(x=>x.path)).not.toContain("02_Industries_Themes/Unrelated Banking.md");
+    expect(pack.items.map(x=>x.path)).not.toContain("02_Industries_Themes/Nonexistent Concept.md");
+  });
+  it("honors caller's explicitly supplied different industry scope over inherited Timeline link",async()=>{
+    const build=await fixture();
+    await addExtra("08_Daily_Weekly/Research Indexes/Company Evolution - NVDA.md",
+      "# NVDA Evolution\n[[02_Industries_Themes/AI Infrastructure]]");
+    await addExtra("02_Industries_Themes/Optical.md","# Optical research\nNo direct NVIDIA AI infrastructure connection asserted.");
+    const pack=build({question:"NVDA optical packaging supply",issuers:["NVDA"],industry:"Optical",maxNotes:12,maxChars:16000});
+    expect(pack.items.map(x=>x.path)).not.toContain("02_Industries_Themes/AI Infrastructure.md");
+  });
+});
