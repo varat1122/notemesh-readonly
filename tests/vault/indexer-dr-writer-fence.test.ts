@@ -86,3 +86,49 @@ it("defers removal of an oversized note until thaw instead of swallowing the fre
     expect(indexerStatus().unindexedNotes).toBe(1);
   }, { timeout: 5_000 });
 });
+
+
+it("holds one writer admission across ALL async rebuild yields; DR capture sees a complete SQLite/FTS index",async()=>{
+  const {indexer,reindexPath}=await import("~/server/vault/indexer");
+  const {db}=await import("~/server/db");
+  const {inProcessDrWriterFence:fence}=await import("~/server/backup/writer-fence");
+  const total=350;
+  for(let n=0;n<total;n++)
+    fs.writeFileSync(path.join(vault,`fixture-${n}.md`),`# Fixture ${n}\\n\\nindexed token ${n}\\n`);
+  const count=(table:string)=>
+    (db().prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as {n:number}).n;
+  const work=indexer().rebuild();
+  // At this tick at least one batch finished, but the indexer has yielded
+  // and the source-side SQLite/FTS rebuild is not logically complete yet.
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  const partial=count("notes");
+  expect(partial).toBeGreaterThan(0);
+  expect(partial).toBeLessThan(total);
+  expect(indexer().ready).toBe(false);
+  expect(fence.getAdmissionEvidence().activeByClass.indexer_rebuild).toBe(1);
+  expect(fence.status.activeWriters).toBe(1);
+
+  let captured=false;
+  const cut=fence.withFrozenWriters(()=>{
+    captured=true;
+    expect(indexer().ready).toBe(true);
+    expect(count("notes")).toBe(total);
+    expect(count("notes_fts")).toBe(total);
+    return "coherent-fixture-index";
+  },{drainTimeoutMs:10000});
+  expect(fence.status.frozen).toBe(true);
+  expect(captured).toBe(false);
+  // A new watcher-initiated mutation is blocked, but admitted rebuild
+  // descendants can finish their SQL batches during the drain.
+  fs.writeFileSync(path.join(vault,"late.md"),"# Late\\n");
+  // Direct reindexPath deliberately retries after thaw rather than modifying
+  // SQLite under the frozen snapshot.
+  reindexPath("late.md");
+  expect(count("notes")).toBeLessThanOrEqual(total);
+  await work;
+  await expect(cut).resolves.toBe("coherent-fixture-index");
+  expect(captured).toBe(true);
+  expect(fence.getAdmissionEvidence().activeByClass).toEqual({});
+  expect(fence.status).toEqual({frozen:false,activeWriters:0});
+  expect(count("notes")).toBe(total);
+});
