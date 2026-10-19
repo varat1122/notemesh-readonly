@@ -53,6 +53,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Encrypted backup and offline Drive readback tests
+        run: node --test scripts/notemesh-backup.test.mjs scripts/notemesh-drive-upload.test.mjs
+
       # Only chromium: these check that pages render and forms work, which is
       # not a cross-browser question, and the download dominates the job time.
       - name: Install the browser for the end-to-end tests
