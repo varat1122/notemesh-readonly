@@ -45,9 +45,10 @@ describe("read-only whole-index review queue over scratch Vault",()=>{
     const before=tracked.map(p=>fs.readFileSync(path.join(vault,p)));
     const {listLegacyReviewQueue}=await import("./legacy-review-queue");
     let cursor:string|undefined;
+    let fingerprint:string|undefined;
     const all:string[]=[];
     for(let i=0;i<5;i++){
-      const result=listLegacyReviewQueue("P1_provenance_or_chronology",5,cursor);
+      const result=listLegacyReviewQueue("P1_provenance_or_chronology",5,cursor,fingerprint);
       expect(result).toMatchObject({
         status:"bounded_read_only_indexed_review_queue",
         indexedNotesConsidered:20,eligibleHistoricalOrReviewNotes:17,
@@ -55,6 +56,9 @@ describe("read-only whole-index review queue over scratch Vault",()=>{
         reviewerAuthenticated:false,originalSourceVerified:false,
         canAutoWrite:false,canAutoUpdateThesis:false,
       });
+      if(fingerprint)expect(result.expectedFingerprintMatched).toBe(true);
+      else expect(result.expectedFingerprintMatched).toBe(false);
+      fingerprint=result.indexFingerprint;
       all.push(...result.page.items.map(x=>x.sourcePath));
       if(!result.page.hasMore)break;
       cursor=result.page.nextCursor!;
@@ -89,7 +93,12 @@ describe("read-only whole-index review queue over scratch Vault",()=>{
     await index();
     expect(()=>listLegacyReviewQueue("all",10,"../secrets.md")).toThrow();
     expect(()=>listLegacyReviewQueue("all",31)).toThrow("legacy_review_queue_invalid_request");
-    expect(()=>listLegacyReviewQueue("all",4,"10_Knowledge/Absent.md"))
+    expect(()=>listLegacyReviewQueue("all",4,primary))
+      .toThrow("legacy_review_queue_fingerprint_required_for_next_page");
+    expect(()=>listLegacyReviewQueue("all",4,primary,"not-a-real-hash"))
+      .toThrow("legacy_review_queue_invalid_fingerprint");
+    const fingerprint=listLegacyReviewQueue("all",4).indexFingerprint;
+    expect(()=>listLegacyReviewQueue("all",4,"10_Knowledge/Absent.md",fingerprint))
       .toThrow("legacy_review_queue_cursor_not_indexed");
   });
   it("holds on invalid indexed metadata rather than silently pretending full classification",async()=>{
@@ -100,5 +109,65 @@ describe("read-only whole-index review queue over scratch Vault",()=>{
     const {listLegacyReviewQueue}=await import("./legacy-review-queue");
     expect(()=>listLegacyReviewQueue()).toThrow(
       "legacy_review_queue_invalid_indexed_metadata_hold");
+  });
+});
+
+describe("review queue index-fingerprint fence and evidence safety",()=>{
+  it("holds page 2 if a new qualifying note was indexed after page 1",async()=>{
+    for(let i=0;i<4;i++)
+      put(`10_Knowledge/Company Research/ASML - Snapshot ${i}.md`,
+        hist("event_date: Unknown"));
+    await index();
+    const {listLegacyReviewQueue}=await import("./legacy-review-queue");
+    const first=listLegacyReviewQueue("all",2);
+    expect(first.page.hasMore).toBe(true);
+    put("10_Knowledge/Company Research/ASML - Snapshot 4.md",
+      hist("event_date: Unknown"));
+    await index();
+    expect(()=>listLegacyReviewQueue("all",2,first.page.nextCursor!,
+      first.indexFingerprint)).toThrow("legacy_review_queue_index_fingerprint_changed_hold");
+  });
+  it("detects changed note metadata even when count remains unchanged",async()=>{
+    put(primary,hist("event_date: Unknown"));
+    put("10_Knowledge/Company Research/ASML - Other.md",hist("event_date: Unknown"));
+    await index();
+    const {listLegacyReviewQueue}=await import("./legacy-review-queue");
+    const first=listLegacyReviewQueue("all",1);
+    expect(first.page.hasMore).toBe(true);
+    put(primary,hist("event_date: '2026-07-16'"));
+    await index();
+    expect(()=>listLegacyReviewQueue("all",1,first.page.nextCursor!,
+      first.indexFingerprint)).toThrow("legacy_review_queue_index_fingerprint_changed_hold");
+  });
+  it("detects a changed link graph without modifying note count",async()=>{
+    put(primary,hist("company: ['ASML']")+"\n[[01_Companies/ASML]]");
+    put("01_Companies/ASML.md","---\ntype: company\n---\n# ASML");
+    put("10_Knowledge/Company Research/ASML - Other.md",hist("event_date: Unknown"));
+    await index();
+    const {listLegacyReviewQueue}=await import("./legacy-review-queue");
+    const first=listLegacyReviewQueue("all",1);
+    const {db}=await import("../db");
+    db().prepare("INSERT INTO links (source_path,target,resolved_path) VALUES (?,?,?)")
+      .run(primary,"10_Knowledge/Company Research/ASML - Other",
+        "10_Knowledge/Company Research/ASML - Other.md");
+    const current=listLegacyReviewQueue("all",1);
+    expect(current.indexedNotesConsidered).toBe(first.indexedNotesConsidered);
+    expect(current.indexFingerprint).not.toBe(first.indexFingerprint);
+    expect(()=>listLegacyReviewQueue("all",1,first.page.nextCursor!,
+      first.indexFingerprint)).toThrow("legacy_review_queue_index_fingerprint_changed_hold");
+  });
+  it("binds fingerprint to selected priority and does not authenticate review",async()=>{
+    put(primary,hist("event_date: Unknown"));
+    put("10_Knowledge/Company Research/ASML - Other.md",hist("event_date: Unknown"));
+    await index();
+    const {listLegacyReviewQueue}=await import("./legacy-review-queue");
+    const first=listLegacyReviewQueue("all",1);
+    expect(first.fileBytesSnapshotVerified).toBe(false);
+    expect(first.originalSourceVerified).toBe(false);
+    expect(()=>listLegacyReviewQueue("P1_provenance_or_chronology",1,
+      first.page.nextCursor!,first.indexFingerprint))
+      .toThrow("legacy_review_queue_index_fingerprint_changed_hold");
+    expect(listLegacyReviewQueue("all",1,first.page.nextCursor!,
+      first.indexFingerprint).expectedFingerprintMatched).toBe(true);
   });
 });
