@@ -8,6 +8,25 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
+/**
+ * Labels identify an admission in THIS Node process, not an independently
+ * attested writer class. In particular they cannot describe the continuous
+ * Obsidian daemon or any unregistered process/device.
+ */
+export type WriterAdmissionClass =
+  | "unclassified"
+  | "vault_atomic_edits"
+  | "protected_safe_edits"
+  | "user_attachments"
+  | "original_source_archive"
+  | "app_sqlite_wal"
+  | "better_auth_adapter"
+  | "market_price_sqlite"
+  | "market_price_drive"
+  | "git_sync"
+  | "obsidian_cli"
+  | "background_price_collector";
+
 export class SnapshotWriterFence {
   private activeWriters=0;
   // Nested write helpers may run AFTER freeze begins, but only when their
@@ -15,12 +34,45 @@ export class SnapshotWriterFence {
   private readonly admissionContext=new AsyncLocalStorage<{active:boolean}>();
   private frozen=false;
   private waiting: Set<() => void>=new Set();
+  private activeClasses=new Map<WriterAdmissionClass,number>();
+
+  /**
+   * Read-only admission OBSERVATION. This is deliberately not a snapshot
+   * eligibility signal: it cannot count raw db() mutations, writers outside
+   * this process, child daemons, other replicas or Obsidian devices.
+   * A nested named operation can share its parent's ticket, so class counts
+   * are observations, NOT additive to activeWriters.
+   */
+  getAdmissionEvidence() {
+    return {
+      scope:"this_node_process_only" as const,
+      frozen:this.frozen,
+      activeWriters:this.activeWriters,
+      activeByClass:Object.fromEntries([...this.activeClasses.entries()]
+        .sort(([a],[b])=>a.localeCompare(b))) as Partial<Record<WriterAdmissionClass,number>>,
+      completeRuntimeWriterCoverageVerified:false as const,
+      externalWriterQuiescenceVerified:false as const,
+      productionSnapshotReady:false as const,
+    };
+  }
+
+  private startClass(kind:WriterAdmissionClass) {
+    this.activeClasses.set(kind,(this.activeClasses.get(kind)??0)+1);
+  }
+
+  private finishClass(kind:WriterAdmissionClass) {
+    const count=this.activeClasses.get(kind);
+    if(!count || count<1)throw Error("backup_writer_class_underflow");
+    if(count===1)this.activeClasses.delete(kind);
+    else this.activeClasses.set(kind,count-1);
+  }
 
   get status() {
     return {frozen:this.frozen, activeWriters:this.activeWriters};
   }
 
-  private releaseWrite() {
+  private releaseWrite(kind:WriterAdmissionClass) {
+    this.finishClass(kind);
     this.activeWriters--;
     if(this.activeWriters===0){
       for(const wake of this.waiting)wake();
@@ -34,22 +86,27 @@ export class SnapshotWriterFence {
    * the returned release exactly once on close, including error paths.
    * An unclosed resource intentionally makes the backup drain time out.
    */
-  acquireWriteTicket():()=>void {
+  acquireWriteTicket(kind:WriterAdmissionClass="unclassified"):()=>void {
     if(this.frozen && !this.admissionContext.getStore()?.active)
       throw Error("backup_writer_freeze_active");
     this.activeWriters++;
+    this.startClass(kind);
     let released=false;
     return ()=>{
       if(released)throw Error("backup_writer_ticket_already_released");
       released=true;
-      this.releaseWrite();
+      this.releaseWrite(kind);
     };
   }
 
   /** Gate an entirely synchronous mutator; release its ticket before return. */
-  withWriteSync<T>(perform:()=>T):T {
-    if(this.admissionContext.getStore()?.active) return perform();
-    const release=this.acquireWriteTicket(), scope={active:true};
+  withWriteSync<T>(perform:()=>T,kind:WriterAdmissionClass="unclassified"):T {
+    if(this.admissionContext.getStore()?.active) {
+      this.startClass(kind);
+      try{return perform();}
+      finally{this.finishClass(kind);}
+    }
+    const release=this.acquireWriteTicket(kind), scope={active:true};
     try{return this.admissionContext.run(scope,perform);}
     finally {scope.active=false;release();}
   }
@@ -58,9 +115,13 @@ export class SnapshotWriterFence {
    * Every async mutator must enter BEFORE its first write and retain the
    * ticket through asynchronous I/O. Reject if a freeze is already active.
    */
-  async withWrite<T>(perform:()=>T|Promise<T>):Promise<T> {
-    if(this.admissionContext.getStore()?.active) return await perform();
-    const release=this.acquireWriteTicket(), scope={active:true};
+  async withWrite<T>(perform:()=>T|Promise<T>,kind:WriterAdmissionClass="unclassified"):Promise<T> {
+    if(this.admissionContext.getStore()?.active) {
+      this.startClass(kind);
+      try{return await perform();}
+      finally{this.finishClass(kind);}
+    }
+    const release=this.acquireWriteTicket(kind), scope={active:true};
     try{return await this.admissionContext.run(scope,perform);}
     finally {scope.active=false;release();}
   }
