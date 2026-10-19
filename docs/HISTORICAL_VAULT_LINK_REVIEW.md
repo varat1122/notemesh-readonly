@@ -89,10 +89,48 @@ already resolves, the role/entity is inconsistent or the anchor is unsafe,
 the handoff fails closed. The returned SHA is evidence of what was read, **not**
 proof that the source remains unchanged when approval/apply occurs.
 
+## Cross-domain Evidence Navigation — proposed links only (development-only)
+
+The existing **read-only** `get_vault_info().knowledgeAudit.linkHealth`
+now also returns `crossDomainReview`. This is designed for the **entire indexed
+Investment_OS Vault**, not any hard-coded ticker, issuer, country or sector.
+It can connect company, industry/supply chain and macro/research notes only
+where a note's YAML metadata explicitly declares a navigational reference.
+
+Supported metadata fields on an otherwise eligible review/industry/company note:
+
+- `related_paths:` — a YAML array of **exact, vault-relative indexed Markdown
+  paths**, such as `01_Companies/AMD.md`. No filename guesses, aliases,
+  fuzzy issuer matches, remote URLs or `../` traversals are accepted.
+- `related_claim_ids:` — a YAML array of **exact Claim IDs** corresponding
+  to `claims[].claim_id` in an indexed structured claim register. The ID
+  must be **unique across all indexed claim-register notes** before proposing
+  one destination. A duplicate ID is ambiguous, not extra independent evidence.
+
+A matching reference is **not** proof that macro changes caused a company's
+earnings move, that a supply-chain relationship is commercial, or that a claim
+is verified or independently sourced. It is a metadata-declared **navigation
+candidate requiring a human to read both notes, check attribution, chronology,
+counter-evidence and intended link direction** before any edit.
+
+The planner scans up to 10,000 indexed notes and returns only eight bounded
+samples, alongside counts for unresolvable, malformed, ambiguous and already
+linked references. It fails closed if the index is incomplete or truncated.
+Protected sources under `05_Thesis`, `06_Portfolio`, `07_Sources`, and
+`09_Templates` are **never** proposed for editing. Existing resolved links
+are not duplicated. A new metadata field alone never triggers a write.
+
+**Important:** This PR only adds cross-domain proposals to the audit.
+PR #65's `prepare_historical_link_edit` handoff is specifically validated
+for same-entity historical navigation and must **not** be assumed to authorize
+or prepare cross-domain relationships. Cross-domain Safe Edit needs a distinct
+verified, owner-approved handoff and independent direct-source review before
+any one-note preview/apply. No existing note has been changed.
+
 ## Future extensions (not implemented)
 
 - Human-reviewed synonym/alias matching for cross-company and sector context.
-- Source-and-counter-evidence graph links with exact Claim IDs and event-date
-  lineage, preserving original/source/review/thesis independence.
+- Source-and-counter-evidence graph with **independently verified** event-date
+  lineage and typed economic relationships (beyond navigation pointers).
 - Explicit staged Safe Edit previews for a manually selected set of approved
   changes, one note at a time, never a silent vault-wide migration.
