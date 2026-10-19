@@ -40,6 +40,9 @@ export const MANDATORY_WRITER_CLASSES = Object.freeze([
     witnesses: [
       ["src/server/db.ts", "new Database(env.dbPath)"],
       ["src/server/db.ts", 'opened.pragma("journal_mode = WAL")'],
+      ["src/server/claim.ts", 'inProcessDrWriterFence.withWriteSync(() => {'],
+      ["src/server/claim.ts", 'source.exec(SINGLE_ADMIN_TRIGGER);'],
+      ["src/server/claim.ts", '}, "better_auth_adapter");'],
     ],
     requiredEvidence: "all app.sqlite handles and WAL/checkpoint writers drained with SQLite-consistent snapshot policy",
   },
