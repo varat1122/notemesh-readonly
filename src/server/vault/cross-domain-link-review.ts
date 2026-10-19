@@ -30,6 +30,8 @@ export interface CrossDomainLinkReview {
   unresolvedReferences:number;
   invalidReferences:number;
   alreadyLinkedReferences:number;
+  claimIndexTruncated:boolean;
+  heldClaimReferences:number;
   sampleTruncated:boolean;
   samples:CrossDomainLinkCandidate[];
   canAutoWrite:false;
@@ -75,30 +77,36 @@ export function planCrossDomainLinkReview(
     status:"incomplete_index_hold",indexedNotesConsidered:notes.length,
     candidateCount:0,ambiguousClaimReferences:0,unresolvedReferences:0,
     invalidReferences:0,alreadyLinkedReferences:0,
+    claimIndexTruncated:false,heldClaimReferences:0,
     sampleTruncated:false,samples:[],canAutoWrite:false,canAutoUpdateThesis:false,
   };
   if(!indexComplete||notes.length>MAX_NOTES)return empty;
   const byPath=new Map<string,KnowledgeLinkNote>();
-  const claimOwners=new Map<string,Set<string>>();
+  // Count every declared occurrence, not merely unique file paths. Two
+  // instances of one Claim ID inside a single register are still ambiguous.
+  const claimOwners=new Map<string,{path:string;occurrences:number}>();
+  let claimIndexTruncated=false;
   for(const n of notes) {
     if(!validPath(n.path))continue;
     byPath.set(n.path,n);
     if(n.role!=="structured_claim")continue;
     const raw=n.metadata.claims;
-    if(!Array.isArray(raw)||raw.length>100)continue;
+    if(!Array.isArray(raw))continue;
+    if(raw.length>100){claimIndexTruncated=true;continue;}
     for(const v of raw) {
       if(!v||typeof v!=="object"||Array.isArray(v))continue;
       const id=text((v as Record<string,unknown>).claim_id);
       if(!id||!validClaimId(id))continue;
-      const paths=claimOwners.get(id)??new Set<string>();
-      paths.add(n.path);claimOwners.set(id,paths);
+      const claim=claimOwners.get(id);
+      if(claim)claim.occurrences++;
+      else claimOwners.set(id,{path:n.path,occurrences:1});
     }
   }
   const sorted=notes.slice().sort((a,b)=>a.path.localeCompare(b.path));
   const samples:CrossDomainLinkCandidate[]=[];
   const seen=new Set<string>();
   let candidateCount=0,ambiguousClaimReferences=0,unresolvedReferences=0;
-  let invalidReferences=0,alreadyLinkedReferences=0;
+  let invalidReferences=0,alreadyLinkedReferences=0,heldClaimReferences=0;
   for(const n of sorted) {
     if(excludedSource(n.path,n.role)||!byPath.has(n.path))continue;
     const direct=field(n.metadata,"related_paths",validPath);
@@ -110,10 +118,13 @@ export function planCrossDomainLinkReview(
       proposals.push({path:p,relation:"explicit_related_path",ref:p});
     }
     for(const id of claims.values) {
-      const owners=claimOwners.get(id);
-      if(!owners?.size){unresolvedReferences++;continue;}
-      if(owners.size!==1){ambiguousClaimReferences++;continue;}
-      proposals.push({path:[...owners][0],relation:"unique_exact_claim_id",ref:id});
+      // One oversized indexed register means uniqueness across ALL indexed
+      // register rows cannot be established, so every Claim-ID candidate holds.
+      if(claimIndexTruncated){heldClaimReferences++;continue;}
+      const owner=claimOwners.get(id);
+      if(!owner){unresolvedReferences++;continue;}
+      if(owner.occurrences!==1){ambiguousClaimReferences++;continue;}
+      proposals.push({path:owner.path,relation:"unique_exact_claim_id",ref:id});
     }
     for(const proposed of proposals) {
       if(proposed.path===n.path)continue;
@@ -134,7 +145,7 @@ export function planCrossDomainLinkReview(
   return {
     status:"read_only_proposals",indexedNotesConsidered:notes.length,
     candidateCount,ambiguousClaimReferences,unresolvedReferences,
-    invalidReferences,alreadyLinkedReferences,
+    invalidReferences,alreadyLinkedReferences,claimIndexTruncated,heldClaimReferences,
     sampleTruncated:candidateCount>samples.length,samples,
     canAutoWrite:false,canAutoUpdateThesis:false,
   };
