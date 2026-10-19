@@ -80,6 +80,8 @@ export const MANDATORY_WRITER_CLASSES = Object.freeze([
     witnesses: [
       ["src/server/sync/git.ts", 'await runGit(["fetch"'],
       ["src/server/sync/git.ts", 'await runGit(["add", "-A"])'],
+      ["src/server/vault/modified.ts", 'return inProcessDrWriterFence.withWrite(async () => {'],
+      ["src/server/vault/modified.ts", '}, "git_sync");'],
     ],
     requiredEvidence: "all Git child processes exited or drained; every inbound merge/checkout halted",
   },
