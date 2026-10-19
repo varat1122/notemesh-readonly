@@ -45,10 +45,19 @@ export function assertIsolatedInterprocessFixture(root) {
  * On process death the directory stays locked until an operator has proved
  * that no writer remains and manually cleared it. Never unlock another owner.
  */
-export async function withFixtureInterprocessExclusion(root, purpose, perform) {
+/**
+ * Acquire a crash-sticky fixture ticket for the ENTIRE writable-resource
+ * lifetime. Unlike a short callback wrapper, the owner may retain this ticket
+ * until an async worker / SQLite handle has actually closed.
+ *
+ * IMPORTANT: This is a cooperative OFFLINE-ONLY exclusion gate. It does not
+ * register an OS-wide lock, block nonparticipants or certify Production DR.
+ * When the holder crashes, the directory remains occupied and requires
+ * independent operator review; never re-acquire based on stale PID/time.
+ */
+export function acquireFixtureInterprocessTicket(root, purpose) {
   if (purpose !== "writer" && purpose !== "snapshot")
     throw Error("dr_ipc_invalid_purpose");
-  if (typeof perform !== "function") throw Error("dr_ipc_callback_required");
   const fixture = assertIsolatedInterprocessFixture(root);
   const lockDir = path.join(fixture, LOCK);
   try {
@@ -57,37 +66,37 @@ export async function withFixtureInterprocessExclusion(root, purpose, perform) {
     if (e?.code === "EEXIST") throw Error("dr_ipc_gate_occupied_fail_closed");
     throw e;
   }
+
   const owner = crypto.randomBytes(32).toString("hex");
   const ownerFile = path.join(lockDir, OWNER);
   const lockStat = fs.lstatSync(lockDir);
-  let result;
-  let failure;
-  let failed = false;
+  // A failed holder write must leave the gate sticky, never admit snapshot.
+  fs.writeFileSync(ownerFile, owner, { flag: "wx", mode: 0o600 });
+  let released = false;
+  return Object.freeze({
+    release() {
+      if (released) throw Error("dr_ipc_ticket_already_released");
+      const now = fs.lstatSync(lockDir);
+      if (!now.isDirectory() || now.isSymbolicLink() ||
+          now.dev !== lockStat.dev || now.ino !== lockStat.ino ||
+          fs.readFileSync(ownerFile, "utf8") !== owner)
+        throw Error("dr_ipc_gate_ownership_lost_fail_closed");
+      // Never recursively delete other writers' data or a tampered directory.
+      fs.unlinkSync(ownerFile);
+      fs.rmdirSync(lockDir);
+      released = true;
+    },
+  });
+}
+
+export async function withFixtureInterprocessExclusion(root, purpose, perform) {
+  if (typeof perform !== "function") throw Error("dr_ipc_callback_required");
+  const ticket = acquireFixtureInterprocessTicket(root, purpose);
   try {
-    // No PID-based "stale lease" override. The random value is used only for
-    // ownership checks and is never printed in errors or CI output.
-    fs.writeFileSync(ownerFile, owner, { flag: "wx", mode: 0o600 });
-    result = await perform();
-  } catch (e) {
-    failure = e;
-    failed = true;
+    return await perform();
+  } finally {
+    // If cleanup cannot independently prove ownership, fail closed; the
+    // directory must remain sticky for review, even after callback failure.
+    ticket.release();
   }
-  // Do NOT throw from finally: cleanup errors have their own explicit branch,
-  // so we can preserve the original callback failure where cleanup succeeds.
-  let cleanupError;
-  try {
-    const now = fs.lstatSync(lockDir);
-    if (!now.isDirectory() || now.isSymbolicLink() ||
-        now.dev !== lockStat.dev || now.ino !== lockStat.ino ||
-        fs.readFileSync(ownerFile, "utf8") !== owner)
-      throw Error("dr_ipc_gate_ownership_lost_fail_closed");
-    // Never remove recursively; unexpected files deliberately keep the lock.
-    fs.unlinkSync(ownerFile);
-    fs.rmdirSync(lockDir);
-  } catch (e) {
-    cleanupError = e;
-  }
-  if (cleanupError) throw cleanupError;
-  if (failed) throw failure;
-  return result;
 }
