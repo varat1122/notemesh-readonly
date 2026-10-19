@@ -1,5 +1,16 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## Resource-lifetime interprocess ticket — offline fixture only (2026-10-19)
+
+Development extension of the existing `nm-interprocess-fixture-gate.mjs` — **not a replacement lock service, not a Production gate**.
+
+- `acquireFixtureInterprocessTicket(root, purpose)` holds the shared atomic-mkdir gate for the **full lifetime of a fixture writer resource**, including an open SQLite handle or async task, until explicit `release()`. Existing `withFixtureInterprocessExclusion` delegates to the same ticket API to avoid competing lock implementations.
+- Gate acquisition and release refuse unknown purpose, Railway env, non-scratch path, concurrent holder, tampered inode or token, and double release. On process death a lock remains sticky; no PID/age-based automatic lock stealing.
+- Child-process regression tests prove **writer→snapshot** and **snapshot→cooperating writer** exclusion, owner tampering and successful release/re-admission. A separate adversarial fixture shows that **noncooperating** writes are not blocked at all; this is a hard Production release blocker, not a passed consistency check.
+- The snapshot and writer sides must BOTH enroll, and each long-lived write resource must hold its ticket until *all* filesystem/SQLite/remote mutations finish. This fixture gate currently serializes all participants; it is neither a scalable read/write lease nor cross-host/distributed coordination.
+
+**Remaining P0:** inventory all true Production writer owners; design proven admission/quiescence across NoteMesh replicas, Better Auth, SQLite open handles/WAL/checkpoint, Git/Obsidian Sync subprocesses, price/Google Drive I/O, background jobs and external producers. Require crash/timeout recovery, independent verification and isolated restore. No Railway backup or auto-scheduler may use this fixture API; NO GO remains.
+
 ## Writer-surface inventory blind-spot review — development only (2026-10-19)
 
 On top of Draft PR #51, the read-only `nm-writer-source-inventory.mjs` now flags additional potential writer entry points previously missed by its synchronous `fs.*Sync` matcher:
