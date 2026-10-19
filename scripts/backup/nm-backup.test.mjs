@@ -86,6 +86,37 @@ test("unsafe directory symlinks and filenames fail closed, without leaking outsi
   const backupDir=fs.existsSync(out)?fs.readdirSync(out):[];
   assert.equal(backupDir.some(x=>x.endsWith(".nmb")),false);
 }));
+test("Railway create fails closed even when offline-confirmed is asserted",()=>fixture(async ({data,out})=>{
+  const p=spawnSync(process.execPath,
+    [tool,"create","--data-dir",data,"--out",out,"--offline-confirmed"],
+    {env:{...env,RAILWAY_ENVIRONMENT_ID:"simulated-deployed-runtime"},encoding:"utf8"});
+  assert.notEqual(p.status,0);
+  assert.match(p.stderr,/backup_create_refused_on_railway_without_coordinated_snapshot/);
+  assert.equal(fs.existsSync(out),false);
+}));
+
+test("resolved symlink output alias cannot overlap source or its ancestor",()=>fixture(async ({root,data})=>{
+  const sourceAlias=path.join(root,"alias-source");
+  fs.symlinkSync(data,sourceAlias);
+  const viaSource=path.join(sourceAlias,"nested-bundles");
+  const p=spawnSync(process.execPath,
+    [tool,"create","--data-dir",data,"--out",viaSource,"--offline-confirmed"],
+    {env,encoding:"utf8"});
+  assert.notEqual(p.status,0);
+  assert.match(p.stderr,/Resolved backup output overlaps source data directory/);
+  if(fs.existsSync(viaSource))
+    assert.equal(fs.readdirSync(viaSource).some(n=>n.endsWith(".nmb")),false);
+
+  const parentAlias=path.join(root,"alias-parent");
+  fs.symlinkSync(root,parentAlias);
+  const q=spawnSync(process.execPath,
+    [tool,"create","--data-dir",data,"--out",parentAlias,"--offline-confirmed"],
+    {env,encoding:"utf8"});
+  assert.notEqual(q.status,0);
+  assert.match(q.stderr,/Resolved backup output overlaps source data directory/);
+  assert.equal(fs.readdirSync(root).some(n=>n.endsWith(".nmb")),false);
+}));
+
 test("fails closed on a missing SQLite primary DB",()=>fixture(async ({data,out})=>{
   // Unix unlink is legal on an open SQLite descriptor; fixture() closes it at teardown.
   fs.rmSync(path.join(data,"app.sqlite"),{force:true});
