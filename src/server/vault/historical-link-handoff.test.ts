@@ -15,8 +15,12 @@ beforeEach(()=>{
   process.env.DATA_DIR=root;
   process.env.ENCRYPTION_KEY??=Buffer.alloc(32,4).toString("base64");
   vi.resetModules();
+  // The indexer intentionally lives on globalThis in production; fixture
+  // tests must not reuse a READY indexer and old DB across scratch roots.
+  Reflect.deleteProperty(globalThis,"__vaultIndexer");
 });
 afterEach(()=>{
+  Reflect.deleteProperty(globalThis,"__vaultIndexer");
   fs.rmSync(root,{recursive:true,force:true});
   delete process.env.DATA_DIR;
 });
