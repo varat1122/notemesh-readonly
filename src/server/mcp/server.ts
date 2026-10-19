@@ -5,6 +5,7 @@ import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
 import { getLegacyReviewDossier } from "../vault/legacy-review-dossier";
+import { listLegacyReviewQueue } from "../vault/legacy-review-queue";
 import { prepareLegacyReviewDecision, REVIEW_DISPOSITIONS, type ReviewDisposition } from "../vault/legacy-review-decision";
 import { prepareHistoricalLinkEdit } from "../vault/historical-link-handoff";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
@@ -1151,6 +1152,34 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       submissionRequires: "vault:read inbox:submit",
       ...(access.label.startsWith("oauth:") ? { grantDiagnostics: oauthScopeDiagnostics(access.label.slice(6)) } : {}),
     } })),
+  );
+
+  // Read-only queue enumerates every indexed eligible review note, not merely
+  // eight global audit examples. Paging is bounded and non-transactional.
+  server.registerTool(
+    "list_legacy_review_queue",
+    {
+      title: "List historical evidence review queue",
+      annotations: READ,
+      description:
+        "Read-only whole-index P1/P2/P3 review queue with bounded cursor pages " +
+        "of exact historical/review note paths. Counts are indexed-metadata-only; " +
+        "a completed Markdown index cannot verify archived originals or claims. " +
+        "Live pagination is not a stable cross-request snapshot. Never edits Vault.",
+      inputSchema: {
+        priority:z.enum(["all","P1_provenance_or_chronology",
+          "P2_attribution_or_scope","P3_navigation_only"]).optional()
+          .describe("Review priority filter, default P1; use all for mixed categories"),
+        limit:z.number().int().min(1).max(30).optional()
+          .describe("Maximum note entries returned per page (default 20; maximum 30)"),
+        afterPath:z.string().min(4).max(350).optional()
+          .describe("Exact next-cursor path from a previous queue page; live pages are not snapshot-isolated"),
+      },
+    },
+    safe(({priority,limit,afterPath}:{
+      priority?:"all"|"P1_provenance_or_chronology"|"P2_attribution_or_scope"|"P3_navigation_only";
+      limit?:number;afterPath?:string;
+    })=>json(withBoundary(listLegacyReviewQueue(priority,limit,afterPath)))),
   );
 
   // Human-review dossier: exact indexed path, current on-disk hash and
