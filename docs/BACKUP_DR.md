@@ -1,5 +1,16 @@
 # Investment OS — NoteMesh Disaster Recovery (P1, NOT ACTIVE)
 
+## Offline coordinated cut — explicit interprocess gate, independent fixture restore (2026-10-19)
+
+This Draft adds `withCoordinatedOfflineFixtureCut()` beside (not in place of) the earlier `withOfflineFixtureCut()`. It composes **the existing process-local Writer Fence → awaited Sync pause → existing crash-sticky interprocess exclusion → external halt attestation → pre/post source fingerprint → capture**, keeping all protections active across asynchronous work. It is **offline fixture-only** and rejects every Railway environment.
+
+The lock is an explicit **sibling scratch directory**, not a file inside the snapshot source: `/tmp/nm-dr-snapshot-fixture-<id>` pairs only with the pre-created `/tmp/nm-dr-ipc-fixture-<id>`. Missing/unsafe gate roots fail closed; no automatic lock-root creation or stale-owner reaping. Lock owner bytes are never included in restored Vault or SQLite data. `assertNoExternalWriters() === true` remains necessary but is **not sufficient**; the coordinator also has to acquire real interprocess exclusion. It cannot prevent unregistered writers from bypassing the lock, even when a cooperating writer is blocked.
+
+Additional Vitest integration tests use a **separate real Node process with better-sqlite3 WAL**, hold its writer lock, and prove that a snapshot is rejected without capture despite a misleading true Boolean. They also test lock persistence on SIGKILL, missing gate, Railway refusal, a deliberately unregistered writer changing bytes, and a full synthetic encrypted `.nmb` creation/verify/restore with SQLite `integrity_check` and exact Markdown readback.
+
+**Status remains `NO_GO`:** fixture lock cooperation cannot establish service-wide writer coverage, real Obsidian client quiescence, app.sqlite cross-process leases, multi-DB temporal consistency, real Google Drive production backup or off-server restore. Do not turn this into a Production snapshot endpoint/scheduler or deploy it based on tests alone. No actual source archives, original investment notes, credentials or portfolio data are operated on.
+
+
 ## Runtime writer-admission observations (development only, 2026-10-19)
 
 A new `SnapshotWriterFence.getAdmissionEvidence()` returns **read-only process-local observations**: current `activeWriters`, `frozen`, and `activeByClass` for named tickets. It explicitly reports `scope: "this_node_process_only"`, `completeRuntimeWriterCoverageVerified: false`, `externalWriterQuiescenceVerified: false` and `productionSnapshotReady: false`.

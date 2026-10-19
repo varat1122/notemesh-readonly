@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { SnapshotWriterFence } from "./writer-fence";
+import { withFixtureInterprocessExclusion } from "../../../scripts/backup/nm-interprocess-fixture-gate.mjs";
 
 type SyncPauser = {
   withPausedForEdit<T>(run: () => T | Promise<T>): Promise<T>;
@@ -122,17 +123,57 @@ function syntheticTreeFingerprint():string {
  * then capture. The Sync pause and the freeze remain active across async work.
  * Reverse on success/failure. This is a lifecycle TEST helper, not a scheduler.
  */
+async function captureUnchangedFixture<T>(capture:()=>Promise<T>|T):Promise<T> {
+  const before=syntheticTreeFingerprint();
+  const result=await capture();
+  const after=syntheticTreeFingerprint();
+  if(before!==after)throw Error("dr_fixture_source_changed_during_cut");
+  return result;
+}
+
 export async function withOfflineFixtureCut<T>(opts: FixtureCutOptions<T>): Promise<T> {
   assertOfflineFixtureOnly();
   return opts.fence.withFrozenWriters(async () => {
     return opts.sync.withPausedForEdit(async () => {
       const halted = await opts.assertNoExternalWriters();
       if (halted !== true) throw Error("dr_fixture_external_writer_not_halted");
-      const before=syntheticTreeFingerprint();
-      const result=await opts.capture();
-      const after=syntheticTreeFingerprint();
-      if(before!==after)throw Error("dr_fixture_source_changed_during_cut");
-      return result;
+      return captureUnchangedFixture(opts.capture);
     });
   }, {drainTimeoutMs: opts.drainTimeoutMs ?? 10000});
+}
+
+/**
+ * OFFLINE FIXTURE ONLY: Compose the existing in-process Writer Fence,
+ * awaited Sync pause, AND an actual crash-sticky interprocess exclusion gate.
+ *
+ * The lock root is a deliberate sibling of the snapshot source:
+ * /tmp/nm-dr-snapshot-fixture-<suffix> -> /tmp/nm-dr-ipc-fixture-<suffix>.
+ * It MUST have been explicitly created by the test/operator; the coordinator
+ * never creates it or accepts an arbitrary gate path. This prevents snapshots
+ * from capturing their own live lock files, and catches missing setup CLOSED.
+ *
+ * assertNoExternalWriters remains required for additional independently
+ * checked fixture assumptions; a TRUE boolean alone is NOT sufficient.
+ * ONLY writers that voluntarily use the exact same lock root are excluded.
+ * No runtime/device/production consistency attestation is provided.
+ */
+export async function withCoordinatedOfflineFixtureCut<T>(opts:FixtureCutOptions<T>):Promise<T> {
+  assertOfflineFixtureOnly();
+  const snapshotRoot=process.env.DATA_DIR!;
+  const prefix="nm-dr-snapshot-fixture-";
+  const name=path.basename(snapshotRoot);
+  if(!name.startsWith(prefix))throw Error("dr_fixture_gate_invalid_snapshot_prefix");
+  const suffix=name.slice(prefix.length);
+  if(!/^[a-zA-Z0-9_-]{6,80}$/.test(suffix))
+    throw Error("dr_fixture_gate_invalid_snapshot_suffix");
+  const lockRoot=path.join(fs.realpathSync(os.tmpdir()),"nm-dr-ipc-fixture-"+suffix);
+  return opts.fence.withFrozenWriters(async()=>{
+    return opts.sync.withPausedForEdit(async()=>{
+      return withFixtureInterprocessExclusion(lockRoot,"snapshot",async()=>{
+        const halted=await opts.assertNoExternalWriters();
+        if(halted!==true)throw Error("dr_fixture_external_writer_not_halted");
+        return captureUnchangedFixture(opts.capture);
+      });
+    });
+  }, {drainTimeoutMs:opts.drainTimeoutMs??10000});
 }
