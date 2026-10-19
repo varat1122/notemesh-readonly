@@ -136,3 +136,89 @@ describe("SnapshotWriterFence (isolated fixture only)",()=>{
     expect(await fence.withFrozenWriters(()=>5)).toBe(5);
   });
 });
+
+
+describe("Runtime admission observations (process-local, never Production attestation)",()=>{
+  it("names simultaneous async and lifetime writes until each closes, without promoting snapshot readiness",async()=>{
+    const fence=new SnapshotWriterFence(),hold=deferred<void>();
+    const asyncWork=fence.withWrite(async()=>{await hold.promise;}, "better_auth_adapter");
+    const release=fence.acquireWriteTicket("market_price_sqlite");
+    const snapshot=fence.getAdmissionEvidence();
+    expect(snapshot).toMatchObject({
+      scope:"this_node_process_only",frozen:false,activeWriters:2,
+      activeByClass:{better_auth_adapter:1,market_price_sqlite:1},
+      completeRuntimeWriterCoverageVerified:false,
+      externalWriterQuiescenceVerified:false,
+      productionSnapshotReady:false,
+    });
+    await expect(fence.withFrozenWriters(()=>true,{drainTimeoutMs:15}))
+      .rejects.toThrow(/drain_timeout/);
+    expect(fence.getAdmissionEvidence().activeWriters).toBe(2);
+    hold.resolve();await asyncWork;
+    expect(fence.getAdmissionEvidence().activeByClass)
+      .toEqual({market_price_sqlite:1});
+    release();
+    expect(fence.getAdmissionEvidence().activeByClass).toEqual({});
+    expect(snapshot.activeByClass).toEqual({better_auth_adapter:1,market_price_sqlite:1});
+    await fence.withFrozenWriters(()=>{
+      expect(fence.getAdmissionEvidence()).toMatchObject({
+        frozen:true,activeWriters:0,productionSnapshotReady:false,
+      });
+    });
+  });
+
+  it("reports nested named operations without claiming extra top-level tickets",async()=>{
+    const fence=new SnapshotWriterFence(),hold=deferred<void>();
+    await fence.withWrite(async()=>{
+      expect(fence.status.activeWriters).toBe(1);
+      await fence.withWrite(async()=>{
+        expect(fence.status.activeWriters).toBe(1);
+        expect(fence.getAdmissionEvidence().activeByClass)
+          .toEqual({better_auth_adapter:1,app_sqlite_wal:1});
+        fence.withWriteSync(()=>{
+          expect(fence.getAdmissionEvidence().activeByClass)
+            .toEqual({better_auth_adapter:1,app_sqlite_wal:1,original_source_archive:1});
+        },"original_source_archive");
+        expect(fence.getAdmissionEvidence().activeByClass)
+          .toEqual({better_auth_adapter:1,app_sqlite_wal:1});
+      },"app_sqlite_wal");
+      expect(fence.getAdmissionEvidence().activeByClass)
+        .toEqual({better_auth_adapter:1});
+      const asyncNested=fence.withWrite(()=>hold.promise,"git_sync");
+      expect(fence.getAdmissionEvidence().activeByClass)
+        .toEqual({better_auth_adapter:1,git_sync:1});
+      hold.resolve();await asyncNested;
+    },"better_auth_adapter");
+    expect(fence.getAdmissionEvidence().activeByClass).toEqual({});
+    expect(fence.status).toEqual({frozen:false,activeWriters:0});
+  });
+
+  it("refuses a new classified writer during freeze before admission; later recovers",async()=>{
+    const fence=new SnapshotWriterFence();
+    await fence.withFrozenWriters(async()=>{
+      await expect(fence.withWrite(async()=>true,"git_sync"))
+        .rejects.toThrow("backup_writer_freeze_active");
+      expect(()=>fence.acquireWriteTicket("market_price_sqlite"))
+        .toThrow("backup_writer_freeze_active");
+      expect(()=>fence.withWriteSync(()=>true,"user_attachments"))
+        .toThrow("backup_writer_freeze_active");
+      expect(fence.getAdmissionEvidence().activeByClass).toEqual({});
+      expect(fence.getAdmissionEvidence().productionSnapshotReady).toBe(false);
+    });
+    await expect(fence.withWrite(()=>true,"git_sync")).resolves.toBe(true);
+    expect(fence.getAdmissionEvidence().activeByClass).toEqual({});
+  });
+
+  it("cleans class observations on sync throw, async reject and ticket double-release",async()=>{
+    const fence=new SnapshotWriterFence();
+    expect(()=>fence.withWriteSync(()=>{throw Error("fixture");},"vault_atomic_edits"))
+      .toThrow("fixture");
+    await expect(fence.withWrite(async()=>{throw Error("fixture_async");},"obsidian_cli"))
+      .rejects.toThrow("fixture_async");
+    const release=fence.acquireWriteTicket("market_price_sqlite");
+    release();
+    expect(release).toThrow(/already_released/);
+    expect(fence.getAdmissionEvidence().activeWriters).toBe(0);
+    expect(fence.getAdmissionEvidence().activeByClass).toEqual({});
+  });
+});
