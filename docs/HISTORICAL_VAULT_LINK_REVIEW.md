@@ -326,39 +326,6 @@ dossier's accuracy and outcomes have been checked on temporary fixture
 Vaults and CI only. **No report of real Production P1/P2/P3 review counts
 or mutation is implied**.
 
-## One-note evidence dossier after P1/P2/P3 prioritization
-
-The additional read-only MCP action `inspect_historical_review_dossier`
-takes a **literal indexed `sourcePath`**, not a ticker, title, full-text
-query, or one of the first-four audit samples. It reevaluates that exact
-note's P1/P2/P3 findings against the **complete current SQLite index**
-(up to 10,000 notes), so a late-sorting item can still be reviewed.
-
-The action then opens the actual historical/review source through a
-descriptor-anchored Vault read that refuses symlinks, multiple hardlinks,
-binary data, invalid UTF-8 and notes larger than 1 MB. It calculates SHA-256
-of bytes observed, compares index-stored source size, mtime and parsed
-frontmatter, and **holds** when source changed since the index. For each
-bounded finding pointing at an indexed destination, it checks current target
-bytes and declares `indexed_target_observed`,
-`indexed_target_changed_or_stale` or
-`indexed_target_unreadable_manual_review`. An explicitly declared Markdown
-path absent from the index returns `not_indexed_disk_not_assessed`, **not**
-a determination that raw source bytes were deleted.
-
-Returned data contains the source byte hash, note-declared verification
-status and dates, and a human-review decision per category. It does not
-return or reinterpret full note prose, assert source independence, verify a
-publisher document or rewrite `event_date`. No Safe Edit operation ID,
-preview, approval or modification is generated. A separate reviewer must
-inspect the **full original and target** and request the existing Safe Edit
-process when a particular change is approved.
-
-This action is implemented and tested on temporary scratch Vault files
-with the SQLite index. It is **not** deployed to Production or run against
-the live Investment_OS Vault. Do not report a new live P1/P2/P3 census,
-claim confirmed mobile Sync, or treat this as DR/restore readiness.
-
 ## Future extensions (not implemented)
 
 - Human-reviewed synonym/alias matching for cross-company and sector context.
