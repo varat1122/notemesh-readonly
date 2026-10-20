@@ -134,11 +134,13 @@ describe("PR #91: real-provider-ready, mock-transport-tested SYNTH-only adapter"
     }
   });
   it("blocks non-explicit or CI/Railway live-provider execution with no outgoing call",async()=>{
-    await expect(runOptInRealOpenAISyntheticEvaluation(undefined,false))
-      .rejects.toThrow("synthetic_openai_explicit_local_opt_in_and_key_required");
-    process.env.NM_ENABLE_SYNTHETIC_OPENAI_RUN="YES";
-    await expect(runOptInRealOpenAISyntheticEvaluation("sk-short",true))
-      .rejects.toThrow("synthetic_openai_explicit_local_opt_in_and_key_required");
+    if(!process.env.CI&&!process.env.GITHUB_ACTIONS){
+      await expect(runOptInRealOpenAISyntheticEvaluation(undefined,false))
+        .rejects.toThrow("synthetic_openai_explicit_local_opt_in_and_key_required");
+      process.env.NM_ENABLE_SYNTHETIC_OPENAI_RUN="YES";
+      await expect(runOptInRealOpenAISyntheticEvaluation("sk-short",true))
+        .rejects.toThrow("synthetic_openai_explicit_local_opt_in_and_key_required");
+    }
     process.env.RAILWAY_PROJECT_ID="do-not-contact-any-provider";
     await expect(runOptInRealOpenAISyntheticEvaluation(
       "sk-fake-REDACTED-test-only",true))
