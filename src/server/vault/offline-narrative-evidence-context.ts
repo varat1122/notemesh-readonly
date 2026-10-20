@@ -135,8 +135,8 @@ export function retrieveOfflineNarrativeEvidence(req:OfflineNarrativeRequest){
       // FTS5 safely accepts quoted string operands via parameter binding.
       const query=words.map(ftsLiteral).join(" OR ");
       const matches=db.prepare(
-        "SELECT n.path,n.title,n.frontmatter,n.mtime,n.size,f.body "+
-        "FROM notes_fts AS f JOIN notes AS n ON n.rowid=f.rowid "+
+        "SELECT n.path,n.title,n.frontmatter,n.mtime,n.size,notes_fts.body "+
+        "FROM notes_fts JOIN notes AS n ON n.rowid=notes_fts.rowid "+
         "WHERE notes_fts MATCH ? ORDER BY bm25(notes_fts), n.path LIMIT ?"
       ).all(query,MAX_HITS+1) as IndexedRow[];
       let skippedProtected=0,scannedSelected=0;
