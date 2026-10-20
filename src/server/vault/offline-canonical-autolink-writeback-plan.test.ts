@@ -373,8 +373,7 @@ describe("PR #99 isolated synthetic Safe Writeback rehearsal",()=>{
     for(const point of [
       "after_analysis_note","after_timeline_append","after_sqlite_index",
     ] as const){
-      const input=routed(m);
-      input.rehearsal={injectFailureAt:point};
+      const input={...routed(m),rehearsal:{injectFailureAt:point}};
       expect(()=>rehearseOfflineSyntheticInvestmentWriteback(input))
         .toThrow("writeback_rehearsal_injected_"+point);
       expect(sourceManifest()).toBe(original);
@@ -403,9 +402,9 @@ describe("PR #99 isolated synthetic Safe Writeback rehearsal",()=>{
       .toThrow();
   });
   it("refuses extra options or unknown failure points",async()=>{
-    const m=await fixture(),input=routed(m);
-    input.rehearsal={injectFailureAt:"unknown" as
-      "after_sqlite_index"};
+    const m=await fixture();
+    const input={...routed(m),rehearsal:{injectFailureAt:"unknown" as
+      "after_sqlite_index"}};
     expect(()=>rehearseOfflineSyntheticInvestmentWriteback(input))
       .toThrow("writeback_rehearsal_unknown_failpoint_hold");
   });
