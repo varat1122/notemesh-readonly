@@ -18,6 +18,8 @@ import {extractStructure,splitFrontmatter}
   from "./markdown";
 import {planOfflineCanonicalInvestmentAutolinks}
   from "./offline-canonical-autolink-writeback-plan";
+import {composeOfflineSyntheticInvestmentReviewMarkdown}
+  from "./offline-investment-analysis-markdown";
 import {rehearseOfflineSyntheticInvestmentWriteback,
   type OfflineSyntheticWritebackInput}
   from "./offline-synthetic-writeback-rehearsal";
@@ -161,20 +163,7 @@ export async function coordinateOfflineSyntheticSafeEditHandoff(
   };
   const marker="<!-- investment-os-operation:"+op+" -->";
   const eventMarker="<!-- investment-os-event:"+event.eventKey+" -->";
-  const analysisText=[
-    "---","type: investment_review","entity: "+issuer,
-    "event_key: "+event.eventKey,"status: draft",
-    "verification: not_reverified","source_type: archived_ai",
-    "analysis_origin: synthetic_ai_draft",
-    "operation_id: "+op,"---",
-    "# Synthetic Investment Review",marker,eventMarker,
-    "No issuer claims or AI conclusions independently verified.",
-    "## Canonical References",
-    ...route.targets.map(t=>ref(t.path)),
-    "## Thesis Review",
-    "Revenue conversion is a hypothetical review topic, not a verified fact.",
-    "Unverified reasoning requires an analyst and owner decision.","",
-  ].join("\n");
+  const analysisText=composeOfflineSyntheticInvestmentReviewMarkdown(input);
   const appendText=[
     marker,eventMarker,
     "- "+ref(route.proposedAnalysisNotePath)+
