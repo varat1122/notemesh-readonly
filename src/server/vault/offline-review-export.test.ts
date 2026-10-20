@@ -127,7 +127,7 @@ describe("PR #83 offline verified snapshot to local Thai browser review",()=>{
     expect(fs.readdirSync(out)).toEqual([]);
   });
   it("escapes both old note text and proposed text so they cannot execute",async()=>{
-    const malicious="<img src=x onerror=alert(1)>";
+    const malicious="Fictional note text <img src=x onerror=alert(1)>";
     await createFixture(malicious);
     const r=run(request(malicious,"<script>alert('XSS')</script>"));
     expect(r.status,r.stderr).toBe(0);
@@ -137,6 +137,13 @@ describe("PR #83 offline verified snapshot to local Thai browser review",()=>{
     expect(html).toContain("&lt;script&gt;alert(&#39;XSS&#39;)&lt;/script&gt;");
     expect(html).not.toContain("<img src=x onerror");
     expect(html).not.toContain("<script>alert");
+  });
+  it("rejects HTML-block note anchors instead of rewriting note structure",async()=>{
+    const htmlBlock="<img src=x onerror=alert(1)>";
+    await createFixture(htmlBlock);
+    const bad=run(request(htmlBlock,"Suggested fictional replacement"));
+    expect(bad.status).not.toBe(0);
+    expect(fs.readdirSync(out)).toEqual([]);
   });
   it("never accepts an output directory in Vault, snapshot or repo",async()=>{
     await createFixture();
