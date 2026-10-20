@@ -69,7 +69,7 @@ export function createSafeEditMcpServer(access:McpAccess) {
     inputSchema:{
       operationRoot:z.string().regex(/^[a-z][a-z0-9-]{8,60}$/),
       issuer:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._ -]{0,49}$/),
-      eventKey:z.string().regex(/^[\\p{L}\\p{N}_. -]{4,140}$/u),
+      eventKey:z.string().regex(/^[\p{L}\p{N}_. -]{4,140}$/u),
       period:z.string().min(1).max(100),
       timelineDate:z.string().date(),
       timelineHeading:z.string().min(1).max(150),
