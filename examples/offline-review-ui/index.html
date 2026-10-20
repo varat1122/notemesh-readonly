@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>Investment OS — ทดลองตรวจข้อเสนอแก้ไข (Offline)</title>
+<style>
+:root{color-scheme:light;--ink:#1d2939;--muted:#667085;--line:#d0d5dd;--surface:#f8fafc;--blue:#175cd3;--red:#b42318;--green:#027a48;--gold:#93370d}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;color:var(--ink);background:#eef2f6;margin:0}
+main{max-width:940px;padding:26px 18px 50px;margin:auto}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+h1{font-size:1.45rem;margin:0 0 6px}h2{font-size:1.12rem;margin:0 0 12px}
+small,.sub,.muted{color:var(--muted)}
+small{font-size:.78rem}.tag{border:1px solid var(--line);padding:5px 10px;border-radius:30px;font-size:.8rem;white-space:nowrap;background:#fff}
+section{background:#fff;border:1px solid #e2e8f0;border-radius:13px;padding:22px;margin-top:16px}
+.notice{background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:12px 14px;line-height:1.6;margin-top:18px;color:#7c2d12}
+.meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px;margin-top:16px}
+.meta>div{padding:10px;background:var(--surface);border-radius:7px}
+.label{font-size:.78rem;color:var(--muted)}
+.value{font-size:.91rem;overflow-wrap:anywhere}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.old,.new{padding:13px;min-height:115px;border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.91rem;line-height:1.65}
+.old{background:#fff1f3;border-color:#fecdd3}.new{background:#ecfdf3;border-color:#abefc6}
+p{line-height:1.65}
+label{display:block;margin:9px 0;line-height:1.5}
+input[type=text],textarea{width:100%;border:1px solid #98a2b3;border-radius:7px;padding:11px;font:inherit}
+textarea{min-height:90px}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+button{border:1px solid var(--blue);background:#fff;color:var(--blue);border-radius:7px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer}
+button.primary{background:var(--blue);color:#fff}
+button.reject{border-color:var(--red);color:var(--red)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid #84adff;outline-offset:2px}
+button:disabled{color:#98a2b3;border-color:#d0d5dd;background:#f2f4f7;cursor:not-allowed}
+.status{border-left:4px solid #98a2b3;background:var(--surface);border-radius:6px;padding:12px 14px;margin-top:14px}
+.status[data-tone="accept"]{border-color:var(--green)}
+.status[data-tone="reject"]{border-color:var(--red)}
+.status[data-tone="changes"]{border-color:var(--gold)}
+footer{font-size:.82rem;line-height:1.6;color:var(--muted);margin-top:24px}
+@media(max-width:620px){.grid,.meta{grid-template-columns:1fr}section{padding:17px}header{display:block}.tag{display:inline-block;margin-top:8px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div><h1>ตรวจข้อเสนอแก้ไขข้อมูลลงทุน</h1><div class="sub">Investment OS — ต้นแบบสำหรับทดลองการตัดสินใจแบบออฟไลน์</div></div>
+<span class="tag">DEMO / ไม่ใช่ระบบอนุมัติจริง</span>
+</header>
+<div class="notice" role="note" id="warning">
+<strong>ข้อมูลตัวอย่างสมมติทั้งหมด</strong> ไม่มีข้อมูลหุ้นจริง และไม่ได้เชื่อม Obsidian, GitHub, Railway, บัญชีผู้ใช้ หรือระบบยืนยันตัวตน
+การกด “เห็นชอบในหลักการ” เป็นเพียงการจำลองความเห็นในหน้าจอนี้ <strong>ไม่ใช่การอนุมัติให้ AI แก้ Vault</strong>
+</div>
+<section aria-labelledby="summary-heading">
+<h2 id="summary-heading">1. AI เสนอแก้ไขอะไร</h2>
+<p class="muted">ตัวอย่างนี้จำลองผลที่ระบบตรวจหลักฐานก่อนหน้าอาจส่งมาให้คนอ่าน ไม่ใช่รายงานบริษัทจริง</p>
+<div class="meta">
+<div><div class="label">บริษัท</div><div class="value">SYNTH (บริษัทสมมติ)</div></div>
+<div><div class="label">ประเภทข้อมูล</div><div class="value">Historical Research Note — ตัวอย่าง</div></div>
+<div><div class="label">ไฟล์</div><div class="value" id="note-path">10_Knowledge/Company Research/SYNTH - Review.md</div></div>
+<div><div class="label">เวอร์ชันหลักฐาน</div><div class="value">Synthetic snapshot #01 (ไม่ผ่านการยืนยันจากผู้ออกเอกสาร)</div></div>
+</div>
+<p><strong>เหตุผลที่เสนอ:</strong> ข้อความเดิมอาจต้องตรวจสอบอีกครั้งจากเอกสารต้นทาง ก่อนยกระดับเป็นข้อเท็จจริงใน Thesis</p>
+<div class="grid">
+<div><div class="label">ข้อความเดิม</div><div class="old" id="before">ตัวเลขสมมติในโน้ต: 10 (ยังไม่ยืนยัน)</div></div>
+<div><div class="label">ข้อความที่ AI เสนอ</div><div class="new" id="after">ตัวเลขสมมติในโน้ต: 12 (รอหลักฐานและการตรวจสอบ)</div></div>
+</div>
+</section>
+<section aria-labelledby="evidence-heading">
+<h2 id="evidence-heading">2. หลักฐานและข้อควรระวัง</h2>
+<label><input type="checkbox" id="seen-source"> ฉันตรวจข้อความเดิม/ข้อเสนอข้างต้นแล้ว</label>
+<label><input type="checkbox" id="seen-risk"> ฉันรับทราบว่า SHA-256 ของไฟล์ ไม่ได้ยืนยันว่าตัวเลขการลงทุนถูกต้อง</label>
+<label><input type="checkbox" id="seen-owner"> ฉันรับทราบว่ายังไม่มีการยืนยันตัวเจ้าของ Vault และการเห็นชอบนี้ไม่อนุญาตให้บันทึกจริง</label>
+<p class="muted">ข้อมูลที่ยังขาด: แหล่งต้นฉบับที่ยืนยันได้, การตรวจ claim ตามช่วงเวลา, การลงทะเบียนกุญแจเจ้าของที่เชื่อถือได้, และการอนุมัติที่มีผลทางสิทธิ์</p>
+</section>
+<section aria-labelledby="decision-heading">
+<h2 id="decision-heading">3. คุณต้องการทำอย่างไรกับข้อเสนอนี้</h2>
+<label for="comment">หมายเหตุหรือเหตุผลที่ตัดสินใจ (จำลองในหน้านี้เท่านั้น)</label>
+<textarea id="comment" maxlength="400" placeholder="ตัวอย่าง: ขอให้แนบหลักฐานจาก Filing ก่อน"></textarea>
+<label for="confirm">ถ้าต้องการเห็นชอบในหลักการ พิมพ์คำว่า <strong>ทบทวนแล้ว</strong></label>
+<input type="text" id="confirm" autocomplete="off" spellcheck="false" placeholder="ทบทวนแล้ว">
+<div class="actions">
+<button type="button" id="request-changes">ขอให้แก้ไขข้อเสนอ</button>
+<button type="button" class="reject" id="reject">ไม่เห็นชอบ</button>
+<button type="button" class="primary" id="accept" disabled>เห็นชอบในหลักการ (ไม่บันทึก Vault)</button>
+<button type="button" id="reset">เริ่มใหม่</button>
+</div>
+<div role="status" aria-live="polite" id="result" class="status" data-state="pending" data-tone="neutral">
+ยังไม่มีการตัดสินใจ — ไม่มีข้อมูลใดถูกบันทึก
+</div>
+</section>
+<footer>
+การทดลองนี้ใช้ HTML/JavaScript ภายในไฟล์เท่านั้น ไม่มีการส่งข้อมูลผ่านอินเทอร์เน็ต ไม่มีการเก็บ localStorage/cookie ไม่มีการสร้าง Digital Signature ไม่มีการบันทึกไฟล์หรือแตะ Production Vault เมื่อปิดหน้า ข้อความที่กรอกและผลการตัดสินใจในหน้านี้จะไม่ถูกเก็บไว้
+</footer>
+</main>
+<script>
+(function(){
+"use strict";
+const id=(name)=>document.getElementById(name);
+const boxes=["seen-source","seen-risk","seen-owner"].map(id);
+const result=id("result"),comment=id("comment"),confirm=id("confirm"),accept=id("accept");
+function ready(){return boxes.every(b=>b.checked)&&confirm.value.trim()==="ทบทวนแล้ว";}
+function resetDecision(){result.dataset.state="pending";result.dataset.tone="neutral";result.textContent="ยังไม่มีการตัดสินใจ — ไม่มีข้อมูลใดถูกบันทึก";accept.disabled=!ready();}
+for(const el of [...boxes,confirm])el.addEventListener("input",resetDecision);
+comment.addEventListener("input",resetDecision);
+function decision(status,tone,message){
+result.dataset.state=status;result.dataset.tone=tone;
+result.textContent=message+" — เป็นเพียงผลจำลองในหน้าจอนี้ ไม่ได้ยืนยันตัวตน ไม่ได้ลงลายเซ็น และไม่ได้บันทึก Vault";
+}
+id("request-changes").addEventListener("click",()=>decision("changes","changes",
+"ขอปรับข้อเสนอเพิ่มเติม"+(comment.value.trim()?" (มีหมายเหตุประกอบ)":"")));
+id("reject").addEventListener("click",()=>decision("rejected","reject","ไม่เห็นชอบข้อเสนอนี้"));
+accept.addEventListener("click",()=>{
+ if(!ready()){resetDecision();return;}
+ decision("provisional-only","accept","เห็นชอบในหลักการเพื่อการตรวจสอบต่อเท่านั้น");
+});
+id("reset").addEventListener("click",()=>{
+ for(const b of boxes)b.checked=false;
+ confirm.value="";comment.value="";resetDecision();
+});
+resetDecision();
+})();
+</script>
+</body>
+</html>
