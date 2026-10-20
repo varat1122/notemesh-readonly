@@ -14,7 +14,8 @@ function put(rel:string,content:string){
 }
 beforeEach(()=>{
   root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),"nm-snapshot-qa-")));
-  vault=path.join(root,"vault");snapshot=path.join(root,"segregated");
+  vault=path.join(root,"vault");
+  snapshot=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),"nm-offline-segregated-")));
   fs.mkdirSync(vault,{recursive:true});
   process.env.DATA_DIR=root;
   process.env.ENCRYPTION_KEY??=Buffer.alloc(32,8).toString("base64");
@@ -23,6 +24,7 @@ beforeEach(()=>{
 afterEach(()=>{
   Reflect.deleteProperty(globalThis,"__vaultIndexer");
   fs.rmSync(root,{recursive:true,force:true});
+  fs.rmSync(snapshot,{recursive:true,force:true});
   delete process.env.DATA_DIR;
   delete process.env.RAILWAY_PROJECT_ID;
 });
