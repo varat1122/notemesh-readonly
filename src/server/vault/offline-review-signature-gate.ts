@@ -94,7 +94,9 @@ function policyKeys(policy:OfflineReviewTrustPolicy){
     throw Error("offline_review_policy_invalid");
   const keys=[policy.reviewer,policy.owner];
   if(keys.some(k=>!k||!good(k.keyId,100)||
-    !good(k.publicKeySpkiPem,3000)||
+    !(typeof k.publicKeySpkiPem==="string"&&
+      k.publicKeySpkiPem.length<3000&&
+      /^-----BEGIN PUBLIC KEY-----\n[A-Za-z0-9+/=\n]+-----END PUBLIC KEY-----\n?$/.test(k.publicKeySpkiPem))||
     !SHA(k.expectedPublicKeySha256))||
     policy.reviewer.keyId===policy.owner.keyId||
     policy.reviewer.expectedPublicKeySha256===policy.owner.expectedPublicKeySha256)
