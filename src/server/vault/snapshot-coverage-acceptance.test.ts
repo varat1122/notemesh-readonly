@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
+import {execFileSync} from "node:child_process";
 
 let root:string,vault:string,snapshot:string;
 const note="10_Knowledge/Company Research/ASML - Historical.md";
@@ -73,6 +74,16 @@ describe("offline isolated Vault+SQLite metadata / FTS / link coverage acceptanc
     expect(report.markdownContentManifestSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(fs.readFileSync(path.join(vault,note))).toEqual(before);
     expect(fs.readFileSync(path.join(snapshot,"vault",note))).toEqual(before);
+  });
+  it("runs the explicit offline CLI against a segregated scratch snapshot",async()=>{
+    fixture();await makeIsolatedSnapshot();
+    const output=execFileSync("pnpm",[
+      "snapshot:coverage:offline",snapshot,
+    ],{cwd:process.cwd(),encoding:"utf8",timeout:45_000});
+    const report=JSON.parse(output) as {status:string;canAutoWrite:boolean};
+    expect(report.status).toBe(
+      "snapshot_markdown_index_reconciled_not_originals_verified");
+    expect(report.canAutoWrite).toBe(false);
   });
   it("detects same-file-length and restored-mtime body tampering via indexed FTS",async()=>{
     fixture();await makeIsolatedSnapshot();
