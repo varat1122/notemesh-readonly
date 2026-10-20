@@ -22,7 +22,7 @@ export type OfflineReviewSubject={
   scope:"offline_review_unapproved_v1";
   notePath:string;noteSha256:string;indexFingerprint:string;
   markdownManifestSha256:string;originalBlobSha256:string;
-  sourceKeySha256:string;action:string;relationship:string;
+  sourceKeySha256:string;sourceRevision:number;action:string;relationship:string;
   oldLineSha256:string;newLineSha256:string;rationaleSha256:string;
 };
 export type TrustedKeyDescriptor={
@@ -65,12 +65,14 @@ export function digestOfflineReviewSubject(s:OfflineReviewSubject):string {
     ![s.noteSha256,s.indexFingerprint,s.markdownManifestSha256,
       s.originalBlobSha256,s.sourceKeySha256,s.oldLineSha256,
       s.newLineSha256,s.rationaleSha256].every(SHA)||
+    !Number.isSafeInteger(s.sourceRevision)||s.sourceRevision<1||
     !good(s.action,100)||!good(s.relationship,100))
     throw Error("offline_signed_review_invalid_subject");
   return hash(JSON.stringify([
     "investment-os-offline-human-subject-v1",s.scope,s.notePath,
     s.noteSha256,s.indexFingerprint,s.markdownManifestSha256,
-    s.originalBlobSha256,s.sourceKeySha256,s.action,s.relationship,
+    s.originalBlobSha256,s.sourceKeySha256,s.sourceRevision,
+    s.action,s.relationship,
     s.oldLineSha256,s.newLineSha256,s.rationaleSha256,
   ]));
 }
