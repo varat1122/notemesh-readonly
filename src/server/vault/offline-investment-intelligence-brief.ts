@@ -13,6 +13,7 @@ import {createHash} from "node:crypto";
 import Database from "better-sqlite3";
 import {splitFrontmatter} from "./markdown";
 import {inspectCanonicalKnowledgeMetadata} from "./investment-knowledge-schema";
+import {verifyOfflineSnapshotCoverage} from "./snapshot-coverage-acceptance";
 import {reviewHistoricalChangeOffline,type OfflineHistorySearchRequest}
   from "./offline-historical-change-review";
 import {retrieveOfflineNarrativeEvidence,type OfflineNarrativeRequest}
@@ -111,6 +112,13 @@ export function prepareOfflineInvestmentIntelligenceBrief(req:OfflineIntelligenc
     narrative.scope.physicalMarkdownManifestSha256)
     throw Error("investment_brief_snapshot_version_disagreement_hold");
   const thesis=explicitThesis(req);
+  // A selected Thesis may have been read after the two historical scans.
+  // Refuse a resulting packet if any physical Markdown changed since then.
+  const finalCoverage=verifyOfflineSnapshotCoverage(req.snapshotRoot);
+  if(finalCoverage.status!=="snapshot_markdown_index_reconciled_not_originals_verified"||
+    finalCoverage.markdownContentManifestSha256!==
+      structured.scope.physicalMarkdownManifestSha256)
+    throw Error("investment_brief_snapshot_changed_after_thesis_readback_hold");
   const conflict=structured.classification==="possible_correction_or_contradiction";
   const exactDuplicate=structured.classification==="duplicate_exact_metadata_same_source";
   const narrativeAmbiguous=narrative.references.length>0&&
