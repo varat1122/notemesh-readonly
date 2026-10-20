@@ -18,7 +18,7 @@
     "lint:fix": "eslint src tests e2e scripts --fix",
     "test": "vitest run",
     "test:watch": "vitest",
-    "snapshot:coverage:offline": "node scripts/audit-vault-snapshot.ts",
+    "snapshot:coverage:offline": "vite-node scripts/audit-vault-snapshot.ts",
     "prices:status": "node scripts/market-prices.ts status",
     "prices:refresh": "node scripts/market-prices.ts refresh"
   },
