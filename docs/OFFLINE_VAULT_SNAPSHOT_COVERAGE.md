@@ -29,3 +29,20 @@ The automated tests build a disposable scratch Vault and SQLite via the real ind
 ## Relation to Review Queue
 
 PR #73's `indexFingerprint` is limited to an indexed metadata/links view within a live request. PR #74 separately checks a segregated **offline copy's** physical Markdown bytes against indexed FTS and links. Neither can be used as an authenticated source claim or a license to modify Current Thesis / Evidence Registers / Portfolio.
+
+
+## Source archive evidence and provenance crosswalk (Draft PR #75)
+
+The source check operates only on the **same independently isolated, consistent copy** after the Markdown+SQLite coverage checker reports clean:
+
+```sh
+pnpm snapshot:sources:offline /absolute/path/to/segregated-snapshot
+```
+
+The source archive must be copied into `snapshot-root/source-archive/blobs/<first-two-sha256-hex>/<sha256>.bin` (the normal application format). Its receipt rows are in the **same** `snapshot-root/app.sqlite` table `source_snapshots`. The CLI never fetches a source, backs up a live volume, authenticates an issuer, or writes to the Vault. It opens SQLite read-only and reads file descriptors using `O_NOFOLLOW` with size/hash checks. Unsafe symlinks, missing files, byte tampering, malformed registry fields and orphan blobs trigger an integrity hold.
+
+**Result separation:** `offline_archived_bytes_intact_not_publisher_verified` is an internally consistent stored-blob result only; `offline_archive_bytes_intact_provenance_review_pending` indicates that a note-declared original-source locator/full-document hash remains unregistered or does not match the stored version; `offline_no_original_source_snapshots_unverified` is **not** success; and `offline_archive_bytes_integrity_hold` indicates a storage integrity failure. The CLI exits nonzero for every state other than internally consistent stored bytes with no explicit note-reference gap.
+
+The crosswalk checks only explicit `original_source` / `source_url` and `original_source_sha256` metadata in the indexed notes. Source `source_records` pointers into Markdown or JSON/ZIP archives are not the same as the registered external source blob; they require a separate physical source export/lineage audit. `source_excerpt_sha256` never substitutes for the full original hash. Archived ChatGPT notes, operator-supplied capture labels, exact file bytes and repeated URL families do **not** constitute independent issuer verification. Historical user-supplied notes are never automatically corrected; the result is an unsaved review queue only.
+
+**Still NO-GO:** the original publisher's authenticity, claim-to-file/period/unit citations, unregistered originals, captured-event chronology, immutable snapshot proof, off-server restoration and device Sync must be independently evidenced before Production acceptance. No Thesis/Evidence Register/Portfolio writeback is authorized.
