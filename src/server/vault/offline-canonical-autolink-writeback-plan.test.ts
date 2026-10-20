@@ -245,7 +245,7 @@ describe("PR #98 canonical Obsidian auto-link preview (synthetic only)",()=>{
     const json=JSON.stringify(r);
     for(const secret of [
       HIDDEN,ATTACK,QUOTE,OLD,THESIS,HUB,EVOLUTION,INDUSTRY,EVIDENCE,
-      "synthetic-release","private","SYNTH",
+      "synthetic-release","SYNTH",
     ])expect(json).not.toContain(secret);
     expect(r.protectedThesisContentReturned).toBe(false);
     expect(r.privateAnalysisTextReturned).toBe(false);
