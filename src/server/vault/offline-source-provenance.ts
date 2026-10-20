@@ -48,9 +48,6 @@ function regularDir(p:string){
   const st=fs.lstatSync(p);
   return st.isDirectory()&&!st.isSymbolicLink()&&fs.realpathSync(p)===p;
 }
-const sourcePath=(root:string,hash:string)=>path.join(
-  root,"source-archive","blobs",hash.slice(0,2),hash+".bin"
-);
 const string=(v:unknown)=>typeof v==="string"&&v.trim()?v.trim():null;
 
 /**
@@ -93,6 +90,9 @@ export function verifyOfflineSourceArchiveCoverage(snapshotRoot:string) {
         const next=(revisions.get(row.source_key)??0)+1;
         const valid=validHash&&key===row.source_key&&
           typeof row.snapshot_id==="string"&&HEX64.test(row.snapshot_id)&&
+          row.snapshot_id===digest(Buffer.from(row.source_key+"\\n"+row.sha256))&&
+          (row.capture_method!=="authorized_external_download"||
+            canonicalUrl(row.retrieved_from)===row.source_key)&&
           typeof row.byte_length==="number"&&Number.isSafeInteger(row.byte_length)&&
           row.byte_length>=16&&row.byte_length<=MAX_BLOB_BYTES&&
           row.revision===next&&
