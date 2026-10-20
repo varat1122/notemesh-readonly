@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { McpAccess } from "./server";
 import { canSafeEdit, oauthChallenge } from "./endpoint";
 import { preview, apply, status } from "../safe-edit/engine";
+import { verifyAuthorizedInvestmentGraphReadback }
+  from "../safe-edit/knowledge-graph-readback";
 import { previewSchema, applySchema, operationId, properties } from "../safe-edit/schema";
 import { withPausedSync } from "../safe-edit/sync";
 import { withBoundary, fence } from "./boundary";
@@ -49,6 +51,17 @@ export function createSafeEditMcpServer(access:McpAccess) {
     },annotations:{readOnlyHint:true,openWorldHint:false},...meta
   },async input=>invoke(()=>inspectUserAttachment(input)));
   server.registerTool("get_edit_status",{description:"Read durable operation receipt: before/after hashes and independent write/readback/reindex/Sync stages. Does not prove remote or mobile arrival.",inputSchema:{operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({operationId})=>invoke(()=>status(operationId,access.label)));
+  server.registerTool("verify_investment_graph_writeback",{
+    description:"READ ONLY: independently cross-check TWO previously host-authorized Safe Edit operation receipts with current server physical Analysis/Company Evolution Markdown, SQLite/FTS, exact full-path Wikilinks and reverse Timeline backlink. Operations must belong to this authenticated OAuth client. No preview, apply, note write, Thesis update, remote/device Sync or source-publisher authenticity claim; partial receipts fail closed.",
+    inputSchema:{
+      analysisOperationId:operationId,
+      timelineOperationId:operationId,
+      analysisPath:z.string().min(1).max(350),
+      timelinePath:z.string().min(1).max(350),
+      sourcePath:z.string().min(1).max(350),
+    },annotations:{readOnlyHint:true,openWorldHint:false},...meta,
+  },async input=>invoke(()=>verifyAuthorizedInvestmentGraphReadback(
+    input,access.label)));
   server.registerTool("rollback_edit",{description:"PREVIEW ONLY: restore checksum-verified backup only if target still equals previous afterHash. Never deletes a created note. Requires fresh review and apply_edit; protected thesis also requires human approval.",inputSchema:{...base,rollbackOperationId:operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({rollbackOperationId,...input})=>invoke(()=>preview({...input,change:{kind:"rollback",operationId:rollbackOperationId}},access.label)));
   return server;
 }
