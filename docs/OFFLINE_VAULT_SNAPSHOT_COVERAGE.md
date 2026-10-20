@@ -46,3 +46,31 @@ The source archive must be copied into `snapshot-root/source-archive/blobs/<firs
 The crosswalk checks only explicit `original_source` / `source_url` and `original_source_sha256` metadata in the indexed notes. Source `source_records` pointers into Markdown or JSON/ZIP archives are not the same as the registered external source blob; they require a separate physical source export/lineage audit. `source_excerpt_sha256` never substitutes for the full original hash. Archived ChatGPT notes, operator-supplied capture labels, exact file bytes and repeated URL families do **not** constitute independent issuer verification. Historical user-supplied notes are never automatically corrected; the result is an unsaved review queue only.
 
 **Still NO-GO:** the original publisher's authenticity, claim-to-file/period/unit citations, unregistered originals, captured-event chronology, immutable snapshot proof, off-server restoration and device Sync must be independently evidenced before Production acceptance. No Thesis/Evidence Register/Portfolio writeback is authorized.
+
+
+## Evidence-Gated Offline Human Review Worksheet (Draft PR #76)
+
+Before reviewing a specific historical/research note, independently prepare an isolated, coordinated Vault + app.sqlite + source-archive snapshot. The code **does not create, freeze, sign or prove** such a snapshot. Avoid Production and run from a standalone development checkout.
+
+```sh
+# First pass: discover exact note's SHA-256, but do not move forward
+pnpm snapshot:review:offline /absolute/segregated-snapshot \
+  "10_Knowledge/Company Research/SYNTH - Review.md" inspect_original_claim
+
+# Reconfirm the selected exact SHA-256 on a subsequent call
+pnpm snapshot:review:offline /absolute/segregated-snapshot \
+  "10_Knowledge/Company Research/SYNTH - Review.md" inspect_original_claim \
+  "<64-char-note-sha256-from-first-call>"
+```
+
+The four available **caller-selected, unverified** worksheet actions are `inspect_original_claim`, `metadata_correction_candidate`, `navigation_link_candidate` and `duplicate_or_contradiction_review`. The CLI has a nonzero exit on all HOLD / missing-hash states. It never executes a Safe Edit operation, returns an edit patch, creates a note, records a human approval, updates Thesis or calls outside websites.
+
+**Gate hierarchy:**
+
+1. Verify physical Markdown/SQLite/FTS and separately archived blob integrity from PR #74–75 against this same isolated copy. Source-integrity corruption produces a HOLD, not an upgrade. All results reflect a non-immutable snapshot unless proven separately.
+2. Match the selected note against its exact indexed path, current bytes/mtime/frontmatter/FTS, record the note SHA-256, and reject a mismatched caller expected SHA on subsequent review.
+3. Crosswalk the selected note's explicit `original_source` / `source_url` and **full** `original_source_sha256` to a unique registered original blob version. Neither an excerpt hash nor an absent full hash can satisfy this match. The note must not be in protected `05_Thesis`, `06_Portfolio`, `07_Sources`, `09_Templates` paths or protected role.
+4. Legacy ChatGPT/archived AI remains **nonindependent**, even when a source URL/hash matches. A source stored-byte match is never publisher authentication, claim-precision review, a real-human identity, or authorization. Every result explicitly returns the unresolved independent-review checklist and `canAutoWrite:false`, `ownerApprovalGranted:false`, `claimVerified:false`, `safeEditTemplate:null`, `proposedPatch:null`.
+5. **Only after** external publisher/claim/period/unit and counter-evidence review, authenticated reviewer and explicit owner approval should a separate one-note Safe Edit preview be considered, with live hash reconciliation and readback. This PR does not implement those actions.
+
+Do not treat the status `stored_bytes_located_for_manual_verification_only` as `verified_against_primary`; it only means a registered blob hash and selected note hash both matched the *supplied offline copy*. Other note-source inconsistencies and cross-device Sync/independent DR acceptance may still be unresolved. No live Production data has been inspected by this feature.

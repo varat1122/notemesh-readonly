@@ -2,6 +2,8 @@
 
 ## Unreleased (development branch only; no production deployment)
 
+- Added an offline exact-note Evidence-Gated Human Review worksheet requiring re-confirmed current note SHA-256, registered original-source blob version matching, and protected/archived-AI holds. Produces metadata-only unsaved human-review checklist; no source authentication, claim approval, edit patch or Production changes.
+
 - Added isolated offline source snapshot SHA-256 verification with explicit registry provenance crosswalk, duplicate/version handling, orphan/missing/tampered blob holds and archived-AI nonindependence. Separate physical blob integrity from note-declared source/hash conflicts; no issuer verification, real Vault source capture, DR acceptance or writeback.
 
 - Added a local offline, read-only Vault+SQLite snapshot reconciliation tool and isolated-fixture tests. It checks Markdown/FTS/link consistency, index versus physical files, and attachment metadata; no live snapshot capture, issuer verification, immutable mount, DR acceptance, Vault write or MCP exposure is implied.
