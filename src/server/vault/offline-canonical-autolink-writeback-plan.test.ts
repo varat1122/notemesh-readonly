@@ -14,6 +14,9 @@ import type {OfflineReasoningContractInput}
   from "./offline-investment-reasoning-contract";
 import {rehearseOfflineSyntheticInvestmentWriteback}
   from "./offline-synthetic-writeback-rehearsal";
+import {coordinateOfflineSyntheticSafeEditHandoff,
+  type OfflineSafeEditPreviewPort}
+  from "./offline-safe-edit-writeback-handoff";
 
 const sha=(s:string|Buffer)=>createHash("sha256").update(s).digest("hex");
 const OLD="10_Knowledge/SYNTH - Earnings Evidence.md";
@@ -407,5 +410,197 @@ describe("PR #99 isolated synthetic Safe Writeback rehearsal",()=>{
       "after_sqlite_index"}};
     expect(()=>rehearseOfflineSyntheticInvestmentWriteback(input))
       .toThrow("writeback_rehearsal_unknown_failpoint_hold");
+  });
+});
+
+type HandoffStatus=Awaited<ReturnType<OfflineSafeEditPreviewPort[
+  "getEditStatus"]>>;
+function portFixture(){
+  const store=new Map<string,HandoffStatus>();
+  const previewCreate=vi.fn(async(input:Parameters<
+    OfflineSafeEditPreviewPort["createNotePreview"]>[0])=>{
+    store.set(input.operationId,{
+      operationId:input.operationId,state:"preview_only",
+      writeReadbackVerified:false,reindexVerified:false,
+      expectedAfterHashMatched:false,
+    });
+    return {
+      operationId:input.operationId,
+      previewOnly:true as const,requiresHostAuthorizedApply:true as const,
+    };
+  });
+  const previewAppend=vi.fn(async(input:Parameters<
+    OfflineSafeEditPreviewPort["appendSectionPreview"]>[0])=>{
+    store.set(input.operationId,{
+      operationId:input.operationId,state:"preview_only",
+      writeReadbackVerified:false,reindexVerified:false,
+      expectedAfterHashMatched:false,
+    });
+    return {
+      operationId:input.operationId,
+      previewOnly:true as const,requiresHostAuthorizedApply:true as const,
+    };
+  });
+  const port:OfflineSafeEditPreviewPort={
+    createNotePreview:previewCreate,
+    appendSectionPreview:previewAppend,
+    getEditStatus:vi.fn(async({operationId})=>store.get(operationId)??null),
+  };
+  const ID=OP+"-analysis",TIME=OP+"-timeline";
+  const set=(which:"analysis"|"timeline",status:
+    "applied"|"failed"|"preview_only",fullyVerified=false)=>{
+    const operationId=which==="analysis"?ID:TIME;
+    store.set(operationId,{
+      operationId,state:status,
+      writeReadbackVerified:fullyVerified,
+      reindexVerified:fullyVerified,
+      expectedAfterHashMatched:fullyVerified,
+    });
+  };
+  return {port,store,set,previewCreate,previewAppend,ID,TIME};
+}
+function handoffInput(m:string){
+  return {...routed(m),handoff:{
+    timelineDate:"2026-10-20",timelineHeading:"# Evolution",
+  }};
+}
+describe("PR #100 Safe Edit preview-first two-note handoff",()=>{
+  it("previews Analysis first, then Timeline only after independently supplied complete receipt",async()=>{
+    const m=await fixture(),f=portFixture(),input=handoffInput(m);
+    const before=verifyOfflineSnapshotCoverage(snapshot)
+      .markdownContentManifestSha256;
+    const step1=await coordinateOfflineSyntheticSafeEditHandoff(input,f.port);
+    expect(step1.stage).toBe(
+      "analysis_preview_ready_awaiting_authorized_apply");
+    expect(step1.previewIssued).toBe(true);
+    expect(f.previewCreate).toHaveBeenCalledTimes(1);
+    expect(f.previewAppend).not.toHaveBeenCalled();
+    const create=f.previewCreate.mock.calls[0][0];
+    expect(create.path).toBe(input.routing.proposedAnalysisNotePath);
+    expect(create.content).toContain("[[01_Companies/SYNTH]]");
+    expect(create.content).toContain("[[05_Thesis/SYNTH - Current Thesis]]");
+    expect(create.content).not.toContain(ATTACK);
+    expect(create.content).not.toContain(HIDDEN);
+    expect(create.evidence.verification).toBe("unverified");
+    expect(create.evidence.classification).toBe("unresolved");
+
+    const repeat=await coordinateOfflineSyntheticSafeEditHandoff(input,f.port);
+    expect(repeat.stage).toBe(
+      "analysis_preview_already_pending_authorized_apply");
+    expect(f.previewCreate).toHaveBeenCalledTimes(1);
+    // A preview without a write/readback/index receipt is NOT permission.
+    f.set("analysis","applied",true);
+    const step2=await coordinateOfflineSyntheticSafeEditHandoff(input,f.port);
+    expect(step2.stage).toBe(
+      "timeline_preview_ready_awaiting_authorized_apply");
+    expect(f.previewAppend).toHaveBeenCalledTimes(1);
+    const append=f.previewAppend.mock.calls[0][0];
+    expect(append.path).toBe(EVOLUTION);
+    expect(append.date).toBe("2026-10-20");
+    expect(append.heading).toBe("# Evolution");
+    expect(append.content).toContain(
+      "[[08_Daily_Weekly/Research Indexes/Investment Review - SYNTH - FY26Q3]]");
+    expect(append.content).not.toContain(ATTACK);
+
+    const pending=await coordinateOfflineSyntheticSafeEditHandoff(input,f.port);
+    expect(pending.stage).toBe(
+      "timeline_preview_already_pending_authorized_apply");
+    expect(f.previewAppend).toHaveBeenCalledTimes(1);
+    f.set("timeline","applied",true);
+    const saved=await coordinateOfflineSyntheticSafeEditHandoff(input,f.port);
+    expect(saved.stage).toBe(
+      "two_server_save_receipts_reported_by_test_port");
+    expect(saved.previewIssued).toBe(false);
+    expect(saved.hostAuthorizationObtainedInThisFunction).toBe(false);
+    expect(saved.realSaveReceiptsIndependentlyVerified).toBe(false);
+    expect(saved.realVaultModified).toBe(false);
+    expect(saved.twoNoteAtomicityEstablished).toBe(false);
+    expect(saved.crossDeviceObsidianSyncVerified).toBe(false);
+    expect(verifyOfflineSnapshotCoverage(snapshot)
+      .markdownContentManifestSha256).toBe(before);
+  });
+  it("never stages Timeline when first receipt is failed, incomplete or out of order",async()=>{
+    const m=await fixture(),input=handoffInput(m);
+    const f=portFixture();
+    f.set("analysis","applied",false);
+    const partial=await coordinateOfflineSyntheticSafeEditHandoff(input,f.port);
+    expect(partial.stage).toBe(
+      "analysis_unverified_receipt_requires_repair");
+    expect(f.previewCreate).not.toHaveBeenCalled();
+    expect(f.previewAppend).not.toHaveBeenCalled();
+    const wrong=portFixture();
+    wrong.set("timeline","applied",true);
+    const outOfOrder=await coordinateOfflineSyntheticSafeEditHandoff(
+      input,wrong.port);
+    expect(outOfOrder.stage).toBe(
+      "failed_or_out_of_order_receipts_require_manual_reconciliation");
+    expect(wrong.previewCreate).not.toHaveBeenCalled();
+    const failed=portFixture();
+    failed.set("analysis","applied",true);
+    failed.set("timeline","failed");
+    const repaired=await coordinateOfflineSyntheticSafeEditHandoff(
+      input,failed.port);
+    expect(repaired.stage).toBe(
+      "timeline_unverified_receipt_requires_repair");
+    expect(failed.previewAppend).not.toHaveBeenCalled();
+  });
+  it("refuses malformed status, forged apply confirmation, and preview mismatch",async()=>{
+    const m=await fixture(),input=handoffInput(m);
+    const bad=portFixture();
+    bad.store.set(bad.ID,{
+      operationId:bad.ID,state:"preview_only",
+      writeReadbackVerified:true,reindexVerified:false,
+      expectedAfterHashMatched:false,
+    });
+    await expect(coordinateOfflineSyntheticSafeEditHandoff(
+      input,bad.port)).rejects.toThrow(
+      "safe_edit_handoff_non_applied_receipt_overclaim_hold");
+    const wrong=portFixture();
+    wrong.port.createNotePreview=async()=>({
+      operationId:"wrong",previewOnly:true,
+      requiresHostAuthorizedApply:true,
+    });
+    await expect(coordinateOfflineSyntheticSafeEditHandoff(
+      input,wrong.port)).rejects.toThrow(
+      "safe_edit_handoff_create_preview_not_acknowledged_hold");
+    const mismatched=portFixture();
+    mismatched.store.set(mismatched.ID,{
+      operationId:"evil",state:"applied",
+      writeReadbackVerified:true,reindexVerified:true,
+      expectedAfterHashMatched:true,
+    });
+    await expect(coordinateOfflineSyntheticSafeEditHandoff(
+      input,mismatched.port)).rejects.toThrow(
+      "safe_edit_handoff_forged_or_mismatched_status_hold");
+  });
+  it("rejects nonexistent timeline heading, invalid date, and changed original bytes",async()=>{
+    const m=await fixture(),f=portFixture();
+    const date=handoffInput(m);
+    date.handoff.timelineDate="2026-02-30";
+    await expect(coordinateOfflineSyntheticSafeEditHandoff(date,f.port))
+      .rejects.toThrow("safe_edit_handoff_invalid_stage_or_port_hold");
+    const heading=handoffInput(m);
+    heading.handoff.timelineHeading="## Missing Heading";
+    await expect(coordinateOfflineSyntheticSafeEditHandoff(heading,f.port))
+      .rejects.toThrow("safe_edit_handoff_append_heading_missing_hold");
+    const corrupt=handoffInput(m);
+    fs.appendFileSync(path.join(snapshot,"vault",EVOLUTION),
+      "unauthorized event edit\n");
+    await expect(coordinateOfflineSyntheticSafeEditHandoff(corrupt,f.port))
+      .rejects.toThrow();
+    expect(f.previewCreate).not.toHaveBeenCalled();
+  });
+  it("returns no note paths, user-input instructions, edit token or live receipt",async()=>{
+    const r=await coordinateOfflineSyntheticSafeEditHandoff(
+      handoffInput(await fixture()),portFixture().port);
+    const json=JSON.stringify(r);
+    for(const sensitive of [
+      ATTACK,HIDDEN,QUOTE,OLD,THESIS,HUB,EVOLUTION,INDUSTRY,EVIDENCE,
+      "synthetic-release","SYNTH","previewToken",
+    ])expect(json).not.toContain(sensitive);
+    expect(r.noteContentsOrPathsReturned).toBe(false);
+    expect(r.appliedByThisFunction).toBe(false);
+    expect(r.productionReleaseAllowed).toBe(false);
+    expect(r.protectedThesisOrEvidenceRegisterModified).toBe(false);
   });
 });
