@@ -14,7 +14,7 @@ This checklist deliberately applies **only to an independently prepared, segrega
 pnpm snapshot:coverage:offline /absolute/path/to/segregated-snapshot
 ```
 
-No network, Vault write, production deployment, or MCP registration. Prints bounded issue samples and hash of observed Markdown file bytes, without note content. Exits 0 for internal Markdown/FTS/links and attachment-index metadata reconciliation; exits 1/2 on issues/errors. A zero exit is **not** external evidence, file original authenticity, or immutable-snapshot/DR acceptance.
+Run from a development checkout with its existing dev dependencies installed (the CLI uses the already installed Vite Node TypeScript resolver). No network calls by the verifier, Vault write, production deployment, or MCP registration. Prints bounded issue samples and hash of observed Markdown file bytes, without note content. Exits 0 for internal Markdown/FTS/links and attachment-index metadata reconciliation; exits 1/2 on issues/errors. A zero exit is **not** external evidence, file original authenticity, or immutable-snapshot/DR acceptance.
 
 ## Gates
 
