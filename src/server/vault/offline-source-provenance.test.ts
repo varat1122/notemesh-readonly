@@ -173,7 +173,8 @@ describe("offline original-source registry and provenance integrity (NO PROD)",(
       {recursive:true,preserveTimestamps:true});
     const {verifyOfflineSourceArchiveCoverage}=await import("./offline-source-provenance");
     const report=verifyOfflineSourceArchiveCoverage(snapshot);
-    expect(report.status).toBe("offline_archived_bytes_intact_not_publisher_verified");
+    expect(report.status).toBe("offline_archive_bytes_intact_provenance_review_pending");
+    expect(report.unresolvedDeclaredNoteReferenceCount).toBe(1);
     expect(report.noteReferenceCrosswalk.noteDeclaredFullHashesNotMatchingRegisteredVersion).toBe(1);
     expect(report.noteReferenceReviewSamples).toContainEqual({
       path:independentNote,kind:"declared_full_hash_not_matching_archived_version",
