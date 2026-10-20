@@ -193,6 +193,7 @@ export function verifyOfflineSourceArchiveCoverage(snapshotRoot:string) {
         notesWithLocatorButNoRegisteredOriginal:0,
         noteDeclaredFullHashesMatchingRegisteredVersion:0,
         noteDeclaredFullHashesNotMatchingRegisteredVersion:0,
+        noteDeclaredFullHashesInvalidOrWrongType:0,
         noteDeclaredFullHashWithoutLocator:0,
         derivativeOrArchivedAiNotesWithLocators:0,
         noteDeclaredExcerptHashesNotFullDocumentProof:0,
@@ -212,8 +213,15 @@ export function verifyOfflineSourceArchiveCoverage(snapshotRoot:string) {
         const inspection=inspectCanonicalKnowledgeMetadata(row.path,fm);
         const locator=string(fm.original_source)??string(fm.source_url);
         const normalized=locator?canonicalUrl(locator):null;
+        const hasFullHash=fm.original_source_sha256!==undefined&&
+          fm.original_source_sha256!==null;
         const fullHash=string(fm.original_source_sha256);
-        if(string(fm.source_excerpt_sha256))
+        const validFullHash=fullHash!==null&&HEX64.test(fullHash.toLowerCase());
+        if(hasFullHash&&!validFullHash){
+          crosswalk.noteDeclaredFullHashesInvalidOrWrongType++;
+          review(row.path,"declared_full_document_hash_invalid_or_not_text");
+        }
+        if(fm.source_excerpt_sha256!==undefined&&fm.source_excerpt_sha256!==null)
           crosswalk.noteDeclaredExcerptHashesNotFullDocumentProof++;
         if(locator){
           crosswalk.notesWithExplicitSourceLocator++;
@@ -222,8 +230,8 @@ export function verifyOfflineSourceArchiveCoverage(snapshotRoot:string) {
           const family=normalized?bySource.get(normalized):undefined;
           if(family&&family.size){
             crosswalk.notesWithLocatorAndRegisteredOriginal++;
-            if(fullHash){
-              if(family.has(fullHash.toLowerCase()))
+            if(validFullHash){
+              if(family.has(fullHash!.toLowerCase()))
                 crosswalk.noteDeclaredFullHashesMatchingRegisteredVersion++;
               else{
                 crosswalk.noteDeclaredFullHashesNotMatchingRegisteredVersion++;
@@ -234,7 +242,7 @@ export function verifyOfflineSourceArchiveCoverage(snapshotRoot:string) {
             crosswalk.notesWithLocatorButNoRegisteredOriginal++;
             review(row.path,"declared_locator_not_in_offline_archive_registry");
           }
-        }else if(fullHash){
+        }else if(validFullHash){
           crosswalk.noteDeclaredFullHashWithoutLocator++;
           review(row.path,"full_hash_declared_without_source_locator");
         }
@@ -243,6 +251,7 @@ export function verifyOfflineSourceArchiveCoverage(snapshotRoot:string) {
       const referenceGaps=
         crosswalk.notesWithLocatorButNoRegisteredOriginal+
         crosswalk.noteDeclaredFullHashesNotMatchingRegisteredVersion+
+        crosswalk.noteDeclaredFullHashesInvalidOrWrongType+
         crosswalk.noteDeclaredFullHashWithoutLocator;
       const status=archiveIssues>0?
         "offline_archive_bytes_integrity_hold" as const:
@@ -268,6 +277,7 @@ export function verifyOfflineSourceArchiveCoverage(snapshotRoot:string) {
         noteReferenceSampleTruncated:
           crosswalk.notesWithLocatorButNoRegisteredOriginal+
           crosswalk.noteDeclaredFullHashesNotMatchingRegisteredVersion+
+          crosswalk.noteDeclaredFullHashesInvalidOrWrongType+
           crosswalk.noteDeclaredFullHashWithoutLocator>reviewSamples.length,
         declaredCaptureMetadataAuthenticated:false as const,
         publisherIdentityVerified:false as const,
