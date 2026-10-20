@@ -234,7 +234,7 @@ describe("PR #98 canonical Obsidian auto-link preview (synthetic only)",()=>{
       x.linkExistsInSnapshot&&x.linkPathQualified)).toBe(true);
     expect(r.stagedIdempotencyMarkersChecked).toBe(true);
     expect(r.exactFullPathWikilinksValidatedInMemory).toBe(true);
-    expect(r.review).toBeUndefined();
+    expect(Object.hasOwn(r,"review")).toBe(false);
     expect(r.actualReadbackVerified).toBe(false);
     expect(r.actualSaveReceipt).toBeNull();
     expect(r.canAutoWrite).toBe(false);
