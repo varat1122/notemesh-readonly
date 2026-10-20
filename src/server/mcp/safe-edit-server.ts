@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { McpAccess } from "./server";
 import { canSafeEdit, oauthChallenge } from "./endpoint";
 import { preview, apply, status } from "../safe-edit/engine";
+import {applyAuthorizedInvestmentGraphBundle}
+  from "../safe-edit/investment-graph-bundle";
 import { verifyAuthorizedInvestmentGraphReadback }
   from "../safe-edit/knowledge-graph-readback";
 import { previewSchema, applySchema, operationId, properties } from "../safe-edit/schema";
@@ -61,6 +63,25 @@ export function createSafeEditMcpServer(access:McpAccess) {
       sourcePath:z.string().min(1).max(350),
     },annotations:{readOnlyHint:true,openWorldHint:false},...meta,
   },async input=>invoke(()=>verifyAuthorizedInvestmentGraphReadback(
+    input,access.label)));
+  server.registerTool("write_investment_graph_bundle",{
+    description:"WRITE: Host/user must explicitly authorize this single scoped two-note investment graph writeback action. Creates ONE unverified Historical AI Analysis Note and appends ONE linked event into the EXISTING Company Evolution Timeline using existing Safe Edit version checks/backups, then independent real physical/FTS/Link/Backlink readback. One authorized host action covers both writes; never modifies protected Thesis/Portfolio. Multi-file atomicity not guaranteed: incomplete second step returns partial manual-repair status. Disabled by default; admin must explicitly enable INVESTMENT_GRAPH_BUNDLE_ENABLED=1. No standing unattended auto-write permission or mobile Sync claim.",
+    inputSchema:{
+      operationRoot:z.string().regex(/^[a-z][a-z0-9-]{8,60}$/),
+      issuer:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._ -]{0,49}$/),
+      eventKey:z.string().regex(/^[\\p{L}\\p{N}_. -]{4,140}$/u),
+      period:z.string().min(1).max(100),
+      timelineDate:z.string().date(),
+      timelineHeading:z.string().min(1).max(150),
+      analysisPath:z.string().min(1).max(350),
+      timelinePath:z.string().min(1).max(350),
+      sourcePath:z.string().min(1).max(350),
+      analysisMarkdown:z.string().min(150).max(90000),
+    },annotations:{
+      readOnlyHint:false,destructiveHint:true,idempotentHint:true,
+      openWorldHint:false,
+    },...meta,
+  },async input=>invoke(()=>applyAuthorizedInvestmentGraphBundle(
     input,access.label)));
   server.registerTool("rollback_edit",{description:"PREVIEW ONLY: restore checksum-verified backup only if target still equals previous afterHash. Never deletes a created note. Requires fresh review and apply_edit; protected thesis also requires human approval.",inputSchema:{...base,rollbackOperationId:operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({rollbackOperationId,...input})=>invoke(()=>preview({...input,change:{kind:"rollback",operationId:rollbackOperationId}},access.label)));
   return server;
