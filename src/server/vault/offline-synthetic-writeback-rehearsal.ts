@@ -22,6 +22,8 @@ import {verifyOfflineSnapshotCoverage}
   from "./snapshot-coverage-acceptance";
 import {extractStructure,splitFrontmatter} from "./markdown";
 import {countWords} from "./text";
+import {proveOfflineNextEventRetrieval}
+  from "./offline-next-event-retrieval";
 
 type FailurePoint="after_analysis_note"|"after_timeline_append"|
   "after_sqlite_index";
@@ -115,9 +117,10 @@ export function rehearseOfflineSyntheticInvestmentWriteback(
     "type: investment_review",
     "entity: "+issuer,
     "event_key: "+incoming.eventKey,
-    "verification: unverified",
+    "verification: not_reverified",
     "status: draft",
-    "source_type: user_supplied",
+    "source_type: archived_ai",
+    "analysis_origin: synthetic_ai_draft",
     "operation_id: "+op,
     "---",
     "# Synthetic Investment Review",
@@ -127,6 +130,7 @@ export function rehearseOfflineSyntheticInvestmentWriteback(
     "## Canonical references",
     ...allTargetLinks,
     "## Investment interpretation",
+    "Revenue conversion and delivery evidence are unverified research topics.",
     "Causal hypotheses and Thesis impact require analyst and owner review.",
     "",
   ].join("\n");
@@ -252,8 +256,21 @@ export function rehearseOfflineSyntheticInvestmentWriteback(
       timelineNow.split(operationMarker).length!==2||
       timelineNow.split(eventMarker).length!==2)
       throw Error("writeback_rehearsal_exact_readback_hold");
+    // A SECOND synthetic event queries the updated physical FTS and
+    // recalls original source and earlier analysis as DIFFERENT roles.
+    const nextRetrieval=proveOfflineNextEventRetrieval({
+      workspace,issuer:"SYNTH",analysisPath:analysis,
+      sourcePath:targets.find(t=>t.role==="source_evidence")?.path??"",
+      timelinePath:timeline.path,operationId:op,
+      expectedAnalysisSha256:hash(scaffold),
+    });
+    if(!nextRetrieval.analyzedHistoryRetrieved||
+      !nextRetrieval.originalSourceRecordRetrieved||
+      nextRetrieval.archivedAIIndependentlyVerified!==false)
+      throw Error("writeback_rehearsal_second_event_context_not_safe_hold");
     return {
       status:"ephemeral_synthetic_writeback_rehearsal_verified" as const,
+      nextEventRetrieval:nextRetrieval,
       operationIdSha256:preview.operationIdSha256,
       eventKeySha256:preview.eventKeySha256,
       sourceManifestUnchanged:true as const,

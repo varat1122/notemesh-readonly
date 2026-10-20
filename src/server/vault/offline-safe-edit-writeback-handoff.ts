@@ -164,13 +164,15 @@ export async function coordinateOfflineSyntheticSafeEditHandoff(
   const analysisText=[
     "---","type: investment_review","entity: "+issuer,
     "event_key: "+event.eventKey,"status: draft",
-    "verification: unverified","source_type: user_supplied",
+    "verification: not_reverified","source_type: archived_ai",
+    "analysis_origin: synthetic_ai_draft",
     "operation_id: "+op,"---",
     "# Synthetic Investment Review",marker,eventMarker,
     "No issuer claims or AI conclusions independently verified.",
     "## Canonical References",
     ...route.targets.map(t=>ref(t.path)),
     "## Thesis Review",
+    "Revenue conversion is a hypothetical review topic, not a verified fact.",
     "Unverified reasoning requires an analyst and owner decision.","",
   ].join("\n");
   const appendText=[
