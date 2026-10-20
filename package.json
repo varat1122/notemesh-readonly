@@ -18,6 +18,7 @@
     "lint:fix": "eslint src tests e2e scripts --fix",
     "test": "vitest run",
     "test:watch": "vitest",
+    "snapshot:coverage:offline": "node --experimental-strip-types scripts/audit-vault-snapshot.mjs",
     "prices:status": "node scripts/market-prices.ts status",
     "prices:refresh": "node scripts/market-prices.ts refresh"
   },
