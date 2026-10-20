@@ -10,6 +10,7 @@ PRs #99–104 proved individual stages, but the **production `buildInvestmentCon
 
 - `Investment Review - ...` is now an explicit lower-trust **`analysis` historical role**, not a new authoritative issuer source or Thesis.
 - Bounded direct lookup by canonical issuer prefix discovers at most the **two newest eligible** saved Reviews even if the next user's question uses totally different words from the past reasoning.
+- Source captures saved under `07_Sources/ChatGPT/` with `source_type=user_supplied`, `type=research_note` and matching issuer are now a separate low-trust **`capture`** role (maximum two per context), rather than being silently excluded as generic AI archive. They remain **unverified supplied content**, not authenticated primary issuer documents.
 - A Review is only admitted if its **indexed YAML frontmatter** says: `type=investment_review`, issuer matches, `source_type=archived_ai`, `independent_evidence=false`, `status=draft`, `analysis_origin` declared, `verification=not_reverified|unverified`. Wrong-issuer, mislabeled primary or silently upgraded verified Reviews are excluded.
 - `namedIssuer` recognizes the prefix to prevent incidental other-company mention from polluting the target issuer's packet.
 - Source/Thesis/Timeline priority and overall token budget remain unchanged; review quota is **two** with lower baseline weight than original sources.
