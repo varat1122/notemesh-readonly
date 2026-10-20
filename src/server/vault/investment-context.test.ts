@@ -185,6 +185,14 @@ Official-file source candidate (no verified numeric facts in this synthetic test
       "[[08_Daily_Weekly/Research Indexes/Company Evolution - NVDA]]",
       "[[05_Thesis/NVDA - Current Thesis]]","",
     ].join("\n"));
+    const userCapture="07_Sources/ChatGPT/NVDA User Capture.md";
+    await addExtra(userCapture,[
+      "---","type: research_note","entity: NVDA",
+      "event_key: FY27Q3-SYNTH","source_type: user_supplied",
+      "verification: unverified","---",
+      "# NVDA User Capture",
+      "An investor submitted NVDA source content; publisher is unverified.","",
+    ].join("\\n").replaceAll("\\n","\n"));
     // No causal keywords in this request are shared by prior AI body.
     const p=build({question:"NVDA accelerator pricing strategy",
       issuers:["NVDA"],focus:"earnings",maxNotes:11,maxChars:12000});
@@ -194,6 +202,11 @@ Official-file source candidate (no verified numeric facts in this synthetic test
     expect(item?.declaredVerification).toBe("not_reverified");
     expect(item?.declaredIndependentEvidence).toBe(false);
     expect(item?.declaredEventKey).toBe("FY27Q3-SYNTH");
+    const capture=p.items.find(x=>x.path===userCapture);
+    expect(capture?.role).toBe("capture");
+    expect(capture?.declaredSourceType).toBe("user_supplied");
+    expect(capture?.declaredVerification).toBe("unverified");
+    expect(p.warnings.join(" ")).toContain("not authenticated primary issuer documents");
     expect(item?.excerpt).toContain("Historical");
     expect(p.warnings.join(" ")).toContain("never independent issuer evidence");
     const original=p.items.find(x=>x.role==="source");
