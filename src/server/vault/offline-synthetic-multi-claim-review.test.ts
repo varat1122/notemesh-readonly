@@ -156,7 +156,7 @@ function fcf(m:string){
   return item(m,{metric:"free_cash_flow",value:"22",period:"FY26Q3",
     unit:"USD millions",relation:"incremental_candidate",channel:"cash_flow"});
 }
-const run=(claims:OfflineMultiClaimInput["claims"][])=>
+const run=(claims:OfflineMultiClaimInput["claims"])=>
   runOfflineSyntheticMultiClaimReview({
     fixtureKind:"synthetic_offline_test_only",claims,
   });
