@@ -33,11 +33,6 @@ type FixedReason=
   "batch_same_dimension_conflicting_value_requires_review"|
   "batch_repeated_literal_not_independent_confirmation"|
   "batch_same_value_different_period_not_duplicate";
-const hardReasons=new Map<number,Set<FixedReason>>();
-function flag(i:number,code:FixedReason){
-  const prior=hardReasons.get(i)??new Set<FixedReason>();
-  prior.add(code);hardReasons.set(i,prior);
-}
 export function runOfflineSyntheticMultiClaimReview(input:OfflineMultiClaimInput){
   if(!input||input.fixtureKind!=="synthetic_offline_test_only"||
     !Array.isArray(input.claims)||input.claims.length<2||
@@ -52,6 +47,11 @@ export function runOfflineSyntheticMultiClaimReview(input:OfflineMultiClaimInput
     !SHA.test(original.originalSourceSha256??""))
     throw Error("multi_claim_release_identity_missing_hold");
   const rows:Row[]=[];
+  const hardReasons=new Map<number,Set<FixedReason>>();
+  function flag(i:number,code:FixedReason){
+    const reasons=hardReasons.get(i)??new Set<FixedReason>();
+    reasons.add(code);hardReasons.set(i,reasons);
+  }
   // No results are returned until EVERY case and final physical snapshot
   // reconciliation succeeds. Failure of any claim aborts the entire batch.
   for(const [index,claim] of input.claims.entries()){
@@ -92,7 +92,6 @@ export function runOfflineSyntheticMultiClaimReview(input:OfflineMultiClaimInput
   // Compare ONLY declared entity/event/source-equal claims, with
   // metric+period+unit as the identity key. Distinct periods/metrics may
   // not corroborate one another, even if two values look identical.
-  hardReasons.clear();
   for(let i=0;i<rows.length;i++){
     for(let j=i+1;j<rows.length;j++){
       const a=rows[i],b=rows[j];
