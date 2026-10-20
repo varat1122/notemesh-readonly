@@ -195,11 +195,14 @@ describe("PR #88: selected, physically verified Thesis snippet crosswalk",()=>{
   });
   it("does not quote fenced code blocks even with exact hashes",async()=>{
     const manifest=await fixture(true);
-    const p=buildProposal(review(manifest));
-    // The Thesis hash must match the exact selected fixture.
-    const exact={...p,evidence:{...p.evidence,thesis:{
-      path:thesisPath,expectedSha256:sha(note(true)),
-    }}};
+    // The pre-existing #86 gate must check the exact same Thesis version.
+    const base=review(manifest);
+    const exactEvidence={...base,evidence:{
+      ...base.evidence,
+      thesis:{path:thesisPath,expectedSha256:sha(note(true))},
+    }};
+    const p=buildProposal(exactEvidence);
+    const exact={...p,evidence:exactEvidence.evidence};
     const target="Untrusted execution note";
     const picked=selection(note(true),target);
     expect(()=>prepareOfflineScopedThesisComparison({
