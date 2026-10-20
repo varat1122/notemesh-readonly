@@ -174,14 +174,13 @@ describe("PR #89 offline semantic candidate with bound refs, not true model fact
       source,findings:[{...finding(),evidenceGaps:[]}],
     })).toThrow();
     expect(()=>judgeOfflineThesisSemanticDraft({
-      source,findings:[{...finding(),ownerApprovalGranted:true} as
-        typeof finding extends (...args: never[])=>infer T?T:never],
+      source,findings:[{...finding(),ownerApprovalGranted:true} as ReturnType<typeof finding>],
     })).toThrow();
   });
   it("refuses duplicate label over structured numeric conflict",async()=>{
     const source=historicalEvidence(await indexedFixture());
     expect(()=>judgeOfflineThesisSemanticDraft({
-      source,findings:[{...finding(),relation:"duplicate_candidate"}],
+      source,findings:[{...finding(),relation:"duplicate_candidate" as const}],
     })).toThrow("semantic_review_duplicate_cannot_override_conflict_hold");
   });
   it("never compares stale Thesis snapshot or runs inside Railway",async()=>{
