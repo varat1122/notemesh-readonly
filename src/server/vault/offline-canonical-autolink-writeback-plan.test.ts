@@ -343,6 +343,25 @@ describe("PR #99 isolated synthetic Safe Writeback rehearsal",()=>{
     expect(result.sandboxCompanyTimelineBacklinkResolved).toBe(true);
     expect(result.sandboxMarkdownSqliteFtsReconciled).toBe(true);
     expect(result.sandboxReadbackVerified).toBe(true);
+    // The NEXT event finds historical analysis + issuer source through
+    // the already updated full-text index, preserving their distinct roles.
+    expect(result.nextEventRetrieval.status).toBe(
+      "synthetic_second_event_topical_retrieval_verified");
+    expect(result.nextEventRetrieval.analyzedHistoryRetrieved).toBe(true);
+    expect(result.nextEventRetrieval.originalSourceRecordRetrieved).toBe(true);
+    expect(result.nextEventRetrieval.historicalAnalysisRole).toBe(
+      "historical_ai_analysis_not_primary");
+    expect(result.nextEventRetrieval.sourceRole).toBe(
+      "issuer_original_unverified");
+    expect(result.nextEventRetrieval.archivedAIIndependentlyVerified)
+      .toBe(false);
+    expect(result.nextEventRetrieval.indexedProvenanceMatchesPhysicalMarkdown)
+      .toBe(true);
+    expect(result.nextEventRetrieval.analysisToSourceLinkResolved).toBe(true);
+    expect(result.nextEventRetrieval.companyEvolutionBacklinkResolved)
+      .toBe(true);
+    expect(result.nextEventRetrieval.actualModelContextSupplied).toBe(false);
+    expect(result.nextEventRetrieval.resultContainsNoteTextOrPaths).toBe(false);
     expect(result.sandboxFilesDiscardedOnFunctionReturn).toBe(true);
     expect(result.sourceManifestUnchanged).toBe(true);
     expect(result.productionVaultWritten).toBe(false);
@@ -367,6 +386,12 @@ describe("PR #99 isolated synthetic Safe Writeback rehearsal",()=>{
     ])expect(json).not.toContain(sensitive);
     expect(r.protectedThesisEvidenceRegisterAndPortfolioNotWritten).toBe(true);
     expect(r.economicInterpretationNotVerified).toBe(true);
+    const retrieval=JSON.stringify(r.nextEventRetrieval);
+    for(const sensitive of [HIDDEN,ATTACK,QUOTE,OLD,THESIS,HUB,EVOLUTION,
+      INDUSTRY,EVIDENCE,"SYNTH","synthetic-release"])
+      expect(retrieval).not.toContain(sensitive);
+    expect(r.nextEventRetrieval.actualDeviceSyncVerified).toBe(false);
+    expect(r.nextEventRetrieval.productionReady).toBe(false);
   });
   it("rolls back disposable worktree after each injected two-note failure",async()=>{
     const m=await fixture(),original=sourceManifest();
@@ -481,6 +506,11 @@ describe("PR #100 Safe Edit preview-first two-note handoff",()=>{
     expect(create.content).toContain("[[05_Thesis/SYNTH - Current Thesis]]");
     expect(create.content).not.toContain(ATTACK);
     expect(create.content).not.toContain(HIDDEN);
+    expect(create.content).toContain("source_type: archived_ai");
+    expect(create.content).toContain("verification: not_reverified");
+    expect(create.content).toContain("analysis_origin: synthetic_ai_draft");
+    // The *incoming* source remains a separate unverified user claim.
+    expect(create.evidence.sourceType).toBe("user_supplied");
     expect(create.evidence.verification).toBe("unverified");
     expect(create.evidence.classification).toBe("unresolved");
 
