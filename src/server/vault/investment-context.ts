@@ -7,7 +7,7 @@ import { splitFrontmatter } from "./markdown";
 import { inspectCanonicalKnowledgeMetadata, type SchemaInspection } from "./investment-knowledge-schema";
 
 export type Focus = "earnings" | "broker" | "tam" | "macro" | "thesis" | "general";
-export type Role = "rules" | "thesis" | "evidence_register" | "timeline" | "company" | "industry" | "source" | "analysis" | "research" | "archive";
+export type Role = "rules" | "thesis" | "evidence_register" | "timeline" | "company" | "industry" | "source" | "analysis" | "capture" | "research" | "archive";
 export interface Input { question: string; issuers?: string[]; industry?: string; focus?: Focus; maxNotes?: number; maxChars?: number }
 export interface Item { path: string; role: Role; declaredVerification: string|null; declaredSourceType: string|null; declaredIndependentEvidence: boolean|null; declaredEventKey: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
 export interface Pack { status: "retrieval_only_not_verified"; question: string; issuers: string[]; focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
@@ -21,11 +21,17 @@ export function roleOf(path: string): Role {
   if (path.startsWith("01_Companies/")) return "company";
   if (/^02_Industries_Themes\/|^03_Concepts\/|TAM_Vintage|Economic_Transmission/.test(path)) return "industry";
   if (/Primary Evidence - |07_Sources\/Company Filings\/|07_Sources\/Earnings\//.test(path)) return "source";
-  if (path.startsWith("07_Sources/ChatGPT/")) return "archive";
+  if(path.startsWith("07_Sources/ChatGPT/")){
+    const m=indexedNoteMeta(path);
+    // This is the saved user submission, not a verified company filing.
+    if(m?.type==="research_note" && m?.source_type==="user_supplied" &&
+      typeof m.entity==="string")return "capture";
+    return "archive";
+  }
   return "research";
 }
-const base: Record<Role, number> = { rules: 40, thesis: 100, evidence_register: 95, timeline: 85, company: 65, industry: 65, source: 87, analysis: 45, research: 35, archive: 8 };
-const quota: Partial<Record<Role, number>> = { rules: 1, thesis: 2, evidence_register: 2, timeline: 3, company: 3, industry: 3, source: 4, analysis: 2, archive: 1 };
+const base: Record<Role, number> = { rules: 40, thesis: 100, evidence_register: 95, timeline: 85, company: 65, industry: 65, source: 87, analysis: 45, capture: 24, research: 35, archive: 8 };
+const quota: Partial<Record<Role, number>> = { rules: 1, thesis: 2, evidence_register: 2, timeline: 3, company: 3, industry: 3, source: 4, analysis: 2, capture: 2, archive: 1 };
 function terms(s: string): string[] {
   return [...new Set((s.match(/[\p{L}\p{N}][\p{L}\p{N}_.-]{1,35}/gu) || []).map(x=>x.toUpperCase()))].slice(0,10);
 }
@@ -73,18 +79,23 @@ function explicitMacroScope(path: string, topic: string): boolean {
     return fields.some(x=>typeof x==="string"&&x.trim().normalize("NFC").toUpperCase()===t);
   }catch{return false;}
 }
+function indexedNoteMeta(path:string):Record<string,unknown>|null{
+  const row=db().prepare("SELECT frontmatter FROM notes WHERE path=?")
+    .get(path) as {frontmatter:string|null}|undefined;
+  if(!row?.frontmatter)return null;
+  try{
+    const v=JSON.parse(row.frontmatter) as Record<string,unknown>;
+    return v && typeof v==="object"&&!Array.isArray(v)?v:null;
+  }catch{return null;}
+}
 function historicalAIReview(path:string,issuer:string|null=null):boolean{
   if(!path.startsWith("08_Daily_Weekly/Research Indexes/Investment Review - "))return false;
-  const row=db().prepare("SELECT frontmatter FROM notes WHERE path=?").get(path) as {frontmatter:string|null}|undefined;
-  if(!row?.frontmatter)return false;
-  try{
-    const m=JSON.parse(row.frontmatter) as Record<string,unknown>;
-    return m.type==="investment_review" && typeof m.entity==="string" &&
-      (!issuer || m.entity.toUpperCase()===issuer) &&
-      m.source_type==="archived_ai" && m.independent_evidence===false &&
-      ["unverified","not_reverified"].includes(String(m.verification)) &&
-      typeof m.analysis_origin==="string" && m.analysis_origin.length>0 && m.status==="draft";
-  }catch{return false;}
+  const m=indexedNoteMeta(path);
+  return !!m && m.type==="investment_review" && typeof m.entity==="string" &&
+    (!issuer || m.entity.toUpperCase()===issuer) &&
+    m.source_type==="archived_ai" && m.independent_evidence===false &&
+    ["unverified","not_reverified"].includes(String(m.verification)) &&
+    typeof m.analysis_origin==="string" && m.analysis_origin.length>0 && m.status==="draft";
 }
 function hasDeclaredMacroPrimary(path:string):boolean {
   const row=db().prepare("SELECT frontmatter FROM notes WHERE path = ?").get(path) as {frontmatter:string|null}|undefined;
@@ -236,6 +247,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
         const role=roleOf(h.path);
         const otherIssuer=namedIssuer(h.path);
         if(issuers.length && otherIssuer && !issuers.includes(otherIssuer))continue;
+        if(role==="capture" && issuers.length &&
+          !issuers.includes(String(indexedNoteMeta(h.path)?.entity??"").toUpperCase()))continue;
         if(role==="analysis" && !historicalAIReview(h.path,
           issuers.length===1?issuers[0]:null))continue;
         if(issuers.length && role==="research" && !pool.has(h.path) &&
@@ -292,6 +305,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
       const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining),row.role);
       if(!excerpt.excerpt.trim())continue;
       if(row.role==="analysis" && !historicalAIReview(row.path,issuers.length===1?issuers[0]:null))continue;
+      if(row.role==="capture" && issuers.length &&
+        !issuers.includes(String(indexedNoteMeta(row.path)?.entity??"").toUpperCase()))continue;
       items.push({path:row.path,role:row.role,...declared(raw,row.path),score:row.score,...excerpt});
       roleCounts.set(row.role,n+1);remaining-=excerpt.excerpt.length;
     } catch {omitted.push(row.path);}
@@ -318,6 +333,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
       "Bounded FTS5 lexical discovery, not semantic recall or full Vault coverage. Missing/omitted notes may contain counter-evidence.",
       "Verification fields are note-declared metadata, NOT freshly reverified primary facts. File modified time is NOT event date.",
       "A saved Investment Review and archived AI repost are historical analysis, never independent issuer evidence; deduplicate issuer+source+metric+fiscal period.",
+      "User-supplied source captures are records of supplied text, not authenticated primary issuer documents.",
       "Use full original notes and current external filings/consensus for investment decisions. This tool is read-only.",
       "Contradiction/risk sections are discoverability hints, not exhaustive counter-evidence verification. Original context must be read in full where material.",
     ]
