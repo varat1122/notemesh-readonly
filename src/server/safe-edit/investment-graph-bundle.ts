@@ -22,7 +22,7 @@ import {verifyAuthorizedInvestmentGraphReadback}
   from "./knowledge-graph-readback";
 
 const OPS=z.string().regex(/^[a-z][a-z0-9-]{8,60}$/);
-const REL=/^[\p{L}\p{N} _./()\-]+\.md$/u;
+const REL=/^[\p{L}\p{N} _./()-]+\.md$/u;
 const EVENT=/^[\p{L}\p{N}_. -]{4,140}$/u;
 const TICKER=/^[A-Za-z0-9][A-Za-z0-9._ -]{0,49}$/;
 const BASE="08_Daily_Weekly/Research Indexes/";
