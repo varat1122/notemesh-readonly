@@ -169,6 +169,61 @@ Official-file source candidate (no verified numeric facts in this synthetic test
     expect(p.status).toBe("retrieval_only_not_verified");
     expect(p.items.find(x=>x.path.includes("official GDP"))?.declaredVerification).toBe("not_reverified");
   });
+
+  it("finds the SAVED Investment Review on the NEXT unrelated issuer question, and never upgrades AI to evidence",async()=>{
+    const build=await fixture();
+    const review="08_Daily_Weekly/Research Indexes/Investment Review - NVDA - FY27Q3-SYNTH.md";
+    await addExtra(review,[
+      "---","type: investment_review","entity: NVDA",
+      "event_key: FY27Q3-SYNTH","status: draft",
+      "verification: not_reverified","source_type: archived_ai",
+      "analysis_origin: synthetic_ai_draft","independent_evidence: false",
+      "---","# Historical NVDA Review",
+      "Historical cash conversion hypotheses were discussed but remain unverified.",
+      "## Counter-evidence",
+      "Delivery timing or inventory could provide another explanation.",
+      "[[08_Daily_Weekly/Research Indexes/Company Evolution - NVDA]]",
+      "[[05_Thesis/NVDA - Current Thesis]]","",
+    ].join("\n"));
+    // No causal keywords in this request are shared by prior AI body.
+    const p=build({question:"NVDA accelerator pricing strategy",
+      issuers:["NVDA"],focus:"earnings",maxNotes:11,maxChars:12000});
+    const item=p.items.find(x=>x.path===review);
+    expect(item?.role).toBe("analysis");
+    expect(item?.declaredSourceType).toBe("archived_ai");
+    expect(item?.declaredVerification).toBe("not_reverified");
+    expect(item?.declaredIndependentEvidence).toBe(false);
+    expect(item?.declaredEventKey).toBe("FY27Q3-SYNTH");
+    expect(item?.excerpt).toContain("Historical");
+    expect(p.warnings.join(" ")).toContain("never independent issuer evidence");
+    const original=p.items.find(x=>x.role==="source");
+    expect(original).toBeDefined();
+    expect(original?.declaredSourceType).toBeNull();
+    expect(p.items.findIndex(x=>x.path===original?.path))
+      .toBeLessThan(p.items.findIndex(x=>x.path===review));
+    expect(p.status).toBe("retrieval_only_not_verified");
+  });
+  it("rejects wrong-issuer and verification-promoted Review, while retaining valid issuer history",async()=>{
+    const build=await fixture();
+    const base="08_Daily_Weekly/Research Indexes/Investment Review - ";
+    const review=(issuer:string,event:string,source:string,independent:boolean)=>
+      ["---","type: investment_review","entity: "+issuer,
+      "event_key: "+event,"status: draft",
+      "verification: not_reverified","source_type: "+source,
+      "analysis_origin: synthetic_ai_draft",
+      "independent_evidence: "+String(independent),
+      "---","# Review for "+issuer,
+      "NVDA appears here, but is not always the issuer.",""].join("\n");
+    await addExtra(base+"AAPL - NVDA-MENTION.md",review("AAPL","INCIDENT","archived_ai",false));
+    await addExtra(base+"NVDA - MISLABELED.md",review("NVDA","BAD","primary",true));
+    await addExtra(base+"NVDA - GOOD.md",review("NVDA","GOOD","archived_ai",false));
+    const p=build({question:"NVDA earnings",issuers:["NVDA"],maxNotes:12,maxChars:12000});
+    const paths=p.items.map(x=>x.path);
+    expect(paths).toContain(base+"NVDA - GOOD.md");
+    expect(paths).not.toContain(base+"NVDA - MISLABELED.md");
+    expect(paths).not.toContain(base+"AAPL - NVDA-MENTION.md");
+    expect(p.items.filter(x=>x.role==="analysis")).toHaveLength(1);
+  });
   it("rejects absent research question",async()=>{
     const build=await fixture();
     expect(()=>build({question:"  "})).toThrow(/Question/);
