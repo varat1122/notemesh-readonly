@@ -155,7 +155,13 @@ export function appendOfflineAuditObservation(req:{
     const out=fs.openSync(filename,fs.constants.O_WRONLY|fs.constants.O_CREAT|
       fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o600);
     try{
-      fs.writeFileSync(out,JSON.stringify(record)+"\n");
+      const encoded=Buffer.from(JSON.stringify(record)+"\n","utf8");
+      let offset=0;
+      while(offset<encoded.length){
+        const written=fs.writeSync(out,encoded,offset,encoded.length-offset);
+        if(written<=0)throw Error("offline_audit_short_write_hold");
+        offset+=written;
+      }
       fs.fsyncSync(out);
     }finally{fs.closeSync(out);}
     const dirfd=fs.openSync(root,fs.constants.O_RDONLY);
