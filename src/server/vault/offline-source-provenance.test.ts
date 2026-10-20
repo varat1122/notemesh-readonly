@@ -157,7 +157,7 @@ describe("offline original-source registry and provenance integrity (NO PROD)",(
     expect(r.originalSourceCoverageComplete).toBe(false);
   });
   it("separates registered original-byte health from false note-declared full hashes",async()=>{
-    const wrong="1".repeat(64);
+    const wrong="f".repeat(64);
     put(independentNote,meta(url,wrong));
     const {captureOriginalDocumentBytes}=await import("../research-source-archive");
     captureOriginalDocumentBytes({
@@ -178,6 +178,28 @@ describe("offline original-source registry and provenance integrity (NO PROD)",(
     expect(report.noteReferenceCrosswalk.noteDeclaredFullHashesNotMatchingRegisteredVersion).toBe(1);
     expect(report.noteReferenceReviewSamples).toContainEqual({
       path:independentNote,kind:"declared_full_hash_not_matching_archived_version",
+    });
+  });
+  it("holds unquoted all-digit YAML hashes instead of treating them as absent",async()=>{
+    put(independentNote,meta(url,"1".repeat(64)));
+    const {captureOriginalDocumentBytes}=await import("../research-source-archive");
+    captureOriginalDocumentBytes({
+      originalSource:url,bytes,contentType:"text/html",
+      capturedAt:"2026-10-20T00:00:00Z",
+      captureMethod:"authorized_external_download",retrievedFrom:url,
+      reviewerOrOperator:"synthetic-offline-qa",
+    });
+    const {indexer}=await import("./indexer");await indexer().rebuild();
+    fs.cpSync(vault,path.join(snapshot,"vault"),{recursive:true,preserveTimestamps:true});
+    const {db}=await import("../db");await db().backup(path.join(snapshot,"app.sqlite"));
+    fs.cpSync(path.join(root,"source-archive"),path.join(snapshot,"source-archive"),
+      {recursive:true,preserveTimestamps:true});
+    const {verifyOfflineSourceArchiveCoverage}=await import("./offline-source-provenance");
+    const r=verifyOfflineSourceArchiveCoverage(snapshot);
+    expect(r.status).toBe("offline_archive_bytes_intact_provenance_review_pending");
+    expect(r.noteReferenceCrosswalk.noteDeclaredFullHashesInvalidOrWrongType).toBe(1);
+    expect(r.noteReferenceReviewSamples).toContainEqual({
+      path:independentNote,kind:"declared_full_document_hash_invalid_or_not_text",
     });
   });
   it("requires PR74 physical Markdown+SQLite consistency before source archive acceptance",async()=>{
