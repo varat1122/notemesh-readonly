@@ -240,10 +240,16 @@ export function verifyOfflineSourceArchiveCoverage(snapshotRoot:string) {
         }
       }
       const archiveIssues=Object.values(issueCounts).reduce((s,v)=>s+(v??0),0);
+      const referenceGaps=
+        crosswalk.notesWithLocatorButNoRegisteredOriginal+
+        crosswalk.noteDeclaredFullHashesNotMatchingRegisteredVersion+
+        crosswalk.noteDeclaredFullHashWithoutLocator;
       const status=archiveIssues>0?
         "offline_archive_bytes_integrity_hold" as const:
         validRows.length===0?
           "offline_no_original_source_snapshots_unverified" as const:
+        referenceGaps>0?
+          "offline_archive_bytes_intact_provenance_review_pending" as const:
           "offline_archived_bytes_intact_not_publisher_verified" as const;
       return {
         status,
@@ -257,6 +263,7 @@ export function verifyOfflineSourceArchiveCoverage(snapshotRoot:string) {
         invalidRegistryRows:invalidRecords,
         issueCounts,issueSamples:issues,issueSampleTruncated:archiveIssues>issues.length,
         noteReferenceCrosswalk:crosswalk,
+        unresolvedDeclaredNoteReferenceCount:referenceGaps,
         noteReferenceReviewSamples:reviewSamples,
         noteReferenceSampleTruncated:
           crosswalk.notesWithLocatorButNoRegisteredOriginal+
