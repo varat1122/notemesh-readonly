@@ -12,7 +12,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),"safe-edit-mcp-"));
 process.env.DATA_DIR=root;process.env.BASE_URL="https://safe-fixture.test";
 process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
 const access:McpAccess={read:true,write:false,label:"oauth:edit-fixture",scopes:["vault:read","vault:edit"]};
-const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","verify_investment_graph_writeback","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment"];
+const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","verify_investment_graph_writeback","write_investment_graph_bundle","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment"];
 const args={operationId:"mcp-synthetic-01",path:"Synthetic.md",reason:"Synthetic MCP test",change:{kind:"replace",oldText:"Old data",newText:"New data"}};
 beforeEach(()=>{fs.mkdirSync(path.join(root,"vault"),{recursive:true});fs.writeFileSync(path.join(root,"vault","Synthetic.md"),"# Synthetic\nOld data\n");});
 afterAll(async()=>{(await import("../db")).db().close();fs.rmSync(root,{recursive:true,force:true});for(const k of ["DATA_DIR","BASE_URL","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];});
@@ -20,15 +20,15 @@ async function connected(a:McpAccess) {
  const {createSafeEditMcpServer}=await import("./safe-edit-server");const server=createSafeEditMcpServer(a),client=new Client({name:"test",version:"1"});const [l,r]=InMemoryTransport.createLinkedPair();await server.connect(r);await client.connect(l);return {client,close:async()=>{await client.close();await server.close();}};
 }
 function unpack(result:any){const b=JSON.parse(result.content[0].text);return JSON.parse(b.result.split("\n").slice(1,-1).join("\n"));}
-it("discovers exactly eleven scoped tools with accurate write annotations",async()=>{
- const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment");}}finally{await c.close();}
+it("discovers exactly twelve scoped tools with accurate write annotations",async()=>{
+ const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="write_investment_graph_bundle"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment");}}finally{await c.close();}
 });
 it.each([
  {...access,scopes:["vault:read"]},{...access,scopes:["vault:read","inbox:submit"]},
  {...access,scopes:["vault:write"]},{...access,label:"api-key:general"},{...access,scopes:undefined},
 ])("enforces OAuth scopes again inside handlers: %j",async a=>{
- const c=await connected(a);try{for(const name of ["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","verify_investment_graph_writeback","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment"]){
- const params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="get_edit_status"?{operationId:args.operationId}:name==="verify_investment_graph_writeback"?{analysisOperationId:"ios-test-fy26-analysis",timelineOperationId:"ios-test-fy26-timeline",analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - SYNTH.md",timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",sourcePath:"07_Sources/ChatGPT/SYNTH.md"}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
+ const c=await connected(a);try{for(const name of ["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","verify_investment_graph_writeback","write_investment_graph_bundle","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment"]){
+ const params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="get_edit_status"?{operationId:args.operationId}:name==="write_investment_graph_bundle"?{operationRoot:"ios-bundle-test-guard",issuer:"SYNTH",eventKey:"SYNTH-Q3-2026",period:"FY26Q3",timelineDate:"2026-10-21",timelineHeading:"Evolution",analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - SYNTH - SYNTH-Q3-2026.md",timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",sourcePath:"07_Sources/ChatGPT/SYNTH Primary Event.md",analysisMarkdown:"synthetic sample".repeat(20)}:name==="verify_investment_graph_writeback"?{analysisOperationId:"ios-test-fy26-analysis",timelineOperationId:"ios-test-fy26-timeline",analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - SYNTH.md",timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",sourcePath:"07_Sources/ChatGPT/SYNTH.md"}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
  if(name==="preview_edit")params.change=args.change;
  const result=await c.client.callTool({name,arguments:params});expect(result.isError,name).toBe(true);expect(JSON.stringify(result._meta),name).toContain("insufficient_scope");
  }expect(fs.readFileSync(path.join(root,"vault","Synthetic.md"),"utf8")).toContain("Old data");}finally{await c.close();}
@@ -179,4 +179,118 @@ it("real OAuth Safe Edit two-note apply then independent Obsidian graph readback
    expect(fs.readFileSync(path.join(vaultRoot,evolution),"utf8"))
      .toContain("Prior history preserved.");
  }finally{await c.close();}
+});
+
+it("single host-authorized Investment Graph bundle uses two existing Safe Edit writes, reads back and never repeats",async()=>{
+ const company="01_Companies/SYNTH.md";
+ const source="07_Sources/ChatGPT/SYNTH Bundle Evidence.md";
+ const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md";
+ const event="SYNTH-BUNDLE-FY26Q4";
+ const rootId="ios-syn-bundle-20261021-a";
+ const analysis="08_Daily_Weekly/Research Indexes/Investment Review - SYNTH - "+event+".md";
+ const marker="<!-- investment-os-operation:"+rootId+" -->";
+ const evt="<!-- investment-os-event:"+event+" -->";
+ const vaultRoot=path.join(root,"vault");
+ const docs=[
+  [company,"---\nentity: SYNTH\ntype: company\n---\n# SYNTH\n"],
+  [source,[
+    "---","entity: SYNTH","event_key: "+event,"period: FY26Q4",
+    "type: research_note","verification: unverified",
+    "source_type: user_supplied","---",
+    "# Captured Source","User-supplied only, issuer not verified.","",
+  ].join("\n")],
+  [timeline,[
+    "---","entity: SYNTH","type: company_evolution","---",
+    "# Evolution","Preexisting historical context retained.","",
+  ].join("\n")],
+ ];
+ for(const [p,content] of docs){
+  fs.mkdirSync(path.dirname(path.join(vaultRoot,p)),{recursive:true});
+  fs.writeFileSync(path.join(vaultRoot,p),content);
+ }
+ const {reindexPath}=await import("../vault/indexer");
+ for(const [p] of docs)reindexPath(p);
+ const markdown=[
+  "---","type: investment_review","entity: SYNTH",
+  "event_key: "+event,"verification: not_reverified",
+  "source_type: archived_ai","analysis_origin: synthetic_ai_draft",
+  "independent_evidence: false","status: draft",
+  "operation_id: "+rootId,"---",
+  "# SYNTH Investment Review",marker,evt,
+  "## Causal hypothesis — unverified",
+  "Demand may not convert to margin; no verified issuer causality.",
+  "## Counter-evidence","Alternative: delivery timing rather than demand.",
+  "## Canonical References",
+  "[["+source.slice(0,-3)+"]]",
+  "[["+timeline.slice(0,-3)+"]]",
+  "[["+company.slice(0,-3)+"]]","",
+ ].join("\n");
+ const payload={operationRoot:rootId,issuer:"SYNTH",eventKey:event,
+   period:"FY26Q4",timelineDate:"2026-10-21",
+   timelineHeading:"Evolution",analysisPath:analysis,
+   timelinePath:timeline,sourcePath:source,analysisMarkdown:markdown};
+ const c=await connected(access);
+ try{
+  const disabled=await c.client.callTool({
+   name:"write_investment_graph_bundle",arguments:payload});
+  expect(disabled.isError).toBe(true);
+  expect(JSON.stringify(disabled)).toContain("admin_explicit_opt_in_required");
+  expect(fs.existsSync(path.join(vaultRoot,analysis))).toBe(false);
+  process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED="1";
+  const wrote=await c.client.callTool({
+   name:"write_investment_graph_bundle",arguments:payload});
+  expect(wrote.isError,JSON.stringify(wrote)).not.toBe(true);
+  const v=unpack(wrote);
+  expect(v.status).toBe(
+   "authorized_two_note_graph_written_and_readback_verified");
+  expect(v.graph.fullPathOutgoingWikilinksResolved).toBe(3);
+  expect(v.graph.livingTimelineBacklinkVerified).toBe(true);
+  expect(v.graph.mobileDeviceSyncVerified).toBe(false);
+  expect(v.multiNoteAtomicityGuaranteed).toBe(false);
+  const oldTimeline=fs.readFileSync(path.join(vaultRoot,timeline),"utf8");
+  expect(oldTimeline).toContain("Preexisting historical context retained.");
+  expect(oldTimeline.split(marker)).toHaveLength(2);
+  const repeat=await c.client.callTool({
+   name:"write_investment_graph_bundle",arguments:payload});
+  expect(repeat.isError,JSON.stringify(repeat)).not.toBe(true);
+  expect(unpack(repeat).status).toBe(
+   "previously_written_both_receipts_graph_reverified");
+  expect(fs.readFileSync(path.join(vaultRoot,timeline),"utf8"))
+   .toBe(oldTimeline);
+ }finally{
+  delete process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED;
+  await c.close();
+ }
+});
+it("Graph bundle rejects fake-primary AI Analysis, nonexistent links and event replay without creating a file",async()=>{
+ const {applyAuthorizedInvestmentGraphBundle}=await import("../safe-edit/investment-graph-bundle");
+ process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED="1";
+ try{
+  const op="ios-syn-block-invalid",ev="SYNTH-BLOCK-2026";
+  const p="08_Daily_Weekly/Research Indexes/Investment Review - SYNTH - "+ev+".md";
+  const data={
+   operationRoot:op,issuer:"SYNTH",eventKey:ev,period:"FY26Q4",
+   timelineDate:"2026-10-21",timelineHeading:"Evolution",
+   analysisPath:p,
+   timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",
+   sourcePath:"07_Sources/ChatGPT/SYNTH Bundle Evidence.md",
+   analysisMarkdown:[
+    "---","type: investment_review","entity: SYNTH",
+    "event_key: "+ev,"source_type: primary","verification: verified_against_primary",
+    "independent_evidence: true","status: draft",
+    "analysis_origin: synthetic_ai_draft","operation_id: "+op,"---",
+    "# Unsafe claim","<!-- investment-os-operation:"+op+" -->",
+    "<!-- investment-os-event:"+ev+" -->",
+    "[[01_Companies/SYNTH]]","",
+   ].join("\n"),
+  };
+  await expect(applyAuthorizedInvestmentGraphBundle(data,"oauth:edit-fixture"))
+   .rejects.toThrow();
+  expect(fs.existsSync(path.join(root,"vault",p))).toBe(false);
+  await expect(applyAuthorizedInvestmentGraphBundle({
+   ...data,analysisPath:"05_Thesis/SYNTH - Current Thesis.md",
+  },"oauth:edit-fixture")).rejects.toThrow();
+ }finally{
+  delete process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED;
+ }
 });
