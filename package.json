@@ -20,6 +20,7 @@
     "test:watch": "vitest",
     "snapshot:coverage:offline": "node --experimental-strip-types scripts/audit-vault-snapshot.mjs",
     "snapshot:sources:offline": "node --experimental-strip-types scripts/audit-vault-snapshot.mjs --sources",
+    "snapshot:review:offline": "node --experimental-strip-types scripts/audit-vault-snapshot.mjs --review",
     "prices:status": "node scripts/market-prices.ts status",
     "prices:refresh": "node scripts/market-prices.ts refresh"
   },
