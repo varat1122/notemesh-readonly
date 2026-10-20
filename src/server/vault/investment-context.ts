@@ -7,24 +7,31 @@ import { splitFrontmatter } from "./markdown";
 import { inspectCanonicalKnowledgeMetadata, type SchemaInspection } from "./investment-knowledge-schema";
 
 export type Focus = "earnings" | "broker" | "tam" | "macro" | "thesis" | "general";
-export type Role = "rules" | "thesis" | "evidence_register" | "timeline" | "company" | "industry" | "source" | "research" | "archive";
+export type Role = "rules" | "thesis" | "evidence_register" | "timeline" | "company" | "industry" | "source" | "analysis" | "capture" | "research" | "archive";
 export interface Input { question: string; issuers?: string[]; industry?: string; focus?: Focus; maxNotes?: number; maxChars?: number }
-export interface Item { path: string; role: Role; declaredVerification: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
+export interface Item { path: string; role: Role; declaredVerification: string|null; declaredSourceType: string|null; declaredIndependentEvidence: boolean|null; declaredEventKey: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
 export interface Pack { status: "retrieval_only_not_verified"; question: string; issuers: string[]; focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
 export function roleOf(path: string): Role {
   if (path.includes("Evidence and Update Rules")) return "rules";
   if (/^05_Thesis\/.*Current Thesis/i.test(path)) return "thesis";
   if (/^05_Thesis\/.*Evidence Register/i.test(path)) return "evidence_register";
+  if (path.startsWith("08_Daily_Weekly/Research Indexes/Investment Review - ")) return "analysis";
   if (/Company Evolution - |00_Investment_Evolution_Master/.test(path)) return "timeline";
   if (path.startsWith("01_Companies/")) return "company";
   if (/^02_Industries_Themes\/|^03_Concepts\/|TAM_Vintage|Economic_Transmission/.test(path)) return "industry";
   if (/Primary Evidence - |07_Sources\/Company Filings\/|07_Sources\/Earnings\//.test(path)) return "source";
-  if (path.startsWith("07_Sources/ChatGPT/")) return "archive";
+  if(path.startsWith("07_Sources/ChatGPT/")){
+    const m=indexedNoteMeta(path);
+    // This is the saved user submission, not a verified company filing.
+    if(m?.type==="research_note" && m?.source_type==="user_supplied" &&
+      typeof m.entity==="string")return "capture";
+    return "archive";
+  }
   return "research";
 }
-const base: Record<Role, number> = { rules: 40, thesis: 100, evidence_register: 95, timeline: 85, company: 65, industry: 65, source: 87, research: 35, archive: 8 };
-const quota: Partial<Record<Role, number>> = { rules: 1, thesis: 2, evidence_register: 2, timeline: 3, company: 3, industry: 3, source: 4, archive: 1 };
+const base: Record<Role, number> = { rules: 40, thesis: 100, evidence_register: 95, timeline: 85, company: 65, industry: 65, source: 87, analysis: 45, capture: 24, research: 35, archive: 8 };
+const quota: Partial<Record<Role, number>> = { rules: 1, thesis: 2, evidence_register: 2, timeline: 3, company: 3, industry: 3, source: 4, analysis: 2, capture: 2, archive: 1 };
 function terms(s: string): string[] {
   return [...new Set((s.match(/[\p{L}\p{N}][\p{L}\p{N}_.-]{1,35}/gu) || []).map(x=>x.toUpperCase()))].slice(0,10);
 }
@@ -34,7 +41,7 @@ function namedIssuer(path: string): string | null {
   const file=path.split("/").at(-1)??"";
   if(path.startsWith("01_Companies/"))return file.match(/^([A-Z][A-Z0-9.-]{0,11})\.md$/)?.[1]??null;
   if(path.startsWith("05_Thesis/"))return file.match(/^([A-Z][A-Z0-9.-]{0,11}) - (?:Current Thesis|Evidence Register)/)?.[1]??null;
-  const structured=file.match(/^(?:Company Evolution - |Company - |Primary Evidence - )([A-Z][A-Z0-9.-]{0,11})(?:\s|\.md)/)?.[1];
+  const structured=file.match(/^(?:Company Evolution - |Company - |Primary Evidence - |Investment Review - )([A-Z][A-Z0-9.-]{0,11})(?:\s|\.md)/)?.[1];
   if(structured)return structured;
   // Many Company Research titles list the covered issuer before a broker.
   // E.g. "ASML - JPM Q3 Preview" concerns ASML, not the bank JPM.
@@ -71,6 +78,24 @@ function explicitMacroScope(path: string, topic: string): boolean {
     const fields=[fm.country,fm.entity,fm.geography,fm.region].flatMap(x=>Array.isArray(x)?x:[x]);
     return fields.some(x=>typeof x==="string"&&x.trim().normalize("NFC").toUpperCase()===t);
   }catch{return false;}
+}
+function indexedNoteMeta(path:string):Record<string,unknown>|null{
+  const row=db().prepare("SELECT frontmatter FROM notes WHERE path=?")
+    .get(path) as {frontmatter:string|null}|undefined;
+  if(!row?.frontmatter)return null;
+  try{
+    const v=JSON.parse(row.frontmatter) as Record<string,unknown>;
+    return v && typeof v==="object"&&!Array.isArray(v)?v:null;
+  }catch{return null;}
+}
+function historicalAIReview(path:string,issuer:string|null=null):boolean{
+  if(!path.startsWith("08_Daily_Weekly/Research Indexes/Investment Review - "))return false;
+  const m=indexedNoteMeta(path);
+  return !!m && m.type==="investment_review" && typeof m.entity==="string" &&
+    (!issuer || m.entity.toUpperCase()===issuer) &&
+    m.source_type==="archived_ai" && m.independent_evidence===false &&
+    ["unverified","not_reverified"].includes(String(m.verification)) &&
+    typeof m.analysis_origin==="string" && m.analysis_origin.length>0 && m.status==="draft";
 }
 function hasDeclaredMacroPrimary(path:string):boolean {
   const row=db().prepare("SELECT frontmatter FROM notes WHERE path = ?").get(path) as {frontmatter:string|null}|undefined;
@@ -126,7 +151,10 @@ function selectedLines(raw: string, search: string[], max: number, role: Role) {
 function dateOf(v: unknown) { return typeof v==="string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v : null; }
 function declared(raw: string, notePath: string) {
   const f = splitFrontmatter(raw).data as Record<string,unknown>;
-  return { declaredVerification:typeof f.verification==="string"?f.verification:null, declaredEventDate:dateOf(f.event_date), declaredPublishedAt:dateOf(f.published_at), schemaCompatibility: inspectCanonicalKnowledgeMetadata(notePath,f) };
+  return { declaredVerification:typeof f.verification==="string"?f.verification:null,
+    declaredSourceType:typeof f.source_type==="string"?f.source_type:null,
+    declaredIndependentEvidence:typeof f.independent_evidence==="boolean"?f.independent_evidence:null,
+    declaredEventKey:typeof f.event_key==="string"?f.event_key:null, declaredEventDate:dateOf(f.event_date), declaredPublishedAt:dateOf(f.published_at), schemaCompatibility: inspectCanonicalKnowledgeMetadata(notePath,f) };
 }
 export function buildInvestmentContextPack(req: Input): Pack {
   const question = req.question.trim().slice(0,1200);
@@ -161,6 +189,20 @@ export function buildInvestmentContextPack(req: Input): Pack {
     const matches = db().prepare("SELECT path FROM notes WHERE substr(path,1,?)=? ORDER BY path DESC LIMIT 12")
       .all(prefix.length,prefix) as {path:string}[];
     for (const note of matches) if(exists(note.path)) pool.set(note.path,115);
+  }
+  // Discover the newest issuer-scoped saved Analysis even when a new
+  // question has no lexical overlap with its old causal hypotheses.
+  for(const ticker of issuers){
+    const prefix="08_Daily_Weekly/Research Indexes/Investment Review - "+ticker+" - ";
+    const rows=db().prepare(`SELECT path FROM notes
+      WHERE substr(path,1,?)=? ORDER BY COALESCE(modified,mtime) DESC, path DESC LIMIT 20`)
+      .all(prefix.length,prefix) as {path:string}[];
+    let found=0;
+    for(const row of rows){
+      if(!historicalAIReview(row.path,ticker)||!exists(row.path))continue;
+      pool.set(row.path,Math.max(pool.get(row.path)||0,75-found*5));
+      if(++found>=2)break;
+    }
   }
   const searchTerms = [...new Set([...issuers,...topicTerms(req.industry||""),...terms(question)])].slice(0,12);
   const failed: string[] = [];
@@ -205,6 +247,10 @@ export function buildInvestmentContextPack(req: Input): Pack {
         const role=roleOf(h.path);
         const otherIssuer=namedIssuer(h.path);
         if(issuers.length && otherIssuer && !issuers.includes(otherIssuer))continue;
+        if(role==="capture" && issuers.length &&
+          !issuers.includes(String(indexedNoteMeta(h.path)?.entity??"").toUpperCase()))continue;
+        if(role==="analysis" && !historicalAIReview(h.path,
+          issuers.length===1?issuers[0]:null))continue;
         if(issuers.length && role==="research" && !pool.has(h.path) &&
           (!h.path.startsWith("10_Knowledge/Company Research/") ||
            (req.industry && !industryMatches.has(h.path))))continue;
@@ -258,6 +304,9 @@ export function buildInvestmentContextPack(req: Input): Pack {
       const raw=readNote(row.path).content;
       const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining),row.role);
       if(!excerpt.excerpt.trim())continue;
+      if(row.role==="analysis" && !historicalAIReview(row.path,issuers.length===1?issuers[0]:null))continue;
+      if(row.role==="capture" && issuers.length &&
+        !issuers.includes(String(indexedNoteMeta(row.path)?.entity??"").toUpperCase()))continue;
       items.push({path:row.path,role:row.role,...declared(raw,row.path),score:row.score,...excerpt});
       roleCounts.set(row.role,n+1);remaining-=excerpt.excerpt.length;
     } catch {omitted.push(row.path);}
@@ -283,7 +332,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
     warnings:[
       "Bounded FTS5 lexical discovery, not semantic recall or full Vault coverage. Missing/omitted notes may contain counter-evidence.",
       "Verification fields are note-declared metadata, NOT freshly reverified primary facts. File modified time is NOT event date.",
-      "An archived AI repost is not independent corroboration; deduplicate issuer+source+metric+fiscal period.",
+      "A saved Investment Review and archived AI repost are historical analysis, never independent issuer evidence; deduplicate issuer+source+metric+fiscal period.",
+      "User-supplied source captures are records of supplied text, not authenticated primary issuer documents.",
       "Use full original notes and current external filings/consensus for investment decisions. This tool is read-only.",
       "Contradiction/risk sections are discoverability hints, not exhaustive counter-evidence verification. Original context must be read in full where material.",
     ]
