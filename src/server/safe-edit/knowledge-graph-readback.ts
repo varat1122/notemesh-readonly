@@ -8,7 +8,6 @@
  * resolved path-qualified Wikilinks. A test port cannot masquerade as a real
  * server readback.
  */
-import fs from "node:fs";
 import {createHash} from "node:crypto";
 import {db} from "../db";
 import {readVaultFile,resolveNotePath} from "../vault/paths";
@@ -197,9 +196,9 @@ export function verifyAuthorizedInvestmentGraphReadback(
       if(!row||row.path!==p)return false;
       try{readVaultFile(resolveNotePath(p));return true;}catch{return false;}
     },
-    getIndexed:p=>database.prepare(`SELECT n.path,n.frontmatter,f.body,n.size,n.mtime
+    getIndexed:p=>(database.prepare(`SELECT n.path,n.frontmatter,f.body,n.size,n.mtime
       FROM notes AS n JOIN notes_fts AS f ON f.rowid=n.rowid
-      WHERE n.path=?`).get(p) as Indexed|undefined??null,
+      WHERE n.path=?`).get(p) as Indexed|undefined)??null,
     getEdges:p=>database.prepare(
       "SELECT target,resolved_path FROM links WHERE source_path=?"
     ).all(p) as Edge[],
