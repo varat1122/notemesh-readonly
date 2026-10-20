@@ -125,15 +125,16 @@ export function prepareOfflineEvidenceGatedHumanReview(req:OfflineReviewRequest)
         typeof meta.source_url==="string"?meta.source_url:null;
       const normalized=rawLocator?canonicalUrl(rawLocator):null;
       const declaredHash=meta.original_source_sha256;
-      const validDeclaredHash=typeof declaredHash==="string"&&
-        HASH.test(declaredHash.toLowerCase());
+      const declaredHashText=typeof declaredHash==="string"?declaredHash:null;
+      const validDeclaredHash=declaredHashText!==null&&
+        HASH.test(declaredHashText.toLowerCase());
       const sourceRows=normalized?d.prepare(
         "SELECT snapshot_id,sha256,byte_length,revision,source_key "+
         "FROM source_snapshots WHERE source_key=? ORDER BY revision LIMIT 102"
       ).all(normalized) as OriginalRow[]:[];
       const sourceVersionsTruncated=sourceRows.length>100;
       const matches=validDeclaredHash?
-        sourceRows.filter(x=>x.sha256===declaredHash.toLowerCase()):[];
+        sourceRows.filter(x=>x.sha256===declaredHashText?.toLowerCase()):[];
       const matched=(matches.length===1&&!sourceVersionsTruncated)?matches[0]:null;
       const sourceEvidenceState=
         !normalized?"no_valid_explicit_original_url" as const:
