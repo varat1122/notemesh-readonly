@@ -101,7 +101,7 @@ export function proveOfflineNextEventRetrieval(input:{
     // semantic relevance or an AI-generated summary.
     const keyword='SYNTH AND revenue';
     const selected=d.prepare(`SELECT n.path,n.title,n.frontmatter
-      FROM notes_fts AS f JOIN notes AS n ON n.rowid=f.rowid
+      FROM notes_fts JOIN notes AS n ON n.rowid=notes_fts.rowid
       WHERE notes_fts MATCH ? LIMIT 12`).all(keyword) as ContextRow[];
     const memo=selected.find(x=>x.path===input.analysisPath);
     const original=selected.find(x=>x.path===input.sourcePath);
