@@ -39,7 +39,7 @@ export type OfflineCanonicalAutolinkInput=OfflineReasoningContractInput&{
 };
 const SHA=/^[a-f0-9]{64}$/;
 const OP=/^[a-z][a-z0-9-]{7,95}$/;
-const CLEAN=/^[\p{L}\p{N} _./()\-]+\.md$/u;
+const CLEAN=/^[\p{L}\p{N} _./()-]+\.md$/u;
 const hash=(v:string|Buffer)=>createHash("sha256").update(v).digest("hex");
 const normalized=(s:string)=>s.normalize("NFC").toLowerCase();
 function safePath(s:unknown){
@@ -130,8 +130,8 @@ export function planOfflineCanonicalInvestmentAutolinks(
   if(typeof issuer!=="string"||typeof eventKey!=="string"||
     issuer.length<1||issuer.length>100||
     eventKey.length<1||eventKey.length>150||
-    !/^[\p{L}\p{N}_ .\-]+$/u.test(issuer)||
-    !/^[\p{L}\p{N}_ .\-]+$/u.test(eventKey))
+    !/^[\p{L}\p{N}_ .-]+$/u.test(issuer)||
+    !/^[\p{L}\p{N}_ .-]+$/u.test(eventKey))
     throw Error("autolink_unbounded_canonical_identity_hold");
 
   const selected=input.routing.targets;
