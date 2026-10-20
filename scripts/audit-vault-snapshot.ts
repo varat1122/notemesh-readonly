@@ -1,7 +1,7 @@
 /**
  * Explicitly local, offline reader for an ALREADY CAPTURED segregated snapshot.
  *
- * Usage: pnpm snapshot:coverage:offline /absolute/path/to/copy
+ * Usage: pnpm snapshot:coverage:offline /absolute/path/to/copy\n * Requires dev dependencies for vite-node TypeScript module resolution.
  *
  * A snapshot contains vault/ and a CONSISTENT app.sqlite from SQLite's
  * backup API (or a quiescent atomic source). Never target live production.
