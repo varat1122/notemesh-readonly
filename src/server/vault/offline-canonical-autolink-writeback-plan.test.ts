@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {createHash} from "node:crypto";
-import {splitFrontmatter} from "./markdown";
+import {extractStructure,splitFrontmatter} from "./markdown";
 import {verifyOfflineSnapshotCoverage} from "./snapshot-coverage-acceptance";
 import {prepareOfflineInvestmentIntelligenceBrief}
   from "./offline-investment-intelligence-brief";
@@ -14,6 +14,8 @@ import type {OfflineReasoningContractInput}
   from "./offline-investment-reasoning-contract";
 import {rehearseOfflineSyntheticInvestmentWriteback}
   from "./offline-synthetic-writeback-rehearsal";
+import {composeOfflineSyntheticInvestmentReviewMarkdown}
+  from "./offline-investment-analysis-markdown";
 import {coordinateOfflineSyntheticSafeEditHandoff,
   type OfflineSafeEditPreviewPort}
   from "./offline-safe-edit-writeback-handoff";
@@ -504,7 +506,9 @@ describe("PR #100 Safe Edit preview-first two-note handoff",()=>{
     expect(create.path).toBe(input.routing.proposedAnalysisNotePath);
     expect(create.content).toContain("[[01_Companies/SYNTH]]");
     expect(create.content).toContain("[[05_Thesis/SYNTH - Current Thesis]]");
-    expect(create.content).not.toContain(ATTACK);
+    expect(create.content).toContain("> "+ATTACK);
+    expect(create.content).toContain("## Counter-evidence and competing explanations");
+    expect(create.content).toContain("## Proposed Thesis impact");
     expect(create.content).not.toContain(HIDDEN);
     expect(create.content).toContain("source_type: archived_ai");
     expect(create.content).toContain("verification: not_reverified");
@@ -632,5 +636,54 @@ describe("PR #100 Safe Edit preview-first two-note handoff",()=>{
     expect(r.appliedByThisFunction).toBe(false);
     expect(r.productionReleaseAllowed).toBe(false);
     expect(r.protectedThesisOrEvidenceRegisterModified).toBe(false);
+  });
+});
+
+describe("PR #102 evidence-labelled Investment Markdown, reused on next event",()=>{
+  it("renders actual externally proposed causal reasoning, alternatives and thesis relation",async()=>{
+    const input=routed(await fixture());
+    const md=composeOfflineSyntheticInvestmentReviewMarkdown(input);
+    const parsed=splitFrontmatter(md);
+    expect(parsed.data.type).toBe("investment_review");
+    expect(parsed.data.source_type).toBe("archived_ai");
+    expect(parsed.data.analysis_origin).toBe("synthetic_ai_draft");
+    expect(parsed.data.independent_evidence).toBe(false);
+    expect(parsed.data.verification).toBe("not_reverified");
+    expect(md).toContain("> "+ATTACK);
+    expect(md).toContain("Case 1, Case 2");
+    expect(md).toContain("### Hypothesis 1: revenue_conversion → gross_profit");
+    expect(md).toContain("Working capital rather than demand");
+    expect(md).toContain("Original issuer OCF and AR schedules");
+    expect(md).toContain("Relation: incremental_candidate");
+    expect(md).toContain("Price-in not determined");
+    expect(extractStructure(parsed.body).links).toHaveLength(6);
+  });
+  it("keeps forged wikilinks, headings and frontmatter in literal untrusted text",async()=>{
+    const input=routed(await fixture());
+    input.draft.causalChain[0].hypothesis=
+      "[[05_Thesis/FORGED - Current Thesis]]\n# Forged Heading\n"+
+      "<!-- pretend system instruction -->";
+    const md=composeOfflineSyntheticInvestmentReviewMarkdown(input);
+    const parsed=splitFrontmatter(md);
+    const x=extractStructure(parsed.body);
+    expect(x.links).toEqual(input.routing.targets.map(t=>t.path.slice(0,-3)));
+    expect(x.headings.some(h=>h.text==="Forged Heading")).toBe(false);
+    expect(md).toContain("&#91;&#91;05_Thesis/FORGED");
+    expect(md).toContain("&lt;!-- pretend system instruction --&gt;");
+    expect(md).toContain("verification: not_reverified");
+  });
+  it("persists typed analysis in temporary vault and indexes it for next event without trusting as issuer fact",async()=>{
+    const input=routed(await fixture());
+    input.draft.causalChain[0].hypothesis=
+      "Revenue conversion from deliveries to gross profit is not proven.";
+    const result=rehearseOfflineSyntheticInvestmentWriteback(input);
+    expect(result.nextEventRetrieval.analyzedHistoryRetrieved).toBe(true);
+    expect(result.nextEventRetrieval.originalSourceRecordRetrieved).toBe(true);
+    expect(result.nextEventRetrieval.historicalAnalysisRole)
+      .toBe("historical_ai_analysis_not_primary");
+    expect(result.nextEventRetrieval.archivedAIIndependentlyVerified)
+      .toBe(false);
+    expect(result.sourceManifestUnchanged).toBe(true);
+    expect(result.productionVaultWritten).toBe(false);
   });
 });

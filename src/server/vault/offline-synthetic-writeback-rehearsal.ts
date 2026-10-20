@@ -22,6 +22,8 @@ import {verifyOfflineSnapshotCoverage}
   from "./snapshot-coverage-acceptance";
 import {extractStructure,splitFrontmatter} from "./markdown";
 import {countWords} from "./text";
+import {composeOfflineSyntheticInvestmentReviewMarkdown}
+  from "./offline-investment-analysis-markdown";
 import {proveOfflineNextEventRetrieval}
   from "./offline-next-event-retrieval";
 
@@ -110,30 +112,8 @@ export function rehearseOfflineSyntheticInvestmentWriteback(
   const op=input.routing.operationId;
   const operationMarker="<!-- investment-os-operation:"+op+" -->";
   const eventMarker="<!-- investment-os-event:"+incoming.eventKey+" -->";
-  const allTargetLinks=targets.map(t=>ref(t.path));
   const analysisLink=ref(analysis);
-  const scaffold=[
-    "---",
-    "type: investment_review",
-    "entity: "+issuer,
-    "event_key: "+incoming.eventKey,
-    "verification: not_reverified",
-    "status: draft",
-    "source_type: archived_ai",
-    "analysis_origin: synthetic_ai_draft",
-    "operation_id: "+op,
-    "---",
-    "# Synthetic Investment Review",
-    operationMarker,eventMarker,
-    "This is an unverified synthetic review index, NOT issuer facts.",
-    "No free-form model claims, protected Thesis excerpts or decisions.",
-    "## Canonical references",
-    ...allTargetLinks,
-    "## Investment interpretation",
-    "Revenue conversion and delivery evidence are unverified research topics.",
-    "Causal hypotheses and Thesis impact require analyst and owner review.",
-    "",
-  ].join("\n");
+  const scaffold=composeOfflineSyntheticInvestmentReviewMarkdown(input);
   // Every link in the note must be a previously checked candidate
   // destination. Prompt/model text is deliberately NOT interpolated.
   const structured=extractStructure(splitFrontmatter(scaffold).body);
