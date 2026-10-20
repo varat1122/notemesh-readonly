@@ -90,10 +90,10 @@ export function judgeOfflineThesisSemanticDraft(input:OfflineSemanticReviewInput
         id:"I"+index+"S"+n,
         kind:r.kind==="historical_prose"?"prose_history":"structured_history",
         interpretationIndex:index,notePath:r.path,
-        noteSha256:"noteSha256" in r?r.noteSha256:null,
-        line:"line" in r?r.line:null,
-        excerpt:"excerpt" in r?r.excerpt:null,
-        sourceSha256:"sourceSha256" in r?r.sourceSha256:null,
+        noteSha256:"noteSha256" in r?(r.noteSha256??null):null,
+        line:"line" in r?(r.line??null):null,
+        excerpt:"excerpt" in r?(r.excerpt??null):null,
+        sourceSha256:"sourceSha256" in r?(r.sourceSha256??null):null,
         independence:r.independence,
       });
     });
