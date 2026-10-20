@@ -45,7 +45,7 @@ describe("PR #81 isolated on-disk audit observations, never Vault authorization"
     expect(verified.records).toBe(2);
     expect(fs.readdirSync(auditDir).sort()).toEqual(["000001.json","000002.json"]);
     expect(fs.readFileSync(path.join(auditDir,"000001.json"),"utf8"))
-      .toContain("owner");
+      .toContain("investment_os_offline_audit_v1");
     expect(b.ownerApprovalGranted).toBe(false);
     expect(b.productionVaultModified).toBe(false);
     expect(b.auditLogImmutable).toBe(false);
