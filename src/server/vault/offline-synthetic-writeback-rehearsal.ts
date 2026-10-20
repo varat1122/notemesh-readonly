@@ -112,7 +112,6 @@ export function rehearseOfflineSyntheticInvestmentWriteback(
   const op=input.routing.operationId;
   const operationMarker="<!-- investment-os-operation:"+op+" -->";
   const eventMarker="<!-- investment-os-event:"+incoming.eventKey+" -->";
-  const allTargetLinks=targets.map(t=>ref(t.path));
   const analysisLink=ref(analysis);
   const scaffold=composeOfflineSyntheticInvestmentReviewMarkdown(input);
   // Every link in the note must be a previously checked candidate
