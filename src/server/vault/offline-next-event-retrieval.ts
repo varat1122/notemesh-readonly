@@ -20,8 +20,8 @@ type ContextRow={path:string;frontmatter:string|null;title:string};
 type LinkRow={source_path:string;target:string;resolved_path:string|null};
 const hash=(v:Buffer|string)=>createHash("sha256").update(v).digest("hex");
 const canon=(p:string)=>p.slice(0,-3);
-const roles=["issuer_original_unverified","historical_ai_analysis_not_primary"]
-  as const;
+const roles=["issuer_original_unverified",
+  "historical_ai_analysis_not_primary"] as const;
 
 export function proveOfflineNextEventRetrieval(input:{
   workspace:string;
