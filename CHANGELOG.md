@@ -2,6 +2,8 @@
 
 ## Unreleased (development branch only; no production deployment)
 
+- Added isolated offline source snapshot SHA-256 verification with explicit registry provenance crosswalk, duplicate/version handling, orphan/missing/tampered blob holds and archived-AI nonindependence. Separate physical blob integrity from note-declared source/hash conflicts; no issuer verification, real Vault source capture, DR acceptance or writeback.
+
 - Added a local offline, read-only Vault+SQLite snapshot reconciliation tool and isolated-fixture tests. It checks Markdown/FTS/link consistency, index versus physical files, and attachment metadata; no live snapshot capture, issuer verification, immutable mount, DR acceptance, Vault write or MCP exposure is implied.
 
 - Added a SHA-256 index-only fingerprint to bound multi-page P1/P2/P3 review enumeration. Subsequent cursor pages now require the prior fingerprint and reject altered SQLite note metadata, indexed versions, link graph, or priority scope; still **not** a filesystem snapshot, archive authenticity validation, or permission to write.
