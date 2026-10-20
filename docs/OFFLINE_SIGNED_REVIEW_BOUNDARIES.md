@@ -32,7 +32,7 @@ all outputs enforce:
 A subject digest is domain-separated and binds exact:
 - note path, note SHA-256
 - offline SQL notes+links fingerprint and physical Markdown manifest
-- registered source URL key SHA-256 and source blob SHA-256
+- registered source URL key SHA-256, source blob SHA-256 and exact revision number
 - selected review action / relationship
 - SHA-256 of exact old/new candidate lines and rationale
 
