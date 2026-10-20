@@ -14,9 +14,14 @@ import {scoreSyntheticSemanticPredictions,
 
 type FixedSyntheticInput=ReturnType<
   typeof getSyntheticModelBenchmarkInputs>[number];
+type FrozenSyntheticInput=
+  Omit<Readonly<FixedSyntheticInput>,"historicalExcerpts"> & {
+    readonly historicalExcerpts:ReadonlyArray<
+      Readonly<FixedSyntheticInput["historicalExcerpts"][number]>>;
+  };
 
 export async function runSyntheticOnlyModelEvaluation(
-  candidateModel:(testInput:Readonly<FixedSyntheticInput>)=>
+  candidateModel:(testInput:FrozenSyntheticInput)=>
     Promise<SyntheticModelPrediction>,
 ){
   if(typeof candidateModel!=="function")
