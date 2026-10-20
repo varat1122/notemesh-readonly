@@ -45,7 +45,7 @@ function validatePrediction(candidate:SyntheticModelPrediction){
     !CHANNELS.includes(candidate.proposedEconomicChannel)||
     !Array.isArray(candidate.citedIds)||candidate.citedIds.length<1||
     candidate.citedIds.length>6||
-    candidate.citedIds.some(id=>!textOk(id,20))||
+    candidate.citedIds.some((id:string)=>!textOk(id,20))||
     new Set(candidate.citedIds).size!==candidate.citedIds.length||
     typeof candidate.abstainsForMissingEvidence!=="boolean"||
     candidate.abstainsForMissingEvidence!==(candidate.proposedRelation==="unresolved")||
@@ -82,8 +82,8 @@ export function scoreSyntheticSemanticPredictions(
     if(!p)throw Error("synthetic_semantic_unknown_or_missing_case_hold");
     const permissible=new Set(s.historicalExcerpts.map(e=>e.id));
     const citationsValid=p.citedIds.includes("T0")&&
-      p.citedIds.some(id=>id.startsWith("I"))&&
-      p.citedIds.every(id=>permissible.has(id));
+      p.citedIds.some((id:string)=>id.startsWith("I"))&&
+      p.citedIds.every((id:string)=>permissible.has(id));
     const relationCorrect=p.proposedRelation===s.goldRelation;
     const abstentionCorrect=p.abstainsForMissingEvidence===s.goldAbstain;
     const mechanismCorrect=p.proposedEconomicChannel===s.goldChannel;
