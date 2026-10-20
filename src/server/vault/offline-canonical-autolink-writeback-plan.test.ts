@@ -12,6 +12,8 @@ import {planOfflineCanonicalInvestmentAutolinks,
   from "./offline-canonical-autolink-writeback-plan";
 import type {OfflineReasoningContractInput}
   from "./offline-investment-reasoning-contract";
+import {rehearseOfflineSyntheticInvestmentWriteback}
+  from "./offline-synthetic-writeback-rehearsal";
 
 const sha=(s:string|Buffer)=>createHash("sha256").update(s).digest("hex");
 const OLD="10_Knowledge/SYNTH - Earnings Evidence.md";
@@ -318,5 +320,92 @@ describe("PR #98 canonical Obsidian auto-link preview (synthetic only)",()=>{
     expect(r.actualDeviceSyncVerified).toBe(false);
     expect(r.industryLinkSemanticsIndependentlyVerified).toBe(false);
     expect(r.allWritesRequireSeparateAuthorizedExecution).toBe(true);
+  });
+});
+
+describe("PR #99 isolated synthetic Safe Writeback rehearsal",()=>{
+  const sourceManifest=()=>verifyOfflineSnapshotCoverage(snapshot)
+    .markdownContentManifestSha256;
+  it("writes Analysis + living Timeline only in disposable sandbox, then readbacks links",async()=>{
+    const manifest=await fixture();
+    const original=sourceManifest();
+    const oldTimeline=fs.readFileSync(path.join(snapshot,"vault",EVOLUTION),"utf8");
+    const protectedThesis=fs.readFileSync(
+      path.join(snapshot,"vault",THESIS),"utf8");
+    const result=rehearseOfflineSyntheticInvestmentWriteback(routed(manifest));
+    expect(result.status).toBe(
+      "ephemeral_synthetic_writeback_rehearsal_verified");
+    expect(result.sandboxNotesWrittenAndReadbackVerified).toBe(2);
+    expect(result.sandboxOutgoingLinksResolved).toBe(6);
+    expect(result.sandboxCompanyTimelineBacklinkResolved).toBe(true);
+    expect(result.sandboxMarkdownSqliteFtsReconciled).toBe(true);
+    expect(result.sandboxReadbackVerified).toBe(true);
+    expect(result.sandboxFilesDiscardedOnFunctionReturn).toBe(true);
+    expect(result.sourceManifestUnchanged).toBe(true);
+    expect(result.productionVaultWritten).toBe(false);
+    expect(result.productionSaveReceipt).toBeNull();
+    expect(result.actualOwnerWriteAuthorizationVerified).toBe(false);
+    expect(result.crossDeviceSyncVerified).toBe(false);
+    expect(sourceManifest()).toBe(original);
+    expect(fs.readFileSync(path.join(snapshot,"vault",EVOLUTION),"utf8"))
+      .toBe(oldTimeline);
+    expect(fs.readFileSync(path.join(snapshot,"vault",THESIS),"utf8"))
+      .toBe(protectedThesis);
+    expect(fs.existsSync(path.join(snapshot,"vault",
+      routed(manifest).routing.proposedAnalysisNotePath))).toBe(false);
+  });
+  it("never leaks private Thesis or caller free-text into receipt",async()=>{
+    const r=rehearseOfflineSyntheticInvestmentWriteback(
+      routed(await fixture()));
+    const json=JSON.stringify(r);
+    for(const sensitive of [
+      ATTACK,HIDDEN,QUOTE,"synthetic-release",THESIS,HUB,EVOLUTION,
+      OLD,INDUSTRY,EVIDENCE,"SYNTH",
+    ])expect(json).not.toContain(sensitive);
+    expect(r.protectedThesisEvidenceRegisterAndPortfolioNotWritten).toBe(true);
+    expect(r.economicInterpretationNotVerified).toBe(true);
+  });
+  it("rolls back disposable worktree after each injected two-note failure",async()=>{
+    const m=await fixture(),original=sourceManifest();
+    const timelineOld=fs.readFileSync(path.join(snapshot,"vault",EVOLUTION));
+    const before=new Set(fs.readdirSync(os.tmpdir())
+      .filter(x=>x.startsWith("nm-synthetic-writeback-")));
+    for(const point of [
+      "after_analysis_note","after_timeline_append","after_sqlite_index",
+    ] as const){
+      const input={...routed(m),rehearsal:{injectFailureAt:point}};
+      expect(()=>rehearseOfflineSyntheticInvestmentWriteback(input))
+        .toThrow("writeback_rehearsal_injected_"+point);
+      expect(sourceManifest()).toBe(original);
+      expect(fs.readFileSync(path.join(snapshot,"vault",EVOLUTION)))
+        .toEqual(timelineOld);
+    }
+    const after=fs.readdirSync(os.tmpdir())
+      .filter(x=>x.startsWith("nm-synthetic-writeback-"));
+    expect(after.filter(x=>!before.has(x))).toEqual([]);
+  });
+  it("rejects a real issuer regardless of caller's synthetic-fixture label",async()=>{
+    const m=await fixture(),input=routed(m);
+    input.claims[0].candidate.source.review.evidence.incoming.entity="NVDA";
+    expect(()=>rehearseOfflineSyntheticInvestmentWriteback(input))
+      .toThrow("writeback_rehearsal_synthetic_issuer_only_hold");
+  });
+  it("fails closed on stale target checksum or source snapshot mutation",async()=>{
+    const m=await fixture(),input=routed(m);
+    input.routing.targets[2].expectedSha256="f".repeat(64);
+    expect(()=>rehearseOfflineSyntheticInvestmentWriteback(input))
+      .toThrow("autolink_stale_target_checksum_hold");
+    const tampered=routed(m);
+    fs.appendFileSync(path.join(snapshot,"vault",EVOLUTION),
+      "unreviewed update\n");
+    expect(()=>rehearseOfflineSyntheticInvestmentWriteback(tampered))
+      .toThrow();
+  });
+  it("refuses extra options or unknown failure points",async()=>{
+    const m=await fixture();
+    const input={...routed(m),rehearsal:{injectFailureAt:"unknown" as
+      "after_sqlite_index"}};
+    expect(()=>rehearseOfflineSyntheticInvestmentWriteback(input))
+      .toThrow("writeback_rehearsal_unknown_failpoint_hold");
   });
 });
