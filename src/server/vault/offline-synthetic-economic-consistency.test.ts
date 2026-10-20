@@ -224,9 +224,9 @@ describe("PR #96 offline explicit financial arithmetic candidates",()=>{
   it("rejects wrong metrics, periods, currencies and unit definitions",async()=>{
     const m=await fixture();
     const variants=[
-      (b:typeof batch)=>{b[1].candidate.source.review.evidence.incoming.period="FY26Q4";},
-      (b:typeof batch)=>{b[1].candidate.source.review.evidence.incoming.unit="THB millions";},
-      (b:typeof batch)=>{b[2].candidate.source.review.evidence.incoming.metric="operating_margin";},
+      (b:OfflineEconomicConsistencyInput["claims"])=>{b[1].candidate.source.review.evidence.incoming.period="FY26Q4";},
+      (b:OfflineEconomicConsistencyInput["claims"])=>{b[1].candidate.source.review.evidence.incoming.unit="THB millions";},
+      (b:OfflineEconomicConsistencyInput["claims"])=>{b[2].candidate.source.review.evidence.incoming.metric="operating_margin";},
     ];
     for(const mutation of variants){
       const arr=gm(m);mutation(arr);
