@@ -96,6 +96,8 @@ describe("PR #78 offline source-bound read-only evidence bridge",()=>{
       ownerApprovalGranted:false,canAutoWrite:false,canAutoUpdateThesis:false,
       safeEditPreview:null,proposedPatch:null,vaultModified:false,
     });
+    expect("offlineIndexMetadataLinksFingerprint" in p).toBe(true);
+    if(!("offlineIndexMetadataLinksFingerprint" in p))throw Error("missing_bound_packet");
     expect(p.offlineIndexMetadataLinksFingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(p.physicalMarkdownManifestSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(p.unresolvedGates).toContain("reviewer_identity_unverified");
@@ -107,6 +109,8 @@ describe("PR #78 offline source-bound read-only evidence bridge",()=>{
     const {prepareOfflineBoundEvidenceProposal}=await import("./offline-bound-evidence-proposal");
     const p=prepareOfflineBoundEvidenceProposal(request());
     expect(p.status).toBe("human_review_required");
+    expect("chronology" in p).toBe(true);
+    if(!("chronology" in p))throw Error("missing_bound_packet");
     expect(p.chronology).toEqual({
       eventDate:null,publishedAt:null,importedAt:null,verifiedAt:null,
     });
@@ -134,14 +138,16 @@ describe("PR #78 offline source-bound read-only evidence bridge",()=>{
     const packet=prepareOfflineBoundEvidenceProposal(request());
     expect(packet.status).toBe("hold");
     expect(packet.safeEditPreview).toBeNull();
-    expect(packet.underlyingReviewStatus).toBe("source_archive_integrity_hold");
+    expect("underlyingReviewStatus" in packet ? packet.underlyingReviewStatus : null)
+      .toBe("source_archive_integrity_hold");
   });
   it("holds missing original registry and mismatched declared full hash",async()=>{
     put(target,raw());await prep(false);
     const {prepareOfflineBoundEvidenceProposal}=await import("./offline-bound-evidence-proposal");
     const noArchive=prepareOfflineBoundEvidenceProposal(request());
     expect(noArchive.status).toBe("hold");
-    expect(noArchive.underlyingReviewStatus).toBe("source_or_independence_evidence_missing_hold");
+    expect("underlyingReviewStatus" in noArchive ? noArchive.underlyingReviewStatus : null)
+      .toBe("source_or_independence_evidence_missing_hold");
   });
   it("rejects YAML numeric hash coercion as invalid original evidence",async()=>{
     put(target,raw().replace("'"+sha(original)+"'","1".repeat(64)));
@@ -156,7 +162,8 @@ describe("PR #78 offline source-bound read-only evidence bridge",()=>{
     const {prepareOfflineBoundEvidenceProposal}=await import("./offline-bound-evidence-proposal");
     const r=prepareOfflineBoundEvidenceProposal(request(protectedNote));
     expect(r.status).toBe("hold");
-    expect(r.underlyingReviewStatus).toBe("protected_or_ineligible_note_hold");
+    expect("underlyingReviewStatus" in r ? r.underlyingReviewStatus : null)
+      .toBe("protected_or_ineligible_note_hold");
   });
   it("holds hidden symlink source, no path traversal and live runtime",async()=>{
     put(target,raw());await prep();
