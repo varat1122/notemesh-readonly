@@ -29,7 +29,7 @@ const subject:OfflineReviewSubject={
   noteSha256:sha("note"),indexFingerprint:sha("sqlite-index"),
   markdownManifestSha256:sha("physical-markdown-manifest"),
   originalBlobSha256:sha("stored-source-blob"),
-  sourceKeySha256:sha("url-source-key"),
+  sourceKeySha256:sha("url-source-key"),sourceRevision:1,
   action:"metadata_correction_candidate",relationship:"added_detail",
   oldLineSha256:sha("old"),newLineSha256:sha("new"),
   rationaleSha256:sha("draft rationale only"),
@@ -113,6 +113,14 @@ describe("PR #79 detached review signatures: never a Vault authorization",()=>{
       expect(r.status,field).toBe("hold_for_offline_human_review");
       expect(r.findings,field).toContain("invalid_reviewer_receipt_fields_or_binding");
     }
+  });
+  it("rejects replay after a different registered source revision",()=>{
+    const x=bundle();
+    const changed=verifyOfflineSignedReviewReceipts({
+      ...x,subject:{...subject,sourceRevision:2},
+    });
+    expect(changed.status).toBe("hold_for_offline_human_review");
+    expect(changed.ownerApprovalGranted).toBe(false);
   });
   it("rejects tampered owner receipt linkage, owner before reviewer and nonce reuse",()=>{
     const x=bundle();
