@@ -102,7 +102,7 @@ function scan(root:string,insideLock=false){
     seen.add(r.referenceSha256);
     head=r.recordSha256;
   }
-  return {headSha256:head,records:seq};
+  return {headSha256:head,records:seq,challengeRefs:seen};
 }
 export function inspectOfflineAuditJournal(req:{
   auditDir:string;snapshotRoot:string;expectedHeadSha256?:string;
@@ -113,7 +113,7 @@ export function inspectOfflineAuditJournal(req:{
     (!SHA.test(req.expectedHeadSha256)||
       req.expectedHeadSha256!==state.headSha256))
     throw Error("offline_audit_external_head_mismatch_hold");
-  return {...state,
+  return {headSha256:state.headSha256,records:state.records,
     externallyAnchored:false as const,
     independentlyImmutable:false as const,
     ownerAuthenticated:false as const,
@@ -141,6 +141,9 @@ export function appendOfflineAuditObservation(req:{
     if(prior.headSha256!==req.expectedHeadSha256)
       throw Error("offline_audit_expected_head_stale_hold");
     if(prior.records>=1000)throw Error("offline_audit_record_limit_hold");
+    if(req.kind==="enrollment_challenge_checked"&&
+      prior.challengeRefs.has(req.referenceSha256))
+      throw Error("offline_audit_duplicate_challenge_reference_hold");
     const base:Omit<OfflineAuditRecord,"recordSha256">={
       schema:"investment_os_offline_audit_v1",seq:prior.records+1,
       previousSha256:prior.headSha256,createdAt:new Date().toISOString(),
@@ -163,7 +166,7 @@ export function appendOfflineAuditObservation(req:{
       throw Error("offline_audit_post_append_validation_hold");
     return {
       status:"offline_scratch_record_fsynced_not_anchored" as const,
-      ...actual,
+      headSha256:actual.headSha256,records:actual.records,
       ownerApprovalGranted:false as const,canAutoWrite:false as const,
       auditLogImmutable:false as const,
       globallyReplayProtected:false as const,
