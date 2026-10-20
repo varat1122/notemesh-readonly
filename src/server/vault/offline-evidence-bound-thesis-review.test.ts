@@ -99,7 +99,7 @@ function proposed(refs:Array<{
   "duplicate_candidate"="contradiction_candidate"){
   return {
     claimLabel:"Fictional Q3 Revenue",hypothesis:"The new input might revise the delivery assumption.",
-    relation,mechanism:["revenue_conversion","earnings"] as const,
+    relation,mechanism:["revenue_conversion","earnings"] as Array<"revenue_conversion"|"earnings">,
     citedHistoricalRefs:refs,
     counterEvidenceRefs:[],
     missingPrimaryEvidence:["Independent issuer earnings release and revision timeline"],
