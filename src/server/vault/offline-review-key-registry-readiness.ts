@@ -69,8 +69,7 @@ function readRegistryFile(file:string,snapshotRoot:string){
   if([snapshot,live].some(root=>root&&(
     canonical===root||canonical.startsWith(root+path.sep))))
     throw Error("offline_registry_cannot_live_inside_vault_or_snapshot");
-  const flags=fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|
-    (fs.constants.O_CLOEXEC??0);
+  const flags=fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW;
   const fd=fs.openSync(canonical,flags);
   try{
     const a=fs.fstatSync(fd);
