@@ -91,7 +91,7 @@ describe("PR #90: fixed artificial corpus evaluation, never production model sco
     expect(()=>scoreSyntheticSemanticPredictions(duplicate))
       .toThrow("synthetic_semantic_duplicate_case_id_hold");
     const authority=ideal();
-    const over=Object.assign({},authority[0],{ownerApprovalGranted:true});
+    const over={...authority[0],ownerApprovalGranted:true};
     authority[0]=over;
     expect(()=>scoreSyntheticSemanticPredictions(authority))
       .toThrow("synthetic_semantic_prediction_schema_or_overclaim_hold");
