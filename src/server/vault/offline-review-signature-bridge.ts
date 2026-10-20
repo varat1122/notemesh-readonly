@@ -34,6 +34,7 @@ export function prepareOfflineBoundSignatureSubject(req:OfflineBoundProposalRequ
     markdownManifestSha256:packet.physicalMarkdownManifestSha256,
     originalBlobSha256:packet.storedSource.originalBlobSha256,
     sourceKeySha256:packet.storedSource.sourceKeySha256,
+    sourceRevision:packet.storedSource.revision,
     action:req.action,relationship:req.relationship,
     oldLineSha256:sha(req.oldLine),newLineSha256:sha(req.newLine),
     rationaleSha256:sha(req.reviewRationale),
