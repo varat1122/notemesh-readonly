@@ -90,3 +90,93 @@ it("authorized Safe Edit MCP raw archive fetch returns SHA and leaves Obsidian V
    delete process.env.SOURCE_ARCHIVE_USER_AGENT;
  }
 });
+
+it("real OAuth Safe Edit two-note apply then independent Obsidian graph readback",async()=>{
+ const prefix="08_Daily_Weekly/Research Indexes/";
+ const analysis=prefix+"Investment Review - SYNTH - FY26Q3.md";
+ const evolution=prefix+"Company Evolution - SYNTH.md";
+ const source="07_Sources/ChatGPT/SYNTH Primary Event.md";
+ const company="01_Companies/SYNTH.md";
+ const op="ios-synth-graph-20261021";
+ const e="SYNTH-FY26Q3-NEW";
+ const mk="<!-- investment-os-operation:"+op+" -->";
+ const evt="<!-- investment-os-event:"+e+" -->";
+ const vaultRoot=path.join(root,"vault");
+ for(const rel of [evolution,source,company]){
+   fs.mkdirSync(path.dirname(path.join(vaultRoot,rel)),{recursive:true});
+ }
+ fs.writeFileSync(path.join(vaultRoot,source),[
+   "---","entity: SYNTH","event_key: "+e,
+   "type: research_note","source_type: user_supplied",
+   "verification: unverified","---",
+   "# User source record","Unverified user supplied source.","",
+ ].join("\n"));
+ fs.writeFileSync(path.join(vaultRoot,company),
+   "---\nentity: SYNTH\ntype: company\n---\n# SYNTH\n");
+ fs.writeFileSync(path.join(vaultRoot,evolution),
+   "---\nentity: SYNTH\ntype: company_evolution\n---\n# Evolution\nPrior history preserved.\n");
+ const {reindexPath}=await import("../vault/indexer");
+ for(const p of [source,company,evolution])reindexPath(p);
+ const analysisMarkdown=[
+   "---","type: investment_review","entity: SYNTH",
+   "event_key: "+e,"verification: not_reverified",
+   "source_type: archived_ai","analysis_origin: synthetic_ai_draft",
+   "independent_evidence: false","status: draft","---",
+   "# Review",mk,evt,
+   "AI proposal only, not independently verified.",
+   "[["+source.slice(0,-3)+"]]",
+   "[["+evolution.slice(0,-3)+"]]",
+   "[["+company.slice(0,-3)+"]]","",
+ ].join("\n");
+ const c=await connected(access);
+ try{
+   const make=await c.client.callTool({name:"create_note",arguments:{
+     operationId:op+"-analysis",path:analysis,
+     reason:"Verify synthetic closed-loop Analysis create",
+     content:analysisMarkdown,
+   }});
+   expect(make.isError,JSON.stringify(make)).not.toBe(true);
+   const planned=unpack(make);
+   expect(planned.status).toBe("preview");
+   const applyOne=await c.client.callTool({name:"apply_edit",arguments:{
+     operationId:planned.operationId,
+     previewToken:planned.previewToken,expectedHash:planned.beforeHash,
+   }});
+   expect(applyOne.isError,JSON.stringify(applyOne)).not.toBe(true);
+   expect(unpack(applyOne).receipt.readback).toBe("verified");
+   const append=await c.client.callTool({name:"append_section",arguments:{
+     operationId:op+"-timeline",path:evolution,
+     reason:"Link already saved unverified research into living Company Timeline",
+     heading:"Evolution",date:"2026-10-21",
+     content:mk+"\n"+evt+"\n- [["+
+       analysis.slice(0,-3)+"]] — unverified analysis.",
+   }});
+   expect(append.isError,JSON.stringify(append)).not.toBe(true);
+   const second=unpack(append);
+   const applyTwo=await c.client.callTool({name:"apply_edit",arguments:{
+     operationId:second.operationId,
+     previewToken:second.previewToken,expectedHash:second.beforeHash,
+   }});
+   expect(applyTwo.isError,JSON.stringify(applyTwo)).not.toBe(true);
+   expect(unpack(applyTwo).receipt.reindex).toBe("verified");
+   const verified=await c.client.callTool({
+     name:"verify_investment_graph_writeback",arguments:{
+       analysisOperationId:op+"-analysis",
+       timelineOperationId:op+"-timeline",
+       analysisPath:analysis,timelinePath:evolution,sourcePath:source,
+     },
+   });
+   expect(verified.isError,JSON.stringify(verified)).not.toBe(true);
+   const result=unpack(verified);
+   expect(result.status).toBe(
+     "authorized_safe_edit_server_graph_readback_verified");
+   expect(result.exactOperationAfterHashesVerified).toBe(true);
+   expect(result.livingTimelineBacklinkVerified).toBe(true);
+   expect(result.fullPathOutgoingWikilinksResolved).toBe(3);
+   expect(result.mobileDeviceSyncVerified).toBe(false);
+   expect(result.vaultWrittenByVerifier).toBe(false);
+   expect(result.originalSourceIndependentlyAuthenticated).toBe(false);
+   expect(fs.readFileSync(path.join(vaultRoot,evolution),"utf8"))
+     .toContain("Prior history preserved.");
+ }finally{await c.close();}
+});
