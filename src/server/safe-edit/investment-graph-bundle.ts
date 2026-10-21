@@ -108,8 +108,8 @@ function validatePreflight(i:InvestmentGraphBundleInput,existingAnalysis=false){
     const saved=loadIndexed(i.analysisPath);
     const parsed=note(saved);
     if(saved!==i.analysisMarkdown||previous?.body!==parsed.body||
-      previous.frontmatter!==JSON.stringify(parsed.data)||
-      previous.size!==Buffer.byteLength(saved,"utf8"))
+      previous?.frontmatter!==JSON.stringify(parsed.data)||
+      previous?.size!==Buffer.byteLength(saved,"utf8"))
       throw Error("graph_bundle_recovery_analysis_physical_or_index_mismatch_hold");
   }
   const src=note(loadIndexed(i.sourcePath));
