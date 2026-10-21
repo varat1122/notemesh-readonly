@@ -12,7 +12,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),"safe-edit-mcp-"));
 process.env.DATA_DIR=root;process.env.BASE_URL="https://safe-fixture.test";
 process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
 const access:McpAccess={read:true,write:false,label:"oauth:edit-fixture",scopes:["vault:read","vault:edit"]};
-const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","verify_investment_graph_writeback","write_investment_graph_bundle","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment"];
+const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","verify_investment_graph_writeback","prepare_investment_graph_review","write_investment_graph_bundle","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment"];
 const args={operationId:"mcp-synthetic-01",path:"Synthetic.md",reason:"Synthetic MCP test",change:{kind:"replace",oldText:"Old data",newText:"New data"}};
 beforeEach(()=>{fs.mkdirSync(path.join(root,"vault"),{recursive:true});fs.writeFileSync(path.join(root,"vault","Synthetic.md"),"# Synthetic\nOld data\n");});
 afterAll(async()=>{(await import("../db")).db().close();fs.rmSync(root,{recursive:true,force:true});for(const k of ["DATA_DIR","BASE_URL","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];});
@@ -20,15 +20,15 @@ async function connected(a:McpAccess) {
  const {createSafeEditMcpServer}=await import("./safe-edit-server");const server=createSafeEditMcpServer(a),client=new Client({name:"test",version:"1"});const [l,r]=InMemoryTransport.createLinkedPair();await server.connect(r);await client.connect(l);return {client,close:async()=>{await client.close();await server.close();}};
 }
 function unpack(result:any){const b=JSON.parse(result.content[0].text);return JSON.parse(b.result.split("\n").slice(1,-1).join("\n"));}
-it("discovers exactly twelve scoped tools with accurate write annotations",async()=>{
+it("discovers exactly thirteen scoped tools with accurate write annotations",async()=>{
  const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="write_investment_graph_bundle"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment");}}finally{await c.close();}
 });
 it.each([
  {...access,scopes:["vault:read"]},{...access,scopes:["vault:read","inbox:submit"]},
  {...access,scopes:["vault:write"]},{...access,label:"api-key:general"},{...access,scopes:undefined},
 ])("enforces OAuth scopes again inside handlers: %j",async a=>{
- const c=await connected(a);try{for(const name of ["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","verify_investment_graph_writeback","write_investment_graph_bundle","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment"]){
- const params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="get_edit_status"?{operationId:args.operationId}:name==="write_investment_graph_bundle"?{operationRoot:"ios-bundle-test-guard",issuer:"SYNTH",eventKey:"SYNTH-Q3-2026",period:"FY26Q3",timelineDate:"2026-10-21",timelineHeading:"Evolution",analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - SYNTH - SYNTH-Q3-2026.md",timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",sourcePath:"07_Sources/ChatGPT/SYNTH Primary Event.md",analysisMarkdown:"synthetic sample".repeat(20)}:name==="verify_investment_graph_writeback"?{analysisOperationId:"ios-test-fy26-analysis",timelineOperationId:"ios-test-fy26-timeline",analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - SYNTH.md",timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",sourcePath:"07_Sources/ChatGPT/SYNTH.md"}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
+ const c=await connected(a);try{for(const name of ["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","verify_investment_graph_writeback","prepare_investment_graph_review","write_investment_graph_bundle","rollback_edit","archive_original_source","store_user_attachment","inspect_user_attachment"]){
+ const params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="get_edit_status"?{operationId:args.operationId}:name==="prepare_investment_graph_review"?{issuer:"SYNTH",eventKey:"SYNTH-Q3-2026",period:"FY26Q3",sourcePath:"07_Sources/ChatGPT/SYNTH Primary Event.md",question:"Review SYNTH historical evidence"}:name==="write_investment_graph_bundle"?{operationRoot:"ios-bundle-test-guard",issuer:"SYNTH",eventKey:"SYNTH-Q3-2026",period:"FY26Q3",timelineDate:"2026-10-21",timelineHeading:"Evolution",analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - SYNTH - SYNTH-Q3-2026.md",timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",sourcePath:"07_Sources/ChatGPT/SYNTH Primary Event.md",analysisMarkdown:"synthetic sample".repeat(20)}:name==="verify_investment_graph_writeback"?{analysisOperationId:"ios-test-fy26-analysis",timelineOperationId:"ios-test-fy26-timeline",analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - SYNTH.md",timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",sourcePath:"07_Sources/ChatGPT/SYNTH.md"}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
  if(name==="preview_edit")params.change=args.change;
  const result=await c.client.callTool({name,arguments:params});expect(result.isError,name).toBe(true);expect(JSON.stringify(result._meta),name).toContain("insufficient_scope");
  }expect(fs.readFileSync(path.join(root,"vault","Synthetic.md"),"utf8")).toContain("Old data");}finally{await c.close();}
@@ -231,14 +231,40 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
    timelinePath:timeline,sourcePath:source,analysisMarkdown:markdown};
  const c=await connected(access);
  try{
+  // Real-Vault indexed source/context preparation runs with WRITE gate disabled.
+  const prepared=await c.client.callTool({
+   name:"prepare_investment_graph_review",arguments:{
+    issuer:"SYNTH",eventKey:event,period:"FY26Q4",sourcePath:source,
+    question:"Review synthetic demand conversion, counter-evidence and historical Thesis",focus:"earnings",
+   },
+  });
+  expect(prepared.isError,JSON.stringify(prepared)).not.toBe(true);
+  const handoff=unpack(prepared);
+  expect(handoff.status).toBe("real_vault_review_context_prepared_no_write");
+  expect(handoff.writeAllowedByPreparation).toBe(false);
+  expect(handoff.modelAnalysisPerformedByThisTool).toBe(false);
+  expect(handoff.vaultModified).toBe(false);
+  expect(handoff.canonical.analysisPath).toBe(analysis);
+  expect(handoff.canonical.timelinePath).toBe(timeline);
+  expect(handoff.canonical.existingTimelineHeadings).toContainEqual({text:"Evolution",level:1});
+  expect(handoff.originalSource.declaredSourceType).toBe("user_supplied");
+  expect(handoff.originalSource.independentlyAuthenticated).toBe(false);
+  expect(handoff.originalSource.sha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(handoff.historicalContext.status).toBe("retrieval_only_not_verified");
+  expect(handoff.historicalContext.items.some((x:any)=>x.path===company)).toBe(true);
+  const boundPayload={...payload,expectedSourceSha256:handoff.originalSource.sha256};
+  const stale=await c.client.callTool({name:"write_investment_graph_bundle",
+   arguments:{...boundPayload,expectedSourceSha256:"0".repeat(64)}});
+  expect(stale.isError).toBe(true);
+  expect(fs.existsSync(path.join(vaultRoot,analysis))).toBe(false);
   const disabled=await c.client.callTool({
-   name:"write_investment_graph_bundle",arguments:payload});
+   name:"write_investment_graph_bundle",arguments:boundPayload});
   expect(disabled.isError).toBe(true);
   expect(JSON.stringify(disabled)).toContain("admin_explicit_opt_in_required");
   expect(fs.existsSync(path.join(vaultRoot,analysis))).toBe(false);
   process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED="1";
   const wrote=await c.client.callTool({
-   name:"write_investment_graph_bundle",arguments:payload});
+   name:"write_investment_graph_bundle",arguments:boundPayload});
   expect(wrote.isError,JSON.stringify(wrote)).not.toBe(true);
   const v=unpack(wrote);
   expect(v.status).toBe(
@@ -251,12 +277,40 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   expect(oldTimeline).toContain("Preexisting historical context retained.");
   expect(oldTimeline.split(marker)).toHaveLength(2);
   const repeat=await c.client.callTool({
-   name:"write_investment_graph_bundle",arguments:payload});
+   name:"write_investment_graph_bundle",arguments:boundPayload});
   expect(repeat.isError,JSON.stringify(repeat)).not.toBe(true);
   expect(unpack(repeat).status).toBe(
    "previously_written_both_receipts_graph_reverified");
   expect(fs.readFileSync(path.join(vaultRoot,timeline),"utf8"))
    .toBe(oldTimeline);
+  // New event, NO lexical overlap with the prior causal draft: previously
+  // saved AI analysis must be retrieved, never promoted to primary evidence.
+  const nextEvent="SYNTH-BUNDLE-FY26Q5";
+  const nextSource="07_Sources/ChatGPT/SYNTH Next Event.md";
+  fs.writeFileSync(path.join(vaultRoot,nextSource),[
+    "---","entity: SYNTH","event_key: "+nextEvent,"period: FY26Q5",
+    "type: research_note","source_type: user_supplied",
+    "verification: unverified","---",
+    "# Independent user submission (NOT a verified issuer release)",
+    "New unrelated question about warranty provisions.","",
+  ].join("\n"));
+  reindexPath(nextSource);
+  const next=await c.client.callTool({name:"prepare_investment_graph_review",
+   arguments:{issuer:"SYNTH",eventKey:nextEvent,period:"FY26Q5",
+    sourcePath:nextSource,question:"Warranty replacement provisions for new contracts",
+    focus:"general"}});
+  expect(next.isError,JSON.stringify(next)).not.toBe(true);
+  const nextPack=unpack(next);
+  expect(nextPack.status).toBe("real_vault_review_context_prepared_no_write");
+  const historical=nextPack.historicalContext.items.find(
+   (x:any)=>x.path===analysis);
+  expect(historical?.role).toBe("analysis");
+  expect(historical?.declaredSourceType).toBe("archived_ai");
+  expect(historical?.declaredIndependentEvidence).toBe(false);
+  const same=await c.client.callTool({name:"prepare_investment_graph_review",
+   arguments:{issuer:"SYNTH",eventKey:event,period:"FY26Q4",
+    sourcePath:source,question:"Review existing event history"}});
+  expect(unpack(same).status).toBe("existing_event_or_analysis_requires_duplicate_review_no_write");
  }finally{
   delete process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED;
   await c.close();
