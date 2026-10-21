@@ -11,7 +11,9 @@ The new **read-only, OAuth-scoped** `prepare_investment_graph_review` tool direc
 - **Exact canonical existing Company, living Timeline and Source paths**, proposed new Analysis destination, available Timeline headings and safe-write input fields for the existing mutating tool. Industry/Thesis are candidates only; AI decides their investment relevance and must cite only relevant, existing Wikilinks.
 - Explicit status when the same event marker or Analysis filename already exists. That status is a **hold for duplicate/correction review**, not permission to overwrite or silently create a parallel timeline.
 
-After the **AI** has performed source-grounded reasoning (Demand → Conversion → Margins → Earnings → FCF → ROIC → Thesis, with counter-evidence and unknowns), the model can supply its unverified draft to `write_investment_graph_bundle`. The writer now optionally accepts `expectedSourceSha256`: if the real source bytes have changed since preparation, it fails **before** creating a note.
+After the **AI** has performed source-grounded reasoning (Demand → Conversion → Margins → Earnings → FCF → ROIC → Thesis, with counter-evidence and unknowns), the model can supply its unverified draft to `write_investment_graph_bundle`. The writer requires `expectedSourceSha256`: if the real source bytes have changed since preparation, it fails **before** creating a note. Copy `canonical.requiredAnalysisSourceMetadata` into the Analysis frontmatter as `source_path` and `source_sha256`. These must match the prepared path and digest; the server does not silently add them to an unbound draft.
+
+The existing Safe Edit receipt's Analysis `afterHash` binds that source metadata to the persisted draft. Independent graph verification reopens the same source path, compares its current SHA with the stored reviewed version, and compares Source Markdown body/frontmatter/size with SQLite/FTS. A changed source or stale Source index holds verification and replay. A caller cannot supply a new expected hash to rebind an old receipt. Timeline-only recovery checks the same stored binding. Legacy Analysis receipts without it require explicit reconciliation; no backfill, retry, or Vault migration is performed automatically. A matching hash proves version identity, never publisher authenticity.
 
 This preserves clear responsibilities:
 - **AI:** semantic relevance, cited factual attribution, hypothesis versus evidence, counter-evidence, Thesis implication and selective link decisions.
@@ -25,6 +27,7 @@ The existing authenticated in-memory MCP test exercises a **single, actual index
 2. Confirm the source is declared user-supplied/unverified, the tool does not write, and ready-to-author exact paths/headings are real.
 3. Once the synthetic test explicitly enables the admin flag, reject a mismatched SHA-256 before saving.
 4. Supply an externally authored unverified Analysis Markdown to the existing host-authorized single two-note bundle. Verify physical write/readback, FTS and exact reciprocal Wikilinks.
+   Missing source bindings fail before writing; changed Source bytes, stale Source FTS and attempts to replace the reviewed hash fail independent verification/replay/recovery without mutating the Analysis or Timeline.
 5. Submit a DIFFERENT subsequent event with a question sharing no causal keywords; the same preparation interface must retrieve the previous Review with role `analysis`, `source_type=archived_ai`, `independent_evidence=false`. The previous event is held as existing/duplicate on preparation.
 6. CI must pass Lint, Typecheck, Build, Unit/MCP Integration, Playwright E2E, Docker and Security Audit.
 

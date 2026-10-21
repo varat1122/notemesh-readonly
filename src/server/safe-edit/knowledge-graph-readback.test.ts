@@ -23,13 +23,21 @@ const input=()=>({
 const mark="<!-- investment-os-operation:"+ROOT+" -->";
 const event="<!-- investment-os-event:"+EVENT+" -->";
 function fixture(){
+  const sourceRaw=[
+    "---","entity: SYNTH","type: research_note",
+    "source_type: user_supplied","verification: unverified",
+    "event_key: "+EVENT,"---",
+    "# Original Event",
+    "User-supplied source capture, not publisher authenticated.","",
+  ].join("\n");
   const notes=new Map<string,string>([
     [ANALYSIS,[
       "---","type: investment_review","entity: SYNTH",
       "event_key: "+EVENT,
       "verification: not_reverified","source_type: archived_ai",
       "analysis_origin: synthetic_ai_draft",
-      "independent_evidence: false","status: draft","---",
+      "independent_evidence: false","status: draft",
+      "source_path: "+SOURCE,"source_sha256: "+sha(sourceRaw),"---",
       "# SYNTH Review",mark,event,
       "AI working capital hypothesis, not an issuer verified fact.",
       ...[SOURCE,TIMELINE,HUB,INDUSTRY,THESIS].map(ref),"",
@@ -39,13 +47,7 @@ function fixture(){
       "# Evolution","Prior events preserved.",mark,event,
       "- "+ref(ANALYSIS)+" — unverified AI research index.","",
     ].join("\n")],
-    [SOURCE,[
-      "---","entity: SYNTH","type: research_note",
-      "source_type: user_supplied","verification: unverified",
-      "event_key: "+EVENT,"---",
-      "# Original Event",
-      "User-supplied source capture, not publisher authenticated.","",
-    ].join("\n")],
+    [SOURCE,sourceRaw],
     [HUB,"---\nentity: SYNTH\n---\n# Company\n"],
     [INDUSTRY,"---\ntype: industry\n---\n# Networking\n"],
     [THESIS,"---\nentity: SYNTH\nverification: not_reverified\n---\n# Draft Thesis\n"],
@@ -106,6 +108,7 @@ describe("PR #103 actual Safe Edit receipt and Knowledge Graph readback contract
     expect(r.fullPathOutgoingWikilinksResolved).toBe(5);
     expect(r.livingTimelineBacklinkVerified).toBe(true);
     expect(r.physicalMarkdownAndFTSAgree).toBe(true);
+    expect(r.reviewedSourceVersionVerified).toBe(true);
     expect(r.archivedAIIsIndependentEvidence).toBe(false);
     expect(r.originalSourceIndependentlyAuthenticated).toBe(false);
     expect(r.vaultWrittenByVerifier).toBe(false);
@@ -184,5 +187,38 @@ describe("PR #103 actual Safe Edit receipt and Knowledge Graph readback contract
     };
     expect(()=>checkInvestmentGraphAgainstReadbackPort(input(),f.port))
       .toThrow("graph_readback_physical_markdown_fts_mismatch_hold");
+  });
+  it("rejects changed Source bytes even when its index has caught up",()=>{
+    const f=fixture();
+    f.notes.set(SOURCE,f.notes.get(SOURCE)!+"\nChanged original claim.\n");
+    expect(()=>checkInvestmentGraphAgainstReadbackPort(input(),f.port))
+      .toThrow("graph_readback_source_changed_since_review_hold");
+  });
+  it("rejects stale Source FTS even when the reviewed bytes are unchanged",()=>{
+    const f=fixture(),getIndexed=f.port.getIndexed;
+    f.port.getIndexed=p=>{
+      const row=getIndexed(p);
+      return p===SOURCE&&row?{...row,body:"stale original source index"}:row;
+    };
+    expect(()=>checkInvestmentGraphAgainstReadbackPort(input(),f.port))
+      .toThrow("graph_readback_physical_markdown_fts_mismatch_hold");
+  });
+  it.each(["source_path","source_sha256"])("holds legacy receipts missing %s rather than inventing a binding",field=>{
+    const f=fixture();
+    const old=f.notes.get(ANALYSIS)!;
+    const unbound=old.split("\n").filter(line=>!line.startsWith(field+":")).join("\n");
+    f.notes.set(ANALYSIS,unbound);
+    // This models a genuinely persisted legacy Analysis, not a hash-tampered note.
+    const receipt=f.receipts.get(ROOT+"-analysis") as
+      {afterHash:string;receipt:{afterHash:string}};
+    receipt.afterHash=receipt.receipt.afterHash=sha(unbound);
+    expect(()=>checkInvestmentGraphAgainstReadbackPort(input(),f.port))
+      .toThrow("graph_readback_reviewed_source_binding_missing_or_mismatched_hold");
+  });
+  it("rejects substitution of a same-event Source at a different indexed path",()=>{
+    const f=fixture(),other="10_Knowledge/Company Research/Same Event.md";
+    f.notes.set(other,f.notes.get(SOURCE)!);
+    expect(()=>checkInvestmentGraphAgainstReadbackPort({...input(),sourcePath:other},f.port))
+      .toThrow("graph_readback_reviewed_source_binding_missing_or_mismatched_hold");
   });
 });

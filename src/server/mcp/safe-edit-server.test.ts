@@ -2,6 +2,7 @@ import { afterAll, beforeEach, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpAccess } from "./server";
@@ -12,6 +13,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),"safe-edit-mcp-"));
 process.env.DATA_DIR=root;process.env.BASE_URL="https://safe-fixture.test";
 process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
 const access:McpAccess={read:true,write:false,label:"oauth:edit-fixture",scopes:["vault:read","vault:edit"]};
+const digest=(raw:string)=>createHash("sha256").update(raw).digest("hex");
 const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","verify_investment_graph_writeback","prepare_investment_graph_review","write_investment_graph_bundle","rollback_edit","archive_original_source","inspect_original_source_archive","get_sync_delivery_evidence","store_user_attachment","inspect_user_attachment"];
 const args={operationId:"mcp-synthetic-01",path:"Synthetic.md",reason:"Synthetic MCP test",change:{kind:"replace",oldText:"Old data",newText:"New data"}};
 beforeEach(()=>{fs.mkdirSync(path.join(root,"vault"),{recursive:true});fs.writeFileSync(path.join(root,"vault","Synthetic.md"),"# Synthetic\nOld data\n");});
@@ -28,7 +30,7 @@ it.each([
  {...access,scopes:["vault:write"]},{...access,label:"api-key:general"},{...access,scopes:undefined},
 ])("enforces OAuth scopes again inside handlers: %j",async a=>{
  const c=await connected(a);try{for(const name of ["preview_edit","apply_edit","append_section","update_frontmatter","create_note","get_edit_status","verify_investment_graph_writeback","prepare_investment_graph_review","write_investment_graph_bundle","rollback_edit","archive_original_source","inspect_original_source_archive","get_sync_delivery_evidence","store_user_attachment","inspect_user_attachment"]){
- const params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="get_edit_status"?{operationId:args.operationId}:name==="prepare_investment_graph_review"?{issuer:"SYNTH",eventKey:"SYNTH-Q3-2026",period:"FY26Q3",sourcePath:"07_Sources/ChatGPT/SYNTH Primary Event.md",question:"Review SYNTH historical evidence"}:name==="write_investment_graph_bundle"?{operationRoot:"ios-bundle-test-guard",issuer:"SYNTH",eventKey:"SYNTH-Q3-2026",period:"FY26Q3",timelineDate:"2026-10-21",timelineHeading:"Evolution",analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - SYNTH - SYNTH-Q3-2026.md",timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",sourcePath:"07_Sources/ChatGPT/SYNTH Primary Event.md",analysisMarkdown:"synthetic sample".repeat(20)}:name==="verify_investment_graph_writeback"?{analysisOperationId:"ios-test-fy26-analysis",timelineOperationId:"ios-test-fy26-timeline",analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - SYNTH.md",timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",sourcePath:"07_Sources/ChatGPT/SYNTH.md"}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="inspect_original_source_archive"?{url:"https://www.sec.gov/Archives/sample"}:name==="get_sync_delivery_evidence"?{}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
+ const params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="get_edit_status"?{operationId:args.operationId}:name==="prepare_investment_graph_review"?{issuer:"SYNTH",eventKey:"SYNTH-Q3-2026",period:"FY26Q3",sourcePath:"07_Sources/ChatGPT/SYNTH Primary Event.md",question:"Review SYNTH historical evidence"}:name==="write_investment_graph_bundle"?{operationRoot:"ios-bundle-test-guard",issuer:"SYNTH",eventKey:"SYNTH-Q3-2026",period:"FY26Q3",timelineDate:"2026-10-21",timelineHeading:"Evolution",analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - SYNTH - SYNTH-Q3-2026.md",timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",sourcePath:"07_Sources/ChatGPT/SYNTH Primary Event.md",analysisMarkdown:"synthetic sample".repeat(20),expectedSourceSha256:"a".repeat(64)}:name==="verify_investment_graph_writeback"?{analysisOperationId:"ios-test-fy26-analysis",timelineOperationId:"ios-test-fy26-timeline",analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - SYNTH.md",timelinePath:"08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",sourcePath:"07_Sources/ChatGPT/SYNTH.md"}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="inspect_original_source_archive"?{url:"https://www.sec.gov/Archives/sample"}:name==="get_sync_delivery_evidence"?{}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
  if(name==="preview_edit")params.change=args.change;
  const result=await c.client.callTool({name,arguments:params});expect(result.isError,name).toBe(true);expect(JSON.stringify(result._meta),name).toContain("insufficient_scope");
  }expect(fs.readFileSync(path.join(root,"vault","Synthetic.md"),"utf8")).toContain("Old data");}finally{await c.close();}
@@ -121,7 +123,9 @@ it("real OAuth Safe Edit two-note apply then independent Obsidian graph readback
    "---","type: investment_review","entity: SYNTH",
    "event_key: "+e,"verification: not_reverified",
    "source_type: archived_ai","analysis_origin: synthetic_ai_draft",
-   "independent_evidence: false","status: draft","---",
+   "independent_evidence: false","status: draft",
+   "source_path: "+source,
+   "source_sha256: "+digest(fs.readFileSync(path.join(vaultRoot,source),"utf8")),"---",
    "# Review",mk,evt,
    "AI proposal only, not independently verified.",
    "[["+source.slice(0,-3)+"]]",
@@ -289,13 +293,27 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   expect(handoff.originalSource.sha256).toMatch(/^[a-f0-9]{64}$/);
   expect(handoff.historicalContext.status).toBe("retrieval_only_not_verified");
   expect(handoff.historicalContext.items.some((x:any)=>x.path===company)).toBe(true);
-  const boundPayload={...payload,expectedSourceSha256:handoff.originalSource.sha256};
+  expect(handoff.canonical.requiredAnalysisSourceMetadata).toEqual({
+    source_path:source,source_sha256:handoff.originalSource.sha256,
+  });
+  const boundPayload={...payload,expectedSourceSha256:handoff.originalSource.sha256,
+    analysisMarkdown:markdown.replace("status: draft\n",
+      "status: draft\nsource_path: "+source+"\nsource_sha256: "+handoff.originalSource.sha256+"\n"),
+  };
   const disabled=await c.client.callTool({
    name:"write_investment_graph_bundle",arguments:boundPayload});
   expect(disabled.isError).toBe(true);
   expect(JSON.stringify(disabled)).toContain("admin_explicit_opt_in_required");
   expect(fs.existsSync(path.join(vaultRoot,analysis))).toBe(false);
   process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED="1";
+  const missingHash=await c.client.callTool({name:"write_investment_graph_bundle",
+    arguments:{...boundPayload,expectedSourceSha256:undefined}});
+  expect(missingHash.isError).toBe(true);
+  const unbound=await c.client.callTool({name:"write_investment_graph_bundle",
+    arguments:{...boundPayload,analysisMarkdown:markdown}});
+  expect(unbound.isError).toBe(true);
+  expect(JSON.stringify(unbound)).toContain("reviewed_source_binding_missing_or_mismatched_hold");
+  expect(fs.existsSync(path.join(vaultRoot,analysis))).toBe(false);
   // Simulate a device/source edit AFTER the model received the source hash.
   // Never allow writing its old analysis based on changed underlying bytes.
   fs.appendFileSync(path.join(vaultRoot,source),"\nUpdated out-of-band source content.\n");
@@ -327,6 +345,36 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
    "previously_written_both_receipts_graph_reverified");
   expect(fs.readFileSync(path.join(vaultRoot,timeline),"utf8"))
    .toBe(oldTimeline);
+  const savedAnalysis=fs.readFileSync(path.join(vaultRoot,analysis),"utf8");
+  const verifyArgs={analysisOperationId:v.analysisOperationId,
+    timelineOperationId:v.timelineOperationId,analysisPath:analysis,
+    timelinePath:timeline,sourcePath:source};
+  // A replay must not replace the reviewed version with the new Source hash.
+  const revisedSource=originalSource.replace("Original user statement","Modified user statement");
+  fs.writeFileSync(path.join(vaultRoot,source),revisedSource);
+  const changedSource=await c.client.callTool({name:"verify_investment_graph_writeback",
+    arguments:verifyArgs});
+  expect(changedSource.isError).toBe(true);
+  expect(JSON.stringify(changedSource)).toContain("source_changed_since_review_hold");
+  reindexPath(source);
+  for(const expectedSourceSha256 of [boundPayload.expectedSourceSha256,digest(revisedSource)]){
+    const replay=await c.client.callTool({name:"write_investment_graph_bundle",
+      arguments:{...boundPayload,expectedSourceSha256}});
+    expect(replay.isError).toBe(true);
+  }
+  // Restoring bytes alone leaves the changed FTS behind; verification must hold.
+  fs.writeFileSync(path.join(vaultRoot,source),originalSource);
+  const staleIndex=await c.client.callTool({name:"verify_investment_graph_writeback",
+    arguments:verifyArgs});
+  expect(staleIndex.isError).toBe(true);
+  expect(JSON.stringify(staleIndex)).toContain("physical_markdown_fts_mismatch_hold");
+  expect(fs.readFileSync(path.join(vaultRoot,analysis),"utf8")).toBe(savedAnalysis);
+  expect(fs.readFileSync(path.join(vaultRoot,timeline),"utf8")).toBe(oldTimeline);
+  reindexPath(source);
+  const verifiedAgain=await c.client.callTool({name:"verify_investment_graph_writeback",
+    arguments:verifyArgs});
+  expect(verifiedAgain.isError,JSON.stringify(verifiedAgain)).not.toBe(true);
+  expect(unpack(verifiedAgain).reviewedSourceVersionVerified).toBe(true);
   // New event, NO lexical overlap with the prior causal draft: previously
   // saved AI analysis must be retrieved, never promoted to primary evidence.
   const nextEvent="SYNTH-BUNDLE-FY26Q5";
@@ -402,7 +450,9 @@ it("explicitly authorized partial-graph recovery repairs only an unstarted Timel
   "---","type: investment_review","entity: SYNTH","event_key: "+event,
   "verification: not_reverified","source_type: archived_ai",
   "analysis_origin: synthetic_ai_draft","independent_evidence: false",
-  "status: draft","operation_id: "+op,"---",
+  "status: draft","operation_id: "+op,
+  "source_path: "+source,
+  "source_sha256: "+digest(fs.readFileSync(path.join(vaultRoot,source),"utf8")),"---",
   "# Unverified review",marker,eventMarker,
   "## Causal chain","Demand conversion and revenue remain hypotheses.",
   "## Counter-evidence","Alternative: delivery timing, not demand.",
@@ -416,6 +466,7 @@ it("explicitly authorized partial-graph recovery repairs only an unstarted Timel
   timelineDate:"2026-10-21",timelineHeading:"Evolution",
   analysisPath:analysis,timelinePath:timeline,sourcePath:source,
   analysisMarkdown:markdown,
+  expectedSourceSha256:digest(fs.readFileSync(path.join(vaultRoot,source),"utf8")),
  };
  const c=await connected(access);
  process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED="1";
@@ -440,6 +491,22 @@ it("explicitly authorized partial-graph recovery repairs only an unstarted Timel
   expect(unpack(applied).receipt.reindex).toBe("verified");
   const beforeRepair=fs.readFileSync(path.join(vaultRoot,timeline),"utf8");
   const beforeAnalysis=fs.readFileSync(path.join(vaultRoot,analysis),"utf8");
+  const beforeSource=fs.readFileSync(path.join(vaultRoot,source),"utf8");
+  fs.appendFileSync(path.join(vaultRoot,source),"\nSource changed before recovery.\n");
+  reindexPath(source);
+  const staleRecovery=await c.client.callTool({name:"write_investment_graph_bundle",
+    arguments:{...payload,recoverTimelineOnly:true}});
+  expect(staleRecovery.isError).toBe(true);
+  expect(JSON.stringify(staleRecovery)).toContain("source_changed_since_context_review_hold");
+  const reboundRecovery=await c.client.callTool({name:"write_investment_graph_bundle",
+    arguments:{...payload,recoverTimelineOnly:true,
+      expectedSourceSha256:digest(fs.readFileSync(path.join(vaultRoot,source),"utf8"))}});
+  expect(reboundRecovery.isError).toBe(true);
+  expect(JSON.stringify(reboundRecovery)).toContain("reviewed_source_binding_missing_or_mismatched_hold");
+  expect(fs.readFileSync(path.join(vaultRoot,timeline),"utf8")).toBe(beforeRepair);
+  expect(fs.readFileSync(path.join(vaultRoot,analysis),"utf8")).toBe(beforeAnalysis);
+  fs.writeFileSync(path.join(vaultRoot,source),beforeSource);
+  reindexPath(source);
   const unapproved=await c.client.callTool({name:"write_investment_graph_bundle",
    arguments:payload});
   expect(unapproved.isError).not.toBe(true);

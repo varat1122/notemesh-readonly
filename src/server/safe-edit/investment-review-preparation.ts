@@ -116,6 +116,7 @@ export function prepareRealInvestmentReviewHandoff(input:PrepareReviewInput){
         sourcePath,analysisPath,timelinePath,
         expectedSourceSha256:sourceVersion,
       }:null,
+      requiredAnalysisSourceMetadata:{source_path:sourcePath,source_sha256:sourceVersion},
     },
     existingAnalysisAtProposedPath:!!existingAnalysis,
     timelineEventMarkerAlreadyPresent:knownMarker,

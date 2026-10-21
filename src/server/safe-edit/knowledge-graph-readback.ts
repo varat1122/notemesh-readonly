@@ -124,6 +124,15 @@ export function checkInvestmentGraphAgainstReadbackPort(
     (word(s.entity)&&s.entity!==issuer)||
     (word(s.event_key)&&s.event_key!==m.event_key))
     throw Error("graph_readback_source_analysis_provenance_not_separated_hold");
+  // The Analysis afterHash above binds these fields to the original write.
+  // Legacy unbound reviews must be reconciled explicitly, not rebound to the
+  // current source by a caller or replay. A digest proves version, not truth.
+  if(m.source_path!==input.sourcePath||typeof m.source_sha256!=="string"||
+    !/^[a-f0-9]{64}$/.test(m.source_sha256))
+    throw Error("graph_readback_reviewed_source_binding_missing_or_mismatched_hold");
+  if(sha(original)!==m.source_sha256)
+    throw Error("graph_readback_source_changed_since_review_hold");
+  assertIndexed(port,input.sourcePath,original);
   // Catch duplicate-operation and duplicate-event replays on living timeline.
   const opRoot=input.analysisOperationId.slice(0,-9);
   const opMarker="<!-- investment-os-operation:"+opRoot+" -->";
@@ -171,6 +180,7 @@ export function checkInvestmentGraphAgainstReadbackPort(
     livingTimelineBacklinkVerified:true as const,
     physicalMarkdownAndFTSAgree:true as const,
     exactOperationAfterHashesVerified:true as const,
+    reviewedSourceVersionVerified:true as const,
     userOrOwnerAuthorizationDerivedFromInput:false as const,
     protectedCurrentThesisModifiedByVerifier:false as const,
     vaultWrittenByVerifier:false as const,

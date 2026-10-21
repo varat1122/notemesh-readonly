@@ -102,7 +102,7 @@ export function createSafeEditMcpServer(access:McpAccess) {
     annotations:{readOnlyHint:true,openWorldHint:false},...meta,
   },async input=>invoke(()=>prepareRealInvestmentReviewHandoff(input)));
   server.registerTool("write_investment_graph_bundle",{
-    description:"WRITE: Host/user must explicitly authorize this scoped investment graph action. Prefer prepare_investment_graph_review before reasoning; pass its expectedSourceSha256 so a changed original Source fails closed.  Initial call writes one Historical AI Draft Analysis and one Company Evolution backlink. If Analysis was durably saved but the Timeline write never started, a SEPARATE host-authorized invocation with recoverTimelineOnly=true can complete ONLY the missing backlink after receipt, physical hash, provenance, canonical path and duplicate checks. Interrupted Timeline operations always require manual review. Protected Thesis/Portfolio never change; admin feature flag disabled by default. Not standing auto-save or device Sync.",
+    description:"WRITE: Host/user must explicitly authorize this scoped investment graph action. Use prepare_investment_graph_review before reasoning; expectedSourceSha256 and matching Analysis frontmatter source_path/source_sha256 are required. Independent verification and replay check the receipt-bound Source version and Source FTS.  Initial call writes one Historical AI Draft Analysis and one Company Evolution backlink. If Analysis was durably saved but the Timeline write never started, a SEPARATE host-authorized invocation with recoverTimelineOnly=true can complete ONLY the missing backlink after receipt, physical hash, provenance, canonical path and duplicate checks. Interrupted Timeline operations always require manual review. Protected Thesis/Portfolio never change; admin feature flag disabled by default. Not standing auto-save or device Sync.",
     inputSchema:{
       operationRoot:z.string().regex(/^[a-z][a-z0-9-]{8,60}$/),
       issuer:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._ -]{0,49}$/),
@@ -115,7 +115,7 @@ export function createSafeEditMcpServer(access:McpAccess) {
       sourcePath:z.string().min(1).max(350),
       analysisMarkdown:z.string().min(150).max(90000),
       recoverTimelineOnly:z.boolean().optional().describe("Explicit newly authorized Timeline-only recovery after verified Analysis receipt; never an automatic retry"),
-      expectedSourceSha256:z.string().regex(/^[a-f0-9]{64}$/).optional().describe("Bind the draft to the exact source bytes returned by prepare_investment_graph_review; refuse stale source"),
+      expectedSourceSha256:z.string().regex(/^[a-f0-9]{64}$/).describe("Required reviewed Source SHA from prepare_investment_graph_review. Analysis frontmatter must contain matching source_path and source_sha256; writes, recovery and readback refuse changed or unbound sources"),
     },annotations:{
       readOnlyHint:false,destructiveHint:true,idempotentHint:true,
       openWorldHint:false,
