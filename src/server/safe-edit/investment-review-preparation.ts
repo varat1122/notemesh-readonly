@@ -68,7 +68,12 @@ export function prepareRealInvestmentReviewHandoff(input:PrepareReviewInput){
     throw Error("review_handoff_noncanonical_analysis_destination_hold");
   const timelineRaw=indexed(timelinePath);
   const evolution=meta(timelineRaw);
-  if(evolution.entity!==issuer)
+  // Living Company Evolution was historically indexed with "company: TICKER".
+  // Preserve canonical identity checks without rewriting protected history.
+  // If both fields are declared they MUST agree; a conflicting alias holds.
+  if((evolution.entity!==undefined&&evolution.entity!==issuer)||
+    (evolution.company!==undefined&&evolution.company!==issuer)||
+    (evolution.entity!==issuer&&evolution.company!==issuer))
     throw Error("review_handoff_living_timeline_wrong_issuer_hold");
   indexed(companyPath);
   const sourceVersion=sha(sourceRaw);
