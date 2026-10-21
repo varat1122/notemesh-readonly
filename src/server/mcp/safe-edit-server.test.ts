@@ -280,11 +280,17 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   expect(JSON.stringify(disabled)).toContain("admin_explicit_opt_in_required");
   expect(fs.existsSync(path.join(vaultRoot,analysis))).toBe(false);
   process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED="1";
+  // Simulate a device/source edit AFTER the model received the source hash.
+  // Never allow writing its old analysis based on changed underlying bytes.
+  fs.appendFileSync(path.join(vaultRoot,source),"\nUpdated out-of-band source content.\n");
+  reindexPath(source);
   const stale=await c.client.callTool({name:"write_investment_graph_bundle",
-   arguments:{...boundPayload,expectedSourceSha256:"0".repeat(64)}});
+   arguments:boundPayload});
   expect(stale.isError,JSON.stringify(stale)).toBe(true);
   expect(JSON.stringify(stale)).toContain("source_changed_since_context_review_hold");
   expect(fs.existsSync(path.join(vaultRoot,analysis))).toBe(false);
+  fs.writeFileSync(path.join(vaultRoot,source),originalSource);
+  reindexPath(source);
   const wrote=await c.client.callTool({
    name:"write_investment_graph_bundle",arguments:boundPayload});
   expect(wrote.isError,JSON.stringify(wrote)).not.toBe(true);
