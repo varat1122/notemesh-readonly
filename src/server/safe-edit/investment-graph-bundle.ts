@@ -125,7 +125,9 @@ function validatePreflight(i:InvestmentGraphBundleInput,existingAnalysis=false){
   const m=analysis.data,s=src.data,t=evolution.data;
   if(s.entity!==i.issuer||s.event_key!==i.eventKey||
     !["primary","attributed","user_supplied"].includes(String(s.source_type))||
-    t.entity!==i.issuer||
+    (t.entity!==undefined&&t.entity!==i.issuer)||
+    (t.company!==undefined&&t.company!==i.issuer)||
+    (t.entity!==i.issuer&&t.company!==i.issuer)||
     m.type!=="investment_review"||m.entity!==i.issuer||
     m.event_key!==i.eventKey||
     m.operation_id!==i.operationRoot||
