@@ -133,3 +133,175 @@ describe("multilingual read-only writeback router",()=>{
   expect(p.routes.find(x=>x.kind==="industry_context_candidate")).toBeDefined();
  });
 });
+
+describe("new intake reconciles legacy company navigation before proposing Vault writes", () => {
+ it("links to the retained historical issuer index and never implies absent history", async () => {
+  await add("10_Knowledge/Indexes/Company - MDB.md",
+   "# Legacy MDB history\\n\\nArchived notes in older Company Index; not independently verified.");
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route(base);
+  expect(p.status).toBe("read_only_plan_not_written");
+  expect(p.historical.paths).toContain("10_Knowledge/Indexes/Company - MDB.md");
+  expect(p.historical.missing.some(x=>x.includes("No legacy Company Index found for MDB"))).toBe(false);
+  expect(p.historical.missing).not.toContain("08_Daily_Weekly/Research Indexes/Company - MDB.md");
+  expect(p.gates.canAutoWrite).toBe(false);
+  expect(p.gates.canAutoUpdateThesis).toBe(false);
+ });
+});
+
+
+describe("P0 new-intake reconciliation against archived company events", () => {
+ it("flags possible same-event CRWD CLEAR archive before proposing a distinct research review", async () => {
+  const event="10_Knowledge/Company Research/2026-08-31 - CrowdStrike × CLEAR - Stock160726-190.md";
+  await add(event,[
+    "---","company: [CRWD]","verification: not_reverified","source_type: chatgpt_history","---",
+    "# CrowdStrike × CLEAR identity verification",
+    "CRWD historical user-shared CLEAR enterprise identity collaboration."
+  ].join("\n"));
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const plan=route({
+    domain:"company",entities:["CRWD"],
+    topic:"CrowdStrike CLEAR identity verification partnership",
+    inputFormat:"text",sourceKind:"archived_chat",
+    extractedText:"CrowdStrike $CRWD CLEAR partnership biometric identity verification: this is a historical user-shared account, not newly issuer-verified evidence."
+  });
+  expect(plan.historical.paths).toContain(event);
+  expect(plan.historicalEventReview.status).toBe("possible_same_event_candidates");
+  expect(plan.historicalEventReview.candidatePaths).toContain(event);
+  expect(plan.historicalEventReview.duplicateAdjudicated).toBe(false);
+  expect(plan.routes.find(x=>x.kind==="research_review")?.reason).toContain("Possible prior event");
+  expect(plan.gates.canAutoWrite).toBe(false);
+  expect(plan.gates.canAutoUpdateThesis).toBe(false);
+ });
+ it("does not label a missing selected historical event as proven new", async () => {
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const plan=route(base);
+  expect(plan.historicalEventReview.duplicateAdjudicated).toBe(false);
+  expect(["possible_same_event_candidates","none_selected_not_proof_new"])
+    .toContain(plan.historicalEventReview.status);
+ });
+});
+
+
+describe("intake identity marker blocks repeat Timeline append", () => {
+ it("routes repeated identical intake to existing Timeline link without a duplicate event", async () => {
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const request={domain:"company" as const,entities:["MCKT"],topic:"Synthetic one-off milestone 2026-10-19",
+   inputFormat:"text" as const,sourceKind:"user_commentary" as const,
+   extractedText:"Synthetic MCKT milestone supplied by user for test purposes, no independent issuer verification."};
+  const first=route(request);
+  const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - MCKT.md";
+  await add(timeline,"# Synthetic MCKT Timeline\n## Chronology\nExisting archival item only.\n");
+  const before=route(request);
+  expect(before.routes.find(x=>x.kind==="company_timeline_candidate")?.action)
+    .toBe("candidate_append_after_review");
+  await add(timeline,"# Synthetic MCKT Timeline\n## Chronology\n<!-- investment-intake:"+first.planId+" -->\n");
+  const after=route(request);
+  expect(after.planId).toBe(first.planId);
+  expect(after.routes.find(x=>x.kind==="company_timeline_candidate")).toMatchObject({
+    action:"link_existing_or_hold"
+  });
+  expect(after.routes.find(x=>x.kind==="company_timeline_candidate")?.reason)
+    .toContain("already recorded");
+  expect(after.gates.canAutoWrite).toBe(false);
+  expect(after.gates.canAutoUpdateThesis).toBe(false);
+ });
+});
+
+
+describe("same-source economic event reconciliation despite changed input text",()=>{
+ const url="https://www.sec.gov/Archives/edgar/data/88941/000008894126000041/smtc-20261015.htm";
+ const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - SMTC.md";
+ const evidence="08_Daily_Weekly/Research Indexes/Primary Evidence - SMTC 2026-10-15 Analyst Day.md";
+ const intake={
+   domain:"company" as const,entities:["SMTC"],
+   topic:"Semtech analyst day FY2030 target",sourceKind:"regulatory_filing" as const,
+   inputFormat:"text" as const,eventDate:"2026-10-15",publicationDate:"2026-10-15",
+   sourceUrl:url,extractedText:"Semtech 15 October FY2030 targets reviewed in user supplied regulator excerpt."
+ };
+ it("holds a different paraphrase of the *same issuer/event date/original URL* before append",async()=>{
+   await add(timeline,"---\ncompany: SMTC\n---\n# SMTC chronology\nPreviously dated events.");
+   await add(evidence,[
+     "---","type: primary_ir_evidence_review","company: SMTC",
+     "event_date: 2026-10-15","published_at: 2026-10-15",
+     "verification: not_reverified","---","# Synthetic primary excerpt",url
+   ].join("\n"));
+   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+   const first=route(intake);
+   const second=route({...intake,extractedText:intake.extractedText+" New wording about adjusted margins."});
+   expect(first.planId).not.toBe(second.planId);
+   for(const plan of [first,second]){
+     expect(plan.sourceEventReview).toMatchObject({
+       status:"possible_same_source_event_candidates",
+       candidatePaths:[evidence],duplicateAdjudicated:false,scanTruncated:false
+     });
+     expect(plan.routes.find(x=>x.kind==="company_timeline_candidate")?.action).toBe("link_existing_or_hold");
+     expect(plan.gates.canAutoWrite).toBe(false);
+     expect(plan.gates.canAutoUpdateThesis).toBe(false);
+   }
+   const tracked=route({...intake,sourceUrl:url+"?utm_campaign=test"});
+   expect(tracked.sourceEventReview.candidatePaths).toContain(evidence);
+ });
+ it("does not merge different event dates from a reused source URL",async()=>{
+   await add(timeline,"# SMTC chronology.");
+   await add(evidence,[
+     "---","company: SMTC","event_date: 2026-10-15","verification: not_reverified",
+     "original_source: "+url,"---","# Existing prior event"
+   ].join("\n"));
+   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+   const later=route({...intake,eventDate:"2026-12-15"});
+   expect(later.sourceEventReview.status).toBe("no_structured_match_not_proof_new");
+   expect(later.sourceEventReview.candidatePaths).toHaveLength(0);
+   expect(later.routes.find(x=>x.kind==="company_timeline_candidate")?.action).toBe("candidate_append_after_review");
+   expect(later.gates.canAutoWrite).toBe(false);
+ });
+ it("rejects issuer co-mentions as distinct company event evidence",async()=>{
+   await add(timeline,"# SMTC chronology.");
+   await add("10_Knowledge/Company Research/2026-10-15 - LITE industry review.md",[
+     "---","company: [LITE]","event_date: 2026-10-15","---",
+     "# LITE research with passing mention of SMTC",url
+   ].join("\n"));
+   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+   const p=route(intake);
+   expect(p.sourceEventReview.candidatePaths).toHaveLength(0);
+   expect(p.sourceEventReview.duplicateAdjudicated).toBe(false);
+ });
+});
+
+
+describe("date-scoped intake identity with v1 source preservation",()=>{
+ const original="https://www.sec.gov/Archives/edgar/data/88941/smtc-source-2026.htm";
+ const baseRequest={domain:"company" as const,entities:["SMTC"],
+   topic:"Same exact source transcript about two dated events",inputFormat:"text" as const,
+   sourceKind:"regulatory_filing" as const,sourceUrl:original,
+   eventDate:"2026-10-15",publicationDate:"2026-10-15",
+   extractedText:"Synthetic Semtech original text verbatim repeated despite a later fiscal event date."};
+ it("does not assign one raw intake ID to two distinct declared economic event dates",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const a=route(baseRequest),b=route({...baseRequest,eventDate:"2026-10-16"});
+  expect(a.planId).not.toBe(b.planId);
+  expect(a.routes.find(x=>x.kind==="raw_input")?.path).not.toBe(b.routes.find(x=>x.kind==="raw_input")?.path);
+  expect(a.chronology.eventDate).toBe("2026-10-15");
+  expect(b.chronology.eventDate).toBe("2026-10-16");
+  expect(route(baseRequest).planId).toBe(a.planId);
+ });
+ it("keeps the original v1 ID for an already indexed matching dated raw note",async()=>{
+  const {createHash}=await import("node:crypto");
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const legacy=createHash("sha256").update([
+    "investment_os_intake_v1","company","text","regulatory_filing",
+    "smtc",original,"",baseRequest.extractedText
+  ].join("\n")).digest("hex");
+  const legacyId="IN-"+legacy.slice(0,16).toUpperCase();
+  await add("00_Inbox/ChatGPT/Investment Intake - "+legacyId+".md",[
+    "---","company: [SMTC]","event_date: 2026-10-15","published_at: 2026-10-15",
+    "verification: not_reverified","---","# Previously saved raw source","Synthetic source record"
+  ].join("\n"));
+  const matched=route(baseRequest);
+  expect(matched.planId).toBe(legacyId);
+  expect(matched.routes.find(x=>x.kind==="raw_input")?.action).toBe("link_existing_or_hold");
+  expect(route({...baseRequest,eventDate:"2026-10-16"}).planId).not.toBe(legacyId);
+  expect(route({...baseRequest,publicationDate:"2026-10-16"}).planId).not.toBe(legacyId);
+ });
+});
+
