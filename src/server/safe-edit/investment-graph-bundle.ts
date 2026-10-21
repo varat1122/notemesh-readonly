@@ -16,7 +16,7 @@ import {z} from "zod";
 import {db} from "../db";
 import {resolveNotePath,readVaultFile} from "../vault/paths";
 import {extractStructure,splitFrontmatter} from "../vault/markdown";
-import {preview,apply,status as editStatus} from "./engine";
+import {preview,apply,status as editStatus,sha256} from "./engine";
 import {withPausedSync} from "./sync";
 import {verifyAuthorizedInvestmentGraphReadback}
   from "./knowledge-graph-readback";
@@ -48,6 +48,8 @@ const inputSchema=z.object({
   sourcePath:z.string().min(1).max(350),
   /** Complete investment analysis draft with per-claim references and notes. */
   analysisMarkdown:z.string().min(150).max(90_000),
+  /** A separate, explicitly host-authorized action; NEVER an automatic replay. */
+  recoverTimelineOnly:z.boolean().optional(),
 }).strict();
 export type InvestmentGraphBundleInput=z.infer<typeof inputSchema>;
 
@@ -83,7 +85,7 @@ function requireFeature(){
   if(process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED!=="1")
     throw Error("graph_bundle_disabled_admin_explicit_opt_in_required");
 }
-function validatePreflight(i:InvestmentGraphBundleInput){
+function validatePreflight(i:InvestmentGraphBundleInput,existingAnalysis=false){
   if(!canonical(i.analysisPath)||!canonical(i.timelinePath)||
     !canonical(i.sourcePath)||!SOURCE_DIRS.some(d=>i.sourcePath.startsWith(d))||
     i.analysisPath!==ANALYSIS+i.issuer+" - "+i.eventKey+".md"||
@@ -98,9 +100,18 @@ function validatePreflight(i:InvestmentGraphBundleInput){
     i.timelinePath.startsWith("05_Thesis/")||
     i.analysisPath.startsWith("06_Portfolio/"))
     throw Error("graph_bundle_protected_target_hold");
-  if(db().prepare("SELECT 1 FROM notes WHERE path=?")
-    .get(i.analysisPath))
+  const previous=db().prepare("SELECT body,frontmatter,size FROM notes WHERE path=?")
+    .get(i.analysisPath) as {body:string;frontmatter:string|null;size:number}|undefined;
+  if(previous&&!existingAnalysis)
     throw Error("graph_bundle_analysis_already_exists_hold");
+  if(existingAnalysis){
+    const saved=loadIndexed(i.analysisPath);
+    const parsed=note(saved);
+    if(saved!==i.analysisMarkdown||previous?.body!==parsed.body||
+      previous.frontmatter!==JSON.stringify(parsed.data)||
+      previous.size!==Buffer.byteLength(saved,"utf8"))
+      throw Error("graph_bundle_recovery_analysis_physical_or_index_mismatch_hold");
+  }
   const src=note(loadIndexed(i.sourcePath));
   const evolution=note(loadIndexed(i.timelinePath));
   const analysis=note(i.analysisMarkdown);
@@ -147,9 +158,9 @@ function validatePreflight(i:InvestmentGraphBundleInput){
 
 /**
  * Real implementation: writes only when the OUTER host explicitly authorizes
- * the mutable MCP action. No incoming preview/apply token, approval boolean
- * or policy claims are trusted. Each apply uses an internally generated,
- * actor-bound preview token from the existing Safe Edit engine.
+ * the mutable MCP action. Recovery needs a NEW separately authorized call
+ * with recoverTimelineOnly=true, never an automatic retry of the first call.
+ * No incoming preview/apply token, approval boolean or policy claim is trusted.
  */
 export async function applyAuthorizedInvestmentGraphBundle(
   input:unknown,authenticatedActor:string,
@@ -162,7 +173,76 @@ export async function applyAuthorizedInvestmentGraphBundle(
   if(aid.length>80||tid.length>80)
     throw Error("graph_bundle_operation_id_out_of_bounds");
   return withPausedSync(()=>{
-    // Replay and partial-write handling are explicitly NOT automatic repair.
+    const evidence={
+      entity:i.issuer,event:i.eventKey,period:i.period,
+      originalSource:i.sourcePath,
+      classification:"unresolved" as const,
+      delta:"New analysis proposal linked to original source; independent claim verification pending.",
+      independent:false as const,
+      verification:"not_reverified" as const,
+      sourceType:"archived_ai" as const,
+      event_date:null,published_at:null,received_at:null,
+      imported_at:null,verified_at:null,
+      relatedPaths:[i.sourcePath,"01_Companies/"+i.issuer+".md",i.timelinePath],
+    };
+    // Shared second-write path: both initial write and explicitly authorized
+    // recovery must use the same existing CAS/journal/readback engine.
+    const finishTimeline=(marker:string,evMarker:string,recovering:boolean)=>{
+      try{
+        const changed=loadIndexed(i.timelinePath);
+        if(changed.includes(marker)||changed.includes(evMarker))
+          throw Error("graph_bundle_timeline_changed_or_duplicate_event_hold");
+        const timelineContent=[
+          marker,evMarker,
+          "- [["+i.analysisPath.slice(0,-3)+
+            "]] — Historical AI analysis; not independently verified.",
+        ].join("\n");
+        const append=preview({
+          operationId:tid,path:i.timelinePath,
+          reason:recovering?
+            "Separately host-authorized recovery of missing Company Evolution link":
+            "Host-authorized append to existing Company Evolution Timeline",
+          change:{kind:"append",heading:i.timelineHeading,
+            content:timelineContent,date:i.timelineDate},
+          evidence,
+        },authenticatedActor);
+        if(!append.previewToken)
+          throw Error("graph_bundle_timeline_preview_token_absent_hold");
+        const second=apply({
+          operationId:tid,previewToken:append.previewToken,
+          expectedHash:append.beforeHash,
+        },authenticatedActor);
+        if(!fullyWritten(second))
+          throw Error("graph_bundle_timeline_receipt_incomplete_hold");
+        const graph=verifyAuthorizedInvestmentGraphReadback({
+          analysisOperationId:aid,timelineOperationId:tid,
+          analysisPath:i.analysisPath,timelinePath:i.timelinePath,
+          sourcePath:i.sourcePath,
+        },authenticatedActor);
+        return {
+          status:recovering?
+            "authorized_timeline_recovery_written_and_graph_readback_verified":
+            "authorized_two_note_graph_written_and_readback_verified",
+          analysisOperationId:aid,timelineOperationId:tid,
+          graph,
+          oneHostAuthorizedAction:true as const,
+          recoveryOnly:recovering,
+          multiNoteAtomicityGuaranteed:false as const,
+          mobileSyncVerified:false as const,
+        };
+      }catch{
+        // Do not silently redo, roll back or declare success for an
+        // interrupted or partially recorded second operation.
+        return {
+          status:"analysis_written_timeline_or_graph_needs_manual_reconciliation" as const,
+          analysisOperationId:aid,timelineOperationId:tid,
+          firstNoteSaveReceiptVerified:true as const,
+          entireKnowledgeGraphVerified:false as const,
+          actionNotAutomaticallyRetried:true as const,
+          mobileSyncVerified:false as const,
+        };
+      }
+    };
     const priorAnalysis=currentStatus(aid,authenticatedActor);
     const priorTimeline=currentStatus(tid,authenticatedActor);
     if(priorAnalysis||priorTimeline){
@@ -181,6 +261,22 @@ export async function applyAuthorizedInvestmentGraphBundle(
           mobileSyncVerified:false as const,
         };
       }
+      // A first-note success with NO timeline operation is the sole recoverable
+      // case. A preview/writing/failed timeline might already have modified
+      // bytes; never reuse its ID or guess which stage committed.
+      if(i.recoverTimelineOnly===true && priorAnalysis && !priorTimeline &&
+        fullyWritten(priorAnalysis)){
+        // Recheck original source and existing anchors, provenance, exact
+        // paths, Markdown links and duplicate event markers, NOW.
+        const {marker,evMarker}=validatePreflight(i,true);
+        const saved=loadIndexed(i.analysisPath);
+        if(priorAnalysis.path!==i.analysisPath||
+          priorAnalysis.afterHash!==sha256(saved)||
+          priorAnalysis.receipt?.afterHash!==priorAnalysis.afterHash||
+          saved!==i.analysisMarkdown)
+          throw Error("graph_bundle_recovery_receipt_or_analysis_changed_hold");
+        return finishTimeline(marker,evMarker,true);
+      }
       return {
         status:"existing_partial_or_preview_operations_manual_review" as const,
         analysisOperationId:aid,timelineOperationId:tid,
@@ -189,21 +285,9 @@ export async function applyAuthorizedInvestmentGraphBundle(
         deviceSyncVerified:false as const,
       };
     }
+    if(i.recoverTimelineOnly===true)
+      throw Error("graph_bundle_recovery_requires_existing_written_analysis_hold");
     const {marker,evMarker}=validatePreflight(i);
-    const evidence={
-      entity:i.issuer,event:i.eventKey,period:i.period,
-      originalSource:i.sourcePath,
-      classification:"unresolved" as const,
-      delta:"New analysis proposal linked to original source; independent claim verification pending.",
-      independent:false as const,
-      verification:"not_reverified" as const,
-      sourceType:"archived_ai" as const,
-      event_date:null,published_at:null,received_at:null,
-      imported_at:null,verified_at:null,
-      relatedPaths:[i.sourcePath,"01_Companies/"+i.issuer+".md",i.timelinePath],
-    };
-    // Host/user authorizes this clearly annotated *single two-note bundle*
-    // action. Each actual file commit still gets its own per-note CAS.
     const prepared=preview({
       operationId:aid,path:i.analysisPath,
       reason:"Host-authorized non-protected historical Investment Graph Analysis writeback",
@@ -223,55 +307,6 @@ export async function applyAuthorizedInvestmentGraphBundle(
         mobileSyncVerified:false as const,
       };
     }
-    // Never attempt second note if first is not durably indexed.
-    try{
-      // Refuse concurrent event replay/change to living Timeline.
-      const changed=loadIndexed(i.timelinePath);
-      if(changed.includes(marker)||changed.includes(evMarker))
-        throw Error("graph_bundle_timeline_changed_or_duplicate_event_hold");
-      const timelineContent=[
-        marker,evMarker,
-        "- [["+i.analysisPath.slice(0,-3)+
-          "]] — Historical AI analysis; not independently verified.",
-      ].join("\n");
-      const append=preview({
-        operationId:tid,path:i.timelinePath,
-        reason:"Host-authorized append to existing Company Evolution Timeline",
-        change:{kind:"append",heading:i.timelineHeading,
-          content:timelineContent,date:i.timelineDate},
-        evidence,
-      },authenticatedActor);
-      if(!append.previewToken)
-        throw Error("graph_bundle_timeline_preview_token_absent_hold");
-      const second=apply({
-        operationId:tid,previewToken:append.previewToken,
-        expectedHash:append.beforeHash,
-      },authenticatedActor);
-      if(!fullyWritten(second))
-        throw Error("graph_bundle_timeline_receipt_incomplete_hold");
-      const graph=verifyAuthorizedInvestmentGraphReadback({
-        analysisOperationId:aid,timelineOperationId:tid,
-        analysisPath:i.analysisPath,timelinePath:i.timelinePath,
-        sourcePath:i.sourcePath,
-      },authenticatedActor);
-      return {
-        status:"authorized_two_note_graph_written_and_readback_verified" as const,
-        analysisOperationId:aid,timelineOperationId:tid,
-        graph,
-        oneHostAuthorizedAction:true as const,
-        multiNoteAtomicityGuaranteed:false as const,
-        mobileSyncVerified:false as const,
-      };
-    }catch{
-      // First note exists: never claim rollback or auto-retry.
-      return {
-        status:"analysis_written_timeline_or_graph_needs_manual_reconciliation" as const,
-        analysisOperationId:aid,timelineOperationId:tid,
-        firstNoteSaveReceiptVerified:true as const,
-        entireKnowledgeGraphVerified:false as const,
-        actionNotAutomaticallyRetried:true as const,
-        mobileSyncVerified:false as const,
-      };
-    }
+    return finishTimeline(marker,evMarker,false);
   });
 }
