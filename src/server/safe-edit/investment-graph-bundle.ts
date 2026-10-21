@@ -50,6 +50,8 @@ const inputSchema=z.object({
   analysisMarkdown:z.string().min(150).max(90_000),
   /** A separate, explicitly host-authorized action; NEVER an automatic replay. */
   recoverTimelineOnly:z.boolean().optional(),
+  /** Optional immutable source binding from read-only real-context preparation. */
+  expectedSourceSha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),
 }).strict();
 export type InvestmentGraphBundleInput=z.infer<typeof inputSchema>;
 
@@ -114,7 +116,10 @@ function validatePreflight(i:InvestmentGraphBundleInput,existingAnalysis=false){
       previous?.size!==Buffer.byteLength(saved,"utf8"))
       throw Error("graph_bundle_recovery_analysis_physical_or_index_mismatch_hold");
   }
-  const src=note(loadIndexed(i.sourcePath));
+  const sourceRaw=loadIndexed(i.sourcePath);
+  if(i.expectedSourceSha256 && sha256(sourceRaw)!==i.expectedSourceSha256)
+    throw Error("graph_bundle_source_changed_since_context_review_hold");
+  const src=note(sourceRaw);
   const evolution=note(loadIndexed(i.timelinePath));
   const analysis=note(i.analysisMarkdown);
   const m=analysis.data,s=src.data,t=evolution.data;
