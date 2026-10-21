@@ -253,16 +253,17 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   expect(handoff.historicalContext.status).toBe("retrieval_only_not_verified");
   expect(handoff.historicalContext.items.some((x:any)=>x.path===company)).toBe(true);
   const boundPayload={...payload,expectedSourceSha256:handoff.originalSource.sha256};
-  const stale=await c.client.callTool({name:"write_investment_graph_bundle",
-   arguments:{...boundPayload,expectedSourceSha256:"0".repeat(64)}});
-  expect(stale.isError).toBe(true);
-  expect(fs.existsSync(path.join(vaultRoot,analysis))).toBe(false);
   const disabled=await c.client.callTool({
    name:"write_investment_graph_bundle",arguments:boundPayload});
   expect(disabled.isError).toBe(true);
   expect(JSON.stringify(disabled)).toContain("admin_explicit_opt_in_required");
   expect(fs.existsSync(path.join(vaultRoot,analysis))).toBe(false);
   process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED="1";
+  const stale=await c.client.callTool({name:"write_investment_graph_bundle",
+   arguments:{...boundPayload,expectedSourceSha256:"0".repeat(64)}});
+  expect(stale.isError,JSON.stringify(stale)).toBe(true);
+  expect(JSON.stringify(stale)).toContain("source_changed_since_context_review_hold");
+  expect(fs.existsSync(path.join(vaultRoot,analysis))).toBe(false);
   const wrote=await c.client.callTool({
    name:"write_investment_graph_bundle",arguments:boundPayload});
   expect(wrote.isError,JSON.stringify(wrote)).not.toBe(true);
