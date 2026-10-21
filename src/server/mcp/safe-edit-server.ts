@@ -13,6 +13,8 @@ import { previewSchema, applySchema, operationId, properties } from "../safe-edi
 import { withPausedSync } from "../safe-edit/sync";
 import { withBoundary, fence } from "./boundary";
 import { fetchAndArchiveOfficialSource } from "../research-source-fetch";
+import { inspectOriginalSourceHistory } from "../research-source-archive";
+import { syncBackend } from "../sync";
 import { storeUserAttachment, inspectUserAttachment, MAX_USER_ATTACHMENT_BYTES } from "../user-attachment-vault";
 const securitySchemes=[{type:"oauth2",scopes:["vault:read","vault:edit"]}];
 const base=previewSchema.omit({change:true}).shape;
@@ -39,6 +41,26 @@ export function createSafeEditMcpServer(access:McpAccess) {
     annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     ...meta
   },async ({url})=>invoke(()=>fetchAndArchiveOfficialSource({url,operator:access.label})));
+  server.registerTool("inspect_original_source_archive",{
+    description:"Read-only inspection of an authorized source's content-addressed original-byte revisions on this server. Reopens every stored blob and independently verifies SHA-256. Empty history proves only that this server has no record for the supplied URL. Publisher authenticity, full revision coverage and desktop/mobile delivery are NOT verified.",
+    inputSchema:{url:z.string().url().max(2000)},
+    annotations:{readOnlyHint:true,openWorldHint:false},
+    ...meta
+  },async ({url})=>invoke(()=>inspectOriginalSourceHistory(url,true)));
+  server.registerTool("get_sync_delivery_evidence",{
+    description:"Read-only sync supervisor evidence from this server process: backend state and observed aggregate upload/download counters. Does NOT prove that a specific note reached Obsidian Sync, another device, or the mobile app. Device-specific verification requires separate observed target-device readback.",
+    inputSchema:{},
+    annotations:{readOnlyHint:true,openWorldHint:false},
+    ...meta
+  },async ()=>invoke(()=>{
+    const s=syncBackend().status();
+    return {status:"server_sync_observation_only",kind:s.kind,state:s.state,
+      startedAt:s.startedAt,lastActivityAt:s.lastActivityAt,
+      activity:s.activity,serverDaemonRunning:s.state==="running",
+      noteSpecificRemoteAck:"not_verified",desktopReadback:"not_verified",
+      mobileReadback:"not_verified",crossDeviceSyncVerified:false,
+      evidenceScope:"aggregate server-side supervisor counters; not per-source or per-device receipts"};
+  }));
   server.registerTool("store_user_attachment",{
     description:"Authenticated add-only user-supplied JPG/PNG/WebP/PDF original binary capture into Vault 07_Sources/ChatGPT/Attachments. Supply ACTUAL base64 file bytes, not extracted text, URL, image ID or invented data. Computes SHA-256, reopens bytes, indexes attachment and returns receipt; repeat bytes are idempotent and existing files cannot be overwritten. The bytes remain untrusted user-provided material, NOT independently verified issuer or broker originals; no OCR, claim verification or mobile Sync is asserted. Requires vault:read + vault:edit and verified idle Obsidian Sync; max 4 MiB. Tool output never includes attachment bytes.",
     inputSchema:{
