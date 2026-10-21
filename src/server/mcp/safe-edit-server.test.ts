@@ -183,7 +183,7 @@ it("real OAuth Safe Edit two-note apply then independent Obsidian graph readback
 
 it("single host-authorized Investment Graph bundle uses two existing Safe Edit writes, reads back and never repeats",async()=>{
  const company="01_Companies/SYNTH.md";
- const source="07_Sources/ChatGPT/SYNTH Bundle Evidence.md";
+ const source="10_Knowledge/Company Research/SYNTH Bundle Evidence.md";
  const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md";
  const event="SYNTH-BUNDLE-FY26Q4";
  const rootId="ios-syn-bundle-20261021-a";
@@ -193,12 +193,6 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
  const vaultRoot=path.join(root,"vault");
  const docs=[
   [company,"---\nentity: SYNTH\ntype: company\n---\n# SYNTH\n"],
-  [source,[
-    "---","entity: SYNTH","event_key: "+event,"period: FY26Q4",
-    "type: research_note","verification: unverified",
-    "source_type: user_supplied","---",
-    "# Captured Source","User-supplied only, issuer not verified.","",
-  ].join("\n")],
   [timeline,[
     "---","entity: SYNTH","type: company_evolution","---",
     "# Evolution","Preexisting historical context retained.","",
@@ -210,6 +204,7 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
  }
  const {reindexPath}=await import("../vault/indexer");
  for(const [p] of docs)reindexPath(p);
+ fs.mkdirSync(path.dirname(path.join(vaultRoot,source)),{recursive:true});
  const markdown=[
   "---","type: investment_review","entity: SYNTH",
   "event_key: "+event,"verification: not_reverified",
@@ -231,6 +226,32 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
    timelinePath:timeline,sourcePath:source,analysisMarkdown:markdown};
  const c=await connected(access);
  try{
+  // First leg uses ACTUAL Safe Edit preview + host-authorized apply to
+  // capture a new source note, NOT direct test filesystem insertion.
+  const originalSource=[
+    "---","entity: SYNTH","event_key: "+event,"period: FY26Q4",
+    "type: research_note","verification: unverified",
+    "source_type: user_supplied","event_date: 2026-10-20","---",
+    "# User-supplied source, unverified issuer provenance",
+    "Original user statement kept separately from AI analysis.","",
+  ].join("\n");
+  expect(fs.existsSync(path.join(vaultRoot,source))).toBe(false);
+  const capture=await c.client.callTool({name:"create_note",arguments:{
+    operationId:"ios-synth-capture-20261021-b",path:source,
+    reason:"Source-first capture into existing allowed Company Research folder",
+    content:originalSource,
+  }});
+  expect(capture.isError,JSON.stringify(capture)).not.toBe(true);
+  const srcPreview=unpack(capture);
+  expect(fs.existsSync(path.join(vaultRoot,source))).toBe(false);
+  const captured=await c.client.callTool({name:"apply_edit",arguments:{
+    operationId:srcPreview.operationId,previewToken:srcPreview.previewToken,
+    expectedHash:srcPreview.beforeHash,
+  }});
+  expect(captured.isError,JSON.stringify(captured)).not.toBe(true);
+  expect(unpack(captured).receipt.reindex).toBe("verified");
+  expect(fs.readFileSync(path.join(vaultRoot,source),"utf8"))
+    .toBe(originalSource);
   // Real-Vault indexed source/context preparation runs with WRITE gate disabled.
   const prepared=await c.client.callTool({
    name:"prepare_investment_graph_review",arguments:{
@@ -287,15 +308,27 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   // New event, NO lexical overlap with the prior causal draft: previously
   // saved AI analysis must be retrieved, never promoted to primary evidence.
   const nextEvent="SYNTH-BUNDLE-FY26Q5";
-  const nextSource="07_Sources/ChatGPT/SYNTH Next Event.md";
-  fs.writeFileSync(path.join(vaultRoot,nextSource),[
+  const nextSource="10_Knowledge/Company Research/SYNTH Next Event.md";
+  const nextSourceText=[
     "---","entity: SYNTH","event_key: "+nextEvent,"period: FY26Q5",
     "type: research_note","source_type: user_supplied",
     "verification: unverified","---",
     "# Independent user submission (NOT a verified issuer release)",
     "New unrelated question about warranty provisions.","",
-  ].join("\n"));
-  reindexPath(nextSource);
+  ].join("\n");
+  const nextPreview=await c.client.callTool({name:"create_note",arguments:{
+    operationId:"ios-synth-capture-next-20261021-b",
+    path:nextSource,reason:"Capture next event separately before retrieving history",
+    content:nextSourceText,
+  }});
+  expect(nextPreview.isError,JSON.stringify(nextPreview)).not.toBe(true);
+  const np=unpack(nextPreview);
+  const nextApplied=await c.client.callTool({name:"apply_edit",arguments:{
+    operationId:np.operationId,previewToken:np.previewToken,
+    expectedHash:np.beforeHash,
+  }});
+  expect(nextApplied.isError,JSON.stringify(nextApplied)).not.toBe(true);
+  expect(unpack(nextApplied).receipt.reindex).toBe("verified");
   const next=await c.client.callTool({name:"prepare_investment_graph_review",
    arguments:{issuer:"SYNTH",eventKey:nextEvent,period:"FY26Q5",
     sourcePath:nextSource,question:"Warranty replacement provisions for new contracts",
