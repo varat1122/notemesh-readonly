@@ -37,22 +37,36 @@ function terms(s: string): string[] {
 }
 // Scope the candidate set before ranking. A ticker mentioned as a broker
 // in somebody else's research is not evidence about the issuer's business.
-function namedIssuer(path: string): string | null {
+function namedIssuers(path: string): string[] {
   const file=path.split("/").at(-1)??"";
-  if(path.startsWith("01_Companies/"))return file.match(/^([A-Z][A-Z0-9.-]{0,11})\.md$/)?.[1]??null;
-  if(path.startsWith("05_Thesis/"))return file.match(/^([A-Z][A-Z0-9.-]{0,11}) - (?:Current Thesis|Evidence Register)/)?.[1]??null;
+  if(path.startsWith("01_Companies/")){const t=file.match(/^([A-Z][A-Z0-9.-]{0,11})\.md$/)?.[1];return t?[t]:[];}
+  if(path.startsWith("05_Thesis/")){const t=file.match(/^([A-Z][A-Z0-9.-]{0,11}) - (?:Current Thesis|Evidence Register)/)?.[1];return t?[t]:[];}
   const structured=file.match(/^(?:Company Evolution - |Company - |Primary Evidence - |Investment Review - )([A-Z][A-Z0-9.-]{0,11})(?:\s|\.md)/)?.[1];
-  if(structured)return structured;
+  if(structured)return [structured];
   // Many Company Research titles list the covered issuer before a broker.
   // E.g. "ASML - JPM Q3 Preview" concerns ASML, not the bank JPM.
   // Reject obvious generic metric acronyms and source/vintage IDs; this is a
   // conservative title heuristic, not proof of an issuer's legal identity.
   if(path.startsWith("10_Knowledge/Company Research/")){
+    // Archived company research declares its primary company in frontmatter.
+    // A title like "CrowdStrike × CLEAR" otherwise returns CLEAR as the first
+    // all-caps token and incorrectly excludes the CRWD research event.
+    const indexed=db().prepare("SELECT frontmatter FROM notes WHERE path=?").get(path) as
+      {frontmatter:string|null}|undefined;
+    if(indexed?.frontmatter){
+      try {
+        const fm=JSON.parse(indexed.frontmatter) as Record<string,unknown>;
+        const declared=Array.isArray(fm.company)?fm.company:[fm.company];
+        const tagged=declared.filter((v):v is string=>typeof v==="string")
+          .map(v=>v.trim().toUpperCase()).filter(v=>/^[A-Z][A-Z0-9.-]{0,11}$/.test(v));
+        if(tagged.length)return [...new Set(tagged)];
+      }catch{/* Invalid legacy metadata falls back to conservative filename inference. */}
+    }
     const codes=[...file.matchAll(/(?:^|[^A-Za-z0-9])([A-Z][A-Z0-9]{1,7})(?=[^A-Za-z0-9]|$)/g)]
       .map(x=>x[1]).filter(x=>!/^(?:P\d+|F\d+|Q\d+|FY\d+|USD|GDP|EPS|FCF|OCF|ROIC|BOM|TAM|GPU|CPU|CPO|NPO|ROI|CEO|CFO|IR|US|AI|DC)$/.test(x));
-    return codes[0]??null;
+    return codes.slice(0,1);
   }
-  return null;
+  return [];
 }
 const STOP_SCOPE = new Set(["AND","THE","WITH","FROM","FOR","MARKET","MARKETS","MACRO","ECONOMY","ECONOMIC","INDUSTRY","GLOBAL","FINANCIAL","COMPANY","RESEARCH","STOCK","EQUITY","AND"]);
 function topicTerms(s: string): string[] { return terms(s).filter(t=>!STOP_SCOPE.has(t)); }
@@ -174,13 +188,49 @@ export function buildInvestmentContextPack(req: Input): Pack {
     ...issuers.flatMap(t=>[
       "01_Companies/"+t+".md",
       "08_Daily_Weekly/Research Indexes/Company Evolution - "+t+".md",
-      "08_Daily_Weekly/Research Indexes/Company - "+t+".md",
+
       "05_Thesis/"+t+" - Current Thesis.md",
       "05_Thesis/"+t+" - Evidence Register.md",
     ]),
   ];
   const absent: string[] = [];
   for (const p of needed) { if (exists(p)) pool.set(p,120); else absent.push(p); }
+  // Historical Company indexes exist in two legacy locations. Neither is a
+  // current/approved Thesis, but both provide routes back to dated prior
+  // conversations. A missing newer index must not hide the older one or be
+  // reported as missing when the other location is present.
+  for (const ticker of issuers) {
+    const candidates=[
+      "08_Daily_Weekly/Research Indexes/Company - "+ticker+".md",
+      "10_Knowledge/Indexes/Company - "+ticker+".md"
+    ];
+    const present=candidates.filter(exists);
+    if(present.length) for(const p of present)pool.set(p,120);
+    else absent.push("No legacy Company Index found for "+ticker+" (both known locations checked).");
+  }
+  const linkedIndustryPaths=new Set<string>();
+  // Retrieve existing, explicitly resolved Industry Hubs linked from the
+  // issuer's canonical Timeline. A generic earnings query may contain no
+  // industry search term, but the company already has a curator-reviewed
+  // cross-link. Trust only the indexed exact resolved_path (not co-mentions).
+  // If the caller explicitly provided industry scope, respect that choice.
+  if(issuers.length && !req.industry){
+    for(const ticker of issuers){
+      const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - "+ticker+".md";
+      if(!exists(timeline))continue;
+      const rows=db().prepare(
+        "SELECT DISTINCT resolved_path FROM links WHERE source_path=? AND resolved_path LIKE ? ORDER BY resolved_path LIMIT 12"
+      ).all(timeline,"02_Industries_Themes/%.md") as {resolved_path:string|null}[];
+      for(const row of rows){
+        const target=row.resolved_path;
+        if(target && target.startsWith("02_Industries_Themes/") &&
+           roleOf(target)==="industry" && exists(target)){
+          pool.set(target,Math.max(pool.get(target)||0,116));
+          linkedIndustryPaths.add(target);
+        }
+      }
+    }
+  }
   // Explicit issuer-source discovery: a broad "NVDA" lexical query can be
   // flooded by archived chat and miss the actual issuer IR reviews. Never
   // let search-result popularity determine whether primary documents exist.
@@ -245,8 +295,9 @@ export function buildInvestmentContextPack(req: Input): Pack {
     try {
       for (const [i,h] of searchVault(term,{limit:30}).hits.entries()) {
         const role=roleOf(h.path);
-        const otherIssuer=namedIssuer(h.path);
-        if(issuers.length && otherIssuer && !issuers.includes(otherIssuer))continue;
+        const scopedIssuerNames=namedIssuers(h.path);
+        if(issuers.length && scopedIssuerNames.length &&
+          !scopedIssuerNames.some(t=>issuers.includes(t)))continue;
         if(role==="capture" && issuers.length &&
           !issuers.includes(String(indexedNoteMeta(h.path)?.entity??"").toUpperCase()))continue;
         if(role==="analysis" && !historicalAIReview(h.path,
@@ -256,13 +307,27 @@ export function buildInvestmentContextPack(req: Input): Pack {
            (req.industry && !industryMatches.has(h.path))))continue;
         if(issuers.length && role==="industry" && req.industry &&
           !industryMatches.has(h.path))continue;
+        // For generic company queries, a canonical Industry Hub merely
+        // mentioning the issuer is NOT a business linkage. Require either
+        // a resolved link from its own Company Timeline or clear title-topic
+        // alignment with the user's stated query. This constraint applies
+        // to curated 02_Industries hubs; 03_Concepts retain their prior scope.
+        if(issuers.length && role==="industry" && !req.industry &&
+           h.path.startsWith("02_Industries_Themes/") &&
+           !linkedIndustryPaths.has(h.path)){
+          const title=(h.path.split("/").at(-1)||"").replace(/\.md$/i,"").toUpperCase();
+          const titleWords=new Set(title.split(/[^\p{L}\p{N}]+/u));
+          const explicitWords=question.toUpperCase().split(/[^\p{L}\p{N}]+/u)
+            .filter(w=>w.length>=4&&!issuers.includes(w));
+          if(!explicitWords.some(w=>titleWords.has(w)))continue;
+        }
         if(issuers.length && !issuerPaths.has(h.path) &&
           role!=="industry" && role!=="rules" && !pool.has(h.path)) continue;
         if(macroScope){
           // One shared word (e.g. "revenue") must not pull an unrelated issuer.
           if(!primaryTopic || !explicitMacroScope(h.path,primaryTopic))continue;
           if(role==="company"||role==="thesis"||role==="evidence_register"||
-            (role==="timeline" && otherIssuer)||
+            (role==="timeline" && scopedIssuerNames.length>0)||
             h.path.startsWith("10_Knowledge/Company Research/"))continue;
         }
         pool.set(h.path,Math.max(pool.get(h.path)||0, 30-i));
@@ -270,9 +335,18 @@ export function buildInvestmentContextPack(req: Input): Pack {
       }
     } catch { failed.push(term); }
   }
+  // Promote same-event research whose headline contains the user's specific
+  // subject (e.g. CrowdStrike + CLEAR), not older ticker-only summaries.
+  // The ranking is a discovery hint, never a deduplication or source verdict.
+  const subjectTerms=topicTerms(question).filter(t=>t.length>=4 && !/^[0-9]/.test(t) &&
+    !issuers.includes(t) && !/^(?:HISTORICAL|ARCHIVE|RE-INGEST|UPDATE|LATEST|NEW|EVENT|TEST|VERIFY|SOURCE|CLAIM|NEWS|RESEARCH)$/.test(t));
   const rank = [...pool].map(([path,boost])=>{
     const role=roleOf(path);
     const companyBonus=issuerTokenInTitle(path,issuers)?22:0;
+    const title=(path.split("/").at(-1)??"").normalize("NFC").toUpperCase();
+    const eventTitleMatches=subjectTerms.filter(term=>title.split(/[^\p{L}\p{N}]+/u).includes(term)).length;
+    const specificEventBonus=issuers.length && role==="research"
+      ? Math.min(3,eventTitleMatches)*35:0;
     const macroBonus=macroScope && primaryTopic ?
       (explicitMacroScope(path,primaryTopic)?25:0) +
       (path.startsWith("10_Knowledge/Macro and Markets/")?25:0) +
@@ -283,7 +357,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
     const focusBonus=focus==="tam"&&/TAM|Industries|Concepts/.test(path)?20:
       focus==="broker"&&/Broker|Evolution|Research/.test(path)?17:
       focus==="earnings"&&/Primary Evidence|Event_Lineage/.test(path)?20:0;
-    return {path,role,score:base[role]+boost+companyBonus+focusBonus+macroBonus-(role==="archive"?45:0)};
+    return {path,role,score:base[role]+boost+companyBonus+focusBonus+macroBonus+specificEventBonus-(role==="archive"?45:0)};
   }).sort((a,b)=>b.score-a.score||a.path.localeCompare(b.path));
   const items: Item[] = [];
   // Archived chat excerpts are a last resort and may repeat one issuer event.
