@@ -5,6 +5,8 @@ import { canSafeEdit, oauthChallenge } from "./endpoint";
 import { preview, apply, status } from "../safe-edit/engine";
 import {applyAuthorizedInvestmentGraphBundle}
   from "../safe-edit/investment-graph-bundle";
+import {prepareRealInvestmentReviewHandoff}
+  from "../safe-edit/investment-review-preparation";
 import { verifyAuthorizedInvestmentGraphReadback }
   from "../safe-edit/knowledge-graph-readback";
 import { previewSchema, applySchema, operationId, properties } from "../safe-edit/schema";
@@ -64,8 +66,21 @@ export function createSafeEditMcpServer(access:McpAccess) {
     },annotations:{readOnlyHint:true,openWorldHint:false},...meta,
   },async input=>invoke(()=>verifyAuthorizedInvestmentGraphReadback(
     input,access.label)));
+  server.registerTool("prepare_investment_graph_review",{
+    description:"READ ONLY: Pull the actual indexed Source Note and issuer-scoped historical context (Current Thesis, Evidence Register, old source, Company Evolution, Industry, prior unverified AI drafts). Return exact existing canonical Obsidian paths, source SHA-256 and bounded source/context excerpts for the model to ANALYZE BEFORE a separately host-authorized write_investment_graph_bundle call. Never infers financial truth, approves a draft, previews or writes notes; existing event/analysis is a duplicate-review hold. The original source is not independently authenticated by its metadata.",
+    inputSchema:{
+      issuer:z.string().min(1).max(12),
+      eventKey:z.string().min(4).max(140),
+      period:z.string().min(1).max(100),
+      sourcePath:z.string().min(4).max(350),
+      question:z.string().min(3).max(1200),
+      industry:z.string().max(140).optional(),
+      focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional(),
+    },
+    annotations:{readOnlyHint:true,openWorldHint:false},...meta,
+  },async input=>invoke(()=>prepareRealInvestmentReviewHandoff(input)));
   server.registerTool("write_investment_graph_bundle",{
-    description:"WRITE: Host/user must explicitly authorize this scoped investment graph action. Initial call writes one Historical AI Draft Analysis and one Company Evolution backlink. If Analysis was durably saved but the Timeline write never started, a SEPARATE host-authorized invocation with recoverTimelineOnly=true can complete ONLY the missing backlink after receipt, physical hash, provenance, canonical path and duplicate checks. Interrupted Timeline operations always require manual review. Protected Thesis/Portfolio never change; admin feature flag disabled by default. Not standing auto-save or device Sync.",
+    description:"WRITE: Host/user must explicitly authorize this scoped investment graph action. Prefer prepare_investment_graph_review before reasoning; pass its expectedSourceSha256 so a changed original Source fails closed.  Initial call writes one Historical AI Draft Analysis and one Company Evolution backlink. If Analysis was durably saved but the Timeline write never started, a SEPARATE host-authorized invocation with recoverTimelineOnly=true can complete ONLY the missing backlink after receipt, physical hash, provenance, canonical path and duplicate checks. Interrupted Timeline operations always require manual review. Protected Thesis/Portfolio never change; admin feature flag disabled by default. Not standing auto-save or device Sync.",
     inputSchema:{
       operationRoot:z.string().regex(/^[a-z][a-z0-9-]{8,60}$/),
       issuer:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._ -]{0,49}$/),
@@ -78,6 +93,7 @@ export function createSafeEditMcpServer(access:McpAccess) {
       sourcePath:z.string().min(1).max(350),
       analysisMarkdown:z.string().min(150).max(90000),
       recoverTimelineOnly:z.boolean().optional().describe("Explicit newly authorized Timeline-only recovery after verified Analysis receipt; never an automatic retry"),
+      expectedSourceSha256:z.string().regex(/^[a-f0-9]{64}$/).optional().describe("Bind the draft to the exact source bytes returned by prepare_investment_graph_review; refuse stale source"),
     },annotations:{
       readOnlyHint:false,destructiveHint:true,idempotentHint:true,
       openWorldHint:false,
