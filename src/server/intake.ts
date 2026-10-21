@@ -48,7 +48,7 @@ function enqueueUnderFence(input: unknown) {
     return summary(d.prepare("SELECT * FROM intake_queue WHERE id=?").get(id) as Row);
   })();
 }
-function summary(r: Row) {return {id:r.id,status:r.status,created:r.created,receipt:r.receipt ? JSON.parse(r.receipt) : null,meaning:r.status === "imported" ? "Receiver confirmed files; inspect receipt for cloud/desktop location. Obsidian Sync device arrival must still be verified" : "Queued only. Receiver has not yet written the notes; check status again"};}
+function summary(r: Row) {return {id:r.id,status:r.status,created:r.created,receipt:r.receipt ? JSON.parse(r.receipt) : null,meaning:r.status === "imported" ? "Receiver confirmed files; inspect receipt for cloud/desktop location. Obsidian Sync device arrival must still be verified" : r.status === "blocked" ? "Submission blocked; review the receipt before any further action. Do not automatically resubmit or assume that no files were written." : "Queued only. Receiver has not yet written the notes; check status again"};}
 export function intakeStatus(id:string) {const r=table().prepare("SELECT * FROM intake_queue WHERE id=?").get(id) as Row|undefined; if(!r)throw Error("Unknown submission");return summary(r);}
 export function nextIntake() {const r=table().prepare("SELECT * FROM intake_queue WHERE status='queued' ORDER BY created LIMIT 1").get() as Row|undefined; return r?{id:r.id,payload:JSON.parse(r.payload),created:r.created}:null;}
 export const receiptSchema=z.object({id:z.string().regex(/^[a-f0-9]{64}$/),status:z.enum(["imported","blocked"]),paths:z.array(z.string().max(500)).max(25),message:z.string().max(1000)}).strict();

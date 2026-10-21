@@ -19,6 +19,33 @@ append Company Evolution or complete the source-bound graph workflow below.
 `queued` is not saved, and `imported` needs independent note readback. A skill
 being installed does not establish that its required tools are connected.
 
+The development candidate also recalls receiver-generated Inbox analyses in
+later issuer/country context packs: it requires a leading ticker/country in
+the saved title and an exact resolved link to the existing Company/Macro hub.
+It inspects at most 150 recent indexed Inbox notes and selects at most two;
+other naming schemes still need explicit search. These remain historical AI:
+the existing read-time schema adapter identifies `chatgpt_analysis` as a legacy
+AI alias, while undeclared verification, independence and Source hash fields
+remain undeclared. No files, receipts, hashes or event keys are backfilled.
+This is next-event recall, not a replacement for Source-bound graph writeback
+or an automatic Company Evolution update. It is not live until released.
+
+### If ChatGPT displays Reconnect
+
+An expired connection is not a blocked/imported submission receipt and does not
+prove whether an earlier request reached the queue. The owner must reconnect
+the same intended App through its normal OAuth flow; never disable authentication,
+reuse a token from another App, or widen permissions to get past this screen.
+Do not switch between several save plugins or change the payload to force a retry.
+
+After reconnection, if a submission ID was returned, inspect that ID first:
+`queued` means wait; `imported` means read the actual receipt paths;
+`blocked` means review the receipt and any possible partial files, without retry.
+If no ID was received, retain the original payload unchanged. An explicitly
+authorized resend of that exact payload is deduplicated by its digest; a newly
+worded draft is a different submission and needs duplicate review first.
+The read-only `IN-...` plan ID is not the 64-character submission ID.
+
 Suggested Project instruction, once the approved connector is available:
 
 ```text

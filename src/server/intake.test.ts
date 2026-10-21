@@ -29,3 +29,13 @@ it('offers only additive submission, no vault mutations, with write annotation',
 it('submits through MCP, deduplicates retries, leaves vault empty',async()=>{const a=await client.callTool({name:'submit_investment_notes',arguments:input});const b=await client.callTool({name:'submit_investment_notes',arguments:input});expect(a.isError).not.toBe(true);expect(a.content).toEqual(b.content);expect(fs.readdirSync(path.join(root,'vault'))).toEqual([]);});
 it('rejects malformed and oversized input',async()=>{const {enqueue}=await import('./intake');expect(()=>enqueue({...input,notes:[]})).toThrow();expect(()=>enqueue({...input,notes:[{...input.notes[0],analysis:'x'.repeat(30001)}]})).toThrow();expect(()=>enqueue({...input,extra:'forbidden'})).toThrow();});
 it('persists queue and acknowledges without touching vault',async()=>{const {enqueue,nextIntake,acknowledge,intakeStatus}=await import('./intake');const r=enqueue(input);expect(nextIntake()?.id).toBe(r.id);expect(intakeStatus(r.id).status).toBe('queued');acknowledge({id:r.id,status:'imported',paths:['00_Inbox/test.md'],message:'fixture'});expect(nextIntake()).toBe(null);expect(enqueue(input).status).toBe('imported');expect(()=>intakeStatus('0'.repeat(64))).toThrow();expect(fs.readdirSync(path.join(root,'vault'))).toEqual([]);});
+it('reports a blocked submission as requiring review instead of telling the client it is still queued',async()=>{
+  const {enqueue,acknowledge,intakeStatus}=await import('./intake');
+  const r=enqueue({...input,sourceChat:'SYNTHETIC BLOCKED STATUS'});
+  acknowledge({id:r.id,status:'blocked',paths:[],message:'Synthetic missing related note'});
+  const result=intakeStatus(r.id);
+  expect(result.status).toBe('blocked');
+  expect(result.meaning).toContain('review');
+  expect(result.meaning).not.toContain('Queued only');
+  expect(enqueue({...input,sourceChat:'SYNTHETIC BLOCKED STATUS'})).toEqual(result);
+});

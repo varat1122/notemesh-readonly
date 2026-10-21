@@ -16,6 +16,7 @@ export function roleOf(path: string): Role {
   if (path.includes("Evidence and Update Rules")) return "rules";
   if (/^05_Thesis\/.*Current Thesis/i.test(path)) return "thesis";
   if (/^05_Thesis\/.*Evidence Register/i.test(path)) return "evidence_register";
+  if (importedAIReview(path)) return "analysis";
   if (path.startsWith("08_Daily_Weekly/Research Indexes/Investment Review - ")) return "analysis";
   if (/Company Evolution - |00_Investment_Evolution_Master/.test(path)) return "timeline";
   if (path.startsWith("01_Companies/")) return "company";
@@ -79,6 +80,7 @@ function issuerTokenInTitle(path: string, issuers: string[]) {
 // Retain topic-named notes and explicit country-tagged metadata; broader
 // regional documents require separate query/review rather than silent mixing.
 function explicitMacroScope(path: string, topic: string): boolean {
+  if(importedAIReview(path))return importedReviewInScope(path,[],topic);
   const title=(path.split("/").at(-1)||"").normalize("NFC").toUpperCase();
   const t=topic.normalize("NFC").toUpperCase();
   const isBoundary=(c:string|undefined)=>!c||!/[\p{L}\p{N}]/u.test(c);
@@ -102,7 +104,50 @@ function indexedNoteMeta(path:string):Record<string,unknown>|null{
     return v && typeof v==="object"&&!Array.isArray(v)?v:null;
   }catch{return null;}
 }
+// The existing linked-save receiver writes N01.md, not a ticker/country-named
+// research file. Recognize only that receiver's explicit AI metadata shape.
+// This is historical retrieval, not authentication of a submission or a Source
+// binding: keep all legacy declared provenance fields unchanged.
+function importedAIReview(path:string):boolean{
+  const id=path.match(/^00_Inbox\/ChatGPT\/\d{4}-\d{2}-\d{2}-([a-f0-9]{20})\/N(?:0[1-9]|1[0-9]|20)\.md$/)?.[1];
+  if(!id)return false;
+  const m=indexedNoteMeta(path);
+  return !!m && m.type==="investment_review" &&
+    m.status==="imported_analysis_not_reverified" && m.source_type==="chatgpt_analysis" &&
+    typeof m.source_chat==="string" && m.source_chat.trim().length>0 &&
+    typeof m.submission_id==="string" && /^[a-f0-9]{64}$/.test(m.submission_id) &&
+    m.submission_id.startsWith(id) && m.independent_evidence!==true &&
+    (m.verification==null || ["unverified","not_reverified"].includes(String(m.verification)));
+}
+function importedReviewInScope(path:string,issuers:string[],macroTopic:string|null=null):boolean{
+  if(!importedAIReview(path))return false;
+  const row=db().prepare("SELECT f.headings FROM notes n JOIN notes_fts f ON f.rowid=n.rowid WHERE n.path=?")
+    .get(path) as {headings:string}|undefined;
+  const title=row?.headings.split("\n")[0]?.trim().normalize("NFC").toUpperCase()??"";
+  // Require BOTH an explicit leading subject and an exact resolved canonical
+  // link. A broker/co-mentioned ticker or one country in somebody else's
+  // headline must not turn this into that subject's historical analysis.
+  if(issuers.length){
+    const ticker=title.match(/^([A-Z][A-Z0-9.-]{0,11})(?:\s|$)/)?.[1];
+    if(!ticker || !issuers.includes(ticker))return false;
+    const target="01_Companies/"+ticker+".md";
+    return exists(target) && !!db().prepare(
+      "SELECT 1 FROM links WHERE source_path=? AND resolved_path=? AND target IN (?,?) LIMIT 1"
+    ).get(path,target,target,target.slice(0,-3));
+  }
+  if(macroTopic){
+    const topic=macroTopic.normalize("NFC").toUpperCase();
+    if(!title.startsWith(topic) || /[\p{L}\p{N}]/u.test(title[topic.length]??""))return false;
+    const links=db().prepare(
+      "SELECT target,resolved_path FROM links WHERE source_path=? AND resolved_path LIKE '04_Macro/%.md' ORDER BY resolved_path LIMIT 30"
+    ).all(path) as {target:string;resolved_path:string}[];
+    return links.some(l=>(l.target===l.resolved_path || l.target===l.resolved_path.slice(0,-3)) &&
+      exists(l.resolved_path) && explicitMacroScope(l.resolved_path,macroTopic));
+  }
+  return false;
+}
 function historicalAIReview(path:string,issuer:string|null=null):boolean{
+  if(importedAIReview(path))return !issuer || importedReviewInScope(path,[issuer]);
   if(!path.startsWith("08_Daily_Weekly/Research Indexes/Investment Review - "))return false;
   const m=indexedNoteMeta(path);
   return !!m && m.type==="investment_review" && typeof m.entity==="string" &&
@@ -139,7 +184,7 @@ function selectedLines(raw: string, search: string[], max: number, role: Role) {
   // Anchor contradictory evidence even when the highest lexical match is in
   // a note's introduction. Source line labels prevent disjoint snippets from
   // appearing to be one continuous quotation.
-  if ((role==="thesis" || role==="evidence_register" || role==="source" || role==="research") && max>=700) {
+  if ((role==="thesis" || role==="evidence_register" || role==="source" || role==="research" || role==="analysis") && max>=700) {
     const counter = lines.findIndex((s,i) => i < 1200 &&
       /^\s*#{1,6}\s+.*(counter[- ]?evidence|contradict|invalidation|ข้อขัดแย้ง|ข้อโต้แย้ง|ความเสี่ยง)/i.test(s));
     if (counter>=0 && (counter<start || counter>=firstEnd)) {
@@ -254,6 +299,18 @@ export function buildInvestmentContextPack(req: Input): Pack {
       if(++found>=2)break;
     }
   }
+  // Discover bounded linked-save history through the real index independently
+  // of FTS popularity. No body keyword overlap with the next event is needed.
+  if(issuers.length || (macroScope&&primaryTopic)){
+    const imported=db().prepare(`SELECT path FROM notes WHERE path GLOB '00_Inbox/ChatGPT/*/N[0-2][0-9].md'
+      ORDER BY COALESCE(modified,mtime) DESC,path DESC LIMIT 150`).all() as {path:string}[];
+    let found=0;
+    for(const row of imported){
+      if(!exists(row.path) || !importedReviewInScope(row.path,issuers,macroScope?primaryTopic:null))continue;
+      pool.set(row.path,Math.max(pool.get(row.path)||0,75-found*5));
+      if(++found>=2)break;
+    }
+  }
   const searchTerms = [...new Set([...issuers,...topicTerms(req.industry||""),...terms(question)])].slice(0,12);
   const failed: string[] = [];
   const macroSubjectPaths = new Set<string>();
@@ -295,6 +352,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
     try {
       for (const [i,h] of searchVault(term,{limit:30}).hits.entries()) {
         const role=roleOf(h.path);
+        if(importedAIReview(h.path) && (issuers.length||macroScope) &&
+          !importedReviewInScope(h.path,issuers,macroScope?primaryTopic:null))continue;
         const scopedIssuerNames=namedIssuers(h.path);
         if(issuers.length && scopedIssuerNames.length &&
           !scopedIssuerNames.some(t=>issuers.includes(t)))continue;
@@ -379,6 +438,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
       const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining),row.role);
       if(!excerpt.excerpt.trim())continue;
       if(row.role==="analysis" && !historicalAIReview(row.path,issuers.length===1?issuers[0]:null))continue;
+      if(importedAIReview(row.path) && (issuers.length||macroScope) &&
+        !importedReviewInScope(row.path,issuers,macroScope?primaryTopic:null))continue;
       if(row.role==="capture" && issuers.length &&
         !issuers.includes(String(indexedNoteMeta(row.path)?.entity??"").toUpperCase()))continue;
       items.push({path:row.path,role:row.role,...declared(raw,row.path),score:row.score,...excerpt});
@@ -407,6 +468,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
       "Bounded FTS5 lexical discovery, not semantic recall or full Vault coverage. Missing/omitted notes may contain counter-evidence.",
       "Verification fields are note-declared metadata, NOT freshly reverified primary facts. File modified time is NOT event date.",
       "A saved Investment Review and archived AI repost are historical analysis, never independent issuer evidence; deduplicate issuer+source+metric+fiscal period.",
+      "Linked-save Inbox discovery inspects at most 150 recent indexed notes and selects at most two with an explicit leading ticker/country and exact canonical hub link. Missing legacy Source hashes and independence declarations are not backfilled; scope links do not authenticate a publisher or approve a write.",
       "User-supplied source captures are records of supplied text, not authenticated primary issuer documents.",
       "Use full original notes and current external filings/consensus for investment decisions. This tool is read-only.",
       "Contradiction/risk sections are discoverability hints, not exhaustive counter-evidence verification. Original context must be read in full where material.",

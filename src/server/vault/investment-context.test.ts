@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 
 let root: string;
 let vault: string;
@@ -49,7 +51,73 @@ async function addExtra(p:string,raw:string){
   const {reindexPath}=await import("./indexer");
   reindexPath(p);
 }
+async function importLinkedReview(title:string,relatedNotes:string[]){
+  const payload={sourceChat:"SYNTHETIC LINKED SAVE",notes:[{
+    title,eventDate:null,userInput:"Synthetic user statement; original publisher unknown.",
+    analysis:"An unverified historical cash conversion hypothesis.\n\n## Counter-evidence\nDelivery timing could explain the change.",
+    relatedNotes,
+  }]};
+  const id=createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+  const require=createRequire(import.meta.url);
+  const {importItem}=require("../../../scripts/intake-importer.cjs");
+  const paths=importItem({id,payload,created:"2026-10-21T00:00:00.000Z"},vault,path.join(root,"archive")) as string[];
+  const {reindexPath}=await import("./indexer");
+  for(const p of paths)reindexPath(p);
+  return paths[0];
+}
 describe("investment context retrieval",()=>{
+  it("recalls an actual linked-save Inbox analysis for the next issuer event without inventing legacy provenance",async()=>{
+    const build=await fixture();
+    const saved=await importLinkedReview("NVDA historical delivery review",["01_Companies/NVDA.md"]);
+    const before=fs.readFileSync(path.join(vault,saved),"utf8");
+    const p=build({question:"NVDA warranty provisions",issuers:["NVDA"],focus:"earnings",maxNotes:12,maxChars:16000});
+    const item=p.items.find(x=>x.path===saved);
+    expect(item?.role).toBe("analysis");
+    expect(item?.declaredSourceType).toBe("chatgpt_analysis");
+    expect(item?.declaredIndependentEvidence).toBeNull();
+    expect(item?.declaredVerification).toBeNull();
+    expect(item?.declaredEventKey).toBeNull();
+    expect(item?.schemaCompatibility.independenceAssessment).toBe("not_independent_archived_ai");
+    expect(item?.schemaCompatibility.sourceHashScope).toBe("none");
+    expect(item?.excerpt).toContain("Counter-evidence");
+    expect(fs.readFileSync(path.join(vault,saved),"utf8")).toBe(before);
+    expect(p.items.findIndex(x=>x.role==="source")).toBeLessThan(p.items.findIndex(x=>x.path===saved));
+  });
+  it("recalls a country-scoped linked-save Macro analysis without admitting incidental country mentions",async()=>{
+    const build=await fixture();
+    await addExtra("04_Macro/China Economy.md","# China Economy\nHistorical macro navigation, not primary evidence.");
+    const saved=await importLinkedReview("China historical producer costs",["04_Macro/China Economy.md"]);
+    const incidental=await importLinkedReview("Japan outlook mentioning China",["04_Macro/China Economy.md"]);
+    const unlinked=await importLinkedReview("China unlinked discussion",[]);
+    const p=build({question:"China household balance sheets",industry:"China macro and markets",focus:"macro",maxNotes:12});
+    expect(p.items.find(x=>x.path===saved)?.role).toBe("analysis");
+    expect(p.items.find(x=>x.path===saved)?.schemaCompatibility.independenceAssessment).toBe("not_independent_archived_ai");
+    expect(p.items.map(x=>x.path)).not.toContain(incidental);
+    expect(p.items.map(x=>x.path)).not.toContain(unlinked);
+    expect(p.incomplete.join(" ")).toContain("primary macro/statistical");
+  });
+  it("does not use a related-company link or broker mention alone to assign Inbox analysis to an issuer",async()=>{
+    const build=await fixture();
+    const other=await importLinkedReview("ASML - NVDA supply commentary",["01_Companies/NVDA.md"]);
+    const unlinked=await importLinkedReview("NVDA unlinked review",[]);
+    const saved=await importLinkedReview("NVDA historical review",["01_Companies/NVDA.md"]);
+    const p=build({question:"NVDA earnings",issuers:["NVDA"],maxNotes:12});
+    expect(p.items.find(x=>x.path===saved)?.role).toBe("analysis");
+    expect(p.items.map(x=>x.path)).not.toContain(other);
+    expect(p.items.map(x=>x.path)).not.toContain(unlinked);
+  });
+  it.each(["independence","verification","submission"])("excludes an imported review with inconsistent %s metadata",async field=>{
+    const build=await fixture();
+    const saved=await importLinkedReview("NVDA historical review",["01_Companies/NVDA.md"]);
+    const raw=fs.readFileSync(path.join(vault,saved),"utf8");
+    const changed=field==="submission"?raw.replace(/submission_id: [a-f0-9]{64}/,"submission_id: "+"0".repeat(64)):
+      raw.replace("type: investment_review","type: investment_review\n"+
+        (field==="independence"?"independent_evidence: true":"verification: verified_against_primary"));
+    expect(changed).not.toBe(raw);
+    await addExtra(saved,changed);
+    expect(build({question:"NVDA historical review",issuers:["NVDA"],maxNotes:12})
+      .items.map(x=>x.path)).not.toContain(saved);
+  });
   it("reads issuer, draft thesis, evidence, industry and company timeline before archive duplicates",async()=>{
     const build=await fixture();
     const p=build({question:"NVDA earnings and GPU capacity risk",issuers:["NVDA"],focus:"earnings",maxNotes:11,maxChars:12000});
