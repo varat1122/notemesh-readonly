@@ -301,6 +301,48 @@ function statusUnderFence(id:string,actor:string) {
   return {operationId:id,status:r.status,path:(JSON.parse(r.payload) as PreviewInput).path,
     beforeHash:r.before_hash,afterHash:r.after_hash,receipt:r.receipt?JSON.parse(r.receipt):null};
 }
+/** Internal readback only: prove current bytes through this actor's durable
+ * append receipts. No snapshots or other clients' history leave the engine.
+ * Unjournaled, replace/rollback, ambiguous, partial or cross-client changes hold.
+ */
+export function verifyWrittenAppendHistory(id:string,actor:string,currentText:string){
+  return inProcessDrWriterFence.withWriteSync(()=>{
+    const first=owned(id,actor),initial=previewSchema.parse(JSON.parse(first.payload));
+    const validate=(r:RecordRow)=>{
+      const p=previewSchema.parse(JSON.parse(r.payload));
+      const s=statusUnderFence(r.id,actor),receipt=s.receipt;
+      if(r.actor!==actor||p.path!==initial.path||p.change.kind!=="append"||
+        s.status!=="written"||!receipt||receipt.operationId!==r.id||
+        receipt.path!==p.path||receipt.beforeHash!==r.before_hash||
+        receipt.afterHash!==r.after_hash||receipt.write!=="written"||
+        receipt.readback!=="verified"||receipt.reindex!=="verified"||
+        sha256(r.before_text)!==r.before_hash||sha256(r.after_text)!==r.after_hash||
+        r.before_hash===r.after_hash||
+        (requiresApproval(r)&&!r.approval)||
+        calculate(p,r.before_text,actor)!==r.after_text)
+        throw Error("graph_readback_timeline_append_history_invalid_hold");
+    };
+    validate(first);
+    const rows=store().prepare(`SELECT * FROM safe_edit_operations
+      WHERE actor=? AND json_extract(payload,'$.path')=? AND status='written'`)
+      .all(actor,initial.path) as RecordRow[];
+    let tip=first.after_hash,text=first.after_text,count=0;
+    const seen=new Set([first.id]),currentHash=sha256(currentText);
+    while(tip!==currentHash){
+      const next=rows.filter(r=>r.before_hash===tip&&!seen.has(r.id));
+      if(next.length!==1||++count>1000)
+        throw Error("graph_readback_timeline_append_history_missing_or_ambiguous_hold");
+      validate(next[0]);
+      if(next[0].before_text!==text)
+        throw Error("graph_readback_timeline_append_snapshot_mismatch_hold");
+      seen.add(next[0].id);tip=next[0].after_hash;text=next[0].after_text;
+    }
+    if(text!==currentText)
+      throw Error("graph_readback_timeline_append_snapshot_mismatch_hold");
+    return {operationAfterHash:first.after_hash,currentAfterHash:currentHash,
+      subsequentAuthenticatedAppendCount:count};
+  }, "protected_safe_edits");
+}
 export function apply(input:unknown,actor:string) {
   return inProcessDrWriterFence.withWriteSync(()=>applyUnderFence(input,actor), "protected_safe_edits");
 }

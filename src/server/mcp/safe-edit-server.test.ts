@@ -22,8 +22,123 @@ async function connected(a:McpAccess) {
  const {createSafeEditMcpServer}=await import("./safe-edit-server");const server=createSafeEditMcpServer(a),client=new Client({name:"test",version:"1"});const [l,r]=InMemoryTransport.createLinkedPair();await server.connect(r);await client.connect(l);return {client,close:async()=>{await client.close();await server.close();}};
 }
 function unpack(result:any){const b=JSON.parse(result.content[0].text);return JSON.parse(b.result.split("\n").slice(1,-1).join("\n"));}
+async function seedGraphEvent(issuer:string,event:string,op:string){
+ const company="01_Companies/"+issuer+".md";
+ const source="10_Knowledge/Company Research/"+issuer+" - "+event+".md";
+ const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - "+issuer+".md";
+ const analysis="08_Daily_Weekly/Research Indexes/Investment Review - "+issuer+" - "+event+".md";
+ const sourceText="---\nentity: "+issuer+"\nevent_key: "+event+"\nperiod: FY26Q4\nsource_type: user_supplied\nverification: unverified\n---\n# Source\nSynthetic supplied statement.\n";
+ const {reindexPath}=await import("../vault/indexer");
+ for(const [p,text] of [[company,"---\nentity: "+issuer+"\n---\n# Company\n"],
+  [source,sourceText],[timeline,"---\ncompany: "+issuer+"\n---\n# Evolution\nExisting history.\n"]]){
+  const abs=path.join(root,"vault",p);fs.mkdirSync(path.dirname(abs),{recursive:true});
+  if(!fs.existsSync(abs))fs.writeFileSync(abs,text);
+  reindexPath(p);
+ }
+ return {operationRoot:op,issuer,eventKey:event,period:"FY26Q4",
+  timelineDate:"2026-10-21",timelineHeading:"Evolution",analysisPath:analysis,
+  timelinePath:timeline,sourcePath:source,expectedSourceSha256:digest(sourceText),
+  analysisMarkdown:["---","type: investment_review","entity: "+issuer,
+   "event_key: "+event,"operation_id: "+op,"source_type: archived_ai",
+   "independent_evidence: false","verification: not_reverified","status: draft",
+   "analysis_origin: synthetic_fixture","source_path: "+source,
+   "source_sha256: "+digest(sourceText),"---","# Review",
+   "<!-- investment-os-operation:"+op+" -->","<!-- investment-os-event:"+event+" -->",
+   "Synthetic hypothesis; actual issuer facts remain unverified.",
+   ...[source,company,timeline].map(p=>"[["+p.slice(0,-3)+"]]"),""].join("\n"),
+ };
+}
+it.each(["body","frontmatter","size","missing-fts"])("rejects inconsistent Source %s before either graph operation",async field=>{
+ const payload=await seedGraphEvent("PFTEST","PF-"+field,"ios-preflight-"+field);
+ const database=(await import("../db")).db();
+ const before=fs.readFileSync(path.join(root,"vault",payload.timelinePath),"utf8");
+ if(field==="body")database.prepare("UPDATE notes_fts SET body='stale source body' WHERE rowid=(SELECT rowid FROM notes WHERE path=?)").run(payload.sourcePath);
+ if(field==="frontmatter")database.prepare("UPDATE notes SET frontmatter='{}' WHERE path=?").run(payload.sourcePath);
+ if(field==="size")database.prepare("UPDATE notes SET size=size+1 WHERE path=?").run(payload.sourcePath);
+ if(field==="missing-fts")database.prepare("DELETE FROM notes_fts WHERE rowid=(SELECT rowid FROM notes WHERE path=?)").run(payload.sourcePath);
+ const c=await connected(access);process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED="1";
+ try{
+  const result=await c.client.callTool({name:"write_investment_graph_bundle",arguments:payload});
+  expect(result.isError,JSON.stringify(result)).toBe(true);
+  expect(JSON.stringify(result)).toContain("source_physical_index_mismatch_hold");
+  expect(fs.existsSync(path.join(root,"vault",payload.analysisPath))).toBe(false);
+  expect(fs.readFileSync(path.join(root,"vault",payload.timelinePath),"utf8")).toBe(before);
+  expect(database.prepare("SELECT count(*) AS n FROM safe_edit_operations WHERE id IN (?,?)")
+   .get(payload.operationRoot+"-analysis",payload.operationRoot+"-timeline")).toEqual({n:0});
+  const prepared=await c.client.callTool({name:"prepare_investment_graph_review",arguments:{
+   issuer:payload.issuer,eventKey:payload.eventKey,period:payload.period,
+   sourcePath:payload.sourcePath,question:"Review original source before writing"}});
+  expect(prepared.isError,JSON.stringify(prepared)).toBe(true);
+  expect(JSON.stringify(prepared)).toContain("source_physical_index_mismatch_hold");
+ }finally{delete process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED;await c.close();}
+});
+it("verifies Event A after an authenticated Event B append without accepting unreceipted Timeline changes",async()=>{
+ const first=await seedGraphEvent("HISTORY","HISTORY-A","ios-history-a-20261021");
+ const c=await connected(access);process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED="1";
+ try{
+  const a=await c.client.callTool({name:"write_investment_graph_bundle",arguments:first});
+  expect(a.isError,JSON.stringify(a)).not.toBe(true);
+  expect(unpack(a).status).toBe("authorized_two_note_graph_written_and_readback_verified");
+  const second=await seedGraphEvent("HISTORY","HISTORY-B","ios-history-b-20261021");
+  const b=await c.client.callTool({name:"write_investment_graph_bundle",arguments:second});
+  expect(b.isError,JSON.stringify(b)).not.toBe(true);
+  expect(unpack(b).status).toBe("authorized_two_note_graph_written_and_readback_verified");
+  const args={analysisOperationId:first.operationRoot+"-analysis",timelineOperationId:first.operationRoot+"-timeline",
+   analysisPath:first.analysisPath,timelinePath:first.timelinePath,sourcePath:first.sourcePath};
+  const verify=()=>c.client.callTool({name:"verify_investment_graph_writeback",arguments:args});
+  const current=fs.readFileSync(path.join(root,"vault",first.timelinePath),"utf8");
+  const verified=await verify();
+  expect(verified.isError,JSON.stringify(verified)).not.toBe(true);
+  expect(unpack(verified).historicalWriteReceiptsVerified).toBe(true);
+  expect(unpack(verified).currentGraphIntegrityVerified).toBe(true);
+  expect(unpack(verified).exactOperationAfterHashesVerified).toBe(false);
+  expect(unpack(verified).subsequentAuthenticatedAppendCount).toBe(1);
+  const replay=await c.client.callTool({name:"write_investment_graph_bundle",arguments:first});
+  expect(replay.isError,JSON.stringify(replay)).not.toBe(true);
+  expect(unpack(replay).replayDidNotWrite).toBe(true);
+  expect(fs.readFileSync(path.join(root,"vault",first.timelinePath),"utf8")).toBe(current);
+  const {reindexPath}=await import("../vault/indexer");
+  fs.appendFileSync(path.join(root,"vault",first.timelinePath),"\nUnreceipted edit.\n");reindexPath(first.timelinePath);
+  expect((await verify()).isError).toBe(true);
+  fs.writeFileSync(path.join(root,"vault",first.timelinePath),current);reindexPath(first.timelinePath);
+  const database=(await import("../db")).db();
+  database.prepare("UPDATE safe_edit_operations SET actor='oauth:another-client' WHERE id=?").run(second.operationRoot+"-timeline");
+  expect((await verify()).isError).toBe(true);
+  database.prepare("UPDATE safe_edit_operations SET actor=? WHERE id=?").run(access.label,second.operationRoot+"-timeline");
+  expect((await verify()).isError).not.toBe(true);
+  const snapshot=database.prepare("SELECT after_text FROM safe_edit_operations WHERE id=?")
+   .get(second.operationRoot+"-timeline") as {after_text:string};
+  database.prepare("UPDATE safe_edit_operations SET after_text=after_text||'corrupted snapshot' WHERE id=?")
+   .run(second.operationRoot+"-timeline");
+  expect((await verify()).isError).toBe(true);
+  database.prepare("UPDATE safe_edit_operations SET after_text=? WHERE id=?")
+   .run(snapshot.after_text,second.operationRoot+"-timeline");
+  database.prepare("UPDATE safe_edit_operations SET status='writing' WHERE id=?")
+   .run(second.operationRoot+"-timeline");
+  expect((await verify()).isError).toBe(true);
+  database.prepare("UPDATE safe_edit_operations SET status='written' WHERE id=?")
+   .run(second.operationRoot+"-timeline");
+  // Even a valid receipt chain cannot excuse a stale current graph index.
+  database.prepare("UPDATE notes_fts SET body='stale Timeline' WHERE rowid=(SELECT rowid FROM notes WHERE path=?)")
+   .run(first.timelinePath);
+  expect((await verify()).isError).toBe(true);
+  reindexPath(first.timelinePath);
+  // Replacing the old backlink through a legitimate generic Safe Edit is
+  // still not an append-only evolution and must hold historical verification.
+  const edit=await c.client.callTool({name:"preview_edit",arguments:{
+   operationId:"ios-history-replace-20261021",path:first.timelinePath,
+   reason:"Synthetic non-append history change",change:{kind:"replace",
+    oldText:"Existing history.",newText:"Rewritten history."}}});
+  expect(edit.isError,JSON.stringify(edit)).not.toBe(true);
+  const ep=unpack(edit);
+  const changed=await c.client.callTool({name:"apply_edit",arguments:{
+   operationId:ep.operationId,previewToken:ep.previewToken,expectedHash:ep.beforeHash}});
+  expect(changed.isError,JSON.stringify(changed)).not.toBe(true);
+  expect((await verify()).isError).toBe(true);
+ }finally{delete process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED;await c.close();}
+});
 it("discovers exactly fifteen scoped tools with accurate write annotations",async()=>{
- const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="write_investment_graph_bundle"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment");}}finally{await c.close();}
+ const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());expect(tools.find(t=>t.name==="write_investment_graph_bundle")?.inputSchema.required).toContain("expectedSourceSha256");for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="write_investment_graph_bundle"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment");}}finally{await c.close();}
 });
 it.each([
  {...access,scopes:["vault:read"]},{...access,scopes:["vault:read","inbox:submit"]},

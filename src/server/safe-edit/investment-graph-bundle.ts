@@ -120,6 +120,13 @@ function validatePreflight(i:InvestmentGraphBundleInput,existingAnalysis=false){
   if(sha256(sourceRaw)!==i.expectedSourceSha256)
     throw Error("graph_bundle_source_changed_since_context_review_hold");
   const src=note(sourceRaw);
+  const sourceIndex=db().prepare(`SELECT n.frontmatter,n.size,f.body
+    FROM notes AS n JOIN notes_fts AS f ON f.rowid=n.rowid WHERE n.path=?`)
+    .get(i.sourcePath) as {frontmatter:string|null;size:number;body:string}|undefined;
+  if(!sourceIndex||sourceIndex.body!==src.body||
+    sourceIndex.frontmatter!==JSON.stringify(src.data)||
+    sourceIndex.size!==Buffer.byteLength(sourceRaw,"utf8"))
+    throw Error("graph_bundle_source_physical_index_mismatch_hold");
   const evolution=note(loadIndexed(i.timelinePath));
   const analysis=note(i.analysisMarkdown);
   const m=analysis.data,s=src.data,t=evolution.data;

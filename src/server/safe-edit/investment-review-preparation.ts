@@ -56,6 +56,13 @@ export function prepareRealInvestmentReviewHandoff(input:PrepareReviewInput){
     throw Error("review_handoff_original_source_out_of_scope_hold");
   const sourceRaw=indexed(sourcePath);
   const source=meta(sourceRaw);
+  const sourceIndex=db().prepare(`SELECT n.frontmatter,n.size,f.body
+    FROM notes AS n JOIN notes_fts AS f ON f.rowid=n.rowid WHERE n.path=?`)
+    .get(sourcePath) as {frontmatter:string|null;size:number;body:string}|undefined;
+  if(!sourceIndex||sourceIndex.body!==splitFrontmatter(sourceRaw).body||
+    sourceIndex.frontmatter!==JSON.stringify(source)||
+    sourceIndex.size!==Buffer.byteLength(sourceRaw,"utf8"))
+    throw Error("review_handoff_source_physical_index_mismatch_hold");
   if(source.entity!==issuer||source.event_key!==input.eventKey||
     !["primary","attributed","user_supplied"].includes(String(source.source_type))||
     typeof source.period==="string" && source.period!==input.period)
