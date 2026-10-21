@@ -3,6 +3,51 @@
 Development only. No main merge, deployment, App publication, real Vault access,
 production permissions, or paid inference is authorized by this document.
 
+## Latest linked-save continuation (21 October 2026)
+
+Code candidate: `e1ac0b3643630d0978b3095eadf37d42ac59f190`. The owner's
+ChatGPT screenshot reports an expired NoteMesh V2 connection. It does not
+establish a provider/server bug, a queued submission, or a failed Vault write.
+Normal owner OAuth reconnection is required; no authentication change was made.
+
+Two development defects were reproduced before fixing:
+
+- Actual `intake-importer.cjs` output under `00_Inbox/ChatGPT/.../N01.md`
+  was absent from subsequent scoped investment context. The existing context
+  builder now retrieves bounded imported AI history when its leading title
+  subject and exact resolved canonical Company/Macro hub link agree. Broker
+  mentions, incidental countries, missing links and promoted/inconsistent
+  metadata are excluded. Legacy fields stay undeclared; the existing schema
+  adapter labels `chatgpt_analysis` as non-independent AI without rewriting
+  Source hashes, event keys, notes or receipts. This does not authorize a
+  Source-bound graph write or update Company Evolution.
+- A `blocked` intake receipt incorrectly said it was still queued. It now
+  directs review without retry and does not claim no partial files exist.
+
+The existing real-HTTP OAuth test now expires a temporary opaque save token,
+renews through its actual approved refresh grant, reads the original submission
+and resends its identical payload. Both requests retain one submission ID/row.
+This is offline/local integration evidence, not a diagnosis of the deployed
+ChatGPT connection. Existing consent, audience, revocation and scope gates remain.
+
+Local checks on this source commit: frozen pnpm 11.16.0 installation, lint,
+typecheck, build/client/runtime scans and **1,946 tests / 166 files passed**;
+the separate backup script suite passed **46 tests**. Playwright passed 31/35;
+four local `file://` UI tests were blocked by managed Chromium
+`ERR_BLOCKED_BY_ADMINISTRATOR`. Docker reached dependency installation but
+failed with `EAI_AGAIN registry.npmjs.org`; runtime was not tested locally.
+Production dependency audit exited successfully under unchanged policy; its
+metadata still lists 12 moderate and two high vulnerabilities with reviewed
+existing exceptions. This is not a zero-advisory claim. Authoritative CI for
+the final PR head must separately pass Test, Image and Audit.
+
+No deployment, App action refresh, live Vault mutation or paid inference was
+performed. After reconnecting the intended App, inspect any existing submission
+ID before resending; a read-only `IN-...` plan ID is not a submission receipt.
+The shortest remaining acceptance step is the owner's already reviewed
+single-note save and independent readback in the connected chat, followed by
+separately authorized staging graph/Timeline acceptance.
+
 ## Confirmed defects and repairs
 
 Starting remote #108 HEAD was `de2bd970bf6a1f8ab0c5e6665ec61e46933d8ed9`;
@@ -72,7 +117,14 @@ root-filesystem fixture assumption. Do not change its assertion. Managed system
 Chromium blocks file:// and the pinned-browser CDN is restricted; use normal
 GitHub CI for authoritative E2E and Docker evidence. No test gate is waived.
 
-## Pending OpenAI evaluation: current implementation
+## Historical OpenAI adapter inspection (before budget/proxy changes)
+
+The inspection below predates `cd36fa2` (persistent cumulative budget and graph
+evaluation transport) and `ba7ddc8` (opaque cloud credential support). It is
+retained as a historical finding, not the current adapter contract. Consult
+[OPENAI_EVALUATION_BUDGET.md](./OPENAI_EVALUATION_BUDGET.md) and actual source
+for current limits/readiness gates. Paid evaluation remains paused; this
+linked-save continuation does not require an OpenAI API key.
 
 Inspected `offline-synthetic-openai-eval.ts`, its mock-transport tests,
 `offline-synthetic-model-evaluator.ts`, the fixed corpus/scorer and
