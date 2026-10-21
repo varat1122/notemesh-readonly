@@ -65,7 +65,7 @@ export function createSafeEditMcpServer(access:McpAccess) {
   },async input=>invoke(()=>verifyAuthorizedInvestmentGraphReadback(
     input,access.label)));
   server.registerTool("write_investment_graph_bundle",{
-    description:"WRITE: Host/user must explicitly authorize this single scoped two-note investment graph writeback action. Creates ONE unverified Historical AI Analysis Note and appends ONE linked event into the EXISTING Company Evolution Timeline using existing Safe Edit version checks/backups, then independent real physical/FTS/Link/Backlink readback. One authorized host action covers both writes; never modifies protected Thesis/Portfolio. Multi-file atomicity not guaranteed: incomplete second step returns partial manual-repair status. Disabled by default; admin must explicitly enable INVESTMENT_GRAPH_BUNDLE_ENABLED=1. No standing unattended auto-write permission or mobile Sync claim.",
+    description:"WRITE: Host/user must explicitly authorize this scoped investment graph action. Initial call writes one Historical AI Draft Analysis and one Company Evolution backlink. If Analysis was durably saved but the Timeline write never started, a SEPARATE host-authorized invocation with recoverTimelineOnly=true can complete ONLY the missing backlink after receipt, physical hash, provenance, canonical path and duplicate checks. Interrupted Timeline operations always require manual review. Protected Thesis/Portfolio never change; admin feature flag disabled by default. Not standing auto-save or device Sync.",
     inputSchema:{
       operationRoot:z.string().regex(/^[a-z][a-z0-9-]{8,60}$/),
       issuer:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._ -]{0,49}$/),
@@ -77,6 +77,7 @@ export function createSafeEditMcpServer(access:McpAccess) {
       timelinePath:z.string().min(1).max(350),
       sourcePath:z.string().min(1).max(350),
       analysisMarkdown:z.string().min(150).max(90000),
+      recoverTimelineOnly:z.boolean().optional().describe("Explicit newly authorized Timeline-only recovery after verified Analysis receipt; never an automatic retry"),
     },annotations:{
       readOnlyHint:false,destructiveHint:true,idempotentHint:true,
       openWorldHint:false,

@@ -262,6 +262,119 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   await c.close();
  }
 });
+it("explicitly authorized partial-graph recovery repairs only an unstarted Timeline write; checks receipts, bytes and duplicates",async()=>{
+ const entity="SYNTH",event="SYNTH-RECOVER-FY26Q4",op="ios-synth-recover-20261021-b";
+ const base="08_Daily_Weekly/Research Indexes/";
+ const company="01_Companies/SYNTH.md";
+ const source="07_Sources/ChatGPT/SYNTH Recovery Evidence.md";
+ const timeline=base+"Company Evolution - SYNTH.md";
+ const analysis=base+"Investment Review - SYNTH - "+event+".md";
+ const marker="<!-- investment-os-operation:"+op+" -->";
+ const eventMarker="<!-- investment-os-event:"+event+" -->";
+ const vaultRoot=path.join(root,"vault");
+ const docs=[
+  [company,"---\nentity: SYNTH\ntype: company\n---\n# SYNTH\n"],
+  [source,[
+   "---","entity: SYNTH","event_key: "+event,"period: FY26Q4",
+   "type: research_note","source_type: user_supplied",
+   "verification: unverified","---","# User-supplied source",
+   "Historical data is not independently verified.",""
+  ].join("\n")],
+  [timeline,"---\nentity: SYNTH\ntype: company_evolution\n---\n# Evolution\nPrevious dated history remains.\n"],
+ ];
+ const {reindexPath}=await import("../vault/indexer");
+ for(const [rel,content] of docs){
+  fs.mkdirSync(path.dirname(path.join(vaultRoot,rel)),{recursive:true});
+  fs.writeFileSync(path.join(vaultRoot,rel),content);
+  reindexPath(rel);
+ }
+ const markdown=[
+  "---","type: investment_review","entity: SYNTH","event_key: "+event,
+  "verification: not_reverified","source_type: archived_ai",
+  "analysis_origin: synthetic_ai_draft","independent_evidence: false",
+  "status: draft","operation_id: "+op,"---",
+  "# Unverified review",marker,eventMarker,
+  "## Causal chain","Demand conversion and revenue remain hypotheses.",
+  "## Counter-evidence","Alternative: delivery timing, not demand.",
+  "## Exact canonical links",
+  "[["+source.slice(0,-3)+"]]",
+  "[["+company.slice(0,-3)+"]]",
+  "[["+timeline.slice(0,-3)+"]]","",
+ ].join("\n");
+ const payload={
+  operationRoot:op,issuer:entity,eventKey:event,period:"FY26Q4",
+  timelineDate:"2026-10-21",timelineHeading:"Evolution",
+  analysisPath:analysis,timelinePath:timeline,sourcePath:source,
+  analysisMarkdown:markdown,
+ };
+ const c=await connected(access);
+ process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED="1";
+ try{
+  // Repair request must not create a first analysis note on its own.
+  const early=await c.client.callTool({name:"write_investment_graph_bundle",
+   arguments:{...payload,recoverTimelineOnly:true}});
+  expect(early.isError).toBe(true);
+  expect(fs.existsSync(path.join(vaultRoot,analysis))).toBe(false);
+  // Reproduce a real persisted first Safe Edit write, with NO Timeline operation.
+  const prepared=await c.client.callTool({name:"create_note",arguments:{
+   operationId:op+"-analysis",path:analysis,reason:"SYNTH partial-first-write fixture",
+   content:markdown,
+  }});
+  expect(prepared.isError).not.toBe(true);
+  const p=unpack(prepared);
+  const applied=await c.client.callTool({name:"apply_edit",arguments:{
+   operationId:p.operationId,previewToken:p.previewToken,
+   expectedHash:p.beforeHash,
+  }});
+  expect(applied.isError).not.toBe(true);
+  expect(unpack(applied).receipt.reindex).toBe("verified");
+  const beforeRepair=fs.readFileSync(path.join(vaultRoot,timeline),"utf8");
+  const beforeAnalysis=fs.readFileSync(path.join(vaultRoot,analysis),"utf8");
+  const unapproved=await c.client.callTool({name:"write_investment_graph_bundle",
+   arguments:payload});
+  expect(unapproved.isError).not.toBe(true);
+  expect(unpack(unapproved).status)
+   .toBe("existing_partial_or_preview_operations_manual_review");
+  expect(fs.readFileSync(path.join(vaultRoot,timeline),"utf8")).toBe(beforeRepair);
+  // Do not trust new caller-supplied prose if it differs from the written bytes.
+  const changed=await c.client.callTool({name:"write_investment_graph_bundle",
+   arguments:{...payload,recoverTimelineOnly:true,
+    analysisMarkdown:markdown.replace("Demand conversion","Changed conversion")}});
+  expect(changed.isError).toBe(true);
+  expect(fs.readFileSync(path.join(vaultRoot,timeline),"utf8")).toBe(beforeRepair);
+  // An out-of-band same-event Timeline update must fail closed, not duplicate.
+  fs.appendFileSync(path.join(vaultRoot,timeline),eventMarker+"\n");
+  reindexPath(timeline);
+  const duplicate=await c.client.callTool({name:"write_investment_graph_bundle",
+   arguments:{...payload,recoverTimelineOnly:true}});
+  expect(duplicate.isError).toBe(true);
+  fs.writeFileSync(path.join(vaultRoot,timeline),beforeRepair);
+  reindexPath(timeline);
+  // Only the separately host-authorized recovery call may append the backlink.
+  const fixed=await c.client.callTool({name:"write_investment_graph_bundle",
+   arguments:{...payload,recoverTimelineOnly:true}});
+  expect(fixed.isError,JSON.stringify(fixed)).not.toBe(true);
+  const v=unpack(fixed);
+  expect(v.status).toBe("authorized_timeline_recovery_written_and_graph_readback_verified");
+  expect(v.recoveryOnly).toBe(true);
+  expect(v.graph.livingTimelineBacklinkVerified).toBe(true);
+  expect(v.graph.exactOperationAfterHashesVerified).toBe(true);
+  expect(fs.readFileSync(path.join(vaultRoot,analysis),"utf8")).toBe(beforeAnalysis);
+  const recovered=fs.readFileSync(path.join(vaultRoot,timeline),"utf8");
+  expect(recovered.split(marker)).toHaveLength(2);
+  expect(recovered).toContain("Previous dated history remains.");
+  const replay=await c.client.callTool({name:"write_investment_graph_bundle",
+   arguments:{...payload,recoverTimelineOnly:true}});
+  expect(replay.isError).not.toBe(true);
+  expect(unpack(replay).status)
+   .toBe("previously_written_both_receipts_graph_reverified");
+  expect(fs.readFileSync(path.join(vaultRoot,timeline),"utf8")).toBe(recovered);
+ }finally{
+  delete process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED;
+  await c.close();
+ }
+});
+
 it("Graph bundle rejects fake-primary AI Analysis, nonexistent links and event replay without creating a file",async()=>{
  const {applyAuthorizedInvestmentGraphBundle}=await import("../safe-edit/investment-graph-bundle");
  process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED="1";
