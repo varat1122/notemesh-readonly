@@ -79,6 +79,23 @@ Record, without leaking OAuth tokens or full private note bodies:
 
 **GO** only if every stage succeeds on a reviewed nonproduction exact SHA with the owner-approved authentication and write policy, no protected changes, no unreviewed security exceptions and factual AI reasoning cited to actual sources. **NO-GO** for stale/partial source, absent original, undocumented duplicate classification, unresolved PR stack divergence, any skipped proof, any false "Synced to phone" conclusion or required permission not explicitly granted.
 
+## 6. Real live Vault READ-ONLY preflight (21 Oct 2026; no mutation)
+
+A limited read-only lookup against connected `Investment_OS` was performed. The server reported 3,375 indexed Markdown notes, zero unindexed notes, disk status `ok`. **This is metadata visibility, not a full-Vault review or proof all notes contain reliable evidence.**
+
+Existing NVDA anchors (observed, not modified):
+- `01_Companies/NVDA.md`
+- `08_Daily_Weekly/Research Indexes/Company Evolution - NVDA.md` (note created/last-modified 19 Oct 2026; declares `company: NVDA`, not `entity: NVDA`; headings include `NVDA — Living Company Evolution Timeline` and dated historical sections)
+- `05_Thesis/NVDA - Current Thesis.md` (declared `draft_from_archived_evidence`, `not_reverified`; last `updated: 2026-10-12`)
+- `05_Thesis/NVDA - Evidence Register.md` (`not_reverified`; last `updated: 2026-10-12`)
+- `08_Daily_Weekly/Research Indexes/Primary Evidence - NVDA FY27Q2 2026-08-26.md` (declared `primary` and `verified_against_primary` for certain figures; **also** `status: source_verified_dedup_pending`, `source_sha256: null`, `company: NVDA` without `event_key`).
+
+**Concrete blocker found and fixed in the Draft:** the read/write graph handlers previously required a living Timeline's frontmatter to have `entity`; production's actual NVDA Timeline has `company`. PR #108 now tolerates this *legacy Timeline identity field only* if declared `entity` and `company` (when present) are both consistent with requested issuer. It still refuses conflicting values. The integration test uses that legacy metadata shape.
+
+**Do not choose existing NVDA FY27Q2 evidence as a fresh event automatically:** it is a pre-existing primary IR review with dedup unresolved, no immutable source-byte hash and no exact event-key metadata. For an approved live pilot, either pick a genuinely **new, independently reviewed event** or deliberately create a separately classified source record with exact original event key; preserve the existing evidence as historical reference, never count a rewrite as a new independent issuer report.
+
+**Owner decisions still required before execution:** authorize exact staging deployment/scope, select a genuine event, confirm the actual original source and duplicate classification, and approve the single limited Source + Analysis/Timeline write sequence. No Paid API/model test has been started.
+
 ### Current result (21 Oct 2026)
 
 - Synthetic integration test on PR #108 has been expanded to create original source via **real in-memory MCP Safe Edit preview/apply** in a temporary Vault, then prepare/retrieve/write/read back/next-event retrieve.
