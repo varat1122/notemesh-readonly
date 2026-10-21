@@ -194,7 +194,7 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
  const docs=[
   [company,"---\nentity: SYNTH\ntype: company\n---\n# SYNTH\n"],
   [timeline,[
-    "---","entity: SYNTH","type: company_evolution","---",
+    "---","company: SYNTH","type: company_evolution_timeline","---",
     "# Evolution","Preexisting historical context retained.","",
   ].join("\n")],
  ];
@@ -252,6 +252,22 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   expect(unpack(captured).receipt.reindex).toBe("verified");
   expect(fs.readFileSync(path.join(vaultRoot,source),"utf8"))
     .toBe(originalSource);
+  // Existing production timelines can use company: NVDA without entity.
+  // Never allow a conflicting extra entity field to masquerade as another issuer.
+  const originalTimeline=fs.readFileSync(path.join(vaultRoot,timeline),"utf8");
+  fs.writeFileSync(path.join(vaultRoot,timeline),
+    originalTimeline.replace("company: SYNTH","company: SYNTH\nentity: OTHER"));
+  reindexPath(timeline);
+  const conflicted=await c.client.callTool({
+   name:"prepare_investment_graph_review",arguments:{
+    issuer:"SYNTH",eventKey:event,period:"FY26Q4",sourcePath:source,
+    question:"Check canonical issuer scope before writing",
+   },
+  });
+  expect(conflicted.isError).toBe(true);
+  expect(JSON.stringify(conflicted)).toContain("review_handoff_living_timeline_wrong_issuer_hold");
+  fs.writeFileSync(path.join(vaultRoot,timeline),originalTimeline);
+  reindexPath(timeline);
   // Real-Vault indexed source/context preparation runs with WRITE gate disabled.
   const prepared=await c.client.callTool({
    name:"prepare_investment_graph_review",arguments:{
