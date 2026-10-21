@@ -20,6 +20,16 @@ The administrator must explicitly enable `INVESTMENT_GRAPH_BUNDLE_ENABLED=1` **a
 6. Invoke PR #103's real authenticated read-only graph verifier after both writes. Return a constrained real-server status: verified two-note writeback, previously verified replay, or partial-write manual repair. The entire action is explicitly marked **WRITE**, so the host must authorize that one event's changes. Never treat a preview as a save.
 7. No silent retry or rollback if the second note fails: the first Analysis Note stays as evidence, operation IDs and journal provide manual reconciliation. Multi-note atomicity and remote/mobile device sync are **NOT** claimed.
 
+## Explicit partial Timeline recovery (PR #107; opt-in, NO PROD)
+
+A successful Analysis Safe Edit receipt followed by a **never-started Timeline write** no longer has to remain an indefinite manual dead-end. The same mutating MCP tool accepts optional `recoverTimelineOnly: true` on a **new, separately host-authorized invocation**. Normal replay without that parameter **never** writes again.
+
+The server requires the same authenticated OAuth actor, admin kill switch and paused-Sync guards. It checks the original Analysis operation's durable `written / readback verified / reindex verified` receipt, its canonical path and SHA-256 against the physically reopened, indexed Analysis Note, and requires its bytes to match the caller's identical original draft. The source's issuer/event/period, Analysis provenance/markers, all exact existing canonical references, living Timeline heading and absence of this event's marker are revalidated. It then uses the existing Safe Edit PREVIEW/APPLY on the **Timeline only** and reuses the independent two-note graph verifier. No second Analysis Note is created.
+
+Recovery refuses when the first operation is absent, not fully written, belongs to a different OAuth actor, or when any Timeline operation already exists (including preview, writing, failed or incomplete): those cases might reflect partially committed bytes and require manual reconciliation. A repeated fully written two-note bundle is readback-verified only and never appends again. No automatic retries, rollback, standing consent or mobile Sync claims.
+
+Integration regression exercises a real Safe Edit first-note write with a deliberately absent Timeline operation, rejects a normal replay, tampered Analysis bytes and duplicate event markers, then explicitly repairs the Timeline and proves replays remain idempotent — entirely against a temporary SYNTH Vault.
+
 ## Safety boundaries and release status
 
 - **No user-specified `approved=true`, preview token, actor or bypass policy is accepted.** Authenticated actor is bound to the OAuth host request.
