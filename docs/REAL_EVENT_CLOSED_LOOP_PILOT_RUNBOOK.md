@@ -4,6 +4,8 @@
 **Status:** PREPARED / **NOT EXECUTED** — Draft PR stack, no deployment or live Vault mutation approved.  
 **North Star:** New Investment Intelligence → original-source identity → historical Current Thesis / Evidence Register / industry + contrary evidence → AI causal reasoning → relevant canonical Markdown Wikilinks → authorized Safe Edit Analysis + living Company Evolution → physical/FTS/link/backlink readback → historical ANALYSIS recalled at NEXT event.
 
+Paid-evaluation preparation now has a [single cumulative USD10 campaign with USD8.50 automatic cutoff](./OPENAI_EVALUATION_BUDGET.md), persistent pre-dispatch reservations and offline actual-MCP-loop coverage. This does **not** authorize paid calls: current official pricing/model availability/Project controls and durable ledger setup remain unverified. No provider hard cap is claimed.
+
 ## 1. Stack release review: hard constraints
 
 - Current end-of-stack: [PR #108](https://github.com/varat1122/notemesh-readonly/pull/108), stacked on #107 → #106 → #105 → #104 → #103 → ... → #93 → #92 and earlier non-main branches. At the 21 Oct review, all #93–108 were **Draft/unmerged**. Do not mistake individually green PR CI for a merged deployable release.

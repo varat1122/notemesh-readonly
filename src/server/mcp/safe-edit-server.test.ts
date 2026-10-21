@@ -6,6 +6,10 @@ import { createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpAccess } from "./server";
+import {OpenAIEvaluationBudget,budgetedEvaluationTransport}
+ from "../vault/openai-evaluation-budget";
+import {evaluatePreparedSyntheticGraphWithTransport}
+ from "../vault/offline-synthetic-openai-eval";
 // Only the daemon control is stubbed; transport, filesystem, database, OAuth
 // handler enforcement and engine are real. The production daemon is not run.
 vi.mock("../safe-edit/sync",()=>({withPausedSync:async(run:()=>unknown)=>run()}));
@@ -411,9 +415,68 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   expect(handoff.canonical.requiredAnalysisSourceMetadata).toEqual({
     source_path:source,source_sha256:handoff.originalSource.sha256,
   });
+  // OFFLINE provider simulation now consumes the ACTUAL physical/indexed
+  // handoff through the same reservation/reconciliation wrapper as paid runs.
+  // It returns a fixture draft, never evidence of real model reasoning.
+  const budgetDir=fs.mkdtempSync(path.join(os.tmpdir(),"nm-graph-budget-"));
+  const budgetFile=path.join(budgetDir,"campaign.sqlite");
+  OpenAIEvaluationBudget.initialize(budgetFile);
+  const budget=new OpenAIEvaluationBudget(budgetFile);
+  let modelCalls=0;
+  const pricing={model:"gpt-fixture-2026-10-21",contextTokens:400_000,
+    maxOutputTokens:128_000,inputUsdPerMillion:"1.25",outputUsdPerMillion:"10",
+    evidenceSha256:"b".repeat(64)};
+  const modelTransport=budgetedEvaluationTransport(budget,pricing,"graph-baseline",
+    async(_url,init)=>{
+      modelCalls++;
+      const request=JSON.parse(String(init.body));
+      const modelInput=JSON.parse(request.input[1].content);
+      const pack=modelInput.handoff;
+      expect(pack.originalSource.excerpt).toBeTruthy();
+      expect(pack.historicalContext.items.length).toBeGreaterThan(0);
+      expect(request.tools).toBeUndefined();
+      const links=[pack.canonical.sourcePath,pack.canonical.companyPath,pack.canonical.timelinePath];
+      const review={sourceSha256:pack.originalSource.sha256,classification:"new_event",
+        factVersusHypothesis:[{statement:"User supplied an unverified source, not an authenticated issuer filing.",
+          status:"source_statement_unverified",citedPaths:[pack.originalSource.path]}],
+        causalChain:[{from:"demand",to:"revenue_conversion",
+          mechanism:"Demand may fail to become deliveries; no quantified earnings or FCF bridge.",
+          evidenceOrMissingBridge:"Shipment, margin, capex and working capital evidence is missing.",
+          citedPaths:[pack.originalSource.path]}],
+        bottleneckAndThesisImpact:"Conversion is an unverified hypothesis; protected thesis remains unchanged.",
+        counterEvidenceAndAlternatives:["Timing rather than demand could explain an apparent change."],
+        unsupportedClaimsAndEvidenceNeeded:["Independent original issuer and cash flow evidence required."],
+        selectedLinks:links.map(p=>({path:p,relevance:"Required canonical event/source/company context"})),
+        historicalAIReused:pack.historicalContext.items.filter((i:any)=>i.role==="analysis").map((i:any)=>i.path),
+        historicalAIIsIndependentEvidence:false,marketPriceIn:"not_determined",writeAuthorized:false,
+        analysisMarkdown:markdown.replaceAll(event,pack.eventKey).replaceAll(rootId,modelInput.operationRoot)
+          .replaceAll(source.slice(0,-3),pack.originalSource.path.slice(0,-3))
+          .replace("status: draft\n","status: draft\nsource_path: "+
+          pack.originalSource.path+"\nsource_sha256: "+pack.originalSource.sha256+"\n"),
+      };
+      return Response.json({id:"resp_graph_"+modelCalls,model:pricing.model,status:"completed",service_tier:"default",
+        usage:{input_tokens:2000,output_tokens:4000,total_tokens:6000,
+          input_tokens_details:{cached_tokens:0},output_tokens_details:{reasoning_tokens:2000}},
+        output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(review)}]}]});
+    });
+  // Close/remove this fixture ledger even when a later graph assertion fails.
+  try{
+  const evaluated=await evaluatePreparedSyntheticGraphWithTransport(handoff,rootId,
+    "sk-fixture-never-a-real-key",modelTransport,{model:pricing.model,
+      maxOutputTokens:16_384,reasoningEffort:"medium"});
+  expect(evaluated.writeAuthorized).toBe(false);
+  for(const review of [
+    {...evaluated.review,sourceSha256:"0".repeat(64)},
+    {...evaluated.review,analysisMarkdown:evaluated.review.analysisMarkdown.replace("independent_evidence: false","independent_evidence: true")},
+    {...evaluated.review,analysisMarkdown:evaluated.review.analysisMarkdown+"\n[[01_Companies/INVENTED]]\n"},
+  ]){
+    await expect(evaluatePreparedSyntheticGraphWithTransport(handoff,rootId,"fake",
+      async()=>Response.json({status:"completed",output:[{type:"message",content:[
+        {type:"output_text",text:JSON.stringify(review)}]}]})))
+      .rejects.toThrow("synthetic_graph_evaluation_");
+  }
   const boundPayload={...payload,expectedSourceSha256:handoff.originalSource.sha256,
-    analysisMarkdown:markdown.replace("status: draft\n",
-      "status: draft\nsource_path: "+source+"\nsource_sha256: "+handoff.originalSource.sha256+"\n"),
+    analysisMarkdown:evaluated.review.analysisMarkdown,
   };
   const disabled=await c.client.callTool({
    name:"write_investment_graph_bundle",arguments:boundPayload});
@@ -526,10 +589,19 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   expect(historical?.role).toBe("analysis");
   expect(historical?.declaredSourceType).toBe("archived_ai");
   expect(historical?.declaredIndependentEvidence).toBe(false);
+  const nextEvaluated=await evaluatePreparedSyntheticGraphWithTransport(nextPack,
+    "ios-next-model-evaluation-20261021","sk-fixture-never-a-real-key",modelTransport,
+    {model:pricing.model,maxOutputTokens:32_768,reasoningEffort:"high"});
+  expect(nextEvaluated.review.historicalAIReused).toContain(analysis);
+  expect(nextEvaluated.review.historicalAIIsIndependentEvidence).toBe(false);
+  expect(modelCalls).toBe(2);
+  expect(budget.status()).toMatchObject({requests:2,chargedNanoUsd:85_000_000,
+    reservedNanoUsd:0,blocked:false});
   const same=await c.client.callTool({name:"prepare_investment_graph_review",
    arguments:{issuer:"SYNTH",eventKey:event,period:"FY26Q4",
     sourcePath:source,question:"Review existing event history"}});
   expect(unpack(same).status).toBe("existing_event_or_analysis_requires_duplicate_review_no_write");
+  }finally{budget.close();fs.rmSync(budgetDir,{recursive:true,force:true});}
  }finally{
   delete process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED;
   await c.close();
