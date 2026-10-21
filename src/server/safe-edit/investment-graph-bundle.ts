@@ -100,8 +100,10 @@ function validatePreflight(i:InvestmentGraphBundleInput,existingAnalysis=false){
     i.timelinePath.startsWith("05_Thesis/")||
     i.analysisPath.startsWith("06_Portfolio/"))
     throw Error("graph_bundle_protected_target_hold");
-  const previous=db().prepare("SELECT body,frontmatter,size FROM notes WHERE path=?")
-    .get(i.analysisPath) as {body:string;frontmatter:string|null;size:number}|undefined;
+  const previous=db().prepare(`SELECT f.body,n.frontmatter,n.size
+    FROM notes AS n JOIN notes_fts AS f ON f.rowid=n.rowid
+    WHERE n.path=?`).get(i.analysisPath) as
+    {body:string;frontmatter:string|null;size:number}|undefined;
   if(previous&&!existingAnalysis)
     throw Error("graph_bundle_analysis_already_exists_hold");
   if(existingAnalysis){
