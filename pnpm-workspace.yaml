@@ -19,6 +19,8 @@ overrides:
   seroval: ^1.6.9 # unsafe JSON deserialization and unchecked TypedArray sizes
   source-map-js: ^1.2.2 # indexed source-map section offset DoS
   proxy-addr: ^2.0.8 # IPv4-mapped IPv6 trust-subnet spoofing
+  follow-redirects: 1.16.1 # cross-origin sensitive-header / credential forwarding fixes (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c)
+  vite: 6.4.4 # patch Vite 6 within existing peer compatibility (GHSA-587h-7wmj-h5pm)
 
 # CI fails on a high or critical advisory in a production dependency. An
 # advisory that has been reviewed and found not to apply goes here, with
