@@ -45,7 +45,7 @@ function meta(raw:string):Record<string,unknown>{
   return f.data;
 }
 export function prepareRealInvestmentReviewHandoff(input:PrepareReviewInput){
-  const issuer=input.issuer?.trim().toUpperCase();
+  const issuer=input.issuer?.trim().toUpperCase()??"";
   if(!ISSUER.test(issuer)||!EVENT.test(input.eventKey)||
     !input.period?.trim()||input.period.length>100||
     !input.question?.trim()||input.question.trim().length<3||
