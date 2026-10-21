@@ -105,8 +105,8 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   const independenceAssessment:SchemaInspection["independenceAssessment"]=
     normalizedSourceType==="archived_ai"||(!normalizedSourceType&&role==="archive")
       ?"not_independent_archived_ai":
-    sourceRaw&&["user_supplied_chatgpt_summary","user_supplied_chat_summary",
-      "user_supplied_chat_archive_summary"].includes(sourceRaw.toLowerCase())
+    (sourceRaw!==null&&["user_supplied_chatgpt_summary","user_supplied_chat_summary",
+      "user_supplied_chat_archive_summary"].includes(sourceRaw.toLowerCase()))
       ?"not_independent_derivative_summary":"not_assessed";
   if(sourceRaw&&!declaredSourceType&&!alias)
     warnings.push(sourceRaw==="unverified"?"source_type_misused_for_verification":"unmapped_legacy_source_type");
