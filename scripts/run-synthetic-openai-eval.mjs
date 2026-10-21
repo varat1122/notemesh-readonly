@@ -43,10 +43,10 @@ async function main(){
   if(args.length!==3||!/^[a-zA-Z0-9_.-]{1,64}$/.test(args[0])||
     !/^[1-9]\d*$/.test(args[1])||!["low","medium","high"].includes(args[2]))
     throw Error("synthetic_openai_round_output_limit_effort_required");
-  const {runOptInRealOpenAISyntheticEvaluation}=await import(
+  const {runOptInRealOpenAISyntheticEvaluation,evaluationCredentialFromEnvironment}=await import(
     "../src/server/vault/offline-synthetic-openai-eval.ts");
   const result=await runOptInRealOpenAISyntheticEvaluation(
-    process.env.OPENAI_API_KEY,true,
+    evaluationCredentialFromEnvironment(),true,
     {round:args[0],maxOutputTokens:Number(args[1]),reasoningEffort:args[2]});
   // Only compact sanitized quantitative summary. Do not emit any model
   // raw text, Thesis notes, prompts, bearer tokens or response headers.

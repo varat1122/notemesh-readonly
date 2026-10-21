@@ -8,6 +8,7 @@ import {SYNTHETIC_SEMANTIC_CASES}
   from "./offline-semantic-benchmark-corpus";
 import {
   evaluateSyntheticCasesWithTransport,
+  evaluationCredentialFromEnvironment,
   runOptInRealOpenAISyntheticEvaluation,
   SYNTHETIC_OPENAI_ENDPOINT,
 } from "./offline-synthetic-openai-eval";
@@ -51,6 +52,17 @@ afterEach(()=>{
   delete process.env.NM_ENABLE_SYNTHETIC_OPENAI_RUN;
 });
 describe("PR #91: real-provider-ready, mock-transport-tested SYNTH-only adapter",()=>{
+  it("accepts opaque cloud proxy bindings without treating syntax as authentication or falling back",()=>{
+    expect(evaluationCredentialFromEnvironment({NM_EVAL_API_KEY:"proxy-token"})).toBe("proxy-token");
+    expect(evaluationCredentialFromEnvironment({OPENAI_API_KEY:"sk-local-fixture"})).toBe("sk-local-fixture");
+    expect(evaluationCredentialFromEnvironment({NM_EVAL_API_KEY:"proxy-token",
+      OPENAI_API_KEY:"sk-local-fixture"})).toBe("proxy-token");
+    expect(evaluationCredentialFromEnvironment({})).toBeUndefined();
+    for(const key of [""," ","token\nheader", "x".repeat(8193)]){
+      expect(()=>evaluationCredentialFromEnvironment({NM_EVAL_API_KEY:key,
+        OPENAI_API_KEY:"sk-local-fixture"})).toThrow("invalid_credential_binding_hold");
+    }
+  });
   it("runs the existing eight-case workflow through cumulative accounting and charges invalid semantic output",async()=>{
     const root=fs.mkdtempSync(path.join(os.tmpdir(),"nm-triage-budget-"));
     const file=path.join(root,"campaign.sqlite");
@@ -172,7 +184,7 @@ describe("PR #91: real-provider-ready, mock-transport-tested SYNTH-only adapter"
       await expect(runOptInRealOpenAISyntheticEvaluation(undefined,false))
         .rejects.toThrow("synthetic_openai_explicit_local_opt_in_and_key_required");
       process.env.NM_ENABLE_SYNTHETIC_OPENAI_RUN="YES";
-      await expect(runOptInRealOpenAISyntheticEvaluation("sk-short",true))
+      await expect(runOptInRealOpenAISyntheticEvaluation("invalid header\n",true))
         .rejects.toThrow("synthetic_openai_explicit_local_opt_in_and_key_required");
     }
     process.env.RAILWAY_PROJECT_ID="do-not-contact-any-provider";

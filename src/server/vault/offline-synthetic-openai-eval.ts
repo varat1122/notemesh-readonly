@@ -100,10 +100,25 @@ function runIsLocalOnly(){
     process.env.RAILWAY_PROJECT_ID||process.env.RAILWAY_ENVIRONMENT_ID)
     throw Error("synthetic_live_inference_forbidden_in_ci_or_railway");
 }
+// Cloud proxy bindings are opaque placeholders, not necessarily sk-* keys.
+// Syntax checking is not authentication: readiness still verifies the exact
+// model with OpenAI using this credential before any paid reservation/dispatch.
+const usableCredential=(key:unknown):key is string=>
+  typeof key==="string"&&/^[\x21-\x7e]{1,8192}$/.test(key);
+export function evaluationCredentialFromEnvironment(
+  environment:Record<string,string|undefined>=process.env,
+):string|undefined{
+  // OPENAI_* names are reserved for cloud secret bindings. Keep the legacy
+  // name for local clients, but never switch credentials after an API failure.
+  const key=environment.NM_EVAL_API_KEY??environment.OPENAI_API_KEY;
+  if(key!==undefined&&!usableCredential(key))
+    throw Error("synthetic_openai_invalid_credential_binding_hold");
+  return key;
+}
 function requireLiveConsent(key:string|undefined,explicitConsent:boolean):asserts key is string{
   runIsLocalOnly();
   if(explicitConsent!==true||process.env.NM_ENABLE_SYNTHETIC_OPENAI_RUN!=="YES"||
-    !key||!/^sk-/.test(key)||key.length<18)
+    !usableCredential(key))
     throw Error("synthetic_openai_explicit_local_opt_in_and_key_required");
 }
 async function postSyntheticCase(input:ReturnType<
