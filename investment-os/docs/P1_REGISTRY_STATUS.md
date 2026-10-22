@@ -22,9 +22,9 @@ Run from `investment-os/`; evidence is in [validation/p1-registry/](validation/p
 | Scope/security enforcement | PASS within synthetic scope | Reader/forged actor/protected kind/real provenance/rights expansion/classification downgrade rejected; raw P0 rows not silently adopted |
 | Repeatable demo | PASS | `.venv/bin/python scripts/registry_demo.py`, run twice: ten original records and revision two; second run replays original operations; fresh-engine readback and stale-write denial |
 | Backup/restore | PASS, PostgreSQL only | `.venv/bin/python scripts/restore_drill.py` — seven table digests match after pg_dump/pg_restore; migration downgrade/upgrade and repeat upgrade pass in a temporary restored DB |
-| Frozen install / lint / format / schema drift / bounded secret scan | See evidence manifest | Commands and final observed statuses recorded in validation/p1-registry/evidence.json |
-| Compose and local HTTP readiness | See evidence manifest | API readiness requires migration 0002_registry; no remote deployment |
-| Draft PR and GitHub CI | BLOCKED pending observed remote result | Branch publication and PR attempt are recorded below after execution; no CI success inferred from local tests |
+| Frozen install / lint / format / schema drift / bounded secret scan | PASS | Commands and final observed statuses recorded in validation/p1-registry/evidence.json |
+| Compose and local HTTP readiness | PASS | API readiness requires migration 0002_registry; no remote deployment |
+| Draft PR and GitHub CI | BLOCKED | Branch push succeeded; `gh pr create --draft` and `gh api .../actions/runs` return Forbidden at api.github.com; no PR or remote CI success claim |
 
 ## Limitations and next work
 
@@ -34,4 +34,4 @@ Next P1 work: bounded synthetic PDF/CSV/XLSX intake into a local content-address
 
 ## GitHub
 
-Repository: `varat1122/notemesh-readonly`. Working branch: `codex/investment-os-p1-registry-20261022`, based on P0 commit `12768c4975ef418239ce86cc7da2a0fdcf00401d`. Intended stacked Draft PR base: `codex/investment-os-greenfield-p0-20261022`. Publication outcome is recorded after the actual attempt. No merge or deployment.
+Repository: `varat1122/notemesh-readonly`. Working branch: `codex/investment-os-p1-registry-20261022`, based on P0 commit `12768c4975ef418239ce86cc7da2a0fdcf00401d`. Intended stacked Draft PR base: `codex/investment-os-greenfield-p0-20261022`. Implementation commit `aea5071ee1eaaabce6a6acae3adc8d98304d8273` was pushed successfully. Branch: https://github.com/varat1122/notemesh-readonly/tree/codex/investment-os-p1-registry-20261022 . The actual `gh pr create --draft` attempt failed with `Post https://api.github.com/graphql: Forbidden`; no Draft PR URL exists. Remote CI lookup also returned Forbidden. A documentation follow-up records these publication results. No merge or deployment.

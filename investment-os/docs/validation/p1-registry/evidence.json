@@ -36,6 +36,17 @@
     "GitHub remote CI": {
       "status": "BLOCKED",
       "reason": "gh api GET actions/runs: api.github.com Forbidden"
+    },
+    "branch_push": {
+      "status": "PASS",
+      "branch": "codex/investment-os-p1-registry-20261022",
+      "implementation_commit": "aea5071ee1eaaabce6a6acae3adc8d98304d8273"
+    },
+    "Draft PR": {
+      "status": "BLOCKED",
+      "command": "gh pr create --draft --base codex/investment-os-greenfield-p0-20261022 --head codex/investment-os-p1-registry-20261022 --body-file investment-os/docs/P1_REGISTRY_PR_DESCRIPTION.md",
+      "reason": "Post https://api.github.com/graphql: Forbidden",
+      "pr_url": null
     }
   },
   "legacy_worktree_diff_sha256": "d331814bdd5f2cd7c65dbb90946b16b6edeb0df3c70bade5e5c4d9faabb9d595",
@@ -89,5 +100,6 @@
     "uv.lock": "53c4dd34ae5e024333a80d87d4e27c83d056d024cf27012d6da3801f876d6d48"
   },
   "scope": "synthetic local development; no paid inference, real Vault, budget ledger, merge or deployment",
-  "diagnostic_logs": "/workspace/scratch/investment-os-p1-registry-20261022"
+  "diagnostic_logs": "/workspace/scratch/investment-os-p1-registry-20261022",
+  "implementation_commit": "aea5071ee1eaaabce6a6acae3adc8d98304d8273"
 }
