@@ -47,6 +47,21 @@
       "compared_tables": 7,
       "migration_down_up_idempotent": true,
       "scope": "PostgreSQL only; does not certify coordinated object backup"
+    },
+    "branch_push": {
+      "status": "PASS",
+      "branch": "codex/investment-os-p1-intake-20261022",
+      "implementation_commit": "ed5fec12f0bff4e1b81ff181876b81dd59ea1fbd"
+    },
+    "Draft PR": {
+      "status": "BLOCKED",
+      "reason": "Post https://api.github.com/graphql: Forbidden",
+      "pr_url": null,
+      "base": "codex/investment-os-p1-registry-20261022"
+    },
+    "GitHub CI": {
+      "status": "BLOCKED",
+      "reason": "gh api GET repos/varat1122/notemesh-readonly/actions/runs: api.github.com Forbidden"
     }
   },
   "legacy_worktree_diff_sha256": "d331814bdd5f2cd7c65dbb90946b16b6edeb0df3c70bade5e5c4d9faabb9d595",
@@ -111,5 +126,6 @@
     "uv.lock": "eec3c276b35f7989b23078841706d100955cf7ab5d3ab7c6e09be680b4569b92"
   },
   "scope": "generated synthetic files and dummy principals only; no paid inference, real Vault, budget ledger, merge or deployment",
-  "diagnostic_logs": "/workspace/scratch/investment-os-p1-intake-20261022"
+  "diagnostic_logs": "/workspace/scratch/investment-os-p1-intake-20261022",
+  "implementation_commit": "ed5fec12f0bff4e1b81ff181876b81dd59ea1fbd"
 }

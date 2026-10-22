@@ -24,7 +24,7 @@ Date: 2026-10-22. This is a local synthetic intake slice, not completed Phase P1
 | Docker Compose + HTTP | PASS | Built image recorded in evidence.json; API/DB healthy, migration exit 0, HTTP health and authorization checks pass |
 | PostgreSQL backup/restore | PASS, DB only | Seven table digests match actual pg_dump/pg_restore; migration down/up/repeat-up passes in temporary restored DB |
 | Coordinated object + DB backup, real grants, text extraction | NOT IMPLEMENTED | Explicit later gates, no success claim |
-| GitHub Draft PR and remote CI | BLOCKED pending remote result | Exact publication result is recorded below after attempt; local results are not remote CI |
+| GitHub Draft PR and remote CI | BLOCKED | Branch pushed successfully; actual GitHub GraphQL/REST attempts return Forbidden at api.github.com. No PR or remote CI success claim |
 
 Run from investment-os/:
 
@@ -43,4 +43,4 @@ Next: deterministic extraction into bounded page/CSV-row/worksheet-cell excerpts
 
 ## GitHub
 
-Repository: varat1122/notemesh-readonly. Branch: codex/investment-os-p1-intake-20261022. Base: registry milestone 87c36f0f95df0a02bf959d395bd1a4edc93a1929. Intended stacked Draft PR base: codex/investment-os-p1-registry-20261022. Actual publication and remote-check results will be recorded after the attempt; no merge/deployment is authorized by this milestone.
+Repository: varat1122/notemesh-readonly. Branch: codex/investment-os-p1-intake-20261022. Base: registry milestone 87c36f0f95df0a02bf959d395bd1a4edc93a1929. Intended stacked Draft PR base: codex/investment-os-p1-registry-20261022. Implementation commit `ed5fec12f0bff4e1b81ff181876b81dd59ea1fbd` was pushed successfully. Branch: https://github.com/varat1122/notemesh-readonly/tree/codex/investment-os-p1-intake-20261022 . Actual `gh pr create --draft` failed with `Post https://api.github.com/graphql: Forbidden`; the actions/runs REST lookup also returned Forbidden. No Draft PR URL exists and no remote CI success is claimed. A documentation follow-up records these observed outcomes. No merge or deployment.
