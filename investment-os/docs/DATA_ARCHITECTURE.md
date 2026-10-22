@@ -10,7 +10,7 @@
 | Parquet + DuckDB | Versioned market/quant partitions and result artifacts | PostgreSQL stores manifests, as-of, hash, licensing and lineage | Immutable partitions; publish manifest only after hash verification |
 | Git | Code, schema, ADR, synthetic fixtures | Never real portfolio, original licensed data or credentials | Version-controlled source and lockfiles |
 
-A source's URL or Drive file ID is a locator, not its identity. Drive revisions can change; P1 must preserve exact authorized bytes separately when retention rights permit. Content SHA determines byte identity, not claim truth or publisher authenticity. DB and Markdown duplication is intentional only for indexes, path/hash registry and explicit human-readable summaries. The authoritative field owner is listed above.
+A source's URL or Drive file ID is a locator, not its identity. Drive revisions can change; P1 must preserve exact authorized bytes separately when retention rights permit. Content SHA determines byte identity, not claim truth or publisher authenticity. DB and Markdown duplication is intentional only for indexes, path/hash registry and explicit human-readable summaries. The authoritative field owner is listed above. ResearchReview.conclusion and ThesisVersion.scenarios/assumptions in structured payloads are immutable derived snapshots of a reviewed Markdown revision, not a separately editable narrative source of truth. P2 must pin the Note version/hash through registry references and reject divergence before accepting those projections; P0 does not yet expose a writer for them.
 
 ## ID and revision rules
 

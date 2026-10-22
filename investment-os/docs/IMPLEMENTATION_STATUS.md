@@ -41,7 +41,7 @@ All commands below run from `investment-os/`. Managed environment uses `UV_CACHE
 | No real Vault modification / paid API | PASS within this task | No real Vault mount, provider implementation or inference call; no old ledger created/reset/copied |
 | README and P1 plan | PASS | Reproducible commands, explicit limits and ordered P1 acceptance plan |
 | Owner design/schema sign-off | PENDING REVIEW | Delivered for review; no claim the owner approved detailed schemas or future production policies |
-| GitHub Draft PR and remote CI | BLOCKED | `gh api repos/varat1122/notemesh-readonly` returns Forbidden at api.github.com; no PR/CI success claim |
+| GitHub Draft PR and remote CI | BLOCKED | Branch push succeeded. `gh pr create --draft` returns Forbidden at api.github.com/graphql; no PR/CI success claim |
 
 ### Corrected failures and limits
 
@@ -63,4 +63,4 @@ Ready to implement P1 locally with synthetic fixtures: canonical repository, con
 
 ## G. GitHub deliverables
 
-Repository: `varat1122/notemesh-readonly`. Branch: `codex/investment-os-greenfield-p0-20261022`. Base: `b563c55fd99c5fb2738fda0682f7b6f76a0ef42a`. A new isolated Draft PR is requested; API access is blocked in this environment. Final commit/push outcome is reported to the owner after recording this report. No merge or production deploy is performed. See P0_PR_DESCRIPTION.md for the prepared review text.
+Repository: `varat1122/notemesh-readonly`. Branch: `codex/investment-os-greenfield-p0-20261022`. Base: `b563c55fd99c5fb2738fda0682f7b6f76a0ef42a`. Implementation commit `a13ad0aaccb4ebbc302b5260ae8353ab1675fc9d` was pushed successfully to that branch. Actual Draft PR creation was attempted with `gh pr create --draft --base main` and failed with `Post https://api.github.com/graphql: Forbidden`; no PR URL exists and no remote CI success is asserted. The branch is available at https://github.com/varat1122/notemesh-readonly/tree/codex/investment-os-greenfield-p0-20261022 . The PR creation page is https://github.com/varat1122/notemesh-readonly/pull/new/codex/investment-os-greenfield-p0-20261022 (creation form, not a created PR). No merge or production deploy is performed. See P0_PR_DESCRIPTION.md for the prepared review text. A follow-up documentation commit records this actual publication result; implementation file hashes remain those in validation/evidence.json.
