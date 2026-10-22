@@ -1,0 +1,70 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "operation_id": {
+      "format": "uuid",
+      "title": "Operation Id",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "entity_id": {
+      "format": "uuid",
+      "title": "Entity Id",
+      "type": "string"
+    },
+    "note_path": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Note Path",
+      "type": "string"
+    },
+    "expected_version": {
+      "minimum": 1,
+      "title": "Expected Version",
+      "type": "integer"
+    },
+    "before_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Before Sha256",
+      "type": "string"
+    },
+    "proposed_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Proposed Sha256",
+      "type": "string"
+    },
+    "approval_receipt_id": {
+      "format": "uuid",
+      "title": "Approval Receipt Id",
+      "type": "string"
+    },
+    "action": {
+      "enum": [
+        "research_draft",
+        "timeline_append"
+      ],
+      "title": "Action",
+      "type": "string"
+    }
+  },
+  "required": [
+    "operation_id",
+    "idempotency_key",
+    "entity_id",
+    "note_path",
+    "expected_version",
+    "before_sha256",
+    "proposed_sha256",
+    "approval_receipt_id",
+    "action"
+  ],
+  "title": "WritebackPlan",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:WritebackPlan"
+}

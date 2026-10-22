@@ -1,0 +1,25 @@
+erDiagram
+  COMPANY ||--o{ INSTRUMENT : issues
+  COMPANY }o--o{ INDUSTRY : operates_in
+  COMPANY }o--o{ TECHNOLOGY : typed_exposure
+  DOCUMENT ||--o{ SOURCE : original_bytes
+  SOURCE }o--o{ EVENT : describes
+  EVENT ||--o{ CLAIM : raises
+  CLAIM ||--o{ EVIDENCE : evaluated_by
+  SOURCE ||--o{ EVIDENCE : cites
+  EVIDENCE }o--o{ RELATIONSHIP : supports
+  EVENT ||--o{ RESEARCH_REVIEW : reviewed_in
+  NOTE ||--o{ RESEARCH_REVIEW : narrative
+  COMPANY ||--o{ THESIS_VERSION : interpreted_by
+  MANDATE ||--o{ THESIS_VERSION : scopes
+  INSTRUMENT ||--o{ MARKET_DATA_REFERENCE : observed_in
+  MARKET_DATA_REFERENCE }o--o{ QUANT_RUN : input
+  QUANT_RUN ||--o{ SIGNAL : produces
+  MANDATE ||--o{ TRADE_SETUP : scopes
+  SIGNAL ||--o{ TRADE_SETUP : informs
+  THESIS_VERSION ||--o{ DECISION : references
+  RESEARCH_REVIEW }o--o{ DECISION : informs
+  PORTFOLIO ||--o{ TRANSACTION : records
+  MANDATE }o--o{ PORTFOLIO : aggregates
+  JOB ||--o{ RECEIPT : records
+  JOB ||--o{ AUDIT_EVENT : traces

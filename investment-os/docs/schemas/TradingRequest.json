@@ -1,0 +1,47 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "mandate_id": {
+      "format": "uuid",
+      "title": "Mandate Id",
+      "type": "string"
+    },
+    "research_review_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Research Review Ids",
+      "type": "array"
+    },
+    "signal_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Signal Ids",
+      "type": "array"
+    },
+    "market_data_id": {
+      "format": "uuid",
+      "title": "Market Data Id",
+      "type": "string"
+    },
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    }
+  },
+  "required": [
+    "mandate_id",
+    "research_review_ids",
+    "signal_ids",
+    "market_data_id",
+    "as_of"
+  ],
+  "title": "TradingRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:TradingRequest"
+}

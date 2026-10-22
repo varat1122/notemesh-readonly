@@ -1,0 +1,14 @@
+flowchart TD
+  C[Context pack with provenance] --> Gate[Rights freshness and cost gate]
+  Gate --> Router[Framework router]
+  Router --> F[Fundamental lens]
+  Router --> I[Industry and supply chain lens]
+  Router --> RT[Counter-thesis lens]
+  F --> S[Structured specialist results]
+  I --> S
+  RT --> S
+  S --> Check[Citation schema and evidence validation]
+  Check --> Merge[Synthesis preserving disagreement]
+  Check --> Abstain[Abstain and required evidence]
+  Merge --> Draft[Unverified research draft]
+  Model[Provider-neutral model adapter] -.-> Router

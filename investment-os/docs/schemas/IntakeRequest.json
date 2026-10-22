@@ -1,0 +1,53 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "document_id": {
+      "format": "uuid",
+      "title": "Document Id",
+      "type": "string"
+    },
+    "content_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Content Sha256",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "channel": {
+      "enum": [
+        "manual",
+        "drive",
+        "official_api"
+      ],
+      "title": "Channel",
+      "type": "string"
+    },
+    "received_at": {
+      "format": "date-time",
+      "title": "Received At",
+      "type": "string"
+    },
+    "license_id": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "License Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "document_id",
+    "content_sha256",
+    "idempotency_key",
+    "channel",
+    "received_at",
+    "license_id"
+  ],
+  "title": "IntakeRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:IntakeRequest"
+}

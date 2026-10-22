@@ -1,0 +1,12 @@
+flowchart TD
+  API[FastAPI boundary] --> Policy[Policy and identity]
+  API --> Services[Future application use cases]
+  API --> Domain[Canonical domain contracts]
+  Services --> Ports[Typed internal ports]
+  Ports --> Domain
+  Adapters[Provider and persistence adapters] --> Ports
+  Adapters --> Domain
+  Adapters --> PG[(PostgreSQL)]
+  Adapters --> Local[Scoped local filesystem]
+  Services -.-> Worker[Future worker entrypoint]
+  Policy --> Domain

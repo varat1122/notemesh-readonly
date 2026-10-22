@@ -1,0 +1,60 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "research_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Research Ids",
+      "type": "array"
+    },
+    "mandate_id": {
+      "format": "uuid",
+      "title": "Mandate Id",
+      "type": "string"
+    },
+    "quant_run_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Quant Run Ids",
+      "type": "array"
+    },
+    "trade_setup_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Trade Setup Ids",
+      "type": "array"
+    },
+    "independent_risk_review_id": {
+      "format": "uuid",
+      "title": "Independent Risk Review Id",
+      "type": "string"
+    },
+    "constraints": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Constraints",
+      "type": "array"
+    }
+  },
+  "required": [
+    "research_ids",
+    "mandate_id",
+    "quant_run_ids",
+    "trade_setup_ids",
+    "independent_risk_review_id",
+    "constraints"
+  ],
+  "title": "DecisionRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:DecisionRequest"
+}

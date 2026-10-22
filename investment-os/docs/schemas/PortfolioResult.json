@@ -1,0 +1,51 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "portfolio_id": {
+      "format": "uuid",
+      "title": "Portfolio Id",
+      "type": "string"
+    },
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    },
+    "exposure_artifact": {
+      "anyOf": [
+        {
+          "maxLength": 10000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Exposure Artifact"
+    },
+    "reconciliation_gaps": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reconciliation Gaps",
+      "type": "array"
+    },
+    "recommendation_only": {
+      "const": true,
+      "default": true,
+      "title": "Recommendation Only",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "portfolio_id",
+    "as_of",
+    "exposure_artifact",
+    "reconciliation_gaps"
+  ],
+  "title": "PortfolioResult",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:PortfolioResult"
+}

@@ -1,0 +1,1078 @@
+[
+  {
+    "id": "3f40dd5f-8961-5067-bd08-5fcf483c3b83",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "industry",
+    "name": "Fictional Widgets",
+    "taxonomy_version": "synthetic-v1",
+    "parent_id": null
+  },
+  {
+    "id": "acf9081a-0bf5-507b-b76a-4186908dae3c",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "technology",
+    "name": "Fictional Widget Process",
+    "maturity": "prototype"
+  },
+  {
+    "id": "209edb8a-cdc9-5b38-8440-dde98c59a8ce",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "company",
+    "legal_name": "Synthetic Company (not an issuer)",
+    "jurisdiction": "synthetic",
+    "industry_ids": [
+      "3f40dd5f-8961-5067-bd08-5fcf483c3b83"
+    ]
+  },
+  {
+    "id": "0cb06663-24aa-5bcd-8ebc-732962a6f7ff",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "instrument",
+    "issuer_id": "209edb8a-cdc9-5b38-8440-dde98c59a8ce",
+    "asset_type": "equity",
+    "share_class": "A",
+    "aliases": [
+      {
+        "symbol": "SYNTH",
+        "venue": "TEST",
+        "currency": "USD",
+        "valid_from": "2026-10-22T00:00:00Z",
+        "valid_to": null
+      }
+    ],
+    "external_ids": {}
+  },
+  {
+    "id": "479a579c-b6d9-54c8-96a2-c1235ac5ef87",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "document",
+    "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "byte_size": 32,
+    "media_type": "text/plain",
+    "storage_key": "sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "storage_backend": "local"
+  },
+  {
+    "id": "e1dc1045-d262-5391-a598-1a4d9ed3297a",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "source",
+    "publisher": "Synthetic publisher",
+    "channel": "manual",
+    "source_type": "user_supplied",
+    "original_document_id": "479a579c-b6d9-54c8-96a2-c1235ac5ef87",
+    "original_source_id": null,
+    "url": null
+  },
+  {
+    "id": "74950b8f-b88d-56a2-a141-ddc691fbf50a",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "event",
+    "company_id": "209edb8a-cdc9-5b38-8440-dde98c59a8ce",
+    "source_ids": [
+      "e1dc1045-d262-5391-a598-1a4d9ed3297a"
+    ],
+    "event_type": "synthetic_fixture",
+    "period": "test-only",
+    "classification_result": "unresolved",
+    "related_event_id": null
+  },
+  {
+    "id": "29373777-762a-5233-888a-ed5ff2e74b6f",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "claim",
+    "subject_id": "209edb8a-cdc9-5b38-8440-dde98c59a8ce",
+    "event_id": "74950b8f-b88d-56a2-a141-ddc691fbf50a",
+    "statement": "Fictional widget demand may change",
+    "claim_type": "opinion",
+    "metric": null,
+    "period": null,
+    "value": null,
+    "unit": null
+  },
+  {
+    "id": "2a071ff6-4a73-5a6f-9c03-adc34a858312",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "evidence",
+    "claim_id": "29373777-762a-5233-888a-ed5ff2e74b6f",
+    "source_id": "e1dc1045-d262-5391-a598-1a4d9ed3297a",
+    "document_id": "479a579c-b6d9-54c8-96a2-c1235ac5ef87",
+    "document_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "locator": "line:1",
+    "excerpt": "Synthetic only",
+    "relation": "context"
+  },
+  {
+    "id": "81dde20f-a929-5fa2-8b33-020f1accd7f7",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "relationship",
+    "subject_id": "209edb8a-cdc9-5b38-8440-dde98c59a8ce",
+    "object_id": "acf9081a-0bf5-507b-b76a-4186908dae3c",
+    "predicate": "potential_beneficiary_of",
+    "evidence_ids": [],
+    "mechanism": "Fictional possibility",
+    "strength": "possible",
+    "link_policy": "proposed_only",
+    "review_by": null
+  },
+  {
+    "id": "6306a9b6-2dfc-5310-af38-33649f4439b0",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "note",
+    "canonical_path": "Drafts/example.md",
+    "note_type": "review",
+    "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "entity_ids": [
+      "209edb8a-cdc9-5b38-8440-dde98c59a8ce"
+    ],
+    "previous_paths": []
+  },
+  {
+    "id": "6de81783-508f-5945-be79-8942f708fb5c",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "research_review",
+    "event_id": "74950b8f-b88d-56a2-a141-ddc691fbf50a",
+    "note_id": "6306a9b6-2dfc-5310-af38-33649f4439b0",
+    "source_ids": [
+      "e1dc1045-d262-5391-a598-1a4d9ed3297a"
+    ],
+    "claim_ids": [],
+    "thesis_id": null,
+    "analyst_lens": "fundamental",
+    "conclusion": "No real conclusion",
+    "counter_evidence_ids": [],
+    "uncertainties": [
+      "All data synthetic"
+    ],
+    "analysis_origin": "ai",
+    "independent_evidence": false
+  },
+  {
+    "id": "dc9ac382-431e-56cf-9435-81d98991c964",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "mandate",
+    "name": "Synthetic core mandate",
+    "mandate_type": "core",
+    "horizon": "years",
+    "risk_budget": "0",
+    "currency": "USD",
+    "constraints": [
+      "No execution"
+    ]
+  },
+  {
+    "id": "09559b38-38a0-5671-b355-8a31dfdda8a0",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "thesis_version",
+    "company_id": "209edb8a-cdc9-5b38-8440-dde98c59a8ce",
+    "mandate_id": "dc9ac382-431e-56cf-9435-81d98991c964",
+    "note_id": "6306a9b6-2dfc-5310-af38-33649f4439b0",
+    "scenarios": {
+      "bull": "Unknown",
+      "base": "Unknown",
+      "bear": "Unknown"
+    },
+    "assumptions": [
+      "Synthetic only"
+    ],
+    "invalidation": "All real inputs absent",
+    "approval_receipt_id": null,
+    "status": "proposed"
+  },
+  {
+    "id": "c655cb95-fcf4-5709-9109-2764f8aaf283",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": "2026-10-22T00:00:00Z",
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": "2026-10-22T00:00:00Z",
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "market_data_reference",
+    "instrument_id": "0cb06663-24aa-5bcd-8ebc-732962a6f7ff",
+    "provider": "synthetic",
+    "dataset_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "artifact_key": "synthetic.parquet",
+    "adjustment": "unknown",
+    "currency": "USD",
+    "session_timezone": "UTC",
+    "corporate_action_source_ids": [],
+    "coverage_start": "2026-10-22T00:00:00Z",
+    "coverage_end": "2026-10-22T00:00:00Z"
+  },
+  {
+    "id": "c62a2de6-3e31-53a3-adb2-9776a515ba47",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "quant_run",
+    "dataset_ids": [
+      "c655cb95-fcf4-5709-9109-2764f8aaf283"
+    ],
+    "code_version": "synthetic-contract-v1",
+    "environment_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "model_version": "not-implemented",
+    "parameters": {},
+    "result_artifact": null,
+    "verification_result": "not_computed",
+    "limitations": [
+      "Not computed"
+    ],
+    "transaction_cost_assumptions": "Unknown",
+    "bias_controls": [
+      "Not evaluated"
+    ]
+  },
+  {
+    "id": "9ef9ac9a-8cb7-5666-8076-5302989cda3a",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "signal",
+    "instrument_id": "0cb06663-24aa-5bcd-8ebc-732962a6f7ff",
+    "run_id": "c62a2de6-3e31-53a3-adb2-9776a515ba47",
+    "horizon": "one day",
+    "generated_at": "2026-10-22T00:00:00Z",
+    "expires_at": "2026-10-23T00:00:00Z",
+    "status": "proposed"
+  },
+  {
+    "id": "41c19d19-d68d-5d94-af24-9220e6595a40",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "trade_setup",
+    "mandate_id": "dc9ac382-431e-56cf-9435-81d98991c964",
+    "instrument_id": "0cb06663-24aa-5bcd-8ebc-732962a6f7ff",
+    "thesis_id": null,
+    "signal_id": null,
+    "market_data_id": "c655cb95-fcf4-5709-9109-2764f8aaf283",
+    "entry_conditions": "Not actionable",
+    "invalidation": "Missing prices",
+    "stop_policy": "Not configured",
+    "take_profit_policy": "None",
+    "risk_unit": "1",
+    "position_limit": "1",
+    "transaction_cost_assumption": "Unknown",
+    "expected_holding_period": "one day",
+    "expires_at": "2026-10-23T00:00:00Z",
+    "review_status": "draft",
+    "executable_order": false
+  },
+  {
+    "id": "c0ad54b7-300a-5364-9208-8da233f964e1",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "confidential_portfolio",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "portfolio",
+    "account_reference": "synthetic-account",
+    "base_currency": "USD",
+    "mandate_ids": [
+      "dc9ac382-431e-56cf-9435-81d98991c964"
+    ],
+    "performance_method": "not_configured"
+  },
+  {
+    "id": "4a73e1f8-fadf-5c29-b6c9-af6baf0b0e76",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": "2026-10-22T00:00:00Z",
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "confidential_portfolio",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "transaction",
+    "portfolio_id": "c0ad54b7-300a-5364-9208-8da233f964e1",
+    "instrument_id": null,
+    "transaction_type": "deposit",
+    "quantity": "1",
+    "price": "1",
+    "fees": "0",
+    "taxes": "0",
+    "currency": "USD",
+    "fx_rate": "1",
+    "settlement_at": null,
+    "reconciliation": "unreconciled"
+  },
+  {
+    "id": "cf0537c3-203d-5814-9b99-c8a4a984844a",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "decision",
+    "mandate_id": "dc9ac382-431e-56cf-9435-81d98991c964",
+    "thesis_id": "09559b38-38a0-5671-b355-8a31dfdda8a0",
+    "thesis_version": 1,
+    "research_ids": [
+      "6de81783-508f-5945-be79-8942f708fb5c"
+    ],
+    "risk_review_id": "6de81783-508f-5945-be79-8942f708fb5c",
+    "constraints": [
+      "Not actionable"
+    ],
+    "action": "NO_ACTION_INSUFFICIENT_EVIDENCE",
+    "rationale": "Synthetic contract only",
+    "dissent": [
+      "No independent risk review performed"
+    ],
+    "approval_receipt_id": null,
+    "execution_authorized": false
+  },
+  {
+    "id": "9956ff1b-056f-5e89-a14a-727ad50461c2",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "job",
+    "job_type": "synthetic",
+    "idempotency_key": "synthetic-case-0001",
+    "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+    "state": "blocked",
+    "attempt": 0
+  },
+  {
+    "id": "3361e08b-1ed2-58bc-96af-3c7e2248cd88",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "receipt",
+    "job_id": "9956ff1b-056f-5e89-a14a-727ad50461c2",
+    "resource_id": "6306a9b6-2dfc-5310-af38-33649f4439b0",
+    "before_sha256": null,
+    "after_sha256": null,
+    "physical_verified": false,
+    "index_verified": false,
+    "links_verified": false,
+    "state": "blocked",
+    "device_sync_verified": false
+  },
+  {
+    "id": "7cb0614e-f4e4-5d27-9b78-db799795ab8d",
+    "version": 1,
+    "schema_version": "1.0",
+    "provenance": {
+      "origin": "synthetic",
+      "source_ids": [],
+      "basis": "P0 fictional fixture",
+      "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+      "original_origin_id": null,
+      "independent_evidence": false,
+      "license_id": "synthetic-only",
+      "permitted_uses": [
+        "local_research"
+      ]
+    },
+    "times": {
+      "event_at": null,
+      "published_at": null,
+      "received_at": "2026-10-22T00:00:00Z",
+      "imported_at": "2026-10-22T00:00:00Z",
+      "verified_at": null,
+      "data_as_of": null,
+      "effective_from": null,
+      "effective_to": null,
+      "calculation_at": null,
+      "known_at": null,
+      "available_to_strategy_at": null,
+      "vintage_at": null
+    },
+    "classification": "internal_research",
+    "verification": "unverified",
+    "verified_by": null,
+    "supersedes_id": null,
+    "kind": "audit_event",
+    "actor_id": "335d6412-bf92-5469-954e-2696a05c23ea",
+    "action": "synthetic",
+    "resource_id": "6306a9b6-2dfc-5310-af38-33649f4439b0",
+    "request_id": "2f06fe27-9019-580e-b45a-e759bd9419af",
+    "outcome": "denied",
+    "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+]

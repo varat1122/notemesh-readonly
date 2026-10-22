@@ -1,0 +1,29 @@
+name: Investment OS P0
+on:
+  pull_request:
+    paths: ['investment-os/**', '.github/workflows/investment-os-p0.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: investment-os
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install pinned development tool
+        run: |
+          python3 -m venv /tmp/ios-uv-tool
+          /tmp/ios-uv-tool/bin/pip install uv==0.12.23
+          echo /tmp/ios-uv-tool/bin >> "$GITHUB_PATH"
+      - name: Provision Python
+        run: uv python install 3.12
+      - name: Frozen install, lint, schemas, Compose, DB and API checks
+        run: scripts/check.sh
+      - name: Synthetic restore drill
+        run: uv run --frozen python scripts/restore_drill.py
+      - name: Stop isolated synthetic stack
+        if: always()
+        run: scripts/compose.sh down --volumes

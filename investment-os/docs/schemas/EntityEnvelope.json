@@ -1,0 +1,3902 @@
+{
+  "$defs": {
+    "AuditEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "audit_event",
+          "default": "audit_event",
+          "title": "Kind",
+          "type": "string"
+        },
+        "actor_id": {
+          "format": "uuid",
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "action": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "resource_id": {
+          "format": "uuid",
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "allowed",
+            "denied",
+            "failed"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "payload_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Payload Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "actor_id",
+        "action",
+        "resource_id",
+        "request_id",
+        "outcome",
+        "payload_sha256"
+      ],
+      "title": "AuditEvent",
+      "type": "object"
+    },
+    "Claim": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "claim",
+          "default": "claim",
+          "title": "Kind",
+          "type": "string"
+        },
+        "subject_id": {
+          "format": "uuid",
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "statement": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        },
+        "claim_type": {
+          "enum": [
+            "fact_claim",
+            "quote",
+            "forecast",
+            "opinion",
+            "ai_hypothesis"
+          ],
+          "title": "Claim Type",
+          "type": "string"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric"
+        },
+        "period": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Period"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "subject_id",
+        "event_id",
+        "statement",
+        "claim_type"
+      ],
+      "title": "Claim",
+      "type": "object"
+    },
+    "Classification": {
+      "enum": [
+        "public",
+        "licensed_vendor",
+        "internal_research",
+        "confidential_portfolio",
+        "personal_sensitive",
+        "secret"
+      ],
+      "title": "Classification",
+      "type": "string"
+    },
+    "Company": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "company",
+          "default": "company",
+          "title": "Kind",
+          "type": "string"
+        },
+        "legal_name": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Legal Name",
+          "type": "string"
+        },
+        "jurisdiction": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Jurisdiction",
+          "type": "string"
+        },
+        "industry_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Industry Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "legal_name",
+        "jurisdiction"
+      ],
+      "title": "Company",
+      "type": "object"
+    },
+    "Decision": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "decision",
+          "default": "decision",
+          "title": "Kind",
+          "type": "string"
+        },
+        "mandate_id": {
+          "format": "uuid",
+          "title": "Mandate Id",
+          "type": "string"
+        },
+        "thesis_id": {
+          "format": "uuid",
+          "title": "Thesis Id",
+          "type": "string"
+        },
+        "thesis_version": {
+          "minimum": 1,
+          "title": "Thesis Version",
+          "type": "integer"
+        },
+        "research_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Research Ids",
+          "type": "array"
+        },
+        "risk_review_id": {
+          "format": "uuid",
+          "title": "Risk Review Id",
+          "type": "string"
+        },
+        "constraints": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Constraints",
+          "type": "array"
+        },
+        "action": {
+          "enum": [
+            "BUY_CANDIDATE",
+            "ADD_CANDIDATE",
+            "HOLD",
+            "REDUCE_CANDIDATE",
+            "EXIT_CANDIDATE",
+            "HEDGE_REVIEW",
+            "WATCHLIST",
+            "NO_ACTION_INSUFFICIENT_EVIDENCE"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "rationale": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "dissent": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dissent",
+          "type": "array"
+        },
+        "approval_receipt_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approval Receipt Id"
+        },
+        "execution_authorized": {
+          "const": false,
+          "default": false,
+          "title": "Execution Authorized",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "mandate_id",
+        "thesis_id",
+        "thesis_version",
+        "research_ids",
+        "risk_review_id",
+        "constraints",
+        "action",
+        "rationale",
+        "dissent"
+      ],
+      "title": "Decision",
+      "type": "object"
+    },
+    "Document": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "document",
+          "default": "document",
+          "title": "Kind",
+          "type": "string"
+        },
+        "content_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "byte_size": {
+          "exclusiveMinimum": 0,
+          "title": "Byte Size",
+          "type": "integer"
+        },
+        "media_type": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Media Type",
+          "type": "string"
+        },
+        "storage_key": {
+          "pattern": "^[a-z0-9][a-z0-9/_.-]{0,500}$",
+          "title": "Storage Key",
+          "type": "string"
+        },
+        "storage_backend": {
+          "enum": [
+            "local",
+            "drive",
+            "object"
+          ],
+          "title": "Storage Backend",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "content_sha256",
+        "byte_size",
+        "media_type",
+        "storage_key",
+        "storage_backend"
+      ],
+      "title": "Document",
+      "type": "object"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "event",
+          "default": "event",
+          "title": "Kind",
+          "type": "string"
+        },
+        "company_id": {
+          "format": "uuid",
+          "title": "Company Id",
+          "type": "string"
+        },
+        "source_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Source Ids",
+          "type": "array"
+        },
+        "event_type": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Event Type",
+          "type": "string"
+        },
+        "period": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Period",
+          "type": "string"
+        },
+        "classification_result": {
+          "default": "unresolved",
+          "enum": [
+            "new_event",
+            "duplicate",
+            "added_detail",
+            "correction",
+            "contradiction",
+            "confirmation",
+            "unresolved",
+            "thesis_changing_candidate"
+          ],
+          "title": "Classification Result",
+          "type": "string"
+        },
+        "related_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Related Event Id"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "company_id",
+        "source_ids",
+        "event_type",
+        "period"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "evidence",
+          "default": "evidence",
+          "title": "Kind",
+          "type": "string"
+        },
+        "claim_id": {
+          "format": "uuid",
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "source_id": {
+          "format": "uuid",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "document_id": {
+          "format": "uuid",
+          "title": "Document Id",
+          "type": "string"
+        },
+        "document_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Document Sha256",
+          "type": "string"
+        },
+        "locator": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        },
+        "excerpt": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "relation": {
+          "enum": [
+            "supports",
+            "contradicts",
+            "context"
+          ],
+          "title": "Relation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "claim_id",
+        "source_id",
+        "document_id",
+        "document_sha256",
+        "locator",
+        "excerpt",
+        "relation"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Industry": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "industry",
+          "default": "industry",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "taxonomy_version": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Taxonomy Version",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "name",
+        "taxonomy_version"
+      ],
+      "title": "Industry",
+      "type": "object"
+    },
+    "Instrument": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "instrument",
+          "default": "instrument",
+          "title": "Kind",
+          "type": "string"
+        },
+        "issuer_id": {
+          "format": "uuid",
+          "title": "Issuer Id",
+          "type": "string"
+        },
+        "asset_type": {
+          "enum": [
+            "equity",
+            "bond",
+            "fund",
+            "fx",
+            "commodity",
+            "derivative"
+          ],
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "share_class": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Share Class",
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "$ref": "#/$defs/SymbolAlias"
+          },
+          "minItems": 1,
+          "title": "Aliases",
+          "type": "array"
+        },
+        "external_ids": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "External Ids",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "issuer_id",
+        "asset_type",
+        "share_class",
+        "aliases"
+      ],
+      "title": "Instrument",
+      "type": "object"
+    },
+    "Job": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "job",
+          "default": "job",
+          "title": "Kind",
+          "type": "string"
+        },
+        "job_type": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Job Type",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 200,
+          "minLength": 8,
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "request_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Request Sha256",
+          "type": "string"
+        },
+        "actor_id": {
+          "format": "uuid",
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "running",
+            "completed",
+            "failed_retryable",
+            "failed_terminal",
+            "blocked"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "attempt": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Attempt",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "job_type",
+        "idempotency_key",
+        "request_sha256",
+        "actor_id",
+        "state"
+      ],
+      "title": "Job",
+      "type": "object"
+    },
+    "Mandate": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "mandate",
+          "default": "mandate",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "mandate_type": {
+          "enum": [
+            "core",
+            "tactical",
+            "event_driven",
+            "macro",
+            "systematic",
+            "hedge"
+          ],
+          "title": "Mandate Type",
+          "type": "string"
+        },
+        "horizon": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Horizon",
+          "type": "string"
+        },
+        "risk_budget": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Risk Budget"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "constraints": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Constraints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "name",
+        "mandate_type",
+        "horizon",
+        "risk_budget",
+        "currency",
+        "constraints"
+      ],
+      "title": "Mandate",
+      "type": "object"
+    },
+    "MarketDataReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "market_data_reference",
+          "default": "market_data_reference",
+          "title": "Kind",
+          "type": "string"
+        },
+        "instrument_id": {
+          "format": "uuid",
+          "title": "Instrument Id",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "dataset_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Dataset Sha256",
+          "type": "string"
+        },
+        "artifact_key": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Artifact Key",
+          "type": "string"
+        },
+        "adjustment": {
+          "enum": [
+            "raw",
+            "split",
+            "total_return",
+            "unknown"
+          ],
+          "title": "Adjustment",
+          "type": "string"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "session_timezone": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Session Timezone",
+          "type": "string"
+        },
+        "corporate_action_source_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Corporate Action Source Ids",
+          "type": "array"
+        },
+        "coverage_start": {
+          "format": "date-time",
+          "title": "Coverage Start",
+          "type": "string"
+        },
+        "coverage_end": {
+          "format": "date-time",
+          "title": "Coverage End",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "instrument_id",
+        "provider",
+        "dataset_sha256",
+        "artifact_key",
+        "adjustment",
+        "currency",
+        "session_timezone",
+        "coverage_start",
+        "coverage_end"
+      ],
+      "title": "MarketDataReference",
+      "type": "object"
+    },
+    "Note": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "note",
+          "default": "note",
+          "title": "Kind",
+          "type": "string"
+        },
+        "canonical_path": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Canonical Path",
+          "type": "string"
+        },
+        "note_type": {
+          "enum": [
+            "company",
+            "industry",
+            "review",
+            "thesis",
+            "timeline",
+            "decision"
+          ],
+          "title": "Note Type",
+          "type": "string"
+        },
+        "content_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "entity_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Entity Ids",
+          "type": "array"
+        },
+        "previous_paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Previous Paths",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "canonical_path",
+        "note_type",
+        "content_sha256",
+        "entity_ids"
+      ],
+      "title": "Note",
+      "type": "object"
+    },
+    "Portfolio": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "portfolio",
+          "default": "portfolio",
+          "title": "Kind",
+          "type": "string"
+        },
+        "account_reference": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Account Reference",
+          "type": "string"
+        },
+        "base_currency": {
+          "pattern": "^[A-Z]{3}$",
+          "title": "Base Currency",
+          "type": "string"
+        },
+        "mandate_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Mandate Ids",
+          "type": "array"
+        },
+        "performance_method": {
+          "default": "not_configured",
+          "enum": [
+            "not_configured",
+            "time_weighted",
+            "money_weighted"
+          ],
+          "title": "Performance Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "account_reference",
+        "base_currency",
+        "mandate_ids"
+      ],
+      "title": "Portfolio",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "enum": [
+            "source",
+            "human",
+            "ai",
+            "deterministic",
+            "system",
+            "synthetic"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "source_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Source Ids",
+          "type": "array"
+        },
+        "basis": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Basis",
+          "type": "string"
+        },
+        "actor_id": {
+          "format": "uuid",
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "original_origin_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Origin Id"
+        },
+        "independent_evidence": {
+          "default": false,
+          "title": "Independent Evidence",
+          "type": "boolean"
+        },
+        "license_id": {
+          "default": "synthetic-only",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "License Id",
+          "type": "string"
+        },
+        "permitted_uses": {
+          "default": [
+            "local_research"
+          ],
+          "items": {
+            "enum": [
+              "local_research",
+              "model_input",
+              "redistribute"
+            ],
+            "type": "string"
+          },
+          "title": "Permitted Uses",
+          "type": "array"
+        }
+      },
+      "required": [
+        "origin",
+        "basis",
+        "actor_id"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "QuantRun": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "quant_run",
+          "default": "quant_run",
+          "title": "Kind",
+          "type": "string"
+        },
+        "dataset_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Dataset Ids",
+          "type": "array"
+        },
+        "code_version": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Code Version",
+          "type": "string"
+        },
+        "environment_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Environment Sha256",
+          "type": "string"
+        },
+        "model_version": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Model Version",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
+        "result_artifact": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result Artifact"
+        },
+        "verification_result": {
+          "default": "not_computed",
+          "enum": [
+            "not_computed",
+            "computed",
+            "reproduced"
+          ],
+          "title": "Verification Result",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "transaction_cost_assumptions": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Transaction Cost Assumptions",
+          "type": "string"
+        },
+        "bias_controls": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Bias Controls",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "dataset_ids",
+        "code_version",
+        "environment_sha256",
+        "model_version",
+        "parameters",
+        "limitations",
+        "transaction_cost_assumptions",
+        "bias_controls"
+      ],
+      "title": "QuantRun",
+      "type": "object"
+    },
+    "Receipt": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "receipt",
+          "default": "receipt",
+          "title": "Kind",
+          "type": "string"
+        },
+        "job_id": {
+          "format": "uuid",
+          "title": "Job Id",
+          "type": "string"
+        },
+        "resource_id": {
+          "format": "uuid",
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "before_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before Sha256"
+        },
+        "after_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After Sha256"
+        },
+        "physical_verified": {
+          "default": false,
+          "title": "Physical Verified",
+          "type": "boolean"
+        },
+        "index_verified": {
+          "default": false,
+          "title": "Index Verified",
+          "type": "boolean"
+        },
+        "links_verified": {
+          "default": false,
+          "title": "Links Verified",
+          "type": "boolean"
+        },
+        "state": {
+          "enum": [
+            "prepared",
+            "partial",
+            "committed",
+            "blocked",
+            "reconciled"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "device_sync_verified": {
+          "const": false,
+          "default": false,
+          "title": "Device Sync Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "job_id",
+        "resource_id",
+        "state"
+      ],
+      "title": "Receipt",
+      "type": "object"
+    },
+    "Relationship": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "relationship",
+          "default": "relationship",
+          "title": "Kind",
+          "type": "string"
+        },
+        "subject_id": {
+          "format": "uuid",
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "object_id": {
+          "format": "uuid",
+          "title": "Object Id",
+          "type": "string"
+        },
+        "predicate": {
+          "enum": [
+            "issuer_of",
+            "source_supports_claim",
+            "source_contradicts_claim",
+            "claim_updates_thesis",
+            "company_operates_in_industry",
+            "company_offers_product",
+            "product_competes_with",
+            "supplier_to",
+            "customer_of",
+            "partner_of",
+            "potential_beneficiary_of",
+            "potential_risk_from",
+            "technology_enables",
+            "technology_substitutes",
+            "industry_exposed_to_macro",
+            "review_related_to",
+            "quant_signal_applies_to",
+            "trade_setup_for",
+            "decision_references_thesis"
+          ],
+          "title": "Predicate",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "mechanism": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Mechanism",
+          "type": "string"
+        },
+        "strength": {
+          "default": "possible",
+          "enum": [
+            "possible",
+            "attributed",
+            "supported"
+          ],
+          "title": "Strength",
+          "type": "string"
+        },
+        "link_policy": {
+          "default": "proposed_only",
+          "enum": [
+            "proposed_only",
+            "approved"
+          ],
+          "title": "Link Policy",
+          "type": "string"
+        },
+        "review_by": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review By"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "subject_id",
+        "object_id",
+        "predicate",
+        "mechanism"
+      ],
+      "title": "Relationship",
+      "type": "object"
+    },
+    "ResearchReview": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "research_review",
+          "default": "research_review",
+          "title": "Kind",
+          "type": "string"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "note_id": {
+          "format": "uuid",
+          "title": "Note Id",
+          "type": "string"
+        },
+        "source_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Source Ids",
+          "type": "array"
+        },
+        "claim_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Claim Ids",
+          "type": "array"
+        },
+        "thesis_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Thesis Id"
+        },
+        "analyst_lens": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Analyst Lens",
+          "type": "string"
+        },
+        "conclusion": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Conclusion",
+          "type": "string"
+        },
+        "counter_evidence_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Counter Evidence Ids",
+          "type": "array"
+        },
+        "uncertainties": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Uncertainties",
+          "type": "array"
+        },
+        "analysis_origin": {
+          "enum": [
+            "ai",
+            "human"
+          ],
+          "title": "Analysis Origin",
+          "type": "string"
+        },
+        "independent_evidence": {
+          "const": false,
+          "default": false,
+          "title": "Independent Evidence",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "event_id",
+        "note_id",
+        "source_ids",
+        "analyst_lens",
+        "conclusion",
+        "uncertainties",
+        "analysis_origin"
+      ],
+      "title": "ResearchReview",
+      "type": "object"
+    },
+    "Signal": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "signal",
+          "default": "signal",
+          "title": "Kind",
+          "type": "string"
+        },
+        "instrument_id": {
+          "format": "uuid",
+          "title": "Instrument Id",
+          "type": "string"
+        },
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "horizon": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Horizon",
+          "type": "string"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "status": {
+          "default": "proposed",
+          "enum": [
+            "proposed",
+            "active",
+            "expired",
+            "invalidated"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "instrument_id",
+        "run_id",
+        "horizon",
+        "generated_at",
+        "expires_at"
+      ],
+      "title": "Signal",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "source",
+          "default": "source",
+          "title": "Kind",
+          "type": "string"
+        },
+        "publisher": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Publisher",
+          "type": "string"
+        },
+        "channel": {
+          "enum": [
+            "manual",
+            "drive",
+            "official_api",
+            "market_api",
+            "social"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "source_type": {
+          "enum": [
+            "primary",
+            "commentary",
+            "secondary",
+            "user_supplied",
+            "social"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "original_document_id": {
+          "format": "uuid",
+          "title": "Original Document Id",
+          "type": "string"
+        },
+        "original_source_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Source Id"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "pattern": "^https://",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "publisher",
+        "channel",
+        "source_type",
+        "original_document_id"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "SymbolAlias": {
+      "additionalProperties": false,
+      "properties": {
+        "symbol": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Symbol",
+          "type": "string"
+        },
+        "venue": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Venue",
+          "type": "string"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "valid_from": {
+          "format": "date-time",
+          "title": "Valid From",
+          "type": "string"
+        },
+        "valid_to": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid To"
+        }
+      },
+      "required": [
+        "symbol",
+        "venue",
+        "currency",
+        "valid_from"
+      ],
+      "title": "SymbolAlias",
+      "type": "object"
+    },
+    "Technology": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "technology",
+          "default": "technology",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "maturity": {
+          "default": "unknown",
+          "enum": [
+            "research",
+            "prototype",
+            "commercial",
+            "unknown"
+          ],
+          "title": "Maturity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "name"
+      ],
+      "title": "Technology",
+      "type": "object"
+    },
+    "ThesisVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "thesis_version",
+          "default": "thesis_version",
+          "title": "Kind",
+          "type": "string"
+        },
+        "company_id": {
+          "format": "uuid",
+          "title": "Company Id",
+          "type": "string"
+        },
+        "mandate_id": {
+          "format": "uuid",
+          "title": "Mandate Id",
+          "type": "string"
+        },
+        "note_id": {
+          "format": "uuid",
+          "title": "Note Id",
+          "type": "string"
+        },
+        "scenarios": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "enum": [
+              "bull",
+              "base",
+              "bear"
+            ]
+          },
+          "title": "Scenarios",
+          "type": "object"
+        },
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "invalidation": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Invalidation",
+          "type": "string"
+        },
+        "approval_receipt_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approval Receipt Id"
+        },
+        "status": {
+          "default": "proposed",
+          "enum": [
+            "proposed",
+            "approved",
+            "superseded"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "company_id",
+        "mandate_id",
+        "note_id",
+        "scenarios",
+        "assumptions",
+        "invalidation"
+      ],
+      "title": "ThesisVersion",
+      "type": "object"
+    },
+    "Times": {
+      "additionalProperties": false,
+      "properties": {
+        "event_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event At"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "received_at": {
+          "format": "date-time",
+          "title": "Received At",
+          "type": "string"
+        },
+        "imported_at": {
+          "format": "date-time",
+          "title": "Imported At",
+          "type": "string"
+        },
+        "verified_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified At"
+        },
+        "data_as_of": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data As Of"
+        },
+        "effective_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effective From"
+        },
+        "effective_to": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effective To"
+        },
+        "calculation_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calculation At"
+        },
+        "known_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Known At"
+        },
+        "available_to_strategy_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Available To Strategy At"
+        },
+        "vintage_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vintage At"
+        }
+      },
+      "required": [
+        "received_at",
+        "imported_at"
+      ],
+      "title": "Times",
+      "type": "object"
+    },
+    "TradeSetup": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "trade_setup",
+          "default": "trade_setup",
+          "title": "Kind",
+          "type": "string"
+        },
+        "mandate_id": {
+          "format": "uuid",
+          "title": "Mandate Id",
+          "type": "string"
+        },
+        "instrument_id": {
+          "format": "uuid",
+          "title": "Instrument Id",
+          "type": "string"
+        },
+        "thesis_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Thesis Id"
+        },
+        "signal_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signal Id"
+        },
+        "market_data_id": {
+          "format": "uuid",
+          "title": "Market Data Id",
+          "type": "string"
+        },
+        "entry_conditions": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Entry Conditions",
+          "type": "string"
+        },
+        "invalidation": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Invalidation",
+          "type": "string"
+        },
+        "stop_policy": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Stop Policy",
+          "type": "string"
+        },
+        "take_profit_policy": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Take Profit Policy",
+          "type": "string"
+        },
+        "risk_unit": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Risk Unit"
+        },
+        "position_limit": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Position Limit"
+        },
+        "transaction_cost_assumption": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Transaction Cost Assumption",
+          "type": "string"
+        },
+        "expected_holding_period": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Expected Holding Period",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "review_status": {
+          "default": "draft",
+          "enum": [
+            "draft",
+            "reviewed",
+            "rejected"
+          ],
+          "title": "Review Status",
+          "type": "string"
+        },
+        "executable_order": {
+          "const": false,
+          "default": false,
+          "title": "Executable Order",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "mandate_id",
+        "instrument_id",
+        "market_data_id",
+        "entry_conditions",
+        "invalidation",
+        "stop_policy",
+        "take_profit_policy",
+        "risk_unit",
+        "position_limit",
+        "transaction_cost_assumption",
+        "expected_holding_period",
+        "expires_at"
+      ],
+      "title": "TradeSetup",
+      "type": "object"
+    },
+    "Transaction": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "times": {
+          "$ref": "#/$defs/Times"
+        },
+        "classification": {
+          "$ref": "#/$defs/Classification",
+          "default": "internal_research"
+        },
+        "verification": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "verified",
+            "rejected",
+            "superseded",
+            "not_applicable"
+          ],
+          "title": "Verification",
+          "type": "string"
+        },
+        "verified_by": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified By"
+        },
+        "supersedes_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supersedes Id"
+        },
+        "kind": {
+          "const": "transaction",
+          "default": "transaction",
+          "title": "Kind",
+          "type": "string"
+        },
+        "portfolio_id": {
+          "format": "uuid",
+          "title": "Portfolio Id",
+          "type": "string"
+        },
+        "instrument_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instrument Id"
+        },
+        "transaction_type": {
+          "enum": [
+            "buy",
+            "sell",
+            "deposit",
+            "withdrawal",
+            "dividend",
+            "fee",
+            "split"
+          ],
+          "title": "Transaction Type",
+          "type": "string"
+        },
+        "quantity": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Quantity"
+        },
+        "price": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Price"
+        },
+        "fees": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Fees"
+        },
+        "taxes": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Taxes"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "fx_rate": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Fx Rate"
+        },
+        "settlement_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Settlement At"
+        },
+        "reconciliation": {
+          "default": "unreconciled",
+          "enum": [
+            "unreconciled",
+            "reconciled",
+            "disputed"
+          ],
+          "title": "Reconciliation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provenance",
+        "times",
+        "portfolio_id",
+        "transaction_type",
+        "quantity",
+        "price",
+        "fees",
+        "taxes",
+        "currency",
+        "fx_rate"
+      ],
+      "title": "Transaction",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "audit_event": "#/$defs/AuditEvent",
+      "claim": "#/$defs/Claim",
+      "company": "#/$defs/Company",
+      "decision": "#/$defs/Decision",
+      "document": "#/$defs/Document",
+      "event": "#/$defs/Event",
+      "evidence": "#/$defs/Evidence",
+      "industry": "#/$defs/Industry",
+      "instrument": "#/$defs/Instrument",
+      "job": "#/$defs/Job",
+      "mandate": "#/$defs/Mandate",
+      "market_data_reference": "#/$defs/MarketDataReference",
+      "note": "#/$defs/Note",
+      "portfolio": "#/$defs/Portfolio",
+      "quant_run": "#/$defs/QuantRun",
+      "receipt": "#/$defs/Receipt",
+      "relationship": "#/$defs/Relationship",
+      "research_review": "#/$defs/ResearchReview",
+      "signal": "#/$defs/Signal",
+      "source": "#/$defs/Source",
+      "technology": "#/$defs/Technology",
+      "thesis_version": "#/$defs/ThesisVersion",
+      "trade_setup": "#/$defs/TradeSetup",
+      "transaction": "#/$defs/Transaction"
+    },
+    "propertyName": "kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Instrument"
+    },
+    {
+      "$ref": "#/$defs/Company"
+    },
+    {
+      "$ref": "#/$defs/Industry"
+    },
+    {
+      "$ref": "#/$defs/Technology"
+    },
+    {
+      "$ref": "#/$defs/Source"
+    },
+    {
+      "$ref": "#/$defs/Document"
+    },
+    {
+      "$ref": "#/$defs/Event"
+    },
+    {
+      "$ref": "#/$defs/Claim"
+    },
+    {
+      "$ref": "#/$defs/Evidence"
+    },
+    {
+      "$ref": "#/$defs/Relationship"
+    },
+    {
+      "$ref": "#/$defs/Note"
+    },
+    {
+      "$ref": "#/$defs/ResearchReview"
+    },
+    {
+      "$ref": "#/$defs/ThesisVersion"
+    },
+    {
+      "$ref": "#/$defs/MarketDataReference"
+    },
+    {
+      "$ref": "#/$defs/QuantRun"
+    },
+    {
+      "$ref": "#/$defs/Signal"
+    },
+    {
+      "$ref": "#/$defs/Mandate"
+    },
+    {
+      "$ref": "#/$defs/TradeSetup"
+    },
+    {
+      "$ref": "#/$defs/Portfolio"
+    },
+    {
+      "$ref": "#/$defs/Transaction"
+    },
+    {
+      "$ref": "#/$defs/Decision"
+    },
+    {
+      "$ref": "#/$defs/AuditEvent"
+    },
+    {
+      "$ref": "#/$defs/Job"
+    },
+    {
+      "$ref": "#/$defs/Receipt"
+    }
+  ],
+  "title": "EntityEnvelope",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:EntityEnvelope"
+}

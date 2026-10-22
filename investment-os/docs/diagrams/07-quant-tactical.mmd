@@ -1,0 +1,11 @@
+flowchart LR
+  Data[(Versioned Parquet)] --> Engine[Deterministic Python and DuckDB]
+  Engine --> Run[Reproducible QuantRun]
+  Run --> Signal[Expiring signal]
+  Signal --> Tactical[Tactical mandate setup]
+  Thesis[Core fundamental thesis] --> Core[Long-horizon mandate]
+  Core --> Risk[Independent portfolio risk]
+  Tactical --> Risk
+  Risk --> Proposal[Owner-visible decision proposal]
+  AI[AI hypothesis] -.-> Engine
+  AI -.-> NoNumbers[No invented computed result]

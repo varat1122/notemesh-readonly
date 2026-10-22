@@ -1,0 +1,12 @@
+flowchart TD
+  Input[Manual file or allowed source] --> Rights{Rights and file safety}
+  Rights -->|Fail| Quarantine[Quarantine and audit]
+  Rights -->|Pass| Bytes[Immutable original bytes and hash]
+  Bytes --> Registry[Document Source and canonical registry]
+  Registry --> Parse[Versioned parser and exact locators]
+  Parse --> Dedup{Duplicate correction or new event}
+  Dedup --> Evidence[Claim evidence and contradictions]
+  Evidence --> Context[Permission and as-of filtered context]
+  Context --> Draft[Research draft and missing evidence]
+  Draft --> Approval[Scoped approval gate]
+  Approval --> Receipt[Future writeback and readback receipt]

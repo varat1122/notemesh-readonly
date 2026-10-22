@@ -1,0 +1,70 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "entity_id": {
+      "format": "uuid",
+      "title": "Entity Id",
+      "type": "string"
+    },
+    "source_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Id"
+    },
+    "excerpt": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Excerpt",
+      "type": "string"
+    },
+    "content_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Content Sha256",
+      "type": "string"
+    },
+    "untrusted_data": {
+      "const": true,
+      "default": true,
+      "title": "Untrusted Data",
+      "type": "boolean"
+    },
+    "archived_ai": {
+      "default": false,
+      "title": "Archived Ai",
+      "type": "boolean"
+    },
+    "independent_evidence": {
+      "default": false,
+      "title": "Independent Evidence",
+      "type": "boolean"
+    },
+    "available_at": {
+      "format": "date-time",
+      "title": "Available At",
+      "type": "string"
+    },
+    "truncated": {
+      "default": false,
+      "title": "Truncated",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "entity_id",
+    "excerpt",
+    "content_sha256",
+    "available_at"
+  ],
+  "title": "ContextItem",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:ContextItem"
+}

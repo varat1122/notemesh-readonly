@@ -1,0 +1,65 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "dataset_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Dataset Ids",
+      "type": "array"
+    },
+    "strategy": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Strategy",
+      "type": "string"
+    },
+    "code_version": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Code Version",
+      "type": "string"
+    },
+    "parameters": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "title": "Parameters",
+      "type": "object"
+    },
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    }
+  },
+  "required": [
+    "dataset_ids",
+    "strategy",
+    "code_version",
+    "parameters",
+    "as_of"
+  ],
+  "title": "QuantRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:QuantRequest"
+}

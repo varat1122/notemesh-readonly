@@ -1,0 +1,8 @@
+# Optional build-only CA trust for managed development environments.
+services:
+  migrate:
+    build:
+      secrets: [proxy_ca]
+secrets:
+  proxy_ca:
+    file: ${CODEX_PROXY_CERT:?Set the managed session CA path}

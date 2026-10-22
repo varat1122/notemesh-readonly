@@ -1,0 +1,50 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "symbol": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Symbol",
+      "type": "string"
+    },
+    "venue": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Venue",
+      "type": "string"
+    },
+    "currency": {
+      "pattern": "^[A-Z]{3}$",
+      "title": "Currency",
+      "type": "string"
+    },
+    "valid_from": {
+      "format": "date-time",
+      "title": "Valid From",
+      "type": "string"
+    },
+    "valid_to": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Valid To"
+    }
+  },
+  "required": [
+    "symbol",
+    "venue",
+    "currency",
+    "valid_from"
+  ],
+  "title": "SymbolAlias",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:SymbolAlias"
+}

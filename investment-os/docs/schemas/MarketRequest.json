@@ -1,0 +1,45 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "instrument_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Instrument Ids",
+      "type": "array"
+    },
+    "start": {
+      "format": "date-time",
+      "title": "Start",
+      "type": "string"
+    },
+    "end": {
+      "format": "date-time",
+      "title": "End",
+      "type": "string"
+    },
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    },
+    "frequency": {
+      "const": "daily",
+      "default": "daily",
+      "title": "Frequency",
+      "type": "string"
+    }
+  },
+  "required": [
+    "instrument_ids",
+    "start",
+    "end",
+    "as_of"
+  ],
+  "title": "MarketRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:MarketRequest"
+}

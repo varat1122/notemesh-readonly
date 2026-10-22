@@ -1,0 +1,16 @@
+flowchart TD
+  subgraph Untrusted
+    Text[Sources attachments and AI output]
+    Client[Client requests]
+  end
+  Client --> Auth[Authenticated server principal]
+  Auth --> Policy{Resource action scope and version}
+  Text --> Data[Data-only context and schemas]
+  Data --> Draft[Proposal only]
+  Draft --> Policy
+  Policy -->|Denied| Audit[Denial audit]
+  Policy -->|Separate approval| Writer[Single authorized writer]
+  Writer --> Protected[(Protected state)]
+  Writer --> Receipts[Readback and durable receipts]
+  Admin[Owner approval authority] --> Policy
+  Text -.-> Deny[Cannot grant rights or invoke persistence]

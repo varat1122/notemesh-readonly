@@ -1,0 +1,55 @@
+name: investment-os-p0
+services:
+  db:
+    image: postgres:17-bookworm@sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133ccaf80d27
+    environment:
+      POSTGRES_DB: ios_synthetic
+      POSTGRES_USER: ios_dummy
+      POSTGRES_PASSWORD: dummy-local-only
+    ports:
+      - "127.0.0.1:${IOS_PG_PORT:-55432}:5432"
+    volumes:
+      - p0_postgres:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/001-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ios_dummy -d ios_synthetic"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [local]
+  migrate:
+    build:
+      context: ../..
+    image: investment-os-p0:local
+    command: ["alembic", "-c", "infra/migrations/alembic.ini", "upgrade", "head"]
+    environment:
+      IOS_DATABASE_URL: postgresql+psycopg://ios_dummy:dummy-local-only@db:5432/ios_synthetic
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [local]
+  api:
+    image: investment-os-p0:local
+    command: ["uvicorn", "investment_os.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    environment:
+      IOS_ENVIRONMENT: synthetic_development
+      IOS_ENABLE_DUMMY_AUTH: "true"
+      IOS_DATABASE_URL: postgresql+psycopg://ios_app:dummy-read-only@db:5432/ios_synthetic
+    ports:
+      - "127.0.0.1:${IOS_API_PORT:-58000}:8000"
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready',timeout=3)"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    networks: [local]
+volumes:
+  p0_postgres:
+networks:
+  local:
+    driver: bridge

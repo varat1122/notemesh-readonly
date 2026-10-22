@@ -1,0 +1,369 @@
+{
+  "$defs": {
+    "Classification": {
+      "enum": [
+        "public",
+        "licensed_vendor",
+        "internal_research",
+        "confidential_portfolio",
+        "personal_sensitive",
+        "secret"
+      ],
+      "title": "Classification",
+      "type": "string"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "enum": [
+            "source",
+            "human",
+            "ai",
+            "deterministic",
+            "system",
+            "synthetic"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "source_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Source Ids",
+          "type": "array"
+        },
+        "basis": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Basis",
+          "type": "string"
+        },
+        "actor_id": {
+          "format": "uuid",
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "original_origin_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Origin Id"
+        },
+        "independent_evidence": {
+          "default": false,
+          "title": "Independent Evidence",
+          "type": "boolean"
+        },
+        "license_id": {
+          "default": "synthetic-only",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "License Id",
+          "type": "string"
+        },
+        "permitted_uses": {
+          "default": [
+            "local_research"
+          ],
+          "items": {
+            "enum": [
+              "local_research",
+              "model_input",
+              "redistribute"
+            ],
+            "type": "string"
+          },
+          "title": "Permitted Uses",
+          "type": "array"
+        }
+      },
+      "required": [
+        "origin",
+        "basis",
+        "actor_id"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "Times": {
+      "additionalProperties": false,
+      "properties": {
+        "event_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event At"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "received_at": {
+          "format": "date-time",
+          "title": "Received At",
+          "type": "string"
+        },
+        "imported_at": {
+          "format": "date-time",
+          "title": "Imported At",
+          "type": "string"
+        },
+        "verified_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified At"
+        },
+        "data_as_of": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data As Of"
+        },
+        "effective_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effective From"
+        },
+        "effective_to": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effective To"
+        },
+        "calculation_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calculation At"
+        },
+        "known_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Known At"
+        },
+        "available_to_strategy_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Available To Strategy At"
+        },
+        "vintage_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vintage At"
+        }
+      },
+      "required": [
+        "received_at",
+        "imported_at"
+      ],
+      "title": "Times",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    },
+    "times": {
+      "$ref": "#/$defs/Times"
+    },
+    "classification": {
+      "$ref": "#/$defs/Classification",
+      "default": "internal_research"
+    },
+    "verification": {
+      "default": "unverified",
+      "enum": [
+        "unverified",
+        "verified",
+        "rejected",
+        "superseded",
+        "not_applicable"
+      ],
+      "title": "Verification",
+      "type": "string"
+    },
+    "verified_by": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Verified By"
+    },
+    "supersedes_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supersedes Id"
+    },
+    "kind": {
+      "const": "document",
+      "default": "document",
+      "title": "Kind",
+      "type": "string"
+    },
+    "content_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Content Sha256",
+      "type": "string"
+    },
+    "byte_size": {
+      "exclusiveMinimum": 0,
+      "title": "Byte Size",
+      "type": "integer"
+    },
+    "media_type": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Media Type",
+      "type": "string"
+    },
+    "storage_key": {
+      "pattern": "^[a-z0-9][a-z0-9/_.-]{0,500}$",
+      "title": "Storage Key",
+      "type": "string"
+    },
+    "storage_backend": {
+      "enum": [
+        "local",
+        "drive",
+        "object"
+      ],
+      "title": "Storage Backend",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "provenance",
+    "times",
+    "content_sha256",
+    "byte_size",
+    "media_type",
+    "storage_key",
+    "storage_backend"
+  ],
+  "title": "Document",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:Document"
+}

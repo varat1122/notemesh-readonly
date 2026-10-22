@@ -1,0 +1,11 @@
+flowchart TD
+  PG[(PostgreSQL IDs claims edges decisions audit)] -->|note ID path version hash| MD[(Markdown narrative)]
+  PG -->|document ID digest rights| OBJ[(Original PDF Excel CSV bytes)]
+  PG -->|dataset ID digest as-of| PAR[(Parquet datasets and results)]
+  DU[DuckDB computation] --> PAR
+  MD --> IDX[Rebuildable search and link projection]
+  IDX --> PG
+  Backup[Coordinated backup manifest] --> PG
+  Backup --> MD
+  Backup --> OBJ
+  Backup --> PAR

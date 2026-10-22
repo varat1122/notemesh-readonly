@@ -1,0 +1,102 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "instrument_id": {
+      "format": "uuid",
+      "title": "Instrument Id",
+      "type": "string"
+    },
+    "session_at": {
+      "format": "date-time",
+      "title": "Session At",
+      "type": "string"
+    },
+    "open": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "title": "Open"
+    },
+    "high": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "title": "High"
+    },
+    "low": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "title": "Low"
+    },
+    "close": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "title": "Close"
+    },
+    "volume": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "title": "Volume"
+    },
+    "dataset_id": {
+      "format": "uuid",
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "currency": {
+      "pattern": "^[A-Z]{3}$",
+      "title": "Currency",
+      "type": "string"
+    },
+    "available_at": {
+      "format": "date-time",
+      "title": "Available At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "instrument_id",
+    "session_at",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "dataset_id",
+    "currency",
+    "available_at"
+  ],
+  "title": "MarketBar",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:MarketBar"
+}

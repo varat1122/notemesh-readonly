@@ -1,0 +1,13 @@
+flowchart LR
+  subgraph Local_P0
+    API[Loopback API with dummy auth] --> DB[(Synthetic PostgreSQL)]
+    Mig[One-shot migration owner] --> DB
+    Reader[Read-only synthetic Vault adapter] --> Fixture[(Marked fixture Vault)]
+  end
+  subgraph Future_Cloud_requires_approval
+    Cloud[API and worker with real identity] --> CDB[(Private PostgreSQL)]
+    Cloud --> Store[(Encrypted object and Parquet storage)]
+  end
+  Enrolled[Owner-enrolled local agent] -.->|Authenticated outbound transport| Cloud
+  Enrolled --> RealVault[(Authorized local Vault)]
+  API -.->|Preserve UUID contracts| Cloud

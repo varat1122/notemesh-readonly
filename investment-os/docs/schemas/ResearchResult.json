@@ -1,0 +1,188 @@
+{
+  "$defs": {
+    "SpecialistResult": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "question": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "lens": {
+          "enum": [
+            "fundamental",
+            "industry",
+            "supply_chain",
+            "macro",
+            "scientific",
+            "quant",
+            "tactical",
+            "risk",
+            "counter_thesis"
+          ],
+          "title": "Lens",
+          "type": "string"
+        },
+        "findings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Findings",
+          "type": "array"
+        },
+        "claims_with_source_ids": {
+          "additionalProperties": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Claims With Source Ids",
+          "type": "object"
+        },
+        "mechanism": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Mechanism",
+          "type": "string"
+        },
+        "estimates_if_available": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Estimates If Available",
+          "type": "object"
+        },
+        "counter_evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Counter Evidence",
+          "type": "array"
+        },
+        "uncertainties": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Uncertainties",
+          "type": "array"
+        },
+        "required_evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Evidence",
+          "type": "array"
+        },
+        "confidence_basis": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Confidence Basis",
+          "type": "string"
+        },
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "horizon": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Horizon",
+          "type": "string"
+        },
+        "proposed_thesis_impact": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Proposed Thesis Impact",
+          "type": "string"
+        },
+        "should_abstain": {
+          "title": "Should Abstain",
+          "type": "boolean"
+        },
+        "independent_evidence": {
+          "const": false,
+          "default": false,
+          "title": "Independent Evidence",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "question",
+        "lens",
+        "findings",
+        "claims_with_source_ids",
+        "mechanism",
+        "estimates_if_available",
+        "counter_evidence",
+        "uncertainties",
+        "required_evidence",
+        "confidence_basis",
+        "as_of",
+        "horizon",
+        "proposed_thesis_impact",
+        "should_abstain"
+      ],
+      "title": "SpecialistResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "specialist_results": {
+      "items": {
+        "$ref": "#/$defs/SpecialistResult"
+      },
+      "title": "Specialist Results",
+      "type": "array"
+    },
+    "disagreements": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Disagreements",
+      "type": "array"
+    },
+    "missing_evidence": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Missing Evidence",
+      "type": "array"
+    },
+    "draft_only": {
+      "const": true,
+      "default": true,
+      "title": "Draft Only",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "specialist_results",
+    "disagreements",
+    "missing_evidence"
+  ],
+  "title": "ResearchResult",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:ResearchResult"
+}

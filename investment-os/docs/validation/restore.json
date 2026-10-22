@@ -1,0 +1,1 @@
+{"status": "PASS", "restored_payload_and_hash": true, "migration_down_up_idempotent": true, "scope": "synthetic PostgreSQL only; no cross-store recovery claim"}

@@ -1,0 +1,13 @@
+flowchart TD
+  R[Fundamental and industry research] --> IC[Committee proposal]
+  Q[Deterministic quant] --> IC
+  T[Tactical mandate and horizon] --> IC
+  IC --> Risk{Independent risk and constraints}
+  Risk -->|Insufficient| Watch[Watch or no action]
+  Risk -->|Fits mandate| Owner{Owner authority}
+  Owner --> Ledger[Decision ledger]
+  Ledger --> Journal[Separately authorized portfolio journal]
+  Journal --> Outcome[Outcome and attribution]
+  Outcome --> Review[Forecast thesis timing sizing process review]
+  Review --> R
+  Ledger -.-> NoExecution[No automatic broker execution]

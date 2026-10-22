@@ -1,0 +1,12 @@
+PASS syntax 01-system-context.mmd
+PASS syntax 02-components.mmd
+PASS syntax 03-data-flow.mmd
+PASS syntax 04-knowledge-loop.mmd
+PASS syntax 05-decision-loop.mmd
+PASS syntax 06-orchestration.mmd
+PASS syntax 07-quant-tactical.mmd
+PASS syntax 08-storage.mmd
+PASS syntax 09-trust.mmd
+PASS syntax 10-local-cloud.mmd
+PASS syntax 11-logical-er.mmd
+PASS syntax 12-physical-er.mmd

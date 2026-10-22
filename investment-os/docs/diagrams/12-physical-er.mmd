@@ -1,0 +1,59 @@
+erDiagram
+  entities ||--|{ entity_versions : has
+  entity_versions ||--o{ entity_references : references_from
+  entities ||--o{ entity_references : references_to
+  operations ||--o{ receipts : produces
+  operations ||--o{ audit_events : audits
+  entities {
+    uuid id PK
+    text kind
+    int current_version FK
+    timestamptz created_at
+  }
+  entity_versions {
+    uuid entity_id PK,FK
+    int version PK
+    text schema_version
+    jsonb payload
+    text content_sha256
+    timestamptz recorded_at
+  }
+  entity_references {
+    uuid from_id PK,FK
+    int from_version PK,FK
+    text field_name PK
+    uuid to_id PK,FK
+    int to_version FK
+  }
+  operations {
+    uuid id PK
+    uuid actor_id
+    text idempotency_key
+    text request_sha256
+    text state
+    int version
+  }
+  receipts {
+    uuid id PK
+    uuid operation_id FK
+    text state
+    text after_sha256
+    boolean physical_verified
+    boolean index_verified
+    boolean links_verified
+  }
+  audit_events {
+    uuid id PK
+    uuid operation_id FK
+    uuid actor_id
+    text action
+    text outcome
+  }
+  permission_grants {
+    uuid id PK
+    uuid principal_id
+    text action
+    text resource_scope
+    uuid approved_by
+    timestamptz expires_at
+  }

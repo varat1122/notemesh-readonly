@@ -1,0 +1,47 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "entity_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Entity Ids",
+      "type": "array"
+    },
+    "question": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Question",
+      "type": "string"
+    },
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    },
+    "mandate_id": {
+      "format": "uuid",
+      "title": "Mandate Id",
+      "type": "string"
+    },
+    "max_characters": {
+      "maximum": 100000,
+      "minimum": 1000,
+      "title": "Max Characters",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "entity_ids",
+    "question",
+    "as_of",
+    "mandate_id",
+    "max_characters"
+  ],
+  "title": "RetrievalRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:RetrievalRequest"
+}

@@ -1,0 +1,12 @@
+flowchart LR
+  A[Event A and original source] --> H[Historical thesis and evidence]
+  H --> R[Review draft with counter-evidence]
+  R --> G[Typed link proposals]
+  G --> P{Owner scoped authorization}
+  P -->|Approved| W[Journaled note and timeline write]
+  W --> V{Byte index and link readback}
+  V -->|Pass| C[Committed receipt]
+  V -->|Fail| F[Partial state and reconciliation]
+  C --> B[Event B retrieval]
+  B --> N[Prior review remains non-independent]
+  N --> H

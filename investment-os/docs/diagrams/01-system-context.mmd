@@ -1,0 +1,11 @@
+flowchart LR
+  Owner[Owner and research users] --> API[Investment OS API]
+  Chat[AI frontend] --> API
+  Optional[Future Web Mobile LINE] -.-> API
+  Intake[Manual PDF CSV Excel and Drive] -.-> API
+  API --> PG[(Canonical PostgreSQL)]
+  API --> Agent[Authorized local Vault agent]
+  Agent --> Vault[(Obsidian Markdown)]
+  API -.-> Model[Approved model adapter]
+  API -.-> Market[Approved market data adapter]
+  API --> Files[(Original bytes and Parquet)]
