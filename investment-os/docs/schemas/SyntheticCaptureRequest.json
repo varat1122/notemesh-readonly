@@ -1,0 +1,56 @@
+{
+  "additionalProperties": false,
+  "description": "Local test harness only; caller attestation is not real-source authorization.",
+  "properties": {
+    "filename": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}\\.(pdf|csv|xlsx)$",
+      "title": "Filename",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "maxLength": 128,
+      "minLength": 8,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "received_at": {
+      "format": "date-time",
+      "title": "Received At",
+      "type": "string"
+    },
+    "publisher": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Publisher",
+      "type": "string"
+    },
+    "origin": {
+      "const": "synthetic",
+      "default": "synthetic",
+      "title": "Origin",
+      "type": "string"
+    },
+    "license_id": {
+      "const": "synthetic-only",
+      "default": "synthetic-only",
+      "title": "License Id",
+      "type": "string"
+    },
+    "classification": {
+      "const": "internal_research",
+      "default": "internal_research",
+      "title": "Classification",
+      "type": "string"
+    }
+  },
+  "required": [
+    "filename",
+    "idempotency_key",
+    "received_at",
+    "publisher"
+  ],
+  "title": "SyntheticCaptureRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:SyntheticCaptureRequest"
+}

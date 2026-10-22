@@ -49,7 +49,7 @@ print(
             "unauthenticated": 401,
             "reader_write": 403,
             "protected_actions": 403,
-            "business_writes": 0,
+            "http_business_writes": 0,
             "paid_calls": 0,
         }
     )

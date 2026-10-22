@@ -29,3 +29,7 @@ HTTP logs emit JSON request ID, method, route template and status. They never in
 ## Known external gates
 
 Real authentication/authorization and secret custody, model export/budget, Drive OAuth, real Vault enrollment, vendor licensing, portfolio account/risk limits, cloud retention/backup and public ingress require separate owner decisions. No local PASS silently approves them.
+
+## Synthetic capture recovery
+
+Run `scripts/intake_demo.py` through the project Python environment to create generated fixture originals in ignored `artifacts/synthetic-intake-v1`. Keep its marker, quarantine, objects and journal together. The same request/key/bytes resumes an interrupted capture; different content or metadata under a reused key fails. A complete checkpoint is returned only after original and registry readback. Do not edit checkpoints, overwrite corrupt objects, reset a root or delete an unmatched blob automatically. Failures retain evidence for reconciliation. The dev workflow does not implement total-storage quotas, garbage collection or an independent object backup. `restore_drill.py` remains PostgreSQL-only. A coordinated object/DB recovery drill is required before real source use.

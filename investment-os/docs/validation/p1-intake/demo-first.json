@@ -1,0 +1,48 @@
+{
+  "status": "PASS",
+  "scope": "generated synthetic files only; no source verification, parsing or Vault writes",
+  "fresh_connection_readback": true,
+  "store": "artifacts/synthetic-intake-v1",
+  "results": {
+    "pdf": {
+      "status": "captured",
+      "content_sha256": "f4cc51dac2b06088d0eab71496a28d3c85b575e2288c2853943eba43006fabba",
+      "document_id": "8f065e40-4f4c-5490-add8-2a163a3a2b6e",
+      "source_id": "41703c58-de6a-5def-b607-c51b1cd20345",
+      "reason": null,
+      "replayed": false,
+      "original_bytes_verified": true,
+      "scope": "synthetic_local_capture"
+    },
+    "csv": {
+      "status": "captured",
+      "content_sha256": "954266a28fdffa2782650bc54d1415fc42fd7d32733de71edd18f01375883164",
+      "document_id": "c6d37175-387b-5868-b392-72d96e865931",
+      "source_id": "50ddc7d6-93be-5493-a546-2515a5fbc8a5",
+      "reason": null,
+      "replayed": false,
+      "original_bytes_verified": true,
+      "scope": "synthetic_local_capture"
+    },
+    "xlsx": {
+      "status": "captured",
+      "content_sha256": "9cfbef14e34c6818682b2ac1d7deb3390b904dddcbe16a58bb94b0274f49993c",
+      "document_id": "cdeb9b53-bde0-5278-bc7c-383f0685ba57",
+      "source_id": "c6b7c352-0a15-5583-bfd3-ec2b0369fddf",
+      "reason": null,
+      "replayed": false,
+      "original_bytes_verified": true,
+      "scope": "synthetic_local_capture"
+    },
+    "invalid": {
+      "status": "quarantined",
+      "content_sha256": "4b59203c4bfe03eef333ed7ec78381d44fd328bba2b34eafdcf004b5a68130c4",
+      "document_id": null,
+      "source_id": null,
+      "reason": "magic_mismatch",
+      "replayed": false,
+      "original_bytes_verified": false,
+      "scope": "synthetic_local_capture"
+    }
+  }
+}

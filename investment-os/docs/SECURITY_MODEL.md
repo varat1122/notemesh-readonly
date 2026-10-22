@@ -58,3 +58,7 @@ P0 structured HTTP logs are operational request traces, not durable business aud
 ## Before real-data or internet use
 
 Separate owner approval is required for auth provider, hosting spend, model provider/data export, Drive scope, real Vault enrollment, data licensing, retention/RPO/RTO, risk limits and portfolio account access. See ADR 009. P0 evidence can support design review; it cannot waive these gates.
+
+## P1 synthetic capture implementation overlay
+
+The synthetic registry and local capture library now write unverified fixture data through explicit dummy principals; the HTTP API remains SELECT-only. ADRs 011–012 define the implemented boundaries. Capture uses a separately marked owner-only root, no-follow directory descriptors, immutable files/checksummed checkpoints, byte readback and fail-closed partial recovery. Bounded static PDF/CSV/XLSX inspection runs in a child with no inherited credentials. These controls do not implement real identity/grants, antivirus, tenant isolation, retention quotas or a network sandbox. No captured fixture is promoted to verified Evidence Register status. The local root and dummy database owner remain trusted.

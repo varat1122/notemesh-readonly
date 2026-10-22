@@ -1,4 +1,4 @@
-# Investment OS — P0 foundation + first P1 registry milestone
+# Investment OS — P0 foundation + synthetic P1 registry and capture
 
 A **synthetic-only development foundation** based on [Master Blueprint v1.0](docs/MASTER_BLUEPRINT.md). Python/FastAPI + PostgreSQL + portable Parquet/DuckDB + local Markdown contracts. This is an isolated subtree; the existing NoteMesh application is unchanged.
 
@@ -39,6 +39,12 @@ The Compose bootstrap runs a **one-shot migration owner** before API startup. AP
 
 After starting Compose, run `uv run --frozen python scripts/registry_demo.py` twice. The first run stores ten fictional metadata records and one new revision; the second replays the same operations. Both verify committed hashes through a new database connection and reject stale writes. This uses the local dummy database owner, not a production writer role. No document bytes or Vault notes are written. See [P1 milestone status](docs/P1_REGISTRY_STATUS.md) and [ADR 011](docs/adr/011.md).
 
+## Synthetic PDF/CSV/Excel capture
+
+Run `uv run --frozen python scripts/intake_demo.py` after Compose is healthy. It generates three fictional documents, preserves their original bytes, registers unverified Document/Source records, and quarantines a fourth invalid file. Run again to verify stable replay. No external files or accounts are read.
+
+The marked store is `artifacts/synthetic-intake-v1/` (ignored by Git). Keep originals **and** journal checkpoints together; do not reset the directory to resolve an error. Storage is local to this workspace and is not an independent backup. The capture library accepts only synthetic/internal fixtures, and no HTTP upload route exists. Linux/POSIX is required. See [intake status](docs/P1_INTAKE_STATUS.md) and [ADR 012](docs/adr/012.md) for accepted formats, failure recovery and limits.
+
 ## Local API without the API container
 
 ```bash
@@ -57,7 +63,8 @@ src/investment_os/
   domain/        canonical IDs, provenance, time and 24 entity schemas
   ports/         typed future module/provider interfaces
   policy/        synthetic principals and deny-by-default capabilities
-  storage/       PostgreSQL readiness and transactional synthetic registry
+  storage/       PostgreSQL registry and marked immutable synthetic object store
+  ingestion/     bounded synthetic capture and isolated static-format inspection
   adapters/      read-only synthetic local Vault boundary
 infra/
   local-compose/ isolated API, PostgreSQL, migration owner and dummy roles

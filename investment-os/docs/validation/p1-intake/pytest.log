@@ -1,0 +1,26 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.7.0
+rootdir: /workspace/investment-os-p0-worktree/investment-os
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.15.1
+collected 191 items
+
+tests/integration/test_capture.py ...............                        [  7%]
+tests/integration/test_postgres.py .........                             [ 12%]
+tests/integration/test_registry.py .................................     [ 29%]
+tests/test_analytics.py ..                                               [ 30%]
+tests/test_canonical.py ........                                         [ 35%]
+tests/test_contracts.py ......................                           [ 46%]
+tests/test_intake_validation.py ...................................      [ 64%]
+tests/test_local_objects.py ...............                              [ 72%]
+tests/test_security.py ................................................. [ 98%]
+...                                                                      [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /workspace/investment-os-p0-worktree/investment-os/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 191 passed, 1 warning in 7.38s ========================

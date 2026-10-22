@@ -1,0 +1,3 @@
+# Observed synthetic intake validation
+
+Actual local execution on 2026-10-22. pytest.log is extracted from scripts/check.sh after Compose was healthy. demo-first.json shows three captures and one quarantine; demo-replay.json was produced by a second Python process and preserves IDs/hashes. PostgreSQL restore evidence includes the new registry records, but not filesystem backup. evidence.json binds the source/lock hashes and Docker image to the checks. Generated source binaries remain in ignored local artifacts and temporary test directories, not Git. No remote CI or production readiness is inferred.

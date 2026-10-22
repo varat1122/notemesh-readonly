@@ -34,6 +34,43 @@ class IntakeResult(Contract):
     status: Literal["quarantined", "duplicate_review", "ready_for_evidence_review"]
 
 
+class SyntheticCaptureRequest(Contract):
+    """Local test harness only; caller attestation is not real-source authorization."""
+
+    filename: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}\.(pdf|csv|xlsx)$")
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    received_at: AwareDatetime
+    publisher: str = Field(min_length=1, max_length=200)
+    origin: Literal["synthetic"] = "synthetic"
+    license_id: Literal["synthetic-only"] = "synthetic-only"
+    classification: Literal["internal_research"] = "internal_research"
+
+
+class SyntheticCaptureResult(Contract):
+    status: Literal["captured", "quarantined"]
+    content_sha256: Digest
+    document_id: UUID | None = None
+    source_id: UUID | None = None
+    reason: str | None = None
+    replayed: bool = False
+    original_bytes_verified: bool = False
+    scope: Literal["synthetic_local_capture"] = "synthetic_local_capture"
+
+    @model_validator(mode="after")
+    def capture_state(self):
+        if self.status == "captured":
+            if (
+                not self.document_id
+                or not self.source_id
+                or not self.original_bytes_verified
+                or self.reason
+            ):
+                raise ValueError("captured requires both registry IDs and original readback")
+        elif self.document_id or self.source_id or self.original_bytes_verified or not self.reason:
+            raise ValueError("quarantined cannot claim registry or accepted original success")
+        return self
+
+
 class RetrievalRequest(Contract):
     entity_ids: tuple[UUID, ...] = Field(min_length=1)
     question: Text

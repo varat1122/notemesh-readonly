@@ -8,9 +8,17 @@ version = "0.1.0"
 description = "Synthetic-only P0 foundation for Investment OS"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "pydantic>=2.10,<3",
-  "pydantic-settings>=2.7,<3", "sqlalchemy>=2.0,<3", "psycopg[binary]>=3.2,<4",
-  "alembic>=1.14,<2", "duckdb>=1.2,<2"
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.34,<1",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+  "sqlalchemy>=2.0,<3",
+  "psycopg[binary]>=3.2,<4",
+  "alembic>=1.14,<2",
+  "duckdb>=1.2,<2",
+  "pypdf>=6,<7",
+  "openpyxl>=3.1,<4",
+  "defusedxml>=0.7,<1",
 ]
 
 [dependency-groups]

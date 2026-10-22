@@ -1,0 +1,80 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "enum": [
+        "captured",
+        "quarantined"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "content_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Content Sha256",
+      "type": "string"
+    },
+    "document_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Document Id"
+    },
+    "source_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Id"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "replayed": {
+      "default": false,
+      "title": "Replayed",
+      "type": "boolean"
+    },
+    "original_bytes_verified": {
+      "default": false,
+      "title": "Original Bytes Verified",
+      "type": "boolean"
+    },
+    "scope": {
+      "const": "synthetic_local_capture",
+      "default": "synthetic_local_capture",
+      "title": "Scope",
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "content_sha256"
+  ],
+  "title": "SyntheticCaptureResult",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:SyntheticCaptureResult"
+}

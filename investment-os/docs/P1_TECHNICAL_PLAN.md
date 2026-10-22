@@ -4,7 +4,7 @@ P0 supplies contracts, a running local API/DB foundation and tests. P1 implement
 
 ## Current implementation
 
-Step 1 engineering is implemented for ten unverified synthetic draft kinds; schema owner sign-off is still pending. See [P1_REGISTRY_STATUS.md](P1_REGISTRY_STATUS.md) and ADR 011. Actor-bound replay, atomic audit, concurrency tests and database restore also cover part of step 9. The remaining steps are not complete. No public write endpoint is opened.
+Step 1 engineering is implemented for ten unverified synthetic draft kinds; schema owner sign-off is still pending. See [P1_REGISTRY_STATUS.md](P1_REGISTRY_STATUS.md) and ADR 011. Actor-bound replay, atomic audit, concurrency tests and database restore also cover part of step 9. A bounded synthetic slice of step 3 is also implemented: original PDF/CSV/XLSX bytes, structural inspection/quarantine, content-addressed readback and resumable Document/Source registration. See P1_INTAKE_STATUS.md and ADR 012. Step 2 real auth/grants and step 4 extraction remain incomplete. No public write/upload endpoint is opened.
 
 ## Ordered work packages
 
