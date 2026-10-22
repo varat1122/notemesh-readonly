@@ -16,7 +16,7 @@ The local bridge binds published ports only to 127.0.0.1. Do not change these to
 
 Alembic config contains no credential. `IOS_DATABASE_URL` selects the DB. Only the migration owner changes schema. API uses SELECT-only role. P0 migration is reversible and repeatable; downgrade intentionally destroys this foundational schema, so it is exercised only on a temporary restored synthetic database. Future real deployments require reviewed forward migration, backup and a compatibility/rollback plan; no blind downgrade of real records.
 
-`restore_drill.py` captures a real `pg_dump -Fc`, restores to a uniquely named disposable DB, compares a fictional company payload/digest and schema revision, then exercises downgrade/upgrade/idempotent upgrade there. It removes only that temporary restored DB. The primary synthetic fixture remains for restart checks. This proves database restoration only, not Obsidian/object/Parquet/device recovery.
+`restore_drill.py` captures a real `pg_dump -Fc`, restores to a uniquely named disposable DB, compares a fictional company payload/digest, schema revision and all seven registry transaction table digests, then exercises downgrade/upgrade/idempotent upgrade there. It removes only that temporary restored DB. The primary synthetic fixture remains for restart checks. This proves database restoration only, not Obsidian/object/Parquet/device recovery.
 
 ## Cross-store recovery design for P2/P9
 
@@ -24,7 +24,7 @@ Define RPO/RTO and retention with the owner before real deployment. Stop/fence t
 
 ## Observability
 
-HTTP logs emit JSON request ID, method, route template and status. They never intentionally log query/body/token. Validation/readiness errors are sanitized. Future business audit must be transactional/append-only and distinct from process logs; P0 has the table but no business writer. Required later metrics: intake latency/failures, missing/contradictory evidence, stale data/signals, CAS conflicts, partial writes, readback mismatches, source rights blocks, provider usage/budget and portfolio reconciliation gaps.
+HTTP logs emit JSON request ID, method, route template and status. They never intentionally log query/body/token. Validation/readiness errors are sanitized. Future business audit must be transactional/append-only and distinct from process logs; P0 supplied the table; the P1 synthetic repository now writes successful audit events atomically. Denied/failed attempts still need a separate durable audit channel before real use. Required later metrics: intake latency/failures, missing/contradictory evidence, stale data/signals, CAS conflicts, partial writes, readback mismatches, source rights blocks, provider usage/budget and portfolio reconciliation gaps.
 
 ## Known external gates
 

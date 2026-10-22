@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-SCHEMA_REVISION = "0001_p0"
+SCHEMA_REVISION = "0002_registry"
 
 
 def make_engine(url: str) -> Engine:

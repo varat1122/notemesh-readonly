@@ -1,0 +1,7 @@
+P0 validates payload shapes but does not atomically enforce UUID reference targets when persisting JSONB. This adds a synthetic-only PostgreSQL repository for ten draft entity kinds, materializing typed, version-pinned references together with immutable payload hashes, an actor-bound idempotency operation and audit record.
+
+Concurrent creates and stale updates have one winner; identical retries return the original database commit without new writes. Readback validates payload and reference digests. Protected kinds, non-synthetic provenance, missing/wrong references and inconsistent source/document or issuer/claim links are denied. Migration 0002 adds integrity guards without rewriting legacy rows; unsealed P0 rows require explicit reconciliation.
+
+Validation: 126 tests passed with zero skips (42 real PostgreSQL tests), repeatable two-run demo, actual seven-table pg_dump/pg_restore comparison and migration down/up. Full command evidence and environment checks are in investment-os/docs/validation/p1-registry/. One upstream test-client deprecation warning remains.
+
+This is the first P1 milestone, not complete ingestion. No HTTP write endpoint, original byte capture, real auth, protected writeback or provider calls. The dummy schema owner remains trusted; production writer roles and denial audit are pending. No paid inference, merge, deploy, real Vault changes or budget ledger reset. See P1_REGISTRY_STATUS.md and ADR 011.

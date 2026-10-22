@@ -5,6 +5,8 @@ import os
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from investment_os.storage.database import SCHEMA_REVISION
+
 base = "http://127.0.0.1:" + os.environ.get("IOS_API_PORT", "58000")
 
 
@@ -25,7 +27,7 @@ def call(path, payload=None, token=None):
 
 
 assert call("/health/live")[0] == 200
-assert call("/health/ready")[1]["migration"] == "0001_p0"
+assert call("/health/ready")[1]["migration"] == SCHEMA_REVISION
 request = {"action": "research_draft", "resource_path": "Drafts/example.md"}
 assert call("/v1/policy/evaluate", request)[0] == 401
 assert call("/v1/policy/evaluate", request, "dummy-reader")[0] == 403
@@ -43,7 +45,7 @@ print(
         {
             "status": "PASS",
             "health": 200,
-            "migration": "0001_p0",
+            "migration": SCHEMA_REVISION,
             "unauthenticated": 401,
             "reader_write": 403,
             "protected_actions": 403,

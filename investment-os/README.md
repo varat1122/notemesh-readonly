@@ -1,4 +1,4 @@
-# Investment OS — Phase P0
+# Investment OS — P0 foundation + first P1 registry milestone
 
 A **synthetic-only development foundation** based on [Master Blueprint v1.0](docs/MASTER_BLUEPRINT.md). Python/FastAPI + PostgreSQL + portable Parquet/DuckDB + local Markdown contracts. This is an isolated subtree; the existing NoteMesh application is unchanged.
 
@@ -31,9 +31,13 @@ Or run `scripts/check.sh` for the sequence above. It sets the DB test URL, so in
 
 Managed Codex environment: if HOME caches are read-only, prefix commands with `UV_CACHE_DIR=/workspace/.cache/uv-greenfield`. `scripts/compose.sh` automatically uses the managed local daemon and build-only CA secret when `CODEX_PROXY_CERT` exists. It keeps TLS verification and Docker credentials intact. On an ordinary developer machine it uses your selected Docker context. No production compose/deploy target exists.
 
-Health: `http://127.0.0.1:58000/health/live` and `/health/ready`; development API docs: `/docs`. These are local URLs, not externally accessible deployments. Readiness requires the actual `0001_p0` PostgreSQL migration.
+Health: `http://127.0.0.1:58000/health/live` and `/health/ready`; development API docs: `/docs`. These are local URLs, not externally accessible deployments. Readiness requires the actual `0002_registry` PostgreSQL migration.
 
 The Compose bootstrap runs a **one-shot migration owner** before API startup. API runs non-root with a read-only filesystem and uses `ios_app`, a SELECT-only DB role. All passwords/tokens are conspicuous **public dummy fixtures**. Ports bind loopback; never expose this stack to the Internet or real data. A project bridge allows local ports; outbound network denial is a host responsibility.
+
+## Synthetic registry demo
+
+After starting Compose, run `uv run --frozen python scripts/registry_demo.py` twice. The first run stores ten fictional metadata records and one new revision; the second replays the same operations. Both verify committed hashes through a new database connection and reject stale writes. This uses the local dummy database owner, not a production writer role. No document bytes or Vault notes are written. See [P1 milestone status](docs/P1_REGISTRY_STATUS.md) and [ADR 011](docs/adr/011.md).
 
 ## Local API without the API container
 
@@ -53,7 +57,7 @@ src/investment_os/
   domain/        canonical IDs, provenance, time and 24 entity schemas
   ports/         typed future module/provider interfaces
   policy/        synthetic principals and deny-by-default capabilities
-  storage/       PostgreSQL readiness and connection foundation
+  storage/       PostgreSQL readiness and transactional synthetic registry
   adapters/      read-only synthetic local Vault boundary
 infra/
   local-compose/ isolated API, PostgreSQL, migration owner and dummy roles
@@ -67,7 +71,7 @@ ADR 004 explains this compact Python package layout instead of empty folders for
 
 ## Schema changes and synthetic data
 
-Python models are the schema source of truth. Change them deliberately, regenerate via `uv run --frozen python scripts/export_schemas.py`, review the diff and migration impact, and run tests. Regenerate fictional fixtures with `uv run --frozen python scripts/make_fixtures.py`. JSON Schema files are checked for drift; P1 adds full typed-reference persistence enforcement.
+Python models are the schema source of truth. Change them deliberately, regenerate via `uv run --frozen python scripts/export_schemas.py`, review the diff and migration impact, and run tests. Regenerate fictional fixtures with `uv run --frozen python scripts/make_fixtures.py`. JSON Schema files are checked for drift. The first P1 slice now enforces typed, version-pinned references for ten synthetic draft kinds; later kinds remain disabled.
 
 `tests/fixtures_synthetic/vault` contains a synthetic marker and one unverified example. No real Vault is mounted by Compose. Portfolio fixtures are explicitly fictional/confidential; all model/market adapters are interfaces only.
 

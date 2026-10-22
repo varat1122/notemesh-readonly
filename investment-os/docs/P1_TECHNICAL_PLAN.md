@@ -2,6 +2,10 @@
 
 P0 supplies contracts, a running local API/DB foundation and tests. P1 implements source/evidence behavior; it does not start multi-agent runtime, trading or dashboard work. Blueprint §18 phase numbering governs sequencing; the earlier capability-map MVP/P1/P2 labels are broad capability groupings, not authorization to skip gates.
 
+## Current implementation
+
+Step 1 engineering is implemented for ten unverified synthetic draft kinds; schema owner sign-off is still pending. See [P1_REGISTRY_STATUS.md](P1_REGISTRY_STATUS.md) and ADR 011. Actor-bound replay, atomic audit, concurrency tests and database restore also cover part of step 9. The remaining steps are not complete. No public write endpoint is opened.
+
 ## Ordered work packages
 
 | Step | Implementation | Acceptance / stop condition |

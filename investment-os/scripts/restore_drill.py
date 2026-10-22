@@ -14,7 +14,8 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
-from investment_os.storage.database import make_engine
+from investment_os.domain.canonical import canonical_sha256
+from investment_os.storage.database import SCHEMA_REVISION, make_engine
 
 root = Path(__file__).resolve().parents[1]
 compose = [str(root / "scripts/compose.sh")]
@@ -41,6 +42,35 @@ with database.begin() as conn:
             VALUES (:id,1,'1.0',CAST(:p AS jsonb),:sha)"""),
             {"id": payload["id"], "p": encoded, "sha": digest},
         )
+
+
+def registry_snapshot(engine):
+    # Stable ordering covers all registry transaction tables, including pinned references.
+    orders = {
+        "entities": "id",
+        "entity_versions": "entity_id,version",
+        "entity_references": "from_id,from_version,field_name,to_id",
+        "operations": "id",
+        "registry_commits": "operation_id",
+        "audit_events": "id",
+        "receipts": "id",
+    }
+    with engine.connect() as conn:
+        return {
+            table: canonical_sha256(
+                [
+                    dict(row)
+                    for row in conn.execute(
+                        text(f"SELECT * FROM {table} ORDER BY {order}")
+                    ).mappings()
+                ]
+            )
+            for table, order in orders.items()
+        }
+
+
+# Run on a quiet local dev database; concurrent writes cause a mismatch, not false success.
+before_dump = registry_snapshot(database)
 name = "ios_p0_restore_" + uuid4().hex[:12]
 with tempfile.TemporaryDirectory(prefix="ios-p0-restore-") as tmp:
     dump = Path(tmp) / "synthetic.dump"
@@ -78,8 +108,10 @@ with tempfile.TemporaryDirectory(prefix="ios-p0-restore-") as tmp:
             ).one()
             assert row[0] == payload and row[1] == digest
             assert (
-                conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0001_p0"
+                conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+                == SCHEMA_REVISION
             )
+        assert registry_snapshot(restored) == before_dump
         restored.dispose()
         env = dict(os.environ, IOS_DATABASE_URL=url.rsplit("/", 1)[0] + "/" + name)
         command = [
@@ -95,6 +127,7 @@ with tempfile.TemporaryDirectory(prefix="ios-p0-restore-") as tmp:
                 {
                     "status": "PASS",
                     "restored_payload_and_hash": True,
+                    "registry_table_digests": before_dump,
                     "migration_down_up_idempotent": True,
                     "scope": "synthetic PostgreSQL only; no cross-store recovery claim",
                 }

@@ -12,7 +12,7 @@ from sqlalchemy.engine import Engine
 from investment_os.api.settings import Settings
 from investment_os.domain.entities import EntityEnvelope
 from investment_os.policy.access import DUMMY_PRINCIPALS, PermissionRequest, Principal, authorize
-from investment_os.storage.database import make_engine, ready
+from investment_os.storage.database import SCHEMA_REVISION, make_engine, ready
 
 logger = logging.getLogger("investment_os.requests")
 logger.setLevel(logging.INFO)
@@ -78,7 +78,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
     def readiness():
         try:
             if ready(database):
-                return {"status": "ready", "database": "connected", "migration": "0001_p0"}
+                return {"status": "ready", "database": "connected", "migration": SCHEMA_REVISION}
         except Exception:
             pass
         raise HTTPException(503, "database or migration not ready")

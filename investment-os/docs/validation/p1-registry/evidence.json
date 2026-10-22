@@ -1,0 +1,93 @@
+{
+  "observed_at": "2026-10-22T15:32:33.195809+00:00",
+  "base_commit": "12768c4975ef418239ce86cc7da2a0fdcf00401d",
+  "branch": "codex/investment-os-p1-registry-20261022",
+  "schema_revision": "0002_registry",
+  "docker_api_image": "sha256:36f25c94cbf527d7a834d5c96a4f6e24cee26de60064fb93dfecc7ee6537fa19",
+  "checks": {
+    "scripts/check.sh": {
+      "status": "PASS",
+      "exit_code": 0,
+      "includes": [
+        "uv sync --frozen",
+        "ruff check",
+        "ruff format --check",
+        "schema export --check",
+        "bounded repository scan",
+        "Docker Compose build/up/wait",
+        "pytest: 126 passed, 0 skipped, 1 warning",
+        "local HTTP readiness and authorization"
+      ]
+    },
+    "scripts/registry_demo.py twice": {
+      "status": "PASS",
+      "first_new_records": 10,
+      "first_new_revisions": 1,
+      "second_replayed_operations": 11,
+      "fresh_connection_readback": true,
+      "stale_write_denied": true
+    },
+    "scripts/restore_drill.py": {
+      "status": "PASS",
+      "compared_tables": 7,
+      "migration_down_up_idempotent": true,
+      "scope": "PostgreSQL only"
+    },
+    "GitHub remote CI": {
+      "status": "BLOCKED",
+      "reason": "gh api GET actions/runs: api.github.com Forbidden"
+    }
+  },
+  "legacy_worktree_diff_sha256": "d331814bdd5f2cd7c65dbb90946b16b6edeb0df3c70bade5e5c4d9faabb9d595",
+  "legacy_main_head": "b563c55fd99c5fb2738fda0682f7b6f76a0ef42a",
+  "source_sha256": {
+    "Dockerfile": "87be4e038d1dd0a41c7664b0810b46225a8232cb00f251d2313634d28ad5339f",
+    "infra/local-compose/compose.cloud.yaml": "b8aedf469bf6e164ed9fe378cb3e54a74ed07f20ff3d332e40f0562529decaaa",
+    "infra/local-compose/compose.yaml": "e17dfd7fe4e566186987a8f7ff6da367ddf494b368adbf747aa847ce87f80de5",
+    "infra/local-compose/init.sql": "784b0c404bcc28de4bf20e1fb9fa551af5d6672d49cd586b94b650ec0af5fe30",
+    "infra/migrations/alembic.ini": "592a54dfd69ec9f9644f81de61a519f628d0386de9d8931427bdc71d32188139",
+    "infra/migrations/env.py": "af8d7ebf29025335e5b2e1af86edcd365b8450d3455d05130fa998b65ad55424",
+    "infra/migrations/versions/0001_p0.py": "f51fda38434bccddd9c9520e00f8fda9d70d88c0fe63a66308034a7ebf06a850",
+    "infra/migrations/versions/0002_registry.py": "e6a4054bb7db4cd867a00c00c1d8d74587b7cca57e73004be3f6fac7f315b1b7",
+    "pyproject.toml": "9eae713a8bde30d9fdbab4b0e48ae028128f5081991ce19f80028f8b18a7783d",
+    "scripts/check.sh": "62d1b98c19c04110946a9e992a003ae079838801fcbe8dbb803528d1afc5af2d",
+    "scripts/check_repository.py": "46bdd65d2d155da0a2f6e1ff5c6c35ea819231e6206ef66c92a6182d9571b9d6",
+    "scripts/compose.sh": "72d45e019a653f9345b49147c1b1d7414a54af24a3e1f4e4f355a1c3dc1f24e9",
+    "scripts/export_schemas.py": "afc33e7d05b180658ff1cd681812ffba84a39762e05ef9ab028c1cf346979d43",
+    "scripts/make_fixtures.py": "df00a74bb6cec72134e233eb683f5ad4c32e23d8f19aaa6292d7396469f726ea",
+    "scripts/registry_demo.py": "4d15a7d111c1d11bcb903d98ec3283b31dbefae5432842cc5c8b5505f1142488",
+    "scripts/restore_drill.py": "f36f95c1f98079970c98c549e5f96252e3bb05f71da69fc66a822dc9e87cc25d",
+    "scripts/verify_compose.py": "4c021fe52d3aba7286203870766616e77fdd3381300992cc8837abe2c3ac8272",
+    "src/investment_os/__init__.py": "3ac1455d2854c61b64e9e64b5ea7c893226ff68a4b7bd0d3916a590e751e3f51",
+    "src/investment_os/adapters/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/investment_os/adapters/local_vault.py": "fb464cebb54200a1a90c47f61c9cc23c816e458f47ccd40726479a3c82103f51",
+    "src/investment_os/api/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/investment_os/api/main.py": "74637f219ff59df04cc3b525587d1beda5e5d281277d7f2eed887161e9f91beb",
+    "src/investment_os/api/settings.py": "59e155ae383b125874a671219be5608e7d43ab0c3b904f713e4032de3de607a2",
+    "src/investment_os/domain/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/investment_os/domain/canonical.py": "3cee8de7462d5b8c2296fd192599b9ff6f37be6ded3fdee30763890e2b53b5e2",
+    "src/investment_os/domain/common.py": "552e54b7def1fe701622c8c4c90c2c70522b85f649fcc5c6eb8dfcb6b0f1bed9",
+    "src/investment_os/domain/entities.py": "ccdc68c4059d03509503a4aa5a12698afc063368458db01736e2a366e713e8a0",
+    "src/investment_os/domain/references.py": "254bb5d21f0dd22ae78c76cd411c52fe25d8ced8218b1e9c8edeb35b47f6f6a9",
+    "src/investment_os/policy/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/investment_os/policy/access.py": "54f84b677c020073b427afa904bba93e6712cba614d5981e8207ae62794c3da9",
+    "src/investment_os/ports/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/investment_os/ports/contracts.py": "d7518acdafcab051cf7d38ee9742669ff98175c060383917071edf702ef3740f",
+    "src/investment_os/storage/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/investment_os/storage/database.py": "c651a1889df7df7beaf85672af3579a9e7099b6b969496d8866730f1d2eecf97",
+    "src/investment_os/storage/registry.py": "899c129501c0cc142659865c8059f1a9fda1e40149b34ea4dfff33f6acd9ca69",
+    "tests/conftest.py": "73ad145e6a0573acce9675a813afcfd4cc45447b696ad1115c693b3a29884613",
+    "tests/fixtures_synthetic/entities.json": "b78155bd7e7eb46775b434623d42e6dea40cba42d695a5f58f3d0d692035ef79",
+    "tests/fixtures_synthetic/vault/.investment-os-synthetic": "6be4c6273f7011336579936f8adfeb05acb92d677a5b4e6d6d5a51f7a332e808",
+    "tests/fixtures_synthetic/vault/Drafts/example.md": "505b09003f9f81565fe9c4ecbc13c2504e8fd91d1be1a76805aae41a1fcbaed2",
+    "tests/integration/test_postgres.py": "38183d5175a792759cd7ed3927d5a3adf562f46589926b7594a283d6a7cd30c2",
+    "tests/integration/test_registry.py": "da82ba608d09fe5bff8bc3194f928ce9fd0ba2f0d4d285b663d2305b3d79b383",
+    "tests/test_analytics.py": "f4df3690888a31df0c03b53ea1dcf7a6b3c51edd8dea0495d0294091d6bac0a7",
+    "tests/test_canonical.py": "96c5494c838f4872ebf94fbc7705f2e68e00f967f3f4f3e819cf5822c90424c1",
+    "tests/test_contracts.py": "12c20be3defc7c6184d79f60066a0125b48d7dba5029083808cb03677ee5db09",
+    "tests/test_security.py": "d778e168b322953e964c771b866d264a7b867314f838c4aa00df63526c358a1b",
+    "uv.lock": "53c4dd34ae5e024333a80d87d4e27c83d056d024cf27012d6da3801f876d6d48"
+  },
+  "scope": "synthetic local development; no paid inference, real Vault, budget ledger, merge or deployment",
+  "diagnostic_logs": "/workspace/scratch/investment-os-p1-registry-20261022"
+}
