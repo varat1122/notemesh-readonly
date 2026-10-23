@@ -14,3 +14,5 @@ uv run --frozen python scripts/intake_demo.py
 uv run --frozen python scripts/intake_demo.py
 uv run --frozen python scripts/extraction_demo.py
 uv run --frozen python scripts/extraction_demo.py
+uv run --frozen python scripts/text_review_demo.py
+uv run --frozen python scripts/text_review_demo.py

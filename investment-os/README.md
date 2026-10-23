@@ -1,4 +1,4 @@
-# Investment OS — P0 foundation + synthetic P1 registry, capture and excerpts
+# Investment OS — P0 foundation + synthetic P1 capture, excerpts and review drafts
 
 A **synthetic-only development foundation** based on [Master Blueprint v1.0](docs/MASTER_BLUEPRINT.md). Python/FastAPI + PostgreSQL + portable Parquet/DuckDB + local Markdown contracts. This is an isolated subtree; the existing NoteMesh application is unchanged.
 
@@ -50,6 +50,12 @@ The marked store is `artifacts/synthetic-intake-v1/` (ignored by Git). Keep orig
 After the intake demo, run `uv run --frozen python scripts/extraction_demo.py`. It extracts fictional PDF/CSV/XLSX content and reopens the originals to verify the cited page/row/cell. A second run produces the same excerpt IDs/output hashes. Checkpoints live beside the capture journal in the marked synthetic root; original files and registered records are unchanged.
 
 PDF text offsets are parser text positions, not visual coordinates. No OCR or financial date/unit conversion is performed. See [extraction status](docs/P1_EXTRACTION_STATUS.md) and [ADR 013](docs/adr/013.md) for limits. All extracted content remains untrusted and unverified.
+
+## Fictional text → human review draft
+
+Run `uv run --frozen python scripts/text_review_demo.py` after Compose is healthy. It captures a generated fictional AI-spending passage, creates an unverified paragraph queue, checks every citation through fresh DB/file connections, and prints the path to an offline Thai HTML review document. Open that local file in your browser; each review item links to its original paragraph. Run twice to check stable output. This is a static document, not a dashboard or a real-news intake UI.
+
+`.txt` capture preserves UTF-8 bytes, Unicode offsets, original numbers and line endings. Paragraphs remain human-review candidates: no sentence-level claim extraction, fact verification, year inference, research AI or thesis changes. Only fictional fixtures are authorized in this harness; do not paste private or licensed material into it. See the [Thai walkthrough](docs/NEWS_TO_RESEARCH_GUIDE_TH.md), [status](docs/P1_TEXT_REVIEW_STATUS.md), and [ADR 014](docs/adr/014.md).
 
 ## Local API without the API container
 

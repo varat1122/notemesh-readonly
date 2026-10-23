@@ -11,13 +11,31 @@ MEDIA_TYPES = {
     "csv": "text/csv",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
+CAPTURE_MEDIA_TYPES = {**MEDIA_TYPES, "txt": "text/plain"}
+
+
+def policy_for(extension: str):
+    # Existing file captures keep their original policy and replay identity.
+    return "synthetic-plain-text-v1" if extension == "txt" else POLICY_VERSION
 
 
 def validate_bytes(content: bytes, extension: str) -> dict:
     if type(content) is not bytes or not 0 < len(content) <= MAX_BYTES:
         raise ValueError("content must be nonempty bytes within the intake limit")
-    if extension not in MEDIA_TYPES:
+    if extension not in CAPTURE_MEDIA_TYPES:
         raise ValueError("unsupported format")
+    if extension == "txt":
+        from investment_os.ingestion.plain_text import decode_text
+
+        try:
+            decode_text(content)
+            return {"accepted": True, "policy": policy_for(extension)}
+        except ValueError:
+            return {
+                "accepted": False,
+                "reason": "invalid_or_oversized_plain_text",
+                "policy": policy_for(extension),
+            }
     try:
         result = subprocess.run(
             [sys.executable, "-m", "investment_os.ingestion.validation_worker", extension],

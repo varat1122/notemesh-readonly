@@ -8,6 +8,8 @@ Step 1 engineering is implemented for ten unverified synthetic draft kinds; sche
 
 ## Ordered work packages
 
+An additional synthetic slice now bridges steps 3/4/7: UTF-8 `.txt` capture and immutable paragraph review drafts with original-source anchors (P1_TEXT_REVIEW_STATUS.md, ADR 014). The queue is not a Claim/Evidence Register and performs no verified promotion. Next engineering work is explicit human duplicate/correction and atomic-claim proposal review; real-source grants and durable review authority remain prerequisites for production inputs.
+
 | Step | Implementation | Acceptance / stop condition |
 |---|---|---|
 | 1. Contract sign-off and repository | Owner review schemas/ADRs; UUID registry, canonical serializer, typed reference extraction, transactional repository | Same payload stable hash; kind/ID/revision constraints; missing/wrong reference blocked; no JSON-only FK loophole |

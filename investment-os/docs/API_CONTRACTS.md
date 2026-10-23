@@ -35,4 +35,6 @@ Ports implement no business code in P0. No fake success stubs or fabricated prov
 
 ## Contract evolution
 
+Synthetic P1 local harnesses additionally implement capture, extraction and paragraph review without HTTP write routes. `SyntheticCaptureRequest` accepts `.pdf`, `.csv`, `.xlsx`, `.txt`; authority is still dummy/synthetic-only. `TextReviewPacket` / `TextReviewItem` (ports/text_review.py) bind immutable original references and require human review. `SyntheticTextReviewer.draft` creates a local derived checkpoint; `verify_item` reopens registered originals and compares the complete packet. Neither method creates verified Claim/Evidence records. See ADR 014 for bounds and offset conventions.
+
 Version DTO semantics before breaking changes. Historical entity payloads retain their schema version and validated migration path. Distinguish unknown/null, false and zero. Do not normalize a missing market price to zero. Ports accept UUIDs instead of provider tickers or database-specific row IDs. Original bytes and provenance survive adapter swaps. Client-supplied roles, approvals or source instructions are never trusted policy inputs.

@@ -8,9 +8,9 @@ from investment_os.domain.canonical import canonical_sha256
 from investment_os.domain.common import Provenance, Times
 from investment_os.domain.entities import Document, Source
 from investment_os.ingestion.validation import (
+    CAPTURE_MEDIA_TYPES,
     MAX_BYTES,
-    MEDIA_TYPES,
-    POLICY_VERSION,
+    policy_for,
     validate_bytes,
 )
 from investment_os.policy.access import DUMMY_PRINCIPALS, Principal, Role
@@ -38,6 +38,7 @@ class SyntheticCapture:
             raise ValueError("nonempty bytes within intake size limit required")
         if request.received_at > datetime.now(UTC):
             raise ValueError("received timestamp cannot be in the future")
+        policy = policy_for(request.filename.rsplit(".", 1)[1])
         digest = hashlib.sha256(content).hexdigest()
         key = canonical_sha256({"actor": principal.actor_id, "key": request.idempotency_key})
         fingerprint = canonical_sha256(
@@ -60,12 +61,12 @@ class SyntheticCapture:
                             NAMESPACE_URL, "investment-os/capture/document/" + key
                         ),
                         "source_id": uuid5(NAMESPACE_URL, "investment-os/capture/source/" + key),
-                        "policy": POLICY_VERSION,
+                        "policy": policy,
                     },
                 )
             if prepared["request_sha256"] != fingerprint:
                 raise IdempotencyConflict("capture key already bound to a different request")
-            if prepared["policy"] != POLICY_VERSION:
+            if prepared["policy"] != policy:
                 raise ObjectIntegrityError(
                     "capture policy changed; explicit reconciliation required"
                 )
@@ -102,7 +103,7 @@ class SyntheticCapture:
                         status="quarantined", content_sha256=digest, reason=inspection["reason"]
                     )
                 inspected = self.store.journal(key, "validated", inspection)
-            if inspected["policy"] != POLICY_VERSION or inspected["accepted"] is not True:
+            if inspected["policy"] != policy or inspected["accepted"] is not True:
                 raise ObjectIntegrityError("invalid validation checkpoint")
             try:
                 self.store.promote(digest)
@@ -146,7 +147,7 @@ class SyntheticCapture:
             id=prepared["document_id"],
             content_sha256=prepared["content_sha256"],
             byte_size=prepared["byte_size"],
-            media_type=MEDIA_TYPES[request.filename.rsplit(".", 1)[1]],
+            media_type=CAPTURE_MEDIA_TYPES[request.filename.rsplit(".", 1)[1]],
             storage_key="objects/" + prepared["content_sha256"],
             storage_backend="local",
             **common,

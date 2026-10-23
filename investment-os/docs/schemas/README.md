@@ -8,3 +8,5 @@ Synthetic examples are in `tests/fixtures_synthetic/entities.json`. They are fic
 
 Regenerate: `uv run --frozen python scripts/export_schemas.py`.
 Check drift: `uv run --frozen python scripts/export_schemas.py --check`.
+
+P1 also exports derived excerpt models from `ports/extraction.py` and unverified paragraph review models from `ports/text_review.py`. These are not new canonical Claim/Evidence kinds. Their integrity validators require Python execution and original-source readback; JSON Schema validation alone cannot establish attribution or factual truth.

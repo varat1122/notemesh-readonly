@@ -37,7 +37,7 @@ class IntakeResult(Contract):
 class SyntheticCaptureRequest(Contract):
     """Local test harness only; caller attestation is not real-source authorization."""
 
-    filename: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}\.(pdf|csv|xlsx)$")
+    filename: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}\.(pdf|csv|xlsx|txt)$")
     idempotency_key: str = Field(min_length=8, max_length=128)
     received_at: AwareDatetime
     publisher: str = Field(min_length=1, max_length=200)

@@ -3,7 +3,7 @@
   "description": "Local test harness only; caller attestation is not real-source authorization.",
   "properties": {
     "filename": {
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}\\.(pdf|csv|xlsx)$",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}\\.(pdf|csv|xlsx|txt)$",
       "title": "Filename",
       "type": "string"
     },

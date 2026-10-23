@@ -1,0 +1,77 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "char_start": {
+      "minimum": 0,
+      "title": "Char Start",
+      "type": "integer"
+    },
+    "char_end": {
+      "exclusiveMinimum": 0,
+      "title": "Char End",
+      "type": "integer"
+    },
+    "line_start": {
+      "minimum": 1,
+      "title": "Line Start",
+      "type": "integer"
+    },
+    "line_end": {
+      "minimum": 1,
+      "title": "Line End",
+      "type": "integer"
+    },
+    "text": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    },
+    "text_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Text Sha256",
+      "type": "string"
+    },
+    "contains_number": {
+      "title": "Contains Number",
+      "type": "boolean"
+    },
+    "status": {
+      "const": "needs_human_review",
+      "default": "needs_human_review",
+      "title": "Status",
+      "type": "string"
+    },
+    "untrusted_data": {
+      "const": true,
+      "default": true,
+      "title": "Untrusted Data",
+      "type": "boolean"
+    },
+    "independent_evidence": {
+      "const": false,
+      "default": false,
+      "title": "Independent Evidence",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "char_start",
+    "char_end",
+    "line_start",
+    "line_end",
+    "text",
+    "text_sha256",
+    "contains_number"
+  ],
+  "title": "TextReviewItem",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:TextReviewItem"
+}
