@@ -221,14 +221,18 @@ def inspect_pdf(data):
     return {"pages": len(reader.pages), "objects": len(objects)}
 
 
+def set_resource_limits():
+    import resource
+
+    resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024,) * 2)
+    resource.setrlimit(resource.RLIMIT_CPU, (4, 4))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
+    resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
+
+
 def main():
     try:
-        import resource
-
-        resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024,) * 2)
-        resource.setrlimit(resource.RLIMIT_CPU, (4, 4))
-        resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
-        resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
+        set_resource_limits()
         data = sys.stdin.buffer.read(MAX_BYTES + 1)
         require(0 < len(data) <= MAX_BYTES, "size_limit")
         details = {"csv": inspect_csv, "xlsx": inspect_xlsx, "pdf": inspect_pdf}[sys.argv[1]](data)

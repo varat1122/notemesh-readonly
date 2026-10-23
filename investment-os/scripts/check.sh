@@ -12,3 +12,5 @@ IOS_TEST_DATABASE_URL="postgresql+psycopg://ios_dummy:dummy-local-only@127.0.0.1
 uv run --frozen python scripts/verify_compose.py
 uv run --frozen python scripts/intake_demo.py
 uv run --frozen python scripts/intake_demo.py
+uv run --frozen python scripts/extraction_demo.py
+uv run --frozen python scripts/extraction_demo.py

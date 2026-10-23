@@ -1,0 +1,43 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "csv",
+      "default": "csv",
+      "title": "Kind",
+      "type": "string"
+    },
+    "record": {
+      "maximum": 10000,
+      "minimum": 1,
+      "title": "Record",
+      "type": "integer"
+    },
+    "column": {
+      "maximum": 100,
+      "minimum": 1,
+      "title": "Column",
+      "type": "integer"
+    },
+    "line_start": {
+      "minimum": 1,
+      "title": "Line Start",
+      "type": "integer"
+    },
+    "line_end": {
+      "minimum": 1,
+      "title": "Line End",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "record",
+    "column",
+    "line_start",
+    "line_end"
+  ],
+  "title": "CsvLocator",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:CsvLocator"
+}

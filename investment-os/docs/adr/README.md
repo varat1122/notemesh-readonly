@@ -16,3 +16,4 @@ Accepted means within the owner-authorized P0 scope, not approval of spending or
 | [010 — Versioned JSONB foundation and incremental normalization](010.md) | Accepted — P0 foundation; field projections Proposed for P1 |
 | [011 — Synthetic transactional registry and pinned references](011.md) | Accepted — synthetic P1 development slice; production authority unapproved |
 | [012 — Bounded synthetic capture and resumable originals](012.md) | Accepted — synthetic P1 only; real upload authority unapproved |
+| [013 — Deterministic excerpts and original-source citation readback](013.md) | Accepted — synthetic P1 only; real-source approval still required |

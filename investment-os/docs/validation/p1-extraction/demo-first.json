@@ -1,0 +1,81 @@
+{
+  "status": "PASS",
+  "scope": "synthetic extraction and original-source readback; no fact verification or financial normalization",
+  "results": {
+    "pdf": {
+      "document_id": "8f065e40-4f4c-5490-add8-2a163a3a2b6e",
+      "source_id": "41703c58-de6a-5def-b607-c51b1cd20345",
+      "source_sha256": "f4cc51dac2b06088d0eab71496a28d3c85b575e2288c2853943eba43006fabba",
+      "output_sha256": "823816bb3bb4c0d9e48c2ff852ed9426b9fb6a2d32700cde5dcae67429c6b5c9",
+      "excerpt_count": 1,
+      "citation": {
+        "locator": {
+          "kind": "pdf",
+          "page": 1,
+          "char_start": 0,
+          "char_end": 28
+        },
+        "text": "SYNTHETIC revenue USD 123.45",
+        "value_type": "text",
+        "text_sha256": "52c353fa0f9a5a43339312506cdec2c443475b0b803e1c9cb9d60db6fd091a69",
+        "untrusted_data": true,
+        "independent_evidence": false,
+        "id": "4c4e47b1-ed31-5652-8e0b-3cb57569837f"
+      },
+      "warnings": [
+        "pdf_reading_order_unverified",
+        "ocr_not_performed"
+      ]
+    },
+    "csv": {
+      "document_id": "c6d37175-387b-5868-b392-72d96e865931",
+      "source_id": "50ddc7d6-93be-5493-a546-2515a5fbc8a5",
+      "source_sha256": "954266a28fdffa2782650bc54d1415fc42fd7d32733de71edd18f01375883164",
+      "output_sha256": "0e122ba9abb2d9cfad89f99f065230a2a260698b0e738857aeb318c84ab95689",
+      "excerpt_count": 6,
+      "citation": {
+        "locator": {
+          "kind": "csv",
+          "record": 2,
+          "column": 3,
+          "line_start": 2,
+          "line_end": 2
+        },
+        "text": "123.45",
+        "value_type": "text",
+        "text_sha256": "4ebc4a141b378980461430980948a55988fbf56f85d084ac33d8a8f61b9fab88",
+        "untrusted_data": true,
+        "independent_evidence": false,
+        "id": "102d4810-4837-5d71-8f38-df34f2379ea4"
+      },
+      "warnings": [
+        "csv_values_are_strings"
+      ]
+    },
+    "xlsx": {
+      "document_id": "cdeb9b53-bde0-5278-bc7c-383f0685ba57",
+      "source_id": "c6b7c352-0a15-5583-bfd3-ec2b0369fddf",
+      "source_sha256": "9cfbef14e34c6818682b2ac1d7deb3390b904dddcbe16a58bb94b0274f49993c",
+      "output_sha256": "d439a025e1530603e52bbea95b6919858d64b261214c12f565a63224dd02db6e",
+      "excerpt_count": 6,
+      "citation": {
+        "locator": {
+          "kind": "xlsx",
+          "sheet": "Synthetic",
+          "cell": "C2",
+          "style_index": 0
+        },
+        "text": "123.45",
+        "value_type": "number",
+        "text_sha256": "4ebc4a141b378980461430980948a55988fbf56f85d084ac33d8a8f61b9fab88",
+        "untrusted_data": true,
+        "independent_evidence": false,
+        "id": "df4ea4e5-d7db-58d1-bbfb-e2dde93bb0db"
+      },
+      "warnings": [
+        "xlsx_styles_and_dates_not_interpreted",
+        "merged_cell_layout_not_reconstructed"
+      ]
+    }
+  }
+}

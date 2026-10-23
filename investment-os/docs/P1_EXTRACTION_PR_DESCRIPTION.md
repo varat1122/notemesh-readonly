@@ -1,0 +1,7 @@
+Captured originals previously had no reproducible excerpt locations. This adds synthetic PDF/CSV/XLSX extraction with page/character, logical-record/physical-line/column, and worksheet/cell locators. Original hashes, document revisions, parser versions, excerpt IDs and output digests bind immutable derived artifacts to their exact source.
+
+Citation readback reopens and reparses actual original bytes, rejecting even self-consistent forged excerpt hashes. Concurrent retries reuse one checkpoint; failures preserve originals and leave the registry unchanged. Numeric XLSX values use raw OOXML lexemes, preserving precision. Empty-text PDFs and all output-budget failures are explicit; no silent truncation, OCR, financial normalization or verified-evidence promotion.
+
+Validation: **219 tests passed, zero skipped** (one pre-existing test-client deprecation warning); 28 new tests, including 12 real PostgreSQL integration tests; three-format capture/extract/reparse demo produced identical output across separate processes. Full observed results are in investment-os/docs/P1_EXTRACTION_STATUS.md and docs/validation/p1-extraction/. No dependency or database migration changes; ADR 013 documents guarantees and limits.
+
+Synthetic-only library/CLI scope. No new HTTP mutation route, real accounts/Vault, paid inference, ledger reset, merge or deployment. Real authorization, semantic reconciliation, financial normalization and coordinated object/database recovery remain open.

@@ -1,0 +1,51 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "algorithm": {
+      "const": "synthetic-excerpts-v1",
+      "default": "synthetic-excerpts-v1",
+      "title": "Algorithm",
+      "type": "string"
+    },
+    "admission_policy": {
+      "const": "synthetic-static-files-v1",
+      "default": "synthetic-static-files-v1",
+      "title": "Admission Policy",
+      "type": "string"
+    },
+    "python_version": {
+      "maxLength": 50,
+      "minLength": 1,
+      "title": "Python Version",
+      "type": "string"
+    },
+    "pypdf_version": {
+      "maxLength": 50,
+      "minLength": 1,
+      "title": "Pypdf Version",
+      "type": "string"
+    },
+    "openpyxl_version": {
+      "maxLength": 50,
+      "minLength": 1,
+      "title": "Openpyxl Version",
+      "type": "string"
+    },
+    "defusedxml_version": {
+      "maxLength": 50,
+      "minLength": 1,
+      "title": "Defusedxml Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "python_version",
+    "pypdf_version",
+    "openpyxl_version",
+    "defusedxml_version"
+  ],
+  "title": "ParserProfile",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:ParserProfile"
+}

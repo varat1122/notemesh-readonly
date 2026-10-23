@@ -8,13 +8,13 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from investment_os.domain import entities
-from investment_os.ports import contracts
+from investment_os.ports import contracts, extraction
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def documents():
-    for module in [entities, contracts]:
+    for module in [entities, contracts, extraction]:
         for name, cls in inspect.getmembers(module, inspect.isclass):
             if issubclass(cls, BaseModel) and cls.__module__ == module.__name__:
                 schema = cls.model_json_schema()

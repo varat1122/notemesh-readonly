@@ -1,0 +1,325 @@
+{
+  "$defs": {
+    "CsvLocator": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "csv",
+          "default": "csv",
+          "title": "Kind",
+          "type": "string"
+        },
+        "record": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Record",
+          "type": "integer"
+        },
+        "column": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Column",
+          "type": "integer"
+        },
+        "line_start": {
+          "minimum": 1,
+          "title": "Line Start",
+          "type": "integer"
+        },
+        "line_end": {
+          "minimum": 1,
+          "title": "Line End",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "record",
+        "column",
+        "line_start",
+        "line_end"
+      ],
+      "title": "CsvLocator",
+      "type": "object"
+    },
+    "ParserProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "const": "synthetic-excerpts-v1",
+          "default": "synthetic-excerpts-v1",
+          "title": "Algorithm",
+          "type": "string"
+        },
+        "admission_policy": {
+          "const": "synthetic-static-files-v1",
+          "default": "synthetic-static-files-v1",
+          "title": "Admission Policy",
+          "type": "string"
+        },
+        "python_version": {
+          "maxLength": 50,
+          "minLength": 1,
+          "title": "Python Version",
+          "type": "string"
+        },
+        "pypdf_version": {
+          "maxLength": 50,
+          "minLength": 1,
+          "title": "Pypdf Version",
+          "type": "string"
+        },
+        "openpyxl_version": {
+          "maxLength": 50,
+          "minLength": 1,
+          "title": "Openpyxl Version",
+          "type": "string"
+        },
+        "defusedxml_version": {
+          "maxLength": 50,
+          "minLength": 1,
+          "title": "Defusedxml Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "python_version",
+        "pypdf_version",
+        "openpyxl_version",
+        "defusedxml_version"
+      ],
+      "title": "ParserProfile",
+      "type": "object"
+    },
+    "PdfLocator": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "pdf",
+          "default": "pdf",
+          "title": "Kind",
+          "type": "string"
+        },
+        "page": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "char_start": {
+          "minimum": 0,
+          "title": "Char Start",
+          "type": "integer"
+        },
+        "char_end": {
+          "exclusiveMinimum": 0,
+          "title": "Char End",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "page",
+        "char_start",
+        "char_end"
+      ],
+      "title": "PdfLocator",
+      "type": "object"
+    },
+    "SourceExcerpt": {
+      "additionalProperties": false,
+      "properties": {
+        "locator": {
+          "discriminator": {
+            "mapping": {
+              "csv": "#/$defs/CsvLocator",
+              "pdf": "#/$defs/PdfLocator",
+              "xlsx": "#/$defs/XlsxLocator"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PdfLocator"
+            },
+            {
+              "$ref": "#/$defs/CsvLocator"
+            },
+            {
+              "$ref": "#/$defs/XlsxLocator"
+            }
+          ],
+          "title": "Locator"
+        },
+        "text": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "value_type": {
+          "default": "text",
+          "enum": [
+            "text",
+            "number",
+            "boolean",
+            "date_lexical",
+            "error"
+          ],
+          "title": "Value Type",
+          "type": "string"
+        },
+        "text_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Text Sha256",
+          "type": "string"
+        },
+        "untrusted_data": {
+          "const": true,
+          "default": true,
+          "title": "Untrusted Data",
+          "type": "boolean"
+        },
+        "independent_evidence": {
+          "const": false,
+          "default": false,
+          "title": "Independent Evidence",
+          "type": "boolean"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "locator",
+        "text",
+        "text_sha256",
+        "id"
+      ],
+      "title": "SourceExcerpt",
+      "type": "object"
+    },
+    "XlsxLocator": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "xlsx",
+          "default": "xlsx",
+          "title": "Kind",
+          "type": "string"
+        },
+        "sheet": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Sheet",
+          "type": "string"
+        },
+        "cell": {
+          "pattern": "^[A-Z]{1,2}[1-9][0-9]{0,4}$",
+          "title": "Cell",
+          "type": "string"
+        },
+        "style_index": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Style Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sheet",
+        "cell"
+      ],
+      "title": "XlsxLocator",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "document_id": {
+      "format": "uuid",
+      "title": "Document Id",
+      "type": "string"
+    },
+    "document_version": {
+      "minimum": 1,
+      "title": "Document Version",
+      "type": "integer"
+    },
+    "document_payload_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Document Payload Sha256",
+      "type": "string"
+    },
+    "source_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Source Sha256",
+      "type": "string"
+    },
+    "media_type": {
+      "enum": [
+        "application/pdf",
+        "text/csv",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ],
+      "title": "Media Type",
+      "type": "string"
+    },
+    "profile": {
+      "$ref": "#/$defs/ParserProfile"
+    },
+    "excerpts": {
+      "items": {
+        "$ref": "#/$defs/SourceExcerpt"
+      },
+      "maxItems": 2000,
+      "title": "Excerpts",
+      "type": "array"
+    },
+    "pages_without_text": {
+      "default": [],
+      "items": {
+        "type": "integer"
+      },
+      "title": "Pages Without Text",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Warnings",
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "text_extracted",
+        "no_text"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "output_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Output Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "document_id",
+    "document_version",
+    "document_payload_sha256",
+    "source_sha256",
+    "media_type",
+    "profile",
+    "excerpts",
+    "warnings",
+    "status",
+    "output_sha256"
+  ],
+  "title": "ExtractionArtifact",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:investment-os:schema:1.0:ExtractionArtifact"
+}
