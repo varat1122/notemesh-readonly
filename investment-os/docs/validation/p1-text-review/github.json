@@ -1,0 +1,14 @@
+{
+  "repository": "varat1122/notemesh-readonly",
+  "branch": "codex/investment-os-p1-text-review-20261023",
+  "intended_pr_base": "codex/investment-os-p1-extraction-20261023",
+  "implementation_commit": "8e2f570d95379b9331ab6d5a9feb2d23e1a4582f",
+  "git_push": "PASS",
+  "draft_pr": "BLOCKED",
+  "draft_pr_url": null,
+  "pr_error": "Post https://api.github.com/graphql: Forbidden",
+  "github_ci": "BLOCKED",
+  "ci_error": "GET api.github.com/repos/varat1122/notemesh-readonly/actions/runs: Forbidden",
+  "merged": false,
+  "deployed": false
+}

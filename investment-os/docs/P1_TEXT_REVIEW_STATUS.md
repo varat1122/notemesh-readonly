@@ -23,7 +23,7 @@ Evidence: [validation/p1-text-review/](validation/p1-text-review/). Full command
 | Browser visual review | BLOCKED / unverified | No browser rendering certification in this environment; HTML structure/links tested programmatically |
 | PostgreSQL backup/restore | PASS, DB only | Actual dump/restore compares seven registry table hashes; migration down/up/repeat-up passes |
 | Coordinated object/DB backup | BLOCKED | Marked object root is workspace-local; this drill does not back it up |
-| GitHub Draft PR and remote CI | Pending publication check | Actual push/API outcomes will be recorded below; no remote success assumed |
+| GitHub Draft PR and remote CI | BLOCKED | Branch push succeeds; actual GraphQL PR creation and REST CI lookup return `Forbidden` at api.github.com |
 
 Commands run from `investment-os/`:
 
@@ -42,4 +42,6 @@ Next: human duplicate/correction classification, atomic Claim/Evidence proposals
 
 ## GitHub
 
-Repository: `varat1122/notemesh-readonly`. Branch: `codex/investment-os-p1-text-review-20261023`, based on extraction commit `7c376149a5cf366a17d8a724439ac9768450b3cd`. Intended stacked Draft PR base: `codex/investment-os-p1-extraction-20261023`. Actual publication results are recorded after pushing the tested implementation.
+Repository: `varat1122/notemesh-readonly`. Branch: [codex/investment-os-p1-text-review-20261023](https://github.com/varat1122/notemesh-readonly/tree/codex/investment-os-p1-text-review-20261023), based on extraction commit `7c376149a5cf366a17d8a724439ac9768450b3cd`. Tested implementation commit `8e2f570d95379b9331ab6d5a9feb2d23e1a4582f` was pushed successfully. Intended stacked Draft PR base: `codex/investment-os-p1-extraction-20261023`.
+
+Actual `gh pr create --draft --body-file docs/P1_TEXT_REVIEW_PR_DESCRIPTION.md` failed with `Post https://api.github.com/graphql: Forbidden`. The branch Actions runs REST lookup likewise returned Forbidden. No Draft PR URL exists and no remote CI result is asserted. [Publication evidence](validation/p1-text-review/github.json) records these outcomes. A documentation-only follow-up records them on the same branch; no merge or deployment.
