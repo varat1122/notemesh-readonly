@@ -3,11 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpAccess } from "./server";
-import {OpenAIEvaluationBudget,budgetedEvaluationTransport}
- from "../vault/openai-evaluation-budget";
 import {evaluatePreparedSyntheticGraphWithTransport}
  from "../vault/offline-synthetic-openai-eval";
 // Only the daemon control is stubbed; transport, filesystem, database, OAuth
@@ -314,12 +313,18 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
  const marker="<!-- investment-os-operation:"+rootId+" -->";
  const evt="<!-- investment-os-event:"+event+" -->";
  const vaultRoot=path.join(root,"vault");
+ const thesis="05_Thesis/SYNTH - Current Thesis.md";
+ const register="05_Thesis/SYNTH - Evidence Register.md";
+ const historicalSource="07_Sources/Company Filings/SYNTH Historical Fixture.md";
  const docs=[
   [company,"---\nentity: SYNTH\ntype: company\n---\n# SYNTH\n"],
   [timeline,[
     "---","company: SYNTH","type: company_evolution_timeline","---",
     "# Evolution","Preexisting historical context retained.","",
   ].join("\n")],
+  [thesis,"---\nentity: SYNTH\ntype: current_thesis\nverification: not_reverified\n---\n# Current Thesis\nSynthetic prior thesis: delivery conversion remains uncertain.\n"],
+  [register,"---\nentity: SYNTH\ntype: evidence_register\nverification: not_reverified\n---\n# Evidence Register\nSynthetic historical evidence and contrary delivery timing.\n"],
+  [historicalSource,"---\nentity: SYNTH\nevent_key: SYNTH-HISTORY-FY26Q3\nperiod: FY26Q3\nsource_type: primary\nverification: verified_against_primary\n---\n# Synthetic prior filing fixture\nDeclared primary metadata is test data, not real issuer authentication.\n"],
  ];
  for(const [p,content] of docs){
   fs.mkdirSync(path.dirname(path.join(vaultRoot,p)),{recursive:true});
@@ -327,6 +332,8 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
  }
  const {reindexPath}=await import("../vault/indexer");
  for(const [p] of docs)reindexPath(p);
+ const protectedBefore=[thesis,register].map(p=>({path:p,
+   hash:digest(fs.readFileSync(path.join(vaultRoot,p),"utf8"))}));
  fs.mkdirSync(path.dirname(path.join(vaultRoot,source)),{recursive:true});
  const markdown=[
   "---","type: investment_review","entity: SYNTH",
@@ -348,13 +355,18 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
    timelineHeading:"Evolution",analysisPath:analysis,
    timelinePath:timeline,sourcePath:source,analysisMarkdown:markdown};
  const c=await connected(access);
+ const network=vi.spyOn(globalThis,"fetch").mockImplementation(async()=>{
+   throw Error("offline_closed_loop_must_not_call_external_network");
+ });
  try{
   // First leg uses ACTUAL Safe Edit preview + host-authorized apply to
   // capture a new source note, NOT direct test filesystem insertion.
   const originalSource=[
     "---","entity: SYNTH","event_key: "+event,"period: FY26Q4",
     "type: research_note","verification: unverified",
-    "source_type: user_supplied","event_date: 2026-10-20","---",
+    "source_type: user_supplied","event_date: 2026-10-20",
+    "published_at: null","received_at: 2026-10-21T09:00:00Z",
+    "original_source: synthetic://controlled-source-a","---",
     "# User-supplied source, unverified issuer provenance",
     "Original user statement kept separately from AI analysis.","",
   ].join("\n");
@@ -412,22 +424,20 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   expect(handoff.originalSource.sha256).toMatch(/^[a-f0-9]{64}$/);
   expect(handoff.historicalContext.status).toBe("retrieval_only_not_verified");
   expect(handoff.historicalContext.items.some((x:any)=>x.path===company)).toBe(true);
+  expect(handoff.historicalContext.items).toEqual(expect.arrayContaining([
+    expect.objectContaining({path:thesis,role:"thesis"}),
+    expect.objectContaining({path:register,role:"evidence_register"}),
+    expect.objectContaining({path:historicalSource,role:"source",declaredSourceType:"primary"}),
+  ]));
   expect(handoff.canonical.requiredAnalysisSourceMetadata).toEqual({
     source_path:source,source_sha256:handoff.originalSource.sha256,
   });
-  // OFFLINE provider simulation now consumes the ACTUAL physical/indexed
-  // handoff through the same reservation/reconciliation wrapper as paid runs.
-  // It returns a fixture draft, never evidence of real model reasoning.
-  const budgetDir=fs.mkdtempSync(path.join(os.tmpdir(),"nm-graph-budget-"));
-  const budgetFile=path.join(budgetDir,"campaign.sqlite");
-  OpenAIEvaluationBudget.initialize(budgetFile);
-  const budget=new OpenAIEvaluationBudget(budgetFile);
+  // A controlled analysis fixture consumes the actual indexed handoff.
+  // No provider runtime, evaluation campaign, budget ledger or key is needed.
+  // The existing paid adapter/budget retain their separate opt-in tests.
   let modelCalls=0;
-  const pricing={model:"gpt-fixture-2026-10-21",contextTokens:400_000,
-    maxOutputTokens:128_000,inputUsdPerMillion:"1.25",outputUsdPerMillion:"10",
-    evidenceSha256:"b".repeat(64)};
-  const modelTransport=budgetedEvaluationTransport(budget,pricing,"graph-baseline",
-    async(_url,init)=>{
+  const fixtureModel="offline-controlled-analysis-fixture";
+  const modelTransport=async(_url:string,init:RequestInit)=>{
       modelCalls++;
       const request=JSON.parse(String(init.body));
       const modelInput=JSON.parse(request.input[1].content);
@@ -454,15 +464,13 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
           .replace("status: draft\n","status: draft\nsource_path: "+
           pack.originalSource.path+"\nsource_sha256: "+pack.originalSource.sha256+"\n"),
       };
-      return Response.json({id:"resp_graph_"+modelCalls,model:pricing.model,status:"completed",service_tier:"default",
+      return Response.json({id:"resp_graph_"+modelCalls,model:fixtureModel,status:"completed",service_tier:"default",
         usage:{input_tokens:2000,output_tokens:4000,total_tokens:6000,
           input_tokens_details:{cached_tokens:0},output_tokens_details:{reasoning_tokens:2000}},
         output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(review)}]}]});
-    });
-  // Close/remove this fixture ledger even when a later graph assertion fails.
-  try{
+    };
   const evaluated=await evaluatePreparedSyntheticGraphWithTransport(handoff,rootId,
-    "sk-fixture-never-a-real-key",modelTransport,{model:pricing.model,
+    "sk-fixture-never-a-real-key",modelTransport,{model:fixtureModel,
       maxOutputTokens:16_384,reasoningEffort:"medium"});
   expect(evaluated.writeAuthorized).toBe(false);
   for(const review of [
@@ -513,6 +521,41 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   expect(v.graph.livingTimelineBacklinkVerified).toBe(true);
   expect(v.graph.mobileDeviceSyncVerified).toBe(false);
   expect(v.multiNoteAtomicityGuaranteed).toBe(false);
+  // Reopen persisted bytes + SQLite/FTS in a fresh process with no provider
+  // credentials. This must not rely on the writer's in-memory state.
+  const reopened=spawnSync(process.execPath,["--input-type=module","-e",`
+    import Database from 'better-sqlite3';
+    import fs from 'node:fs';
+    import path from 'node:path';
+    import {createHash} from 'node:crypto';
+    const root=process.argv[1], paths=process.argv.slice(2);
+    const db=new Database(path.join(root,'app.sqlite'),{readonly:true,fileMustExist:true});
+    const notes=paths.map(p=>{
+      const row=db.prepare('SELECT n.path,f.body FROM notes AS n JOIN notes_fts AS f ON f.rowid=n.rowid WHERE n.path=?').get(p);
+      if(!row)throw Error('persisted_note_missing');
+      const raw=fs.readFileSync(path.join(root,'vault',p));
+      return {...row,sha256:createHash('sha256').update(raw).digest('hex')};
+    });
+    const links=db.prepare('SELECT source_path,resolved_path FROM links WHERE source_path IN (?,?)').all(paths[1],paths[2]);
+    console.log(JSON.stringify({integrity:db.pragma('integrity_check',{simple:true}),notes,links}));
+    db.close();
+  `,root,source,analysis,timeline],{
+    cwd:process.cwd(),env:{PATH:process.env.PATH??""},encoding:"utf8",
+    timeout:10000,
+  });
+  expect(reopened.status,reopened.stderr).toBe(0);
+  const persisted=JSON.parse(reopened.stdout);
+  expect(persisted.integrity).toBe("ok");
+  expect(persisted.notes).toEqual(expect.arrayContaining([
+    expect.objectContaining({path:source,sha256:handoff.originalSource.sha256}),
+    expect.objectContaining({path:analysis,sha256:digest(boundPayload.analysisMarkdown)}),
+    expect.objectContaining({path:timeline,sha256:digest(fs.readFileSync(path.join(vaultRoot,timeline),"utf8"))}),
+  ]));
+  expect(persisted.links).toEqual(expect.arrayContaining([
+    expect.objectContaining({source_path:analysis,resolved_path:source}),
+    expect.objectContaining({source_path:analysis,resolved_path:timeline}),
+    expect.objectContaining({source_path:timeline,resolved_path:analysis}),
+  ]));
   const oldTimeline=fs.readFileSync(path.join(vaultRoot,timeline),"utf8");
   expect(oldTimeline).toContain("Preexisting historical context retained.");
   expect(oldTimeline.split(marker)).toHaveLength(2);
@@ -591,18 +634,24 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   expect(historical?.declaredIndependentEvidence).toBe(false);
   const nextEvaluated=await evaluatePreparedSyntheticGraphWithTransport(nextPack,
     "ios-next-model-evaluation-20261021","sk-fixture-never-a-real-key",modelTransport,
-    {model:pricing.model,maxOutputTokens:32_768,reasoningEffort:"high"});
+    {model:fixtureModel,maxOutputTokens:32_768,reasoningEffort:"high"});
   expect(nextEvaluated.review.historicalAIReused).toContain(analysis);
   expect(nextEvaluated.review.historicalAIIsIndependentEvidence).toBe(false);
   expect(modelCalls).toBe(2);
-  expect(budget.status()).toMatchObject({requests:2,chargedNanoUsd:85_000_000,
-    reservedNanoUsd:0,blocked:false});
+  const recalledPrimary=nextPack.historicalContext.items.find(
+    (x:any)=>x.path===historicalSource);
+  expect(recalledPrimary?.role).toBe("source");
+  expect(recalledPrimary?.declaredSourceType).toBe("primary");
+  for(const saved of protectedBefore)
+    expect(digest(fs.readFileSync(path.join(vaultRoot,saved.path),"utf8")))
+      .toBe(saved.hash);
+  expect(network).not.toHaveBeenCalled();
   const same=await c.client.callTool({name:"prepare_investment_graph_review",
    arguments:{issuer:"SYNTH",eventKey:event,period:"FY26Q4",
     sourcePath:source,question:"Review existing event history"}});
   expect(unpack(same).status).toBe("existing_event_or_analysis_requires_duplicate_review_no_write");
-  }finally{budget.close();fs.rmSync(budgetDir,{recursive:true,force:true});}
  }finally{
+  network.mockRestore();
   delete process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED;
   await c.close();
  }
@@ -733,6 +782,51 @@ it("explicitly authorized partial-graph recovery repairs only an unstarted Timel
   expect(unpack(replay).status)
    .toBe("previously_written_both_receipts_graph_reverified");
   expect(fs.readFileSync(path.join(vaultRoot,timeline),"utf8")).toBe(recovered);
+  // Fault the real second write, after the real Analysis commit, rather than
+  // equating an independently seeded partial fixture with bundle failure.
+  const interrupted=await seedGraphEvent("FAILTEST","FAIL-TIMELINE-FY26Q4",
+    "ios-synthetic-failed-timeline");
+  const interruptedTimeline=path.join(vaultRoot,interrupted.timelinePath);
+  const originalBytes=fs.readFileSync(interruptedTimeline,"utf8");
+  const renameImpl=fs.renameSync;
+  let injectedFailures=0;
+  const failedRename=vi.spyOn(fs,"renameSync").mockImplementation((from,to)=>{
+    // The existing writer intentionally renames through an open-directory FD,
+    // not the caller's absolute path. Match the synthetic basename only.
+    if(path.basename(String(to))===path.basename(interruptedTimeline)){
+      injectedFailures++;
+      throw Error("synthetic second-note I/O failure");
+    }
+    renameImpl(from,to);
+  });
+  let partial:any;
+  try{
+    partial=await c.client.callTool({name:"write_investment_graph_bundle",
+      arguments:interrupted});
+  }finally{failedRename.mockRestore();}
+  expect(injectedFailures).toBe(1);
+  expect(partial.isError,JSON.stringify(partial)).not.toBe(true);
+  const interruptedReceipt=unpack(partial);
+  expect(interruptedReceipt).toMatchObject({
+    status:"analysis_written_timeline_or_graph_needs_manual_reconciliation",
+    firstNoteSaveReceiptVerified:true,entireKnowledgeGraphVerified:false,
+    actionNotAutomaticallyRetried:true,
+  });
+  const persistedFirst=fs.readFileSync(path.join(vaultRoot,interrupted.analysisPath),"utf8");
+  expect(persistedFirst).toBe(interrupted.analysisMarkdown);
+  expect(fs.readFileSync(interruptedTimeline,"utf8")).toBe(originalBytes);
+  const failedStage=await c.client.callTool({name:"get_edit_status",
+    arguments:{operationId:interruptedReceipt.timelineOperationId}});
+  expect(unpack(failedStage)).toMatchObject({status:"writing",
+    receipt:{write:"pending",readback:"pending"}});
+  const noRetry=await c.client.callTool({name:"write_investment_graph_bundle",
+    arguments:{...interrupted,recoverTimelineOnly:true}});
+  expect(unpack(noRetry)).toMatchObject({
+    status:"existing_partial_or_preview_operations_manual_review",
+    newWriteExecuted:false,
+  });
+  expect(fs.readFileSync(path.join(vaultRoot,interrupted.analysisPath),"utf8")).toBe(persistedFirst);
+  expect(fs.readFileSync(interruptedTimeline,"utf8")).toBe(originalBytes);
  }finally{
   delete process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED;
   await c.close();

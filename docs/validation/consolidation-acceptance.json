@@ -1,0 +1,1071 @@
+{
+  "as_of_date": "2026-10-23",
+  "timezone": "Asia/Bangkok",
+  "source_parent": "dd89be9c00bfc248c5d103c9eea327535febc372",
+  "source_branch": "feat/real-event-context-to-writeback-handoff-20261021",
+  "existing_pr": 108,
+  "main_snapshot": "b563c55fd99c5fb2738fda0682f7b6f76a0ef42a",
+  "main_is_ancestor": true,
+  "pr_metadata_and_ci": "BLOCKED: gh GraphQL request returned Forbidden; Draft/open state is historical/user-reported, not live verified",
+  "workspace_continuity": "verified; same checkout, original untracked work, ledger pair and restored Git branch source; no new workspace/worktree",
+  "preexisting_untracked_files_preserved": 16,
+  "paid_inference_calls": 0,
+  "new_evaluation_campaigns": 0,
+  "ledger": {
+    "campaign.sqlite": {
+      "before_sha256": "344b1c34c22c3db0726ec4c041a1e5d1b0c783dea97ff84613d5b28342561371",
+      "after_sha256": "344b1c34c22c3db0726ec4c041a1e5d1b0c783dea97ff84613d5b28342561371",
+      "unchanged": true
+    },
+    "campaign.sqlite.identity": {
+      "before_sha256": "052b05f9cf99be994066d337af4bf210918613e7c1368e5096533a9ad91d3b3d",
+      "after_sha256": "052b05f9cf99be994066d337af4bf210918613e7c1368e5096533a9ad91d3b3d",
+      "unchanged": true
+    }
+  },
+  "ledger_integrity": "ok",
+  "ledger_live_campaign": "investment-os-openai-evaluation-new-17e04411",
+  "ledger_state": {
+    "completed_requests": 1,
+    "uncertain_requests": 8,
+    "uncertain_reserved_usd": 8,
+    "successful_usage_estimate_usd": 3.8e-05,
+    "provider_billing_reconciled": false
+  },
+  "api_optionalization": "Runtime core already has no paid provider dependency. Existing integration test now uses direct controlled fixture transport without evaluation budget/campaign bootstrap; provider code retained.",
+  "changed_test_sha256": "6205ee8f30ad571db6d6a3beeb8e7a126d39544ca46e0eb9e41a38b0379aca2a",
+  "tests": {
+    "files": 6,
+    "total": 111,
+    "passed": 111,
+    "failed": 0,
+    "pending": 0,
+    "success": true,
+    "report_sha256": "2b0ca4dea41370d143d6077c0b58fcd32b78b30e1dfe2c0d426d1560e05ac80d",
+    "modules": [
+      "src/server/research-source-archive.test.ts",
+      "src/server/mcp/safe-edit-server.test.ts",
+      "src/server/safe-edit/engine.test.ts",
+      "src/server/safe-edit/knowledge-graph-readback.test.ts",
+      "src/server/vault/investment-context.test.ts",
+      "src/server/vault/investment-writeback-router.test.ts"
+    ]
+  },
+  "acceptance": {
+    "status": "PASS_SYNTHETIC_ONLY",
+    "criteria_passed": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "evidence": [
+      "actual MCP create preview/apply Source A and Source B",
+      "historical Thesis/Evidence Register/source context assertions",
+      "controlled structured analysis bound to actual Source hash",
+      "guarded existing two-note graph writer",
+      "fresh OS process readonly SQLite/FTS and physical SHA/link readback",
+      "duplicate and stale-hash refusal",
+      "scope/feature-gate unauthorized denial",
+      "real second-write rename fault produces durable partial/manual status and no retry",
+      "protected synthetic reference file hashes unchanged",
+      "external fetch spy has zero calls in closed-loop case"
+    ],
+    "external_boundary_stub": "withPausedSync replaces actual Obsidian daemon control only; access objects are synthetic OAuth contexts, not a live user OAuth handshake",
+    "real_issuer_authentication": false,
+    "live_chatgpt_tool_registry_verified": false,
+    "production_ready": false
+  },
+  "build": {
+    "exit_code": 0,
+    "error_markers": false
+  },
+  "security_audit": {
+    "exit_code": 1,
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 14,
+      "high": 2,
+      "critical": 0
+    },
+    "high_advisories": [
+      {
+        "module_name": "zod",
+        "severity": "high",
+        "title": "Zod can exhaust memory while validating oversized constrained collections",
+        "url": "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5",
+        "patched_versions": ">=4.6.6",
+        "github_advisory_id": "GHSA-mrhx-c7xc-m3w5"
+      }
+    ],
+    "release_allowed": false,
+    "no_exceptions_added": true
+  },
+  "pr_inventory": [
+    {
+      "pr": 84,
+      "head": "342397aefcba63d163d6c041b6d0a395ac16b2ad",
+      "subject": "docs: Thai operator guide for safe historical dedup, scope gaps and exception-based review",
+      "ancestor_prs": [],
+      "incremental_file_count": 179,
+      "incremental_stat": "179 files changed, 16708 insertions(+), 407 deletions(-)"
+    },
+    {
+      "pr": 85,
+      "head": "01e2927675c85741fe2f47f57b9b8379ae9704fa",
+      "subject": "docs: Thai explanation of narrative quote retrieval, citation scope and non-semantic evidence caveats",
+      "ancestor_prs": [
+        84
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 450 insertions(+)"
+    },
+    {
+      "pr": 86,
+      "head": "3804ceeef5eee8962440ddead490a06d807b0bcd",
+      "subject": "docs: Thai user explanation of source-bound history to Thesis evidence brief, no semantic verdict",
+      "ancestor_prs": [
+        84,
+        85
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 419 insertions(+)"
+    },
+    {
+      "pr": 87,
+      "head": "aae1555f55d34f7f073fb275da7584a3f84d853d",
+      "subject": "docs: Thai explanation of unverified AI interpretation with mandatory exact evidence links",
+      "ancestor_prs": [
+        84,
+        85,
+        86
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 474 insertions(+)"
+    },
+    {
+      "pr": 88,
+      "head": "9d565814a34f33bdc6a1b4468be0a70104db659d",
+      "subject": "test: use matching augmented Thesis SHA before asserting fenced-code scoped excerpt refusal",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 455 insertions(+)"
+    },
+    {
+      "pr": 89,
+      "head": "1f8a8eab15d53e11cc9640b1258a9e8b977bb944",
+      "subject": "fix: normalize optional counterevidence fields to null as well",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 497 insertions(+)"
+    },
+    {
+      "pr": 90,
+      "head": "a7ab0563ed451cae25efb045a8a1d63ace05afed",
+      "subject": "fix: explicit typed citation callbacks under strict TypeScript narrowing",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89
+      ],
+      "incremental_file_count": 6,
+      "incremental_stat": "6 files changed, 628 insertions(+)"
+    },
+    {
+      "pr": 91,
+      "head": "eb81be4c468f6cdf3051e0f28ce2cffa5a238051",
+      "subject": "test: assert CI hard block without bypassing CI environment for local-only key opt-in cases",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90
+      ],
+      "incremental_file_count": 4,
+      "incremental_stat": "4 files changed, 499 insertions(+)"
+    },
+    {
+      "pr": 92,
+      "head": "d130c4b61caf29c01d4d40b13057272effea9e80",
+      "subject": "docs: durable API-test pause trigger and resume handoff, no reminder or secret collection",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 272 insertions(+)"
+    },
+    {
+      "pr": 93,
+      "head": "7c57cc0e61b01076dda6d802613548e631c0de3f",
+      "subject": "docs: bound safety and non-production claims for PR93 evidence triage",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 455 insertions(+)"
+    },
+    {
+      "pr": 94,
+      "head": "ead2a98ca8575a4e14b0ff8d7f1128fb282b7989",
+      "subject": "docs: describe offline source-to-exception orchestration and trust boundaries",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 493 insertions(+)"
+    },
+    {
+      "pr": 95,
+      "head": "7adaa84c2eed46e3cfd09de27884dcf46cf2ee0d",
+      "subject": "fix: correct typed multi-claim batch test helper signature",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 538 insertions(+)"
+    },
+    {
+      "pr": 96,
+      "head": "bc1325341921c542e29cbce2eff83f33ad2db04f",
+      "subject": "fix: explicit batch fixture type after removing unused variable",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 570 insertions(+)"
+    },
+    {
+      "pr": 97,
+      "head": "86de1b085b2753b487750ed9bc4eece3133e076c",
+      "subject": "docs: pivot from accounting rules to evidence-grounded AI reasoning with explicit semantic limits",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 738 insertions(+)"
+    },
+    {
+      "pr": 98,
+      "head": "a30d9b8f9138da8b859500c266f7038700e1a0d2",
+      "subject": "test: assert no proprietary content, not absence of safe privacy flag names",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 681 insertions(+)"
+    },
+    {
+      "pr": 99,
+      "head": "08e88ef390d5201c3e52d621afca446213b13109",
+      "subject": "fix: respect Vault write-site guard, use exclusive descriptor only in temp sandbox",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 409 insertions(+)"
+    },
+    {
+      "pr": 100,
+      "head": "9300ea2a3cd9ad2a6f4c23016fff719e917d00c2",
+      "subject": "docs: record owner's non-negotiable Obsidian knowledge graph and auto-writeback north star",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99
+      ],
+      "incremental_file_count": 4,
+      "incremental_stat": "4 files changed, 558 insertions(+)"
+    },
+    {
+      "pr": 101,
+      "head": "48e5700d606a5e1d6b84bce4b2e964dba6d3f699",
+      "subject": "fix: use explicit base FTS5 table name for MATCH query and indexed join",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100
+      ],
+      "incremental_file_count": 5,
+      "incremental_stat": "5 files changed, 252 insertions(+), 3 deletions(-)"
+    },
+    {
+      "pr": 102,
+      "head": "fdff4df6a694d549bce292c1777d6391b8e822c2",
+      "subject": "fix: remove unused scaffold variable after shared Markdown composer integration",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101
+      ],
+      "incremental_file_count": 5,
+      "incremental_stat": "5 files changed, 233 insertions(+), 39 deletions(-)"
+    },
+    {
+      "pr": 103,
+      "head": "7cbee061d6a306b89bfab6e16aa96570582df3a1",
+      "subject": "test: real authenticated MCP preview/apply two-note graph, physical readback and FTS links in temp vault",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102
+      ],
+      "incremental_file_count": 5,
+      "incremental_stat": "5 files changed, 548 insertions(+), 4 deletions(-)"
+    },
+    {
+      "pr": 104,
+      "head": "bd5cb1556c6138a7b26eff3765acaf9175e9984c",
+      "subject": "docs: single user-authorized graph writeback action, idempotency, partial failure and release constraints",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103
+      ],
+      "incremental_file_count": 4,
+      "incremental_stat": "4 files changed, 456 insertions(+), 5 deletions(-)"
+    },
+    {
+      "pr": 105,
+      "head": "0ded0f6e6f741ec7a007d655e48248480434118b",
+      "subject": "docs: distinguish user source capture from archived AI and issuer filings in next-event retrieval",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103,
+        104
+      ],
+      "incremental_file_count": 3,
+      "incremental_stat": "3 files changed, 156 insertions(+), 8 deletions(-)"
+    },
+    {
+      "pr": 106,
+      "head": "bf7d97f3fc0519099e891555868427170666eef5",
+      "subject": "fix(security): refresh pnpm lock graph with audited patch versions",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103,
+        104,
+        105
+      ],
+      "incremental_file_count": 2,
+      "incremental_stat": "2 files changed, 47 insertions(+), 43 deletions(-)"
+    },
+    {
+      "pr": 107,
+      "head": "16fe18cb5aa46202fc30def9896efa23f24e13ee",
+      "subject": "fix(graph): compare physical recovery note with actual FTS body join",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106
+      ],
+      "incremental_file_count": 4,
+      "incremental_stat": "4 files changed, 234 insertions(+), 73 deletions(-)"
+    },
+    {
+      "pr": 108,
+      "head": "dd89be9c00bfc248c5d103c9eea327535febc372",
+      "subject": "docs: record linked-save fixes and exact local verification limits",
+      "ancestor_prs": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107
+      ],
+      "incremental_file_count": 35,
+      "incremental_stat": "35 files changed, 3488 insertions(+), 103 deletions(-)"
+    }
+  ],
+  "module_inventory": [
+    {
+      "path": "src/server/vault/offline-bound-evidence-proposal.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-canonical-autolink-writeback-plan.ts",
+      "decision": "CONSOLIDATE",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-evidence-bound-thesis-review.ts",
+      "decision": "CONSOLIDATE",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-evidence-human-review.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-evidence-safe-triage.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-exception-review-queue.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-historical-change-review.ts",
+      "decision": "CONSOLIDATE",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-investment-analysis-markdown.ts",
+      "decision": "CONSOLIDATE",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-investment-intelligence-brief.ts",
+      "decision": "CONSOLIDATE",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-investment-reasoning-contract.ts",
+      "decision": "KEEP",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-narrative-evidence-context.ts",
+      "decision": "CONSOLIDATE",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-next-event-retrieval.ts",
+      "decision": "CONSOLIDATE",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-owner-enrollment-challenge.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-review-audit-journal.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-review-key-registry-readiness.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-review-signature-bridge.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-review-signature-gate.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-safe-edit-writeback-handoff.ts",
+      "decision": "CONSOLIDATE",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-semantic-benchmark-corpus.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-semantic-benchmark-score.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-semantic-thesis-judge.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-source-provenance.ts",
+      "decision": "KEEP",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-synthetic-economic-consistency.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-synthetic-investment-pipeline.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-synthetic-model-evaluator.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-synthetic-multi-claim-review.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-synthetic-openai-eval.ts",
+      "decision": "DEFER",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-synthetic-writeback-rehearsal.ts",
+      "decision": "REMOVE CANDIDATE",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/vault/offline-thesis-scoped-excerpt-crosswalk.ts",
+      "decision": "KEEP",
+      "disposition": "Preserved; no deletion/refactor. Core uses existing authenticated MCP path; optional helpers do not become additional runtime gates."
+    },
+    {
+      "path": "src/server/research-source-archive.ts",
+      "decision": "KEEP",
+      "reason": "Original byte revision storage and integrity"
+    },
+    {
+      "path": "src/server/research-source-fetch.ts",
+      "decision": "KEEP",
+      "reason": "Bounded allowlisted external fetch, controlled fixture only in this run"
+    },
+    {
+      "path": "src/server/user-attachment-vault.ts",
+      "decision": "KEEP",
+      "reason": "Original attachment bytes and hash readback"
+    },
+    {
+      "path": "src/server/vault/source-observation-receipt.ts",
+      "decision": "KEEP",
+      "reason": "Existing evidence provenance receipt matching"
+    },
+    {
+      "path": "src/server/vault/investment-writeback-router.ts",
+      "decision": "KEEP",
+      "reason": "Issuer/event/source duplicate candidates, not semantic verification"
+    },
+    {
+      "path": "src/server/vault/investment-claim-review.ts",
+      "decision": "KEEP",
+      "reason": "Bounded claim matching and explicit uncertainty"
+    },
+    {
+      "path": "src/server/vault/investment-context.ts",
+      "decision": "KEEP",
+      "reason": "Canonical actual-note retrieval, including archived analysis"
+    },
+    {
+      "path": "src/server/safe-edit/investment-review-preparation.ts",
+      "decision": "KEEP",
+      "reason": "Original Source/version plus context/canonical destination preparation"
+    },
+    {
+      "path": "src/server/safe-edit/investment-graph-bundle.ts",
+      "decision": "COMPLETE",
+      "reason": "Existing Analysis + Timeline path passed isolated acceptance; real acceptance remains gated"
+    },
+    {
+      "path": "src/server/safe-edit/engine.ts",
+      "decision": "KEEP",
+      "reason": "One existing CAS/approval/journal/backup/write engine"
+    },
+    {
+      "path": "src/server/safe-edit/knowledge-graph-readback.ts",
+      "decision": "KEEP",
+      "reason": "Independent physical/index/link/receipt verification"
+    },
+    {
+      "path": "src/server/safe-edit/sync.ts",
+      "decision": "KEEP",
+      "reason": "Actual production sync boundary retained, stubbed only in synthetic test"
+    },
+    {
+      "path": "src/server/mcp/safe-edit-server.ts",
+      "decision": "KEEP",
+      "reason": "Existing scoped tool registration/authorization"
+    },
+    {
+      "path": "src/server/cloud-intake.ts",
+      "decision": "CONSOLIDATE",
+      "reason": "Retain legacy inbox compatibility; do not treat combined analysis as an original source"
+    },
+    {
+      "path": "src/server/intake.ts",
+      "decision": "KEEP",
+      "reason": "Existing legacy ingestion identity and idempotency"
+    },
+    {
+      "path": "src/server/vault/openai-evaluation-budget.ts",
+      "decision": "BLOCKED",
+      "reason": "Retain future adapter; old campaign/schema is incompatible with preserved live ledger; never run status/initialize against it"
+    },
+    {
+      "path": "src/server/vault/openai-evaluation-readiness.ts",
+      "decision": "DEFER",
+      "reason": "Only relevant to separately authorized future paid evaluation"
+    },
+    {
+      "path": "scripts/run-synthetic-openai-eval.mjs",
+      "decision": "DEFER",
+      "reason": "Paid evaluation and campaign initialization remain paused"
+    }
+  ],
+  "adjacent_greenfield_branches": [
+    {
+      "branch": "codex/investment-os-greenfield-p0-20261022",
+      "head": "12768c4975ef418239ce86cc7da2a0fdcf00401d",
+      "ancestor_of_108": false,
+      "decision": "DEFER integration; existing separate Python/PostgreSQL implementation preserved, not reimplemented or merged for the core loop"
+    },
+    {
+      "branch": "codex/investment-os-p1-intake-20261022",
+      "head": "28ee279a4d6fb2441734f9175cbb5ca148d89339",
+      "ancestor_of_108": false,
+      "decision": "DEFER integration; existing separate Python/PostgreSQL implementation preserved, not reimplemented or merged for the core loop"
+    },
+    {
+      "branch": "codex/investment-os-p1-registry-20261022",
+      "head": "87c36f0f95df0a02bf959d395bd1a4edc93a1929",
+      "ancestor_of_108": false,
+      "decision": "DEFER integration; existing separate Python/PostgreSQL implementation preserved, not reimplemented or merged for the core loop"
+    },
+    {
+      "branch": "codex/investment-os-p1-text-review-20261023",
+      "head": "4da7e7addf53aee8747c9ad02fec9df1fc1fb0ec",
+      "ancestor_of_108": false,
+      "decision": "DEFER integration; existing separate Python/PostgreSQL implementation preserved, not reimplemented or merged for the core loop"
+    },
+    {
+      "branch": "codex/investment-os-p1-extraction-20261023",
+      "head": "7c376149a5cf366a17d8a724439ac9768450b3cd",
+      "ancestor_of_108": false,
+      "decision": "DEFER integration; existing separate Python/PostgreSQL implementation preserved, not reimplemented or merged for the core loop"
+    }
+  ],
+  "remaining_owner_approvals": [
+    "P0 schema/architecture ratification not assumed",
+    "specific real-source/test-vault pilot and any staging deployment/action publication",
+    "production/release/real Vault/credentials/environment publication remain unauthorized"
+  ],
+  "unrun": [
+    "full suite on candidate",
+    "browser E2E",
+    "Docker",
+    "latest GitHub CI",
+    "real-source/production/device-sync acceptance"
+  ],
+  "governance": "No extra PR, engine, dependency, production runtime modification, paid API or credential/config change",
+  "lint": {
+    "exit_code": 0
+  },
+  "typecheck": {
+    "exit_code": 0
+  },
+  "operation_trace": [
+    {
+      "audit": "safe_edit_write_started",
+      "ts": "2026-10-23T21:51:46.355Z",
+      "operationId": "ios-synth-capture-20261021-b",
+      "actor": "oauth:edit-fixture",
+      "scopes": [
+        "vault:read",
+        "vault:edit"
+      ],
+      "path": "10_Knowledge/Company Research/SYNTH Bundle Evidence.md",
+      "beforeHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterHash": "572fc51ab6213d18e62cb83a1b29f10c36577e17807ec5e4d6f0bdcc1254aedf"
+    },
+    {
+      "audit": "safe_edit_written",
+      "ts": "2026-10-23T21:51:46.362Z",
+      "operationId": "ios-synth-capture-20261021-b",
+      "actor": "oauth:edit-fixture",
+      "scopes": [
+        "vault:read",
+        "vault:edit"
+      ],
+      "path": "10_Knowledge/Company Research/SYNTH Bundle Evidence.md",
+      "beforeHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterHash": "572fc51ab6213d18e62cb83a1b29f10c36577e17807ec5e4d6f0bdcc1254aedf"
+    },
+    {
+      "audit": "safe_edit_write_started",
+      "ts": "2026-10-23T21:51:46.460Z",
+      "operationId": "ios-syn-bundle-20261021-a-analysis",
+      "actor": "oauth:edit-fixture",
+      "scopes": [
+        "vault:read",
+        "vault:edit"
+      ],
+      "path": "08_Daily_Weekly/Research Indexes/Investment Review - SYNTH - SYNTH-BUNDLE-FY26Q4.md",
+      "beforeHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterHash": "532e22454e28516d8315e700c74e5d1508bdb6f51946a62156b649eea1f0ac43"
+    },
+    {
+      "audit": "safe_edit_written",
+      "ts": "2026-10-23T21:51:46.467Z",
+      "operationId": "ios-syn-bundle-20261021-a-analysis",
+      "actor": "oauth:edit-fixture",
+      "scopes": [
+        "vault:read",
+        "vault:edit"
+      ],
+      "path": "08_Daily_Weekly/Research Indexes/Investment Review - SYNTH - SYNTH-BUNDLE-FY26Q4.md",
+      "beforeHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterHash": "532e22454e28516d8315e700c74e5d1508bdb6f51946a62156b649eea1f0ac43"
+    },
+    {
+      "audit": "safe_edit_write_started",
+      "ts": "2026-10-23T21:51:46.479Z",
+      "operationId": "ios-syn-bundle-20261021-a-timeline",
+      "actor": "oauth:edit-fixture",
+      "scopes": [
+        "vault:read",
+        "vault:edit"
+      ],
+      "path": "08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",
+      "beforeHash": "9e260868134f76f4f4c28c42e1c5036840c9287163d441a1526e4d20da24687f",
+      "afterHash": "8e7c0632c8123306c88749e4d999f55f276a8512c0a7fd49f232a63c90a4bae4"
+    },
+    {
+      "audit": "safe_edit_written",
+      "ts": "2026-10-23T21:51:46.483Z",
+      "operationId": "ios-syn-bundle-20261021-a-timeline",
+      "actor": "oauth:edit-fixture",
+      "scopes": [
+        "vault:read",
+        "vault:edit"
+      ],
+      "path": "08_Daily_Weekly/Research Indexes/Company Evolution - SYNTH.md",
+      "beforeHash": "9e260868134f76f4f4c28c42e1c5036840c9287163d441a1526e4d20da24687f",
+      "afterHash": "8e7c0632c8123306c88749e4d999f55f276a8512c0a7fd49f232a63c90a4bae4"
+    },
+    {
+      "audit": "safe_edit_write_started",
+      "ts": "2026-10-23T21:51:46.606Z",
+      "operationId": "ios-synth-capture-next-20261021-b",
+      "actor": "oauth:edit-fixture",
+      "scopes": [
+        "vault:read",
+        "vault:edit"
+      ],
+      "path": "10_Knowledge/Company Research/SYNTH Next Event.md",
+      "beforeHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterHash": "f944fc83a629d810a69134e9725bca22433f1d84cdd9a09d07bfb10320b37adc"
+    },
+    {
+      "audit": "safe_edit_written",
+      "ts": "2026-10-23T21:51:46.610Z",
+      "operationId": "ios-synth-capture-next-20261021-b",
+      "actor": "oauth:edit-fixture",
+      "scopes": [
+        "vault:read",
+        "vault:edit"
+      ],
+      "path": "10_Knowledge/Company Research/SYNTH Next Event.md",
+      "beforeHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterHash": "f944fc83a629d810a69134e9725bca22433f1d84cdd9a09d07bfb10320b37adc"
+    },
+    {
+      "audit": "safe_edit_write_started",
+      "ts": "2026-10-23T21:51:46.746Z",
+      "operationId": "ios-synthetic-failed-timeline-analysis",
+      "actor": "oauth:edit-fixture",
+      "scopes": [
+        "vault:read",
+        "vault:edit"
+      ],
+      "path": "08_Daily_Weekly/Research Indexes/Investment Review - FAILTEST - FAIL-TIMELINE-FY26Q4.md",
+      "beforeHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterHash": "3f56d96720977359f94f3970fe47950c416e5c4d6167bbd1c8637c4a1325996e"
+    },
+    {
+      "audit": "safe_edit_written",
+      "ts": "2026-10-23T21:51:46.750Z",
+      "operationId": "ios-synthetic-failed-timeline-analysis",
+      "actor": "oauth:edit-fixture",
+      "scopes": [
+        "vault:read",
+        "vault:edit"
+      ],
+      "path": "08_Daily_Weekly/Research Indexes/Investment Review - FAILTEST - FAIL-TIMELINE-FY26Q4.md",
+      "beforeHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterHash": "3f56d96720977359f94f3970fe47950c416e5c4d6167bbd1c8637c4a1325996e"
+    },
+    {
+      "audit": "safe_edit_write_started",
+      "ts": "2026-10-23T21:51:46.761Z",
+      "operationId": "ios-synthetic-failed-timeline-timeline",
+      "actor": "oauth:edit-fixture",
+      "scopes": [
+        "vault:read",
+        "vault:edit"
+      ],
+      "path": "08_Daily_Weekly/Research Indexes/Company Evolution - FAILTEST.md",
+      "beforeHash": "2a2ca95ef93363c72d36ab0982a1d5f4b30812da0a0d0eec0b6c0a097d06aa03",
+      "afterHash": "7ead13a9a1dfa0b61ae2d2a5b035a1c589c992f0adcfe0566f756ef16a65d5a4"
+    }
+  ],
+  "source_patch_sha256": "fce4c96e3e81d1499e378e714c92fa83f36024b8ce148c70560288422baf98a4"
+}

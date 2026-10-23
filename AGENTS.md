@@ -32,3 +32,33 @@ The North Star: **new intelligence → original Source + historical Thesis/Evide
 **Paid API evaluation is PAUSED** until the owner explicitly restarts it. Codex Cloud environment setup and GitHub CI tests alone do not authorize spending.
 
 This root file is deliberately short; **consult the detailed handoff** rather than guessing missing historical context.
+
+## Owner consolidation directive — 23 Oct 2026
+
+Prioritize the single existing Source → Evidence/History → ChatGPT analysis →
+authorized graph write → physical/FTS/link readback → next-event retrieval path.
+Use `investment-review-preparation`, `investment-context`, `investment-graph-bundle`,
+the existing Safe Edit engine and `knowledge-graph-readback` as the canonical
+delivery path. ChatGPT or an explicitly controlled offline fixture supplies the
+analysis; a paid API is not a core prerequisite. Retain optional provider code.
+
+Before another change, identify existing support, a proven functional gap, why it
+blocks acceptance, the smallest safe correction and its measurable completion.
+Defer changes that cannot answer those questions. Do not create another engine,
+validator, dependency, PR or architectural layer merely to demonstrate progress.
+Keep review-only/schema proposals separate from runtime integration and never
+infer P0 schema ratification from an instruction to continue development.
+
+Paid inference and evaluation are paused. Preserve campaign
+`investment-os-openai-evaluation-new-17e04411` and its exact ledger/identity pair
+at `/workspace/.investment-os-evaluation/campaign.sqlite{,.identity}` read-only.
+Do not initialize/reset/migrate/copy/restore it or release uncertain reservations.
+The retained native evaluation adapter names an older campaign/schema; do not run
+its initialization/status/paid entrypoints against this ledger to reconcile them.
+Any future reconciliation or paid restart is separate explicitly authorized work.
+
+Preserve the existing branch/PR stack and uncommitted work. Do not close PRs,
+force-push, merge, deploy, publish configuration, change credentials or write a
+real Vault without explicit authorization. Relevant isolated tests are permitted;
+reruns require a defined acceptance/change/failure purpose. Full release CI and
+owner-authorized real-source acceptance remain separate from synthetic success.
