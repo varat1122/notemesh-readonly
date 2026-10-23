@@ -21,6 +21,7 @@ overrides:
   proxy-addr: ^2.0.8 # IPv4-mapped IPv6 trust-subnet spoofing
   follow-redirects: 1.16.1 # cross-origin sensitive-header / credential forwarding fixes (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c)
   vite: 6.4.4 # patch Vite 6 within existing peer compatibility (GHSA-587h-7wmj-h5pm)
+  "body-parser@>=2.0.0 <2.4.0": 2.4.0 # compressed-body trailing-byte DoS (GHSA-27r3-jxmh-p828); retain Express's v2 line
 
 # CI fails on a high or critical advisory in a production dependency. An
 # advisory that has been reviewed and found not to apply goes here, with

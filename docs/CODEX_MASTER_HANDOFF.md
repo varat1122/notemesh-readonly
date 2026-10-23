@@ -6,6 +6,14 @@
 **Vault:** `Investment_OS` (Obsidian); **not included as GitHub source files**  
 **Status of this handoff:** instructions and a *dated snapshot*. Recheck latest GitHub HEAD, main, PRs, deployed SHA, CI, connector registry and permissions before acting.
 
+**23 Oct Research MVP update:** use [Live Research MVP handoff](LIVE_RESEARCH_MVP_HANDOFF.md)
+and the [ready-to-install ChatGPT Project package](../integrations/investment-os-safe-edit/USER_ACCEPTANCE_TH.md).
+The candidate reuses the existing Source/context/Safe Edit/graph/readback path;
+ChatGPT supplies analysis without a paid API. This update does not establish
+frontend tool registration, actual user acceptance or production approval.
+The [consolidation audit](DEVELOPMENT_CONSOLIDATION.md) records current stack ancestry;
+older divergence and tool-count descriptions below remain historical snapshots.
+
 > **The owner’s non-negotiable North Star:** make one complete, usable Investment Knowledge Graph loop, not another pile of disconnected validators or Draft PRs. **New Intelligence → historical Source/Thesis/Evidence recall → actual AI investment reasoning → selectively chosen exact Obsidian Markdown links → authorized Safe Vault Writeback → independently verified physical/FTS/link/backlink readback → retrieval and reuse at the NEXT event.**
 
 ## 0. The contract for Codex (read before any command)

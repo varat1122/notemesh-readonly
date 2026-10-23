@@ -23,7 +23,7 @@ The North Star: **new intelligence → original Source + historical Thesis/Evide
 
 ## Engineering working method
 
-1. Confirm `git status`, actual checkout ref/commit, `main` head, PR #108 head/base and stacked ancestry; PR #108 is historically **Draft/unmerged** and has **content-level but not Git-ancestry reconciliation** with newer main — verify again.
+1. Confirm `git status`, actual checkout ref/commit, `main` head, PR #108 head/base and stacked ancestry. The 23 Oct audit found main is now an ancestor of #108 via reconciliation; older divergence claims are dated. PR #108 is historically **Draft/unmerged**; verify its current remote state and CI rather than repeating reconciliation from an old handoff.
 2. State the *single* P0 link in the North Star being advanced; locate existing production code path and tests.
 3. For an authorized dev change, keep blast radius narrow; preserve newer main improvements and historical `archived_ai` non-independence logic.
 4. Run appropriate frozen pnpm install, lint, typecheck, build, unit/integration, E2E, Docker and security audit; inspect every required CI job. Record tested SHA and known skips; do not bypass a failing gate.

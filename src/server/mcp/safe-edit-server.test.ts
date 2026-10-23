@@ -437,6 +437,10 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
   // The existing paid adapter/budget retain their separate opt-in tests.
   let modelCalls=0;
   const fixtureModel="offline-controlled-analysis-fixture";
+  // Exercise the user-delivered Markdown through the EXISTING complete
+  // Source A/write/readback/Source B case, rather than another pipeline.
+  const reviewTemplate=fs.readFileSync(path.resolve(
+    "integrations/investment-os-safe-edit/INVESTMENT_REVIEW_TEMPLATE.md"),"utf8");
   const modelTransport=async(_url:string,init:RequestInit)=>{
       modelCalls++;
       const request=JSON.parse(String(init.body));
@@ -446,6 +450,36 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
       expect(pack.historicalContext.items.length).toBeGreaterThan(0);
       expect(request.tools).toBeUndefined();
       const links=[pack.canonical.sourcePath,pack.canonical.companyPath,pack.canonical.timelinePath];
+      const fields:Record<string,string>={
+        ISSUER:"SYNTH",EVENT_KEY:pack.eventKey,PERIOD:pack.canonical.proposedWriteFields.period,
+        OPERATION_ROOT:modelInput.operationRoot,
+        ANALYSIS_ORIGIN:"controlled_offline_fixture",
+        SOURCE_PATH:pack.originalSource.path,SOURCE_SHA256:pack.originalSource.sha256,
+        EVENT_DATE_YAML:JSON.stringify(pack.originalSource.declaredEventDate),
+        PUBLICATION_DATE_YAML:JSON.stringify(pack.originalSource.declaredPublishedAt),
+        PROVENANCE:"Controlled user-supplied Source; publication and verification unknown. Not an issuer filing.",
+        RESEARCH_SCOPE:"Fundamental / Thesis: delivery conversion over the next reporting period. Fictional SYNTH only.",
+        EVIDENCE_ROWS:"| E1 | Original user statement retained separately | Unverified source statement | "+pack.originalSource.path+"; see supplied excerpt |",
+        HISTORICAL_CONTEXT:"Prior protected Thesis: delivery conversion uncertain. Historical notes read: "+
+          pack.historicalContext.items.map((i:any)=>i.path).join("; ")+
+          ". Historical AI remains non-independent; declared primary fixtures are not authenticated filings.",
+        EVIDENCE_DELTA:"Unresolved substance; this is a distinct controlled event, not independent confirmation of prior AI.",
+        MECHANISMS:"[E1] Demand → delivery conversion is an unverified hypothesis. Shipment, margin and working capital bridge missing; valuation not assessed.",
+        COUNTER_EVIDENCE:"Alternative: delivery timing rather than demand. Contrary historical timing remains unresolved.",
+        BOTTLENECK_RISKS:"Conversion is a candidate bottleneck only; execution, economic and balance-sheet effects unknown.",
+        THESIS_IMPACT:"Unresolved; low confidence because issuer provenance and economics are missing. No protected Thesis change.",
+        REQUIRED_EVIDENCE:"Independent issuer original, shipments, cash flow and dated expectation data. Price-in not determined.",
+        RELATIONSHIP_ROWS:"| Analysis → Source | cites | E1 provides the input | Current controlled event | proposed citation; no supplier/customer exposure verified |",
+        SOURCE_LINK:pack.originalSource.path.slice(0,-3),
+        COMPANY_LINK:pack.canonical.companyPath.slice(0,-3),
+        TIMELINE_LINK:pack.canonical.timelinePath.slice(0,-3),
+        VAULT_ACTIONS:"Create this unverified Analysis and append its link to the existing Timeline only after concrete host authorization. No protected writes.",
+      };
+      const templateMarkdown=reviewTemplate.replace(/\{\{([A-Z0-9_]+)\}\}/g,(_token,key:string)=>{
+        expect(fields[key],"unfilled review template field: "+key).toBeDefined();
+        return fields[key];
+      });
+      expect(templateMarkdown).not.toMatch(/\{\{[A-Z0-9_]+\}\}/);
       const review={sourceSha256:pack.originalSource.sha256,classification:"new_event",
         factVersusHypothesis:[{statement:"User supplied an unverified source, not an authenticated issuer filing.",
           status:"source_statement_unverified",citedPaths:[pack.originalSource.path]}],
@@ -459,10 +493,7 @@ it("single host-authorized Investment Graph bundle uses two existing Safe Edit w
         selectedLinks:links.map(p=>({path:p,relevance:"Required canonical event/source/company context"})),
         historicalAIReused:pack.historicalContext.items.filter((i:any)=>i.role==="analysis").map((i:any)=>i.path),
         historicalAIIsIndependentEvidence:false,marketPriceIn:"not_determined",writeAuthorized:false,
-        analysisMarkdown:markdown.replaceAll(event,pack.eventKey).replaceAll(rootId,modelInput.operationRoot)
-          .replaceAll(source.slice(0,-3),pack.originalSource.path.slice(0,-3))
-          .replace("status: draft\n","status: draft\nsource_path: "+
-          pack.originalSource.path+"\nsource_sha256: "+pack.originalSource.sha256+"\n"),
+        analysisMarkdown:templateMarkdown,
       };
       return Response.json({id:"resp_graph_"+modelCalls,model:fixtureModel,status:"completed",service_tier:"default",
         usage:{input_tokens:2000,output_tokens:4000,total_tokens:6000,

@@ -46,60 +46,19 @@ authorized resend of that exact payload is deduplicated by its digest; a newly
 worded draft is a different submission and needs duplicate review first.
 The read-only `IN-...` plan ID is not the 64-character submission ID.
 
-Suggested Project instruction, once the approved connector is available:
+The canonical ready-to-copy Research Analyst Instructions now live in
+[PROJECT_INSTRUCTIONS_TH.md](../integrations/investment-os-safe-edit/PROJECT_INSTRUCTIONS_TH.md).
+Install them in ChatGPT Project Instructions once; attach the
+[tool orchestration guide](../integrations/investment-os-safe-edit/RESEARCH_WORKFLOW.md)
+and [raw review template](../integrations/investment-os-safe-edit/INVESTMENT_REVIEW_TEMPLATE.md)
+as Project files. Follow the
+[Thai user acceptance procedure](../integrations/investment-os-safe-edit/USER_ACCEPTANCE_TH.md)
+for actual tool discovery, concrete approval and Event A → Event B recall.
+This replaces the shorter candidate prompt previously copied here; it does not
+publish tools or establish live acceptance. The generic existing-note edit
+examples below remain separate from the company graph workflow.
 
-```text
-เมื่อผมส่งข้อมูลการลงทุนใน Micro / Stock ให้ใช้ข้อมูลเก่าใน Investment_OS
-ประกอบการวิเคราะห์ และเตรียมบันทึกความรู้สำหรับใช้วิเคราะห์ครั้งต่อไป
-ตรวจเครื่องมือที่เรียกได้จริงก่อน อย่าสมมติว่าอยู่ Project เดียวกันแล้วทุกแชต
-จะเห็นประวัติหรือเครื่องมือเหมือนกัน และอย่าอ้างว่าอ่านข้อความจากแชตอื่นแล้ว
-
-1. แยกต้นฉบับที่ผมส่งออกจากข้อวิเคราะห์ของ AI ตรวจบริษัท เหตุการณ์ รอบรายงาน
-   วันที่และต้นทาง ตรวจข้อมูลซ้ำก่อน ไม่เดาวันหรือข้อเท็จจริงที่ไม่มีหลักฐาน
-   ถ้าขาดข้อมูลสำคัญ ให้ระบุสิ่งที่ขาดก่อนสร้าง Source
-2. อ่านโน้ตที่เกี่ยวข้องผ่าน NoteMesh ถ้ามี Source เดิมที่ตรงเหตุการณ์ให้ใช้เดิม
-   ถ้ายังไม่มี ให้เตรียม Source แยกผ่าน create_note ในโฟลเดอร์ที่มีอยู่และอนุญาต
-   ใช้ source_type: user_supplied และ verification: unverified ตามความจริง
-   ใส่ entity, event_key และ period จากข้อมูลที่ตรวจแล้ว ไม่ใช้บทวิเคราะห์รวม
-   ใน Inbox เป็นหลักฐานต้นฉบับ ไม่เขียน 07_Sources ผ่านตัวเขียนทั่วไป
-   เมื่อได้รับสิทธิ์เขียนตามขอบเขตและการยืนยันของเครื่องมือแล้ว จึง apply_edit
-   ด้วย previewToken และ expectedHash ที่ได้รับ และตรวจ receipt/reindex
-3. เรียก prepare_investment_graph_review ด้วย Source ที่มีอยู่จริง
-   อ่าน Source และประวัติ Thesis, Evidence, Company Evolution, Industry
-   และข้อวิเคราะห์เก่าที่คืนมา ระบุข้อมูลที่ขาดและขอบเขตข้อความที่อ่านจริง
-   ถ้าพบเหตุการณ์เดิม ให้หยุดเพื่อจัดประเภท duplicate/correction/added_detail
-   อย่าเปลี่ยน event_key เพื่อเลี่ยงการตรวจซ้ำหรือสร้าง Timeline ใหม่
-4. วิเคราะห์ Fact กับ Hypothesis, Demand → Revenue → Earnings → FCF → ROIC
-   เท่าที่หลักฐานรองรับ พร้อม Counter-evidence และสิ่งที่ยังไม่ทราบ
-   ข้อวิเคราะห์ AI เก่าเป็น archived_ai ไม่ใช่หลักฐานอิสระหรือ Thesis ที่ผมรับรอง
-   เลือกเฉพาะ Wikilinks แบบเต็มพาธที่มีอยู่จริงและเกี่ยวข้อง พร้อมเหตุผล
-5. เตรียม Analysis Draft โดยใช้พาธที่ preparation คืนมา
-   คัดลอก canonical.requiredAnalysisSourceMetadata เป็น source_path/source_sha256
-   ส่ง originalSource.sha256 เป็น expectedSourceSha256 ห้ามเดาหรือสร้าง hash เอง
-   เมื่อมีสิทธิ์ที่อนุมัติไว้จริงและผ่านการยืนยันของเครื่องมือ ให้ใช้
-   write_investment_graph_bundle บันทึก Analysis และเพิ่มลิงก์ใน Company Evolution
-   เดิม ไม่แก้ Current Thesis, Evidence Register หรือ Portfolio
-6. ใช้ operation IDs และพาธที่ได้รับเรียก verify_investment_graph_writeback
-   ด้วยการเชื่อมต่อเดิม ตรวจไฟล์จริง ดัชนี ลิงก์และลิงก์กลับ
-   ถ้าเขียนได้เพียงบางส่วน ให้รายงานตามจริง ห้าม retry/recover อัตโนมัติ
-   การตรวจเหตุการณ์เก่าหลังมีเหตุการณ์ใหม่ ต้องผ่านทั้ง historical receipts
-   และ current graph integrity ไม่ตัดสินจาก afterHash เก่าเพียงอย่างเดียว
-7. ข่าวครั้งถัดไปให้ค้นข้อวิเคราะห์ที่บันทึกไว้มาเทียบ โดยคงสถานะ AI ที่ยังไม่ยืนยัน
-   รายงานสั้น ๆ ว่าบันทึกไฟล์ใด ตรวจอ่านกลับสำเร็จหรือไม่ และยังมีข้อจำกัดอะไร
-   อย่าอ้างว่าเข้า Obsidian บนมือถือแล้วจาก receipt ฝั่งเซิร์ฟเวอร์
-
-หากไม่มี prepare_investment_graph_review, write_investment_graph_bundle หรือ
-verify_investment_graph_writeback ให้แจ้งว่าการเชื่อมต่อยังไม่ครบ วิเคราะห์และ
-เตรียมร่างได้ แต่ห้ามแจ้งว่าบันทึกครบวงจรแล้วหรือเปลี่ยนไปใช้ตัวเขียนที่ข้ามกฎ
-คำสั่งนี้ไม่เปิด writer flags หรือให้สิทธิ์เขียนเอง ต้องเคารพ OAuth/host confirmation
-และขอบเขตที่อนุมัติจริง การเผยแพร่ App และทดสอบกับ Vault จริงต้องอนุมัติแยก
-```
-
-Use the [real-event pilot runbook](./REAL_EVENT_CLOSED_LOOP_PILOT_RUNBOOK.md)
-for exact Source frontmatter, Analysis requirements and acceptance evidence.
-Do not paste these instructions into a Source note and treat them as research.
-
-## Project instruction addition
+## Separate existing-note edit workflow
 
 Use NoteMesh Read Only to read current company/industry context, Current Thesis,
 Evidence Register, Change Log, primary sources and counter-evidence. Read

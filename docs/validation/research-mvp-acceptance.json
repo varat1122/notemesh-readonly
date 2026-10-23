@@ -1,0 +1,347 @@
+{
+  "recordedDate": "2026-10-23",
+  "timezone": "Asia/Bangkok",
+  "scope": "Live Research MVP instructions and existing-component synthetic integration; no live acceptance claim",
+  "git": {
+    "baseHead": "0a503698bd257c362454fe90a8278d33dd47e937",
+    "branch": "feat/real-event-context-to-writeback-handoff-20261021",
+    "remotePr108Head": "dd89be9c00bfc248c5d103c9eea327535febc372",
+    "remoteMainHead": "b563c55fd99c5fb2738fda0682f7b6f76a0ef42a",
+    "remoteGitHeadsRechecked": true,
+    "githubPrStateAndCi": "BLOCKED: GraphQL Forbidden",
+    "pushMergeDeployPublish": false
+  },
+  "acceptance": {
+    "syntheticIntegration": "PASS",
+    "liveChatGPTIntegration": "BLOCKED_NOT_OBSERVED",
+    "authorizedTestVaultWriteback": "BLOCKED_NOT_PERFORMED",
+    "production": "NOT_READY",
+    "semanticResearchQuality": "REQUIRES_ACTUAL_CHATGPT_AND_HUMAN_REVIEW",
+    "deviceSync": "NOT_VERIFIED"
+  },
+  "tests": {
+    "passed": 234,
+    "failed": 0,
+    "pending": 0,
+    "files": 19,
+    "resultSha256": "810f84da543ceef139a1c90a118e33f1b7233141428214d58948bb51eba5d34e",
+    "argv": [
+      "/workspace/.investment-os-foundation/toolchain/node_modules/.bin/pnpm",
+      "exec",
+      "vitest",
+      "run",
+      "src/server/mcp/safe-edit-server.test.ts",
+      "src/server/safe-edit/knowledge-graph-readback.test.ts",
+      "src/server/safe-edit/engine.test.ts",
+      "src/server/vault/investment-context.test.ts",
+      "src/server/vault/investment-writeback-router.test.ts",
+      "src/server/research-source-archive.test.ts",
+      "src/server/vault/investment-claim-review.test.ts",
+      "src/server/mcp/boundary.test.ts",
+      "src/server/mcp/server.test.ts",
+      "src/server/research-source-fetch.test.ts",
+      "src/server/user-attachment-vault.test.ts",
+      "src/server/auth-upgrade.test.ts",
+      "src/server/auth-guard.test.ts",
+      "src/server/oauth-refresh-scopes.test.ts",
+      "src/server/oauth-registration.test.ts",
+      "src/server/mcp/oauth-endpoint.test.ts",
+      "src/server/mcp/tool-auth.test.ts",
+      "src/server/mcp/readonly-deployment.test.ts",
+      "src/server/safe-edit/sync.test.ts",
+      "--maxWorkers=1",
+      "--testTimeout=15000",
+      "--reporter=json",
+      "--outputFile=/workspace/.investment-os-foundation/research-mvp/final-acceptance-results.json"
+    ],
+    "environment": "existing helper whitelist; isolated synthetic DATA_DIR; no provider keys or real sync account",
+    "perFile": [
+      {
+        "file": "src/server/auth-guard.test.ts",
+        "passed": 3,
+        "failed": 0
+      },
+      {
+        "file": "src/server/auth-upgrade.test.ts",
+        "passed": 4,
+        "failed": 0
+      },
+      {
+        "file": "src/server/oauth-refresh-scopes.test.ts",
+        "passed": 6,
+        "failed": 0
+      },
+      {
+        "file": "src/server/oauth-registration.test.ts",
+        "passed": 4,
+        "failed": 0
+      },
+      {
+        "file": "src/server/research-source-archive.test.ts",
+        "passed": 9,
+        "failed": 0
+      },
+      {
+        "file": "src/server/research-source-fetch.test.ts",
+        "passed": 5,
+        "failed": 0
+      },
+      {
+        "file": "src/server/user-attachment-vault.test.ts",
+        "passed": 7,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/boundary.test.ts",
+        "passed": 21,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/oauth-endpoint.test.ts",
+        "passed": 5,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/readonly-deployment.test.ts",
+        "passed": 17,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/safe-edit-server.test.ts",
+        "passed": 20,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/server.test.ts",
+        "passed": 27,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/tool-auth.test.ts",
+        "passed": 2,
+        "failed": 0
+      },
+      {
+        "file": "src/server/safe-edit/engine.test.ts",
+        "passed": 27,
+        "failed": 0
+      },
+      {
+        "file": "src/server/safe-edit/knowledge-graph-readback.test.ts",
+        "passed": 13,
+        "failed": 0
+      },
+      {
+        "file": "src/server/safe-edit/sync.test.ts",
+        "passed": 6,
+        "failed": 0
+      },
+      {
+        "file": "src/server/vault/investment-claim-review.test.ts",
+        "passed": 16,
+        "failed": 0
+      },
+      {
+        "file": "src/server/vault/investment-context.test.ts",
+        "passed": 25,
+        "failed": 0
+      },
+      {
+        "file": "src/server/vault/investment-writeback-router.test.ts",
+        "passed": 17,
+        "failed": 0
+      }
+    ],
+    "fixture": "Existing MCP test composes installed investment_review template from controlled offline analysis and prepared context; no provider fetch; real temporary filesystem/SQLite/FTS/receipt/link paths; Sync daemon stubbed and OAuth access controlled",
+    "additionalTestCases": 0,
+    "initialFailedTemplateRunRetained": "template-integration-results.json: SOURCE_SHA256 substitution matcher omitted digits; corrected matcher; engine validation unchanged"
+  },
+  "checks": {
+    "patched-lint": {
+      "check": "patched-lint",
+      "exit_code": 0
+    },
+    "patched-typecheck": {
+      "check": "patched-typecheck",
+      "exit_code": 0
+    },
+    "patched-build": {
+      "check": "patched-build",
+      "exit_code": 0,
+      "prerender_error": false
+    },
+    "final-frozen-install": {
+      "exit_code": 0
+    },
+    "final-peers": {
+      "exit_code": 1
+    },
+    "final-audit": {
+      "exit_code": 1
+    }
+  },
+  "security": {
+    "auditCounts": {
+      "info": 0,
+      "low": 0,
+      "moderate": 14,
+      "high": 2,
+      "critical": 0
+    },
+    "patched": [
+      "body-parser 2.3.0 -> 2.4.0 (GHSA-27r3-jxmh-p828)",
+      "existing Zod v4 path 4.4.3 -> 4.6.6 (GHSA-mrhx-c7xc-m3w5)"
+    ],
+    "remainingHigh": [
+      {
+        "id": "GHSA-mrhx-c7xc-m3w5",
+        "package": "zod",
+        "versions": [
+          "3.25.76"
+        ]
+      }
+    ],
+    "auditSha256": "555946bd663ea4905e37d6234200ffd58edabd5709eef13ce6c4ccb39586d2ab",
+    "newAuditExemptions": 0,
+    "preExistingPeerMismatches": [
+      "better-call 1.4.0 wants zod ^4; one context uses 3.25.76",
+      "better-auth 1.7.2 wants better-sqlite3 ^12; root uses 13.0.2"
+    ],
+    "newSdkPeerMismatch": false,
+    "lockCleanup": "Removed temporary broad Zod override; retained patched v4 resolution and original SDK peer ranges. Final frozen install reports already up to date; tested build packages unchanged."
+  },
+  "preservation": {
+    "p0UntrackedFiles": {
+      "docs/investment-os/AUTHORITY_MODEL.md": {
+        "expectedSha256": "34d1ab132a40e17ea5dfd13f9da7253618c15de9c173ffca68748ecfeb80fc85",
+        "actualSha256": "34d1ab132a40e17ea5dfd13f9da7253618c15de9c173ffca68748ecfeb80fc85",
+        "unchanged": true
+      },
+      "docs/investment-os/DATA_CONTRACTS.md": {
+        "expectedSha256": "df00311f75ba5358c84796670ddb69624850e6c8044c02f1b137766bfb7af2a9",
+        "actualSha256": "df00311f75ba5358c84796670ddb69624850e6c8044c02f1b137766bfb7af2a9",
+        "unchanged": true
+      },
+      "docs/investment-os/DEVELOPMENT.md": {
+        "expectedSha256": "2e76b3792207fdb3176480042ccd509a5e5720420c3d55b7f0fc40ff1d2a1255",
+        "actualSha256": "2e76b3792207fdb3176480042ccd509a5e5720420c3d55b7f0fc40ff1d2a1255",
+        "unchanged": true
+      },
+      "docs/investment-os/IMPLEMENTATION_STATUS.md": {
+        "expectedSha256": "0486edba99d78f88f464dbc054e446479a264cb3efaa3a186184dc0369d8a958",
+        "actualSha256": "0486edba99d78f88f464dbc054e446479a264cb3efaa3a186184dc0369d8a958",
+        "unchanged": true
+      },
+      "docs/investment-os/README.md": {
+        "expectedSha256": "9b036d5a1901dabce4b5bdf6dfb79ca5b2e05e1854ef06e99bd1e5d9462262d2",
+        "actualSha256": "9b036d5a1901dabce4b5bdf6dfb79ca5b2e05e1854ef06e99bd1e5d9462262d2",
+        "unchanged": true
+      },
+      "docs/investment-os/REQUIREMENTS.md": {
+        "expectedSha256": "f0d6773cb0e1c565c5616dc46410a9824c752d7f29a8d208d5e8af15ede8cbd5",
+        "actualSha256": "f0d6773cb0e1c565c5616dc46410a9824c752d7f29a8d208d5e8af15ede8cbd5",
+        "unchanged": true
+      },
+      "docs/investment-os/THREAT_MODEL.md": {
+        "expectedSha256": "0fad4364b5b1c496f70f7146c8576b43f1d9a97853257ff6f1d74796f2cbccef",
+        "actualSha256": "0fad4364b5b1c496f70f7146c8576b43f1d9a97853257ff6f1d74796f2cbccef",
+        "unchanged": true
+      },
+      "docs/investment-os/WORK_STATUS.md": {
+        "expectedSha256": "640aab01cb407be30c4ded94a8aa5efea1ad3c1d7d62d3bd90717a8c9a670438",
+        "actualSha256": "640aab01cb407be30c4ded94a8aa5efea1ad3c1d7d62d3bd90717a8c9a670438",
+        "unchanged": true
+      },
+      "docs/investment-os/adr/0001-foundation-boundaries.md": {
+        "expectedSha256": "a71528feed1c548125b958e81bcea7b6ddfdbb1e50e6102c8b1cd70c4cc4b353",
+        "actualSha256": "a71528feed1c548125b958e81bcea7b6ddfdbb1e50e6102c8b1cd70c4cc4b353",
+        "unchanged": true
+      },
+      "docs/investment-os/adr/0002-identity-and-storage.md": {
+        "expectedSha256": "2e6bae0e3d15a86dca09a2dbb2375f54e6e248efc4f3688f443777116528b5c5",
+        "actualSha256": "2e6bae0e3d15a86dca09a2dbb2375f54e6e248efc4f3688f443777116528b5c5",
+        "unchanged": true
+      },
+      "docs/investment-os/adr/0003-offline-development.md": {
+        "expectedSha256": "ea634774766095c20e68b2d07d1d6b9ca9d2504d0a43111cc6b06bfe83802e03",
+        "actualSha256": "ea634774766095c20e68b2d07d1d6b9ca9d2504d0a43111cc6b06bfe83802e03",
+        "unchanged": true
+      },
+      "docs/investment-os/examples/synthetic-bundle.json": {
+        "expectedSha256": "1985e9cc529f91bacf5d06d23446bae96dd2edfffb9aaea9d70cdecbc355613c",
+        "actualSha256": "1985e9cc529f91bacf5d06d23446bae96dd2edfffb9aaea9d70cdecbc355613c",
+        "unchanged": true
+      },
+      "docs/investment-os/schemas/foundation-v1.schema.json": {
+        "expectedSha256": "559462c049740da91077f2b9afaabdf70379ba9127ba4697beddb104021b0fc2",
+        "actualSha256": "559462c049740da91077f2b9afaabdf70379ba9127ba4697beddb104021b0fc2",
+        "unchanged": true
+      },
+      "docs/investment-os/tests/validate_contracts.py": {
+        "expectedSha256": "8fb0dc7029baab7aecd9ac6aa6b4bf827dc5cff3f22dbabf976be916c183692c",
+        "actualSha256": "8fb0dc7029baab7aecd9ac6aa6b4bf827dc5cff3f22dbabf976be916c183692c",
+        "unchanged": true
+      },
+      "docs/investment-os/tools/develop.py": {
+        "expectedSha256": "f3ec6db2665521f79bd54988abeb4538fb74a87e314805c1e8bd79d66b5a2d65",
+        "actualSha256": "f3ec6db2665521f79bd54988abeb4538fb74a87e314805c1e8bd79d66b5a2d65",
+        "unchanged": true
+      },
+      "docs/investment-os/validation-summary.json": {
+        "expectedSha256": "a8f86ed5cbc26717a593c73432b0f64ef24d09404f13bb414883ceb323a21f25",
+        "actualSha256": "a8f86ed5cbc26717a593c73432b0f64ef24d09404f13bb414883ceb323a21f25",
+        "unchanged": true
+      }
+    },
+    "ledgerCampaign": "investment-os-openai-evaluation-new-17e04411",
+    "ledgerIdentityHashes": {
+      "campaign.sqlite": {
+        "expectedSha256": "344b1c34c22c3db0726ec4c041a1e5d1b0c783dea97ff84613d5b28342561371",
+        "actualSha256": "344b1c34c22c3db0726ec4c041a1e5d1b0c783dea97ff84613d5b28342561371",
+        "unchanged": true
+      },
+      "campaign.sqlite.identity": {
+        "expectedSha256": "052b05f9cf99be994066d337af4bf210918613e7c1368e5096533a9ad91d3b3d",
+        "actualSha256": "052b05f9cf99be994066d337af4bf210918613e7c1368e5096533a9ad91d3b3d",
+        "unchanged": true
+      }
+    },
+    "ledgerReadMode": "sqlite URI mode=ro; no evaluation adapter status/init invocation",
+    "ledgerIntegrity": "ok",
+    "paidInferenceCalls": 0,
+    "newCampaigns": 0,
+    "ledgerMutations": 0,
+    "productionVaultWrites": 0,
+    "credentialChanges": 0,
+    "environmentPublications": 0,
+    "ownerP0SchemaRatification": "NOT_RECORDED"
+  },
+  "instructions": {
+    "master": "integrations/investment-os-safe-edit/PROJECT_INSTRUCTIONS_TH.md",
+    "characters": 7692,
+    "installation": "Copy master into ChatGPT Project Instructions; attach RESEARCH_WORKFLOW.md and INVESTMENT_REVIEW_TEMPLATE.md as Project files",
+    "fallbackTrigger": "วิเคราะห์ข่าวนี้ด้วย Investment OS",
+    "graphPersistenceScope": "existing canonical company graph only; unresolved identity/period, missing anchors and same-event correction hold"
+  },
+  "inputSha256": {
+    "integrations/investment-os-safe-edit/INVESTMENT_REVIEW_TEMPLATE.md": "b7c6d32574da5fb9dc52be33f36df16a31626aa15c74b0b741c3f24816c9bb25",
+    "integrations/investment-os-safe-edit/PROJECT_INSTRUCTIONS_TH.md": "2ebda5141f3a019b989bdcc30ecd4ace1126e7399424aab0aa1add9c0645789f",
+    "integrations/investment-os-safe-edit/README.md": "4793ee76d1487d15dc0ea7399d8e2aa87298936b1c6b60178dec367d47b187af",
+    "integrations/investment-os-safe-edit/RESEARCH_WORKFLOW.md": "06395ee5943822ef03c7eeb4607ae8278c421ad2b7d490906b3294cde552e0f4",
+    "integrations/investment-os-safe-edit/USER_ACCEPTANCE_TH.md": "30d1c39880d167c39ca91807f0ed29ff81068db2d3476f16b819f305e32cf153",
+    "package.json": "456d6a443abc4408b4c19f113e7112741799c2158e4dd44a8a2bab55d8095db0",
+    "pnpm-lock.yaml": "310fb93efbc3a89e62ad58f6bad1f13c37238633d4760c8564bb58a1406a3133",
+    "pnpm-workspace.yaml": "bf499737dc4d3c34ab52eb141f2e05eab06495f56677f3b9ebf8cc59d33a02a4",
+    "src/server/mcp/safe-edit-server.test.ts": "976c5a11091b717808393d1083cfb2ed020bb249a3d52fca339c89f74b6d682e",
+    "src/server/mcp/safe-edit-server.ts": "75ff693603e59d5f6fbaaab34520d506fc6d5ab464625d6788dbbc00b2d9bd46",
+    "src/server/mcp/server.ts": "f31b229f5a5a4b0d7e119423737342ff65c6fa92d73c221ecc0ba8066d71ab89",
+    "src/server/safe-edit/engine.ts": "6966c7568e75edb6257d915baebfbb320b544610a40dc9f911d2a245ce6a3e5d",
+    "src/server/safe-edit/investment-graph-bundle.ts": "ee494972875afc6c91ebe20fb14396dd09b3087d241f799c97d650c7a200de3e",
+    "src/server/safe-edit/investment-review-preparation.ts": "433778edd9e7d24299ce4665e3e2948a6254bfe5be263ef9d854cfff585506df",
+    "src/server/safe-edit/knowledge-graph-readback.ts": "a0856a3fb00504a3dd827c7deac6b25985ad6cb3b5353deaa0e839a1936dedfd",
+    "src/server/vault/investment-claim-review.ts": "f3d810eaf331fc83aef9017c79787e6e615c9d210155c1673ef542eaf2dcdb23",
+    "src/server/vault/investment-context.ts": "f9de79b5db4ed75fc4e3dfccbee59ca7342f2dd17d400e0e02d0df4e036156ef",
+    "src/server/vault/investment-writeback-router.ts": "9a7706104213d1b1e66346b0df1e4bab9d811b90fa2d50017d0c440dcb7ca347"
+  },
+  "detailedEvidenceDirectory": "/workspace/.investment-os-foundation/research-mvp"
+}

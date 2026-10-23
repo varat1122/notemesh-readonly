@@ -2,6 +2,15 @@
 
 > **Operational blocker, not a completed 12-tool migration.** Do not change the production Vault or publish a new desktop-only connector as a substitute.
 
+**23 Oct candidate update:** PR #108 source now registers **15** tools, adding
+`prepare_investment_graph_review`, `write_investment_graph_bundle` and
+`verify_investment_graph_writeback`. This is a source/test observation, not an
+updated live registry observation. The historical seven/twelve-tool evidence
+below does not prove those actions are connected. Use the
+[Research MVP user acceptance procedure](../integrations/investment-os-safe-edit/USER_ACCEPTANCE_TH.md)
+and preserve the existing Web App identity. Owner-approved release/action refresh
+and real frontend discovery remain required; do not stop at a wrapper edit.
+
 ## Independently inspected systems
 
 | Layer | Live identifier | State verified on 2026-10-19 |
