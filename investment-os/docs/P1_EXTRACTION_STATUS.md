@@ -25,7 +25,7 @@ Targeted new checks: **28 passed**, including **12 actual PostgreSQL integration
 | Frozen install, lint/format, schemas and bounded repository scan | PASS | scripts/check.sh exit 0; no matched credential pattern or unexpected repository data binary |
 | Docker Compose and HTTP | PASS | API/DB healthy, migration exit 0, readiness/authorization checks pass; image digest recorded |
 | PostgreSQL backup/restore | PASS, DB only | Seven table digests match actual pg_dump/pg_restore; migration down/up/repeat-up passes |
-| Draft PR and GitHub CI | Pending actual remote attempt | Local PASS does not establish remote CI; publication result follows below |
+| Draft PR and GitHub CI | BLOCKED | Branch push succeeded; actual GraphQL PR creation and REST CI lookup return Forbidden at api.github.com; no PR/CI success claim |
 | Full P1 / production readiness | NOT COMPLETE | Semantic reconciliation, financial normalization, real grants and coordinated object/DB recovery remain open |
 
 Commands run from investment-os/:
@@ -45,4 +45,4 @@ Next P1 work is source/event duplicate-versus-correction reconciliation with a h
 
 ## GitHub
 
-Repository: varat1122/notemesh-readonly. Branch: codex/investment-os-p1-extraction-20261023, based on intake commit 28ee279a4d6fb2441734f9175cbb5ca148d89339. Intended stacked Draft PR base: codex/investment-os-p1-intake-20261022. Actual publication outcome is recorded after the attempt. No merge or deployment.
+Repository: varat1122/notemesh-readonly. Branch: codex/investment-os-p1-extraction-20261023, based on intake commit 28ee279a4d6fb2441734f9175cbb5ca148d89339. Intended stacked Draft PR base: codex/investment-os-p1-intake-20261022. Implementation commit `11b0ac50b3fb0a090cee1f40092f2cfa2e979f78` was pushed successfully. Branch: https://github.com/varat1122/notemesh-readonly/tree/codex/investment-os-p1-extraction-20261023 . Actual `gh pr create --draft` failed with `Post https://api.github.com/graphql: Forbidden`; the branch actions/runs REST lookup also returned Forbidden. No Draft PR URL exists and no remote CI success is asserted. A documentation follow-up records these outcomes. No merge or deployment.
