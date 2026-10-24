@@ -11,6 +11,7 @@ describe("fail-closed API routing", () => {
     "/api/mcp",
     "/api/market-prices-drive",
     "/api/safe-edit",
+    "/api/staging-git-pilot",
     "/api/auth/session",
     "/api/rpc/getSetupProgress",
   ])("allows known exact or deliberately prefixed route %s", (path) => {
@@ -25,6 +26,8 @@ describe("fail-closed API routing", () => {
     "/api/backup-drive/foo",
     "/api/backup-drive/callback/extra",
     "/api/mcp-malicious",
+    "/api/staging-git-pilot/extra",
+    "/api/staging-git-pilot-evil",
     "/api/healthz",
     "/api/market-prices-drive-evil",
     "/api/unknown",
