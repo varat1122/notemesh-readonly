@@ -65,10 +65,10 @@ jobs:
       # transport. They cannot verify an actual Railway volume backup.
       - name: M3 backup and recovery regression (offline fixtures)
         run: |
-          node --test --test-concurrency=1 \\
-            scripts/backup/nm-backup.test.mjs \\
-            scripts/backup/nm-dr-drill.test.mjs \\
-            scripts/backup/nm-cloud-dr-drill.test.mjs \\
+          node --test --test-concurrency=1 \
+            scripts/backup/nm-backup.test.mjs \
+            scripts/backup/nm-dr-drill.test.mjs \
+            scripts/backup/nm-cloud-dr-drill.test.mjs \
             scripts/backup/nm-dr-preflight.test.mjs
 
       # Only chromium: these check that pages render and forms work, which is
