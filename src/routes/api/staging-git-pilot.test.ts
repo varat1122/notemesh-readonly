@@ -144,3 +144,41 @@ it("rejects oversized POST bodies before making a preview",async()=>{
   expect(r.status).toBe(400);
   expect(state.previewCalls).toHaveLength(0);
 });
+
+const research=vi.hoisted(()=>({calls:[] as {action:string;actor:string}[],approved:false}));
+vi.mock("~/server/safe-edit/owner-research",()=>{
+ const view=()=>({analysis:{beforeHash:"e".repeat(64)},timeline:{beforeHash:"e".repeat(64)},reviewHash:"a".repeat(64),previews:["analysis","timeline"].map(kind=>({path:kind,approved:research.approved,status:"preview",expiresAt:"2099-01-01",approvalUrl:"https://staging-fixture.test/api/safe-edit-approval?id="+kind,diff:{added:["<script>untrusted</script>"]}}))});
+ return {
+  assertOwnerResearch:()=>{if(!state.pilotEnabled)throw Error("off");},
+  ownerResearchStatus:(_root:string,actor:string)=>{research.calls.push({action:"status",actor});return view();},
+  previewOwnerResearch:async(_input:unknown,actor:string)=>{research.calls.push({action:"preview",actor});return {analysis:{operationId:"m4-fixture-analysis",previewToken:"a".repeat(64)},timeline:{previewToken:"b".repeat(64)},context:{synthetic:true}};},
+  applyOwnerResearch:async(_input:unknown,actor:string)=>{research.calls.push({action:"apply",actor});return {status:"owner_research_git_and_graph_verified"};},
+ };
+});
+import {GET as researchGet,POST as researchPost} from "./staging-research-review";
+const researchURL="https://staging-fixture.test/api/staging-research-review";
+const researchForm=(action:string)=>new URLSearchParams({action,package:'{}',operationRoot:"m4-fixture",token0:"a".repeat(64),token1:"b".repeat(64)});
+const researchRequest=(action:string,origin="https://staging-fixture.test")=>researchPost(event(new Request(researchURL,{method:"POST",headers:{Origin:origin},body:researchForm(action)})));
+it("M4 transport enforces session, gate, exact Origin and bounded import before invoking any preview",async()=>{
+ research.calls=[];research.approved=false;
+ state.signedIn=false;expect((await researchGet(event(new Request(researchURL)))).status).toBe(401);
+ expect((await researchRequest("import")).status).toBe(401);
+ state.signedIn=true;expect((await researchRequest("import","https://attacker.test")).status).toBe(403);
+ state.pilotEnabled=false;expect((await researchRequest("import")).status).toBe(403);
+ state.pilotEnabled=true;
+ expect((await researchPost(event(new Request(researchURL,{method:"POST",headers:{Origin:"https://staging-fixture.test"},body:new URLSearchParams({action:"import",package:"x".repeat(512001)})})))).status).toBe(400);
+ expect(research.calls).toEqual([]);
+});
+it("M4 import escapes the full diff, never approves/applies automatically and never fabricates an OAuth actor",async()=>{
+ research.calls=[];research.approved=false;
+ const r=await researchRequest("import"),body=await r.text();expect(r.status).toBe(200);
+ expect(body).toContain("&lt;script&gt;untrusted&lt;/script&gt;");expect(body).not.toContain('<script>');
+ expect(body).not.toContain('value="apply"');expect(body).toContain('value="check"');
+ expect(research.calls[0]).toEqual({action:"preview",actor:"staging-owner-research:fixture-admin"});
+ expect(research.calls.some(c=>c.action==="apply")).toBe(false);
+ research.approved=true;
+ const check=await researchRequest("check");expect(await check.text()).toContain('value="apply"');
+ expect(research.calls.some(c=>c.action==="apply")).toBe(false);
+ expect((await researchRequest("apply")).status).toBe(200);
+ expect(research.calls.filter(c=>c.action==="apply")).toHaveLength(1);
+});

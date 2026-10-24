@@ -234,7 +234,7 @@ export function verifyAuthorizedInvestmentGraphReadback(
   return {
     ...result,
     status:"authorized_safe_edit_server_graph_readback_verified" as const,
-    actualReceiptScope:"authenticated_oauth_client_only" as const,
+    actualReceiptScope:authenticatedActor.startsWith("staging-owner-research:")?"authenticated_owner_session_only":"authenticated_oauth_client_only",
     serverNotDeviceReadback:true as const,
   };
 }

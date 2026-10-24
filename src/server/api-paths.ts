@@ -2,7 +2,7 @@
 // Only paths ending in "/" are intentional prefix matches.
 const API_PREFIXES = [
   "/api/health", "/api/mcp", "/api/save-analysis", "/api/safe-edit",
-  "/api/safe-edit-approval", "/api/staging-git-pilot", "/api/market-prices-drive",
+  "/api/safe-edit-approval", "/api/staging-git-pilot", "/api/staging-research-review", "/api/market-prices-drive",
   "/api/market-prices-drive/callback", "/api/backup-drive",
   "/api/backup-drive/callback", "/api/backup-drive/credential-check", "/api/backup-drive/fixture-upload",
   "/api/intake-worker", "/api/auth/", "/api/rpc/", "/api/attachment",

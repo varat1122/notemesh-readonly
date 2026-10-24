@@ -942,7 +942,7 @@ it("Git pilot registers only scoped preview/create/apply/status and fails closed
  const {setSetting}=await import("../db");setSetting("sync_backend","git");
  const c=await connected(access);
  try {
-  expect((await c.client.listTools()).tools.map(t=>t.name).sort()).toEqual(["preview_edit","create_note","apply_edit","get_edit_status"].sort());
+  expect((await c.client.listTools()).tools.map(t=>t.name).sort()).toEqual(["preview_edit","create_note","apply_edit","get_edit_status","prepare_investment_graph_review"].sort());
   const result=await c.client.callTool({name:"create_note",arguments:{operationId:"git-mcp-pilot-001",path:"PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md",reason:"Gate test",content:"Synthetic only"}});
   expect(result.isError).toBe(true);
  } finally {await c.close();setSetting("sync_backend","obsidian");}

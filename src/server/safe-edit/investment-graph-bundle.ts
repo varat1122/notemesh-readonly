@@ -36,7 +36,7 @@ const allowedTarget=(p:string)=>[
 const canonical=(p:string)=>REL.test(p)&&p.length<=350&&
   !p.startsWith("/")&&!p.includes("//")&&!p.includes("/./")&&
   !p.includes("\\")&&p.split("/").every(x=>x!==".."&&x!=="."&&x.trim()===x);
-const inputSchema=z.object({
+export const inputSchema=z.object({
   operationRoot:OPS,
   issuer:z.string().regex(TICKER),
   eventKey:z.string().regex(EVENT),
@@ -87,7 +87,7 @@ function requireFeature(){
   if(process.env.INVESTMENT_GRAPH_BUNDLE_ENABLED!=="1")
     throw Error("graph_bundle_disabled_admin_explicit_opt_in_required");
 }
-function validatePreflight(i:InvestmentGraphBundleInput,existingAnalysis=false){
+export function validatePreflight(i:InvestmentGraphBundleInput,existingAnalysis=false){
   if(!canonical(i.analysisPath)||!canonical(i.timelinePath)||
     !canonical(i.sourcePath)||!SOURCE_DIRS.some(d=>i.sourcePath.startsWith(d))||
     i.analysisPath!==ANALYSIS+i.issuer+" - "+i.eventKey+".md"||

@@ -14,29 +14,29 @@ import { assertGitPilot, note } from "~/server/safe-edit/git-pilot-policy";
 import { status, adminPreview } from "~/server/safe-edit/engine";
 import { applySchema } from "~/server/safe-edit/schema";
 
-const headers = {
+export const headers = {
   "Content-Type": "text/html; charset=utf-8",
   "Cache-Control": "no-store",
   "X-Frame-Options": "DENY",
   "Content-Security-Policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   "Referrer-Policy": "same-origin",
 };
-const escapeHtml = (value: string) =>
+export const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!));
-const html = (body: string, code = 200) =>
+export const html = (body: string, code = 200) =>
   new Response('<!doctype html><html lang="en"><meta charset="utf-8"><title>Staging Git Pilot</title><body><main>' +
     body + '</main></body></html>', {status: code, headers});
-const denied = (message: string, code: number) => html('<h1>Not available</h1><p>'+escapeHtml(message)+'</p>',code);
+export const denied = (message: string, code: number) => html('<h1>Not available</h1><p>'+escapeHtml(message)+'</p>',code);
 
-async function owner(request: Request) {
+export async function owner(request: Request) {
   await runAuthMigrations();
   // A session lookup may write OAuth/session SQLite; hold the DR fence for the
   // whole awaited adapter lifetime, as on the existing approval page.
   return inProcessDrWriterFence.withWrite(
     () => auth.api.getSession({headers:request.headers}), "better_auth_adapter");
 }
-async function smallForm(request: Request) {
-  if (Number(request.headers.get("content-length")) > 2048) throw Error("Form too large");
+export async function smallForm(request: Request, limit=2048) {
+  if (Number(request.headers.get("content-length")) > limit) throw Error("Form too large");
   const reader = request.body?.getReader();
   if (!reader) throw Error("Missing form");
   const chunks: Uint8Array[] = []; let size=0;
@@ -45,7 +45,7 @@ async function smallForm(request: Request) {
       const part = await reader.read();
       if (part.done) break;
       size += part.value.byteLength;
-      if (size > 2048) throw Error("Form too large");
+      if (size > limit) throw Error("Form too large");
       chunks.push(part.value);
     }
   } finally {

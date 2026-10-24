@@ -17,10 +17,13 @@ import { previewSchema, applySchema, operationId as idSchema, type PreviewInput 
 
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
 // Internal transaction context, never accepted from MCP input.
-export const gitPilotContext = new AsyncLocalStorage<{base:string}>();
+export const gitPilotContext = new AsyncLocalStorage<{base:string; operations?:{id:string;path:string;kind:string}[]}>();
 function gitPilotGuard(p:PreviewInput) {
   if(getSetting("sync_backend")!=="git") return;
-  if(!gitPilotContext.getStore() || process.env.GIT_SAFE_WRITEBACK_PILOT!=="1" ||
+  const context=gitPilotContext.getStore();
+  if(context?.operations && process.env.GIT_RESEARCH_WRITEBACK_M4==="1" &&
+    process.env.GIT_SAFE_WRITEBACK_PILOT==="1" && context.operations.some(o=>o.id===p.operationId&&o.path===p.path&&o.kind===p.change.kind)) return;
+  if(!context || process.env.GIT_SAFE_WRITEBACK_PILOT!=="1" ||
     p.path!=="PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md" || p.change.kind!=="create")
     throw Error("Git Safe Edit requires the scoped pilot transaction");
 }
@@ -29,7 +32,10 @@ export function recordGitPilot(id:string,actor:string,detail:Record<string,unkno
     const r=owned(id,actor), receipt=r.receipt?JSON.parse(r.receipt):{};
     receipt.gitPilot={...receipt.gitPilot,...detail};
     store().prepare("UPDATE safe_edit_operations SET receipt=? WHERE id=?").run(JSON.stringify(receipt),id);
-    log(id,actor,"git_pilot",detail);
+    // Journal retains the review privately; deployment logs contain stages and
+    // hashes only, never imported research text or historical note excerpts.
+    const safe=Object.fromEntries(Object.entries(detail).filter(([key])=>["state","base","reviewHash","commit","manualReviewRequired","remoteSha256"].includes(key)));
+    log(id,actor,"git_pilot",safe);
   },"protected_safe_edits");
 }
 const MAX_BYTES = 100_000;
@@ -212,7 +218,7 @@ function publicPreview(r:RecordRow) {
 }
 function requiresApproval(r:RecordRow) {
   const p=JSON.parse(r.payload) as PreviewInput;
-  if(p.path==="PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md") return true;
+  if(p.path==="PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md"||r.actor.startsWith("staging-owner-research:")) return true;
   // Protect all thesis changes, including first creation and rollback; never
   // infer investment approval from an OAuth grant or model-supplied boolean.
   return p.path.startsWith("05_Thesis/") || [r.before_text,r.after_text].some(text=>{
@@ -228,7 +234,7 @@ function previewUnderFence(input:unknown,actor:string) {
   if(store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND status='writing' LIMIT 1").get(p.path)) throw Error("This path has an interrupted operation; administrator recovery required");
   const before=read(t.abs);
   if(p.change.kind==="create"?before!==null:before===null) throw Error("Create never overwrites; other edits require an existing note");
-  if(getSetting("sync_backend")==="git" && store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND id<>? AND status<>'preview' LIMIT 1").get(p.path,p.operationId))
+  if(getSetting("sync_backend")==="git" && !gitPilotContext.getStore()?.operations && store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND id<>? AND status<>'preview' LIMIT 1").get(p.path,p.operationId))
     throw Error("Git pilot already attempted; manual reconciliation required");
   const existing=store().prepare("SELECT * FROM safe_edit_operations WHERE id=?").get(p.operationId) as RecordRow|undefined;
   if(existing) {
@@ -367,6 +373,12 @@ export function verifyWrittenAppendHistory(id:string,actor:string,currentText:st
     return {operationAfterHash:first.after_hash,currentAfterHash:currentHash,
       subsequentAuthenticatedAppendCount:count};
   }, "protected_safe_edits");
+}
+export function validateApprovedEdit(input:unknown,actor:string) {
+  const args=applySchema.parse(input),r=owned(args.operationId,actor);
+  if(!crypto.timingSafeEqual(Buffer.from(sha256(args.previewToken),"hex"),Buffer.from(r.token_hash,"hex"))||args.expectedHash!==r.before_hash) throw Error("Invalid preview token or expected hash");
+  if(Date.now()>r.expires||r.status!=="preview"||!r.approval) throw Error("Exact active human approval required");
+  return publicPreview(r);
 }
 export function apply(input:unknown,actor:string) {
   return inProcessDrWriterFence.withWriteSync(()=>applyUnderFence(input,actor), "protected_safe_edits");
