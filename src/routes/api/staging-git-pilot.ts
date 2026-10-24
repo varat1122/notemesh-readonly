@@ -67,6 +67,48 @@ const noteBody = (id:string) =>
   '- Evidence status: Synthetic operational test; not investment evidence.\n\n' +
   'This note must never be treated as investment research.\n';
 
+type ReviewForm = {
+  operationId: string;
+  previewToken: string;
+  expectedHash: string;
+  afterHash: string;
+  expiresAt: string;
+  path: string;
+};
+function reviewPage(p: ReviewForm, approved: boolean, diff?: unknown, warnings?: unknown) {
+  const link=env.baseUrl+"/api/safe-edit-approval?id="+encodeURIComponent(p.operationId);
+  const fields=['<input type="hidden" name="operationId" value="'+escapeHtml(p.operationId)+'">',
+    '<input type="hidden" name="expectedHash" value="'+escapeHtml(p.expectedHash)+'">',
+    '<input type="hidden" name="previewToken" value="'+escapeHtml(p.previewToken)+'">'].join("");
+  const notice=approved
+    ? '<h2>Admin Approval: VERIFIED for this exact preview</h2><p>Now you may choose to Apply once.</p>'
+    : '<h2>Admin Approval: NOT YET VERIFIED</h2><p>First use the approval link in a NEW browser tab, approve the exact diff, then RETURN TO THIS TAB and press Check approval. Do not prepare another preview.</p>';
+  return html('<h1>Staging one-note Git Pilot — Review</h1>' +
+    '<p><b>Keep this preview tab open.</b> A new preview has a different operation ID and requires a separate approval.</p>'+
+    '<p>Operation: <code>'+escapeHtml(p.operationId)+'</code></p>'+
+    '<p>File: <code>'+escapeHtml(p.path)+'</code></p>'+
+    '<p>After hash: <code>'+escapeHtml(p.afterHash)+'</code></p>'+
+    '<p>Expires: '+escapeHtml(p.expiresAt)+'</p>'+
+    (diff === undefined ? "" : '<pre>'+escapeHtml(JSON.stringify({diff,warnings},null,2))+'</pre>')+
+    notice+
+    '<p><a href="'+escapeHtml(link)+'" target="_blank" rel="noopener noreferrer">2. Open Admin Approval for THIS Operation in a new tab</a></p>'+
+    '<form method="post"><input type="hidden" name="action" value="check">'+fields+
+    '<button type="submit">3. Check whether THIS preview is approved (no write)</button></form>'+
+    (approved?'<form method="post"><input type="hidden" name="action" value="apply">'+fields+
+      '<button type="submit">4. Apply exactly this approved note ONCE</button></form>':"")+
+    '<p>Do not start another Preview while reviewing this one. If Apply has an uncertain outcome, do not retry.</p>');
+}
+function validatedApproval(id:string, actorId:string) {
+  const owned=status(id,actorId);
+  const reviewed=adminPreview(id);
+  if (owned.path!==note || owned.status!=="preview" ||
+      owned.beforeHash!==reviewed.beforeHash || owned.afterHash!==reviewed.afterHash ||
+      reviewed.path!==note || !reviewed.requiresAdminApproval)
+    throw Error("Operation not an active, correctly scoped preview");
+  if (!(new Date(reviewed.expiresAt).getTime()>Date.now()))
+    throw Error("Preview expired");
+  return {owned,reviewed};
+}
 export async function GET({request}: APIEvent) {
   const s=await owner(request);
   if (!s) return denied("Sign in to the Staging administrator dashboard first.",401);
@@ -74,6 +116,7 @@ export async function GET({request}: APIEvent) {
   return html('<h1>Staging Git Safe Writeback — One-note acceptance</h1>' +
     '<p>This is a human-operated Staging Test Vault action, not a ChatGPT tool write.</p>' +
     '<p>Only '+escapeHtml(note)+' may be created. No production or thesis notes.</p>' +
+    '<p>Create a preview ONE time, keep its tab open, approve via a NEW tab, then Check Approval before Apply.</p>'+
     '<form method="post"><input type="hidden" name="action" value="preview">' +
     '<button type="submit">1. Prepare preview — no note write</button></form>');
 }
@@ -96,42 +139,36 @@ export async function POST({request}: APIEvent) {
       },who);
       if (typeof p.previewToken!=="string" || !p.requiresAdminApproval || !p.approvalUrl)
         throw Error("Preview missing required safeguards");
-      // Token only appears in the authenticated no-store page, never in an URL,
-      // log, or a tool response. The POST returns no file writes.
-      return html('<h1>Review exact one-note preview</h1><p>Do not apply until you independently approve this diff.</p>' +
-        '<p>Operation: <code>'+escapeHtml(p.operationId)+'</code></p>' +
-        '<p>File: <code>'+escapeHtml(p.path)+'</code></p>' +
-        '<pre>'+escapeHtml(JSON.stringify({diff:p.diff,warnings:p.warnings,afterHash:p.afterHash,expiresAt:p.expiresAt},null,2))+'</pre>' +
-        '<p><a href="'+escapeHtml(p.approvalUrl)+'" target="_blank" rel="noopener noreferrer">' +
-        '2. Review and approve the exact diff in a new tab</a></p>' +
-        '<form method="post"><input type="hidden" name="action" value="apply">' +
-        '<input type="hidden" name="operationId" value="'+escapeHtml(p.operationId)+'">' +
-        '<input type="hidden" name="expectedHash" value="'+escapeHtml(p.beforeHash)+'">' +
-        '<input type="hidden" name="previewToken" value="'+escapeHtml(p.previewToken)+'">' +
-        '<button type="submit">3. Apply exactly this approved note once</button></form>' +
-        '<p>If the page or preview expires, start a fresh preview; never retry after an uncertain Apply outcome.</p>');
+      // Token is retained only in the authenticated, no-store HTML form.
+      // Approval opens a separate tab; no POST applies automatically.
+      return reviewPage({operationId:p.operationId,previewToken:p.previewToken,
+        expectedHash:p.beforeHash,afterHash:p.afterHash,
+        expiresAt:p.expiresAt,path:p.path},false,p.diff,p.warnings);
     } catch {
       return denied("Preview refused. Check pilot status and reconcile manually; no Apply attempted.",409);
     }
   }
-  if (form.get("action")==="apply") {
+  if (form.get("action")==="check" || form.get("action")==="apply") {
     const operationId=form.get("operationId")??"";
     if (!/^pilot001-owner-[a-f0-9]{20}$/.test(operationId))
       return denied("Invalid owner-only operation ID",400);
     const parsed=applySchema.safeParse({
-      operationId, previewToken:form.get("previewToken"),
+      operationId,previewToken:form.get("previewToken"),
       expectedHash:form.get("expectedHash"),
     });
     if(!parsed.success) return denied("Invalid token or hash form",400);
+    let state: ReturnType<typeof validatedApproval>;
+    try {state=validatedApproval(operationId,who);}
+    catch {return denied("Preview invalid or expired. Reconcile receipts and start a fresh preview; no write attempted.",409);}
+    const {owned,reviewed}=state;
+    const formState={operationId,previewToken:parsed.data.previewToken,
+      expectedHash:parsed.data.expectedHash,afterHash:owned.afterHash,
+      expiresAt:reviewed.expiresAt,path:owned.path};
+    if (form.get("action")==="check" || !reviewed.approved)
+      return reviewPage(formState,reviewed.approved);
+    // Below is the ONLY write path. Requires separately approved exact-hash
+    // preview, explicit owner Apply POST, and all original Git-pilot gates.
     try {
-      const owned=status(operationId,who);
-      const reviewed=adminPreview(operationId);
-      if (owned.path!==note || owned.status!=="preview" ||
-          owned.beforeHash!==reviewed.beforeHash || owned.afterHash!==reviewed.afterHash ||
-          reviewed.path!==note || !reviewed.requiresAdminApproval || !reviewed.approved)
-        return denied("Admin approval for this exact preview is still required.",409);
-      if (new Date(reviewed.expiresAt).getTime() < Date.now())
-        return denied("Preview expired. Start a fresh preview; do not reuse this token.",409);
       const applied=await applyGitPilot(parsed.data,who);
       const pilot=applied.receipt?.gitPilot;
       return html('<h1>Apply result</h1><pre>'+escapeHtml(JSON.stringify({
