@@ -21,6 +21,7 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
   delete process.env.DATA_DIR;
+  vi.restoreAllMocks();
 });
 
 async function status() {
@@ -44,8 +45,10 @@ describe("diskStatus", () => {
   });
 
   it("notices when the data directory is not on its own volume", async () => {
-    // A temp dir is on the machine's main filesystem, which is exactly the
-    // local-development case the caveat exists for.
+    // /tmp can be a separate mount in cloud runners. Explicitly model the
+    // same-filesystem case instead of assuming the host's mount layout.
+    const filesystem=fs.statfsSync(root);
+    vi.spyOn(fs,"statfsSync").mockReturnValue(filesystem);
     const s = await status();
     expect(s.filesystem!.sharedWithRoot).toBe(true);
   });

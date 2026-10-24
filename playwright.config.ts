@@ -18,6 +18,9 @@ export default defineConfig({
   reporter: process.env.CI ? "list" : "line",
   use: {
     baseURL: BASE_URL,
+    // Managed cloud runners may already provide a system Chromium. CI keeps
+    // the pinned Playwright browser unless explicitly selected by the runner.
+    launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH },
     // Kept for the first failure only: enough to diagnose, not enough to fill
     // the runner with artefacts.
     trace: "retain-on-failure",

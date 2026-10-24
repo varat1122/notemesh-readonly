@@ -44,3 +44,10 @@ Stale hash ให้หยุด/อ่าน/วิเคราะห์ให�
 
 7. ข่าวถัดไป
 ค้นใหม่ทุกครั้ง Retrieve Event A/Thesis มาเทียบ B แยกสิ่งใหม่/ซ้ำ คง archived_ai/independent_evidence:false และ chronology/source lineage ผู้ใช้เริ่มด้วยข่าวตามปกติต่อได้
+
+8. Owner-reviewed M4 fallback เมื่อ direct write ถูก Platform Block
+เคารพ block; ห้ามเปลี่ยนชื่อ tool/ปลอม actor/ลอง endpoint อื่นแทนโดยอัตโนมัติ
+หากเจ้าของเลือก human-operated flow ให้ใช้ read-only prepare_investment_graph_review แล้ว export InvestmentGraphBundleInput เดิมเป็น JSON ให้เจ้าของตรวจ
+ห้ามกรอก approved/actor/token หรือเดา Source SHA/canonical paths ส่งตาม docs/m4/OWNER_REVIEW_WRITEBACK_TH.md
+เจ้าของ import ที่ staging /api/staging-research-review ตรวจ full diff, อนุมัติแต่ละ operation ผ่าน admin page เดิม แล้ว Apply เองหนึ่งครั้ง
+ChatGPT ห้ามอ้างบันทึกสำเร็จจนมี Git/graph readback receipt; partial/unknown ต้องหยุด ไม่มี silent retry และไม่ส่ง auto-save request แทนเจ้าของ

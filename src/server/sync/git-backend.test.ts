@@ -435,3 +435,100 @@ describe("approved single-note Safe Edit Git pilot",()=>{
     unblock();await cycle;await drain;expect(done).toBe(true);
   });
 });
+
+// M4 uses the SAME temporary Git fixture, Safe Edit engine, and graph readback.
+describe("M4 owner-reviewed research over the existing Git transaction",()=>{
+  const actor="staging-owner-research:synthetic-admin";
+  afterEach(()=>{
+    vi.doUnmock("~/server/safe-edit/git-pilot-policy");vi.restoreAllMocks();
+    for(const k of ["GIT_RESEARCH_WRITEBACK_M4","GIT_SAFE_WRITEBACK_PILOT","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];
+  });
+  async function fixture(){
+    const setup=await configuredBackend();
+    Object.assign(process.env,{GIT_RESEARCH_WRITEBACK_M4:"1",GIT_SAFE_WRITEBACK_PILOT:"1",SAFE_EDIT_ENABLED:"1",SAFE_EDIT_SINGLE_WRITER:"1"});
+    vi.doMock("~/server/safe-edit/git-pilot-policy",()=>({assertGitPilot:()=>{},note:"PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md",remote}));
+    const {reindexPath}=await import("~/server/vault/indexer");
+    const engine=await import("~/server/safe-edit/engine");
+    const sourcePath="10_Knowledge/TEST - event-a.md",timelinePath="08_Daily_Weekly/Research Indexes/Company Evolution - TEST.md";
+    const analysisPath="08_Daily_Weekly/Research Indexes/Investment Review - TEST - TEST-EVENT-A.md";
+    const source="---\nentity: TEST\nevent_key: TEST-EVENT-A\nperiod: FY26Q4\nsource_type: user_supplied\nverification: unverified\n---\n# Source A\nSynthetic demand statement; not a real issuer.\n";
+    for(const [p,text] of [[sourcePath,source],[timelinePath,"---\ncompany: TEST\n---\n# Evolution\nPrior history.\n"],["01_Companies/TEST.md","---\nentity: TEST\n---\n# Company\n"],["05_Thesis/TEST - Current Thesis.md","---\nentity: TEST\nverification: not_reverified\n---\n# Draft Thesis\nSynthetic uncertain thesis.\n"]]){write(setup.vault,p,text);reindexPath(p);}
+    commitAll(setup.vault,"synthetic history");git(setup.vault,"push","-q");
+    const input={operationRoot:"m4-synthetic-event-a",issuer:"TEST",eventKey:"TEST-EVENT-A",period:"FY26Q4",timelineDate:"2026-10-24",timelineHeading:"Evolution",sourcePath,timelinePath,analysisPath,expectedSourceSha256:engine.sha256(source),analysisMarkdown:""};
+    input.analysisMarkdown=["---","type: investment_review","entity: TEST","event_key: TEST-EVENT-A","operation_id: "+input.operationRoot,"source_type: archived_ai","independent_evidence: false","verification: not_reverified","status: draft","analysis_origin: synthetic_fixture","source_path: "+sourcePath,"source_sha256: "+input.expectedSourceSha256,"---","# Synthetic Research","<!-- investment-os-operation:"+input.operationRoot+" -->","<!-- investment-os-event:TEST-EVENT-A -->","Unverified analysis: demand may improve; revenue conversion remains uncertain.",... [sourcePath,timelinePath,"01_Companies/TEST.md"].map(p=>"[["+p.slice(0,-3)+"]]"),""].join("\n");
+    const m4=await import("~/server/safe-edit/owner-research");
+    return {...setup,m4,engine,input};
+  }
+  function args(p:Awaited<ReturnType<(typeof import("~/server/safe-edit/owner-research"))["previewOwnerResearch"]>>){return {analysis:{operationId:p.analysis.operationId,previewToken:p.analysis.previewToken,expectedHash:p.analysis.beforeHash},timeline:{operationId:p.timeline.operationId,previewToken:p.timeline.previewToken,expectedHash:p.timeline.beforeHash}};}
+  it("imports, independently approves BOTH diffs, applies ONCE, verifies Git/graph and retrieves archived AI on the next event",async()=>{
+    const {m4,engine,input,vault}=await fixture();const before=git(remote,"rev-parse","main");
+    const thesis=read(vault,"05_Thesis/TEST - Current Thesis.md");
+    const p=await m4.previewOwnerResearch(input,actor);expect(git(remote,"rev-parse","main")).toBe(before);
+    await expect(m4.applyOwnerResearch(args(p),"staging-owner-research:another-admin")).rejects.toThrow(/another/);
+    await expect(m4.applyOwnerResearch(args(p),actor)).rejects.toThrow(/approval/);
+    engine.approve(p.analysis.operationId,"human",p.analysis.afterHash);
+    await expect(m4.applyOwnerResearch(args(p),actor)).rejects.toThrow(/approval/);
+    expect(fs.existsSync(path.join(vault,input.analysisPath))).toBe(false);
+    engine.approve(p.timeline.operationId,"human",p.timeline.afterHash);
+    const result=await m4.applyOwnerResearch(args(p),actor);
+    expect(result.status).toBe("owner_research_git_and_graph_verified");
+    expect(result).toMatchObject({graph:{physicalMarkdownAndFTSAgree:true,livingTimelineBacklinkVerified:true,currentGraphIntegrityVerified:true}});
+    expect(git(remote,"show",`main:${input.analysisPath}`)).toBe(input.analysisMarkdown);
+    expect(read(vault,"05_Thesis/TEST - Current Thesis.md")).toBe(thesis);
+    const count=git(remote,"rev-list","--count","main");
+    expect(await m4.applyOwnerResearch(args(p),actor)).toMatchObject({newWriteExecuted:false});
+    expect(git(remote,"rev-list","--count","main")).toBe(count);
+    await expect(m4.previewOwnerResearch(input,actor)).rejects.toThrow(/Duplicate/);
+    const {reindexPath}=await import("~/server/vault/indexer");
+    const nextSource="10_Knowledge/TEST - event-b.md";
+    write(vault,nextSource,"---\nentity: TEST\nevent_key: TEST-EVENT-B\nperiod: FY26Q4\nsource_type: user_supplied\nverification: unverified\n---\n# Source B\nNew synthetic demand event; compare historical interpretation.\n");reindexPath(nextSource);
+    const {prepareRealInvestmentReviewHandoff}=await import("~/server/safe-edit/investment-review-preparation");
+    const recalled=prepareRealInvestmentReviewHandoff({issuer:"TEST",eventKey:"TEST-EVENT-B",period:"FY26Q4",sourcePath:nextSource,question:"TEST demand update compare previous historical analysis"});
+    expect(JSON.stringify(recalled)).toContain("archived_ai");
+    expect(JSON.stringify(recalled)).toContain('"declaredIndependentEvidence":false');
+    expect(JSON.stringify(recalled)).toContain(input.analysisPath);
+
+  });
+  it("fails closed for disabled gate, forged actor, invalid paths/source hash and unbound analysis",async()=>{
+    const {m4,input}=await fixture();
+    delete process.env.GIT_RESEARCH_WRITEBACK_M4;
+    await expect(m4.previewOwnerResearch(input,actor)).rejects.toThrow(/disabled/);
+    process.env.GIT_RESEARCH_WRITEBACK_M4="1";
+    await expect(m4.previewOwnerResearch(input,"oauth:forged-owner")).rejects.toThrow(/owner session/);
+    await expect(m4.previewOwnerResearch({...input,analysisPath:"05_Thesis/TEST - Current Thesis.md"},actor)).rejects.toThrow();
+    await expect(m4.previewOwnerResearch({...input,expectedSourceSha256:"0".repeat(64)},actor)).rejects.toThrow(/source_changed/);
+    await expect(m4.previewOwnerResearch({...input,analysisMarkdown:input.analysisMarkdown.replace("archived_ai","primary")},actor)).rejects.toThrow(/provenance/);
+  });
+  it("rejects stale source/thesis/timeline, wrong tokens and dirty worktree before the first note write",async()=>{
+    const {m4,engine,input,vault}=await fixture();const p=await m4.previewOwnerResearch(input,actor);
+    engine.approve(p.analysis.operationId,"human",p.analysis.afterHash);engine.approve(p.timeline.operationId,"human",p.timeline.afterHash);
+    const a=args(p);
+    await expect(m4.applyOwnerResearch({...a,timeline:{...a.timeline,previewToken:"0".repeat(64)}},actor)).rejects.toThrow(/token/);
+    const file=path.join(vault,input.sourcePath),original=fs.readFileSync(file);fs.appendFileSync(file,"Changed source");
+    await expect(m4.applyOwnerResearch(a,actor)).rejects.toThrow();
+    fs.writeFileSync(file,original);
+    const thesis=path.join(vault,"05_Thesis/TEST - Current Thesis.md");fs.appendFileSync(thesis,"changed historical thesis");
+    await expect(m4.applyOwnerResearch(a,actor)).rejects.toThrow();
+    expect(fs.existsSync(path.join(vault,input.analysisPath))).toBe(false);
+  });
+  it("partial second-note failure is durable and cannot replay or background-push after restart",async()=>{
+    const {m4,engine,input}=await fixture();const p=await m4.previewOwnerResearch(input,actor);
+    engine.approve(p.analysis.operationId,"human",p.analysis.afterHash);engine.approve(p.timeline.operationId,"human",p.timeline.afterHash);
+    vi.spyOn(fs,"renameSync").mockImplementation(()=>{throw Error("synthetic second-note failure");});
+    await expect(m4.applyOwnerResearch(args(p),actor)).rejects.toThrow();
+    expect(engine.status(p.analysis.operationId,actor).receipt.gitPilot.state).toBe("research_applying");
+    vi.restoreAllMocks();delete (globalThis as Record<string,unknown>).__obSyncGitBackend;
+    const {gitBackend}=await import("~/server/sync/git");
+    expect((await gitBackend().syncNow()).ok).toBe(false);
+    expect(await m4.applyOwnerResearch(args(p),actor)).toMatchObject({newWriteExecuted:false});
+  });
+  it("an ambiguous network push stays held and is never retried",async()=>{
+    const {m4,engine,input}=await fixture();const p=await m4.previewOwnerResearch(input,actor);
+    engine.approve(p.analysis.operationId,"human",p.analysis.afterHash);engine.approve(p.timeline.operationId,"human",p.timeline.afterHash);
+    const exec=await import("~/server/sync/git-exec"),original=exec.runGit;let pushes=0;
+    vi.spyOn(exec,"runGit").mockImplementation(async(a,o)=>{const result=await original(a,o);if(a.includes("push")){pushes++;return {...result,ok:false,code:null};}return result;});
+    await expect(m4.applyOwnerResearch(args(p),actor)).rejects.toThrow();
+    expect(engine.status(p.analysis.operationId,actor).receipt.gitPilot.state).toBe("push_unknown");
+    expect(await m4.applyOwnerResearch(args(p),actor)).toMatchObject({newWriteExecuted:false});expect(pushes).toBe(1);
+  });
+});

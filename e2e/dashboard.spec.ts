@@ -698,3 +698,12 @@ test.describe("signing out", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 });
+
+test("M4 review remains unavailable without an authenticated staging opt-in",async({page})=>{
+  const anonymous=await page.request.get("/api/staging-research-review");expect(anonymous.status()).toBe(401);
+  await seedSession(page);
+  const signedIn=await page.request.get("/api/staging-research-review");expect(signedIn.status()).toBe(403);
+  await page.goto("/api/staging-research-review");
+  await expect(page.getByRole("heading",{name:"Not available"})).toBeVisible();
+  await expect(page.getByRole("button",{name:/Apply/})).toHaveCount(0);
+});

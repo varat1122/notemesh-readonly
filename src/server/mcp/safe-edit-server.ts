@@ -41,7 +41,20 @@ export function createSafeEditMcpServer(access:McpAccess) {
   }
   server.registerTool("create_note",{description:"PREVIEW ONLY: prepare a new Markdown note after duplicate checks. Existing paths are never overwritten. Parent folder must exist. Review then apply_edit.",inputSchema:{...base,content:z.string().min(1).max(100000)},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({content,...input})=>invoke(()=>preview({...input,change:{kind:"create",content}},access.label)));
   server.registerTool("get_edit_status",{description:"Read durable operation receipt: before/after hashes and independent write/readback/reindex/Sync stages. Does not prove remote or mobile arrival.",inputSchema:{operationId},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({operationId})=>invoke(()=>status(operationId,access.label)));
-  // Git pilot exposes only preview/create/apply/status; all other mutations stay unavailable.
+  server.registerTool("prepare_investment_graph_review",{
+    description:"READ ONLY: Pull the actual indexed Source Note and issuer-scoped historical context (Current Thesis, Evidence Register, old source, Company Evolution, Industry, prior unverified AI drafts). Return exact existing canonical Obsidian paths, source SHA-256 and bounded source/context excerpts for the model to ANALYZE BEFORE a separately host-authorized write_investment_graph_bundle call. Never infers financial truth, approves a draft, previews or writes notes; existing event/analysis is a duplicate-review hold. The original source is not independently authenticated by its metadata.",
+    inputSchema:{
+      issuer:z.string().min(1).max(12),
+      eventKey:z.string().min(4).max(140),
+      period:z.string().min(1).max(100),
+      sourcePath:z.string().min(4).max(350),
+      question:z.string().min(3).max(1200),
+      industry:z.string().max(140).optional(),
+      focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional(),
+    },
+    annotations:{readOnlyHint:true,openWorldHint:false},...meta,
+  },async input=>invoke(()=>prepareRealInvestmentReviewHandoff(input)));
+  // Git exposes the existing read-only preparation too; other mutations stay unavailable.
   if(syncKind()==="git") return server;
   server.registerTool("archive_original_source",{
     description:"Download one explicitly allowlisted HTTPS primary document to the content-addressed archive OUTSIDE Obsidian Vault under authorized vault:edit OAuth. Returns SHA-256 of complete fetched bytes and source version. Does not alter Notes, Current Thesis or Portfolio. Redirects, unknown hosts and files above 8 MiB are denied. Requires server SOURCE_ARCHIVE_USER_AGENT identifying a real operator. This is NOT proof of publisher signature, source completeness or claim truth.",
@@ -96,19 +109,6 @@ export function createSafeEditMcpServer(access:McpAccess) {
     },annotations:{readOnlyHint:true,openWorldHint:false},...meta,
   },async input=>invoke(()=>verifyAuthorizedInvestmentGraphReadback(
     input,access.label)));
-  server.registerTool("prepare_investment_graph_review",{
-    description:"READ ONLY: Pull the actual indexed Source Note and issuer-scoped historical context (Current Thesis, Evidence Register, old source, Company Evolution, Industry, prior unverified AI drafts). Return exact existing canonical Obsidian paths, source SHA-256 and bounded source/context excerpts for the model to ANALYZE BEFORE a separately host-authorized write_investment_graph_bundle call. Never infers financial truth, approves a draft, previews or writes notes; existing event/analysis is a duplicate-review hold. The original source is not independently authenticated by its metadata.",
-    inputSchema:{
-      issuer:z.string().min(1).max(12),
-      eventKey:z.string().min(4).max(140),
-      period:z.string().min(1).max(100),
-      sourcePath:z.string().min(4).max(350),
-      question:z.string().min(3).max(1200),
-      industry:z.string().max(140).optional(),
-      focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional(),
-    },
-    annotations:{readOnlyHint:true,openWorldHint:false},...meta,
-  },async input=>invoke(()=>prepareRealInvestmentReviewHandoff(input)));
   server.registerTool("write_investment_graph_bundle",{
     description:"WRITE: Host/user must explicitly authorize this scoped investment graph action. Use prepare_investment_graph_review before reasoning; expectedSourceSha256 and matching Analysis frontmatter source_path/source_sha256 are required. Independent verification and replay check the receipt-bound Source version and Source FTS.  Initial call writes one Historical AI Draft Analysis and one Company Evolution backlink. If Analysis was durably saved but the Timeline write never started, a SEPARATE host-authorized invocation with recoverTimelineOnly=true can complete ONLY the missing backlink after receipt, physical hash, provenance, canonical path and duplicate checks. Interrupted Timeline operations always require manual review. Protected Thesis/Portfolio never change; admin feature flag disabled by default. Not standing auto-save or device Sync.",
     inputSchema:{
