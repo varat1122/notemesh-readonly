@@ -11,7 +11,7 @@ import { inProcessDrWriterFence } from "~/server/backup/writer-fence";
 import { env } from "~/server/env";
 import { previewGitPilot, applyGitPilot } from "~/server/safe-edit/git-pilot";
 import { assertGitPilot, note } from "~/server/safe-edit/git-pilot-policy";
-import { status } from "~/server/safe-edit/engine";
+import { status, adminPreview } from "~/server/safe-edit/engine";
 import { applySchema } from "~/server/safe-edit/schema";
 
 const headers = {
@@ -124,9 +124,11 @@ export async function POST({request}: APIEvent) {
     });
     if(!parsed.success) return denied("Invalid token or hash form",400);
     try {
-      const reviewed=status(operationId,who);
-      if (reviewed.path!==note || reviewed.status!=="preview" ||
-          !reviewed.requiresAdminApproval || !reviewed.approved)
+      const owned=status(operationId,who);
+      const reviewed=adminPreview(operationId);
+      if (owned.path!==note || owned.status!=="preview" ||
+          owned.beforeHash!==reviewed.beforeHash || owned.afterHash!==reviewed.afterHash ||
+          reviewed.path!==note || !reviewed.requiresAdminApproval || !reviewed.approved)
         return denied("Admin approval for this exact preview is still required.",409);
       if (new Date(reviewed.expiresAt).getTime() < Date.now())
         return denied("Preview expired. Start a fresh preview; do not reuse this token.",409);
