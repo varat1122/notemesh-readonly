@@ -10,7 +10,7 @@ async function smallBody(request:Request) {
   finally {await reader.cancel().catch(()=>{});reader.releaseLock();}
   return Buffer.concat(chunks).toString("utf8");
 }
-const headers={"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","X-Frame-Options":"DENY","Content-Security-Policy":"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'","Referrer-Policy":"no-referrer"};
+const headers={"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","X-Frame-Options":"DENY","Content-Security-Policy":"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'","Referrer-Policy":"same-origin"};
 const escape=(s:string)=>s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]!);
 async function session(request:Request) {
   await runAuthMigrations();
