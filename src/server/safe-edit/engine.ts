@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { getSetting } from "../db";
 import fs from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
@@ -14,6 +16,22 @@ import { inProcessDrWriterFence } from "../backup/writer-fence";
 import { previewSchema, applySchema, operationId as idSchema, type PreviewInput } from "./schema";
 
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
+// Internal transaction context, never accepted from MCP input.
+export const gitPilotContext = new AsyncLocalStorage<{base:string}>();
+function gitPilotGuard(p:PreviewInput) {
+  if(getSetting("sync_backend")!=="git") return;
+  if(!gitPilotContext.getStore() || process.env.GIT_SAFE_WRITEBACK_PILOT!=="1" ||
+    p.path!=="PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md" || p.change.kind!=="create")
+    throw Error("Git Safe Edit requires the scoped pilot transaction");
+}
+export function recordGitPilot(id:string,actor:string,detail:Record<string,unknown>) {
+  return inProcessDrWriterFence.withWriteSync(()=>{
+    const r=owned(id,actor), receipt=r.receipt?JSON.parse(r.receipt):{};
+    receipt.gitPilot={...receipt.gitPilot,...detail};
+    store().prepare("UPDATE safe_edit_operations SET receipt=? WHERE id=?").run(JSON.stringify(receipt),id);
+    log(id,actor,"git_pilot",detail);
+  },"protected_safe_edits");
+}
 const MAX_BYTES = 100_000;
 const TTL = 30 * 60_000;
 export function assertEnabled() {
@@ -194,6 +212,7 @@ function publicPreview(r:RecordRow) {
 }
 function requiresApproval(r:RecordRow) {
   const p=JSON.parse(r.payload) as PreviewInput;
+  if(p.path==="PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md") return true;
   // Protect all thesis changes, including first creation and rollback; never
   // infer investment approval from an OAuth grant or model-supplied boolean.
   return p.path.startsWith("05_Thesis/") || [r.before_text,r.after_text].some(text=>{
@@ -205,10 +224,12 @@ export function preview(input:unknown,actor:string) {
   return inProcessDrWriterFence.withWriteSync(()=>previewUnderFence(input,actor), "protected_safe_edits");
 }
 function previewUnderFence(input:unknown,actor:string) {
-  assertEnabled();const p=previewSchema.parse(input);const t=target(p.path);p.path=t.rel;
+  assertEnabled();const p=previewSchema.parse(input);gitPilotGuard(p);const t=target(p.path);p.path=t.rel;
   if(store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND status='writing' LIMIT 1").get(p.path)) throw Error("This path has an interrupted operation; administrator recovery required");
   const before=read(t.abs);
   if(p.change.kind==="create"?before!==null:before===null) throw Error("Create never overwrites; other edits require an existing note");
+  if(getSetting("sync_backend")==="git" && store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND id<>? AND status<>'preview' LIMIT 1").get(p.path,p.operationId))
+    throw Error("Git pilot already attempted; manual reconciliation required");
   const existing=store().prepare("SELECT * FROM safe_edit_operations WHERE id=?").get(p.operationId) as RecordRow|undefined;
   if(existing) {
     if(existing.actor!==actor||existing.payload!==JSON.stringify(p)) throw Error("Operation ID reused for different input or actor");
@@ -348,6 +369,7 @@ export function apply(input:unknown,actor:string) {
 }
 function applyUnderFence(input:unknown,actor:string) {
   assertEnabled();const args=applySchema.parse(input),r=owned(args.operationId,actor);
+  gitPilotGuard(JSON.parse(r.payload));
   if(!crypto.timingSafeEqual(Buffer.from(sha256(args.previewToken),"hex"),Buffer.from(r.token_hash,"hex"))||args.expectedHash!==r.before_hash) throw Error("Invalid preview token or expected hash");
   if(r.status==="written") return status(r.id,actor);
   if(Date.now()>r.expires) throw Error("Preview expired; review a fresh diff");
@@ -367,7 +389,8 @@ function applyUnderFence(input:unknown,actor:string) {
     const receipt={operationId:r.id,path:p.path,beforeHash:r.before_hash,afterHash:r.after_hash,
       writtenAt:null as string|null,write:"pending",readback:"pending",reindex:"pending",
       sync:"unverified",remoteSync:"unverified",mobileSync:"unverified",backup:`safe-edit-backups/${r.id}.md`,
-      approval:r.approval,review:p.evidence??null};
+      approval:r.approval,review:p.evidence??null,
+      ...(r.receipt?{gitPilot:JSON.parse(r.receipt).gitPilot}:{})};
     store().prepare("UPDATE safe_edit_operations SET status='writing',receipt=? WHERE id=?").run(JSON.stringify(receipt),r.id);
     log(r.id,actor,"write_started",{path:p.path,beforeHash:r.before_hash,afterHash:r.after_hash});
     try {

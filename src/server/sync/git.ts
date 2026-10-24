@@ -227,9 +227,21 @@ class GitBackend implements SyncBackend {
     };
   }
 
+  // Pilot holds survive restart and feature-flag removal. Ordinary reconciliation
+  // must never publish a partially completed authorized transaction.
+  async holdForPilot() {
+    this.stop();
+    const deadline=Date.now()+125_000;
+    while(this.busy) {
+      if(Date.now()>deadline) throw Error("Git pilot drain timeout");
+      await new Promise(resolve=>setTimeout(resolve,25));
+    }
+  }
+
   // One full reconcile: publish local work, take remote work, push.
   // Serialized — overlapping cycles would race on the index and the ref.
   private async cycle(reason: string): Promise<boolean> {
+    if(process.env.GIT_SAFE_WRITEBACK_PILOT==="1" || fs.existsSync(path.join(env.dataDir,"git-pilot-hold"))) return false;
     if (this.busy) return true;
     // One admission ticket spans the entire asynchronous reconcile, including
     // fetch, merge, conflict-copy writes, metadata refresh and push. Starting

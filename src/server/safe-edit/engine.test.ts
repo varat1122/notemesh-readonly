@@ -246,3 +246,42 @@ it("P0 synthetic end-to-end: historical retrieval → raw capture → linked rev
   expect(engine.status(reviewResult.preview.operationId,actor).status).toBe("written");
 });
 
+
+it("Git pilot policy fails closed for disabled or wrongly identified deployments",async()=>{
+  const {assertGitPilot}=await import("./git-pilot-policy");
+  expect(()=>assertGitPilot()).toThrow();
+  process.env.GIT_SAFE_WRITEBACK_PILOT="1";
+  process.env.RAILWAY_PROJECT_ID="wrong-project";
+  expect(()=>assertGitPilot()).toThrow();
+  delete process.env.GIT_SAFE_WRITEBACK_PILOT;delete process.env.RAILWAY_PROJECT_ID;
+});
+it("Git Safe Edit cannot bypass the internal scoped transaction",()=>{
+  dbModule.setSetting("sync_backend","git");
+  try {expect(()=>engine.preview(input(),actor)).toThrow(/scoped pilot/);}
+  finally {dbModule.setSetting("sync_backend","obsidian");}
+});
+
+it("Git pilot attestation rejects each wrong scope even when the feature flag is enabled",async()=>{
+  const {assertGitPilot}=await import("./git-pilot-policy");
+  const variables={GIT_SAFE_WRITEBACK_PILOT:"1",RAILWAY_PROJECT_ID:"8ac4a414-9f0b-4a90-bcce-4995e5736d9d",RAILWAY_ENVIRONMENT_ID:"bce3bde4-29c1-44e5-8cfe-7400db9f7f51",RAILWAY_SERVICE_ID:"0f673bc3-e433-4641-85a8-12b2678eb040",RAILWAY_REPLICA_COUNT:"1",INVESTMENT_GRAPH_BUNDLE_ENABLED:"0",DATA_DIR:"/pilot-001-data",CLOUD_INTAKE:"0"};
+  const saved=Object.fromEntries(Object.keys(variables).map(k=>[k,process.env[k]]));
+  const settings={sync_backend:"git",git_remote:"https://github.com/varat1122/investment-os-staging-test-vault.git",git_branch:"main"};
+  const previous=Object.fromEntries(Object.keys(settings).map(k=>[k,dbModule.getSetting(k)]));
+  try {
+    Object.assign(process.env,variables);
+    for(const [k,v] of Object.entries(settings)) dbModule.setSetting(k,v);
+    // Only filesystem attestation is synthetic; no staging directory is touched.
+    vi.spyOn(fs,"realpathSync").mockImplementation(p=>String(p));
+    expect(()=>assertGitPilot()).not.toThrow();
+    for(const key of Object.keys(variables)) {
+      process.env[key]="wrong";expect(()=>assertGitPilot()).toThrow();process.env[key]=variables[key as keyof typeof variables];
+    }
+    for(const [key,value] of Object.entries(settings)) {
+      dbModule.setSetting(key,"wrong");expect(()=>assertGitPilot()).toThrow();dbModule.setSetting(key,value);
+    }
+  } finally {
+    for(const [k,v] of Object.entries(saved)) {if(v===undefined) delete process.env[k];else process.env[k]=v;}
+    for(const [k,v] of Object.entries(previous)) dbModule.setSetting(k,v??"");
+    vi.restoreAllMocks();
+  }
+});

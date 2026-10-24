@@ -934,3 +934,13 @@ it("read-only archive inspection verifies exact persisted SEC bytes without clai
   delete process.env.SOURCE_ARCHIVE_USER_AGENT;
  }
 });
+
+it("Git pilot registers only scoped preview/create/apply/status and fails closed without staging attestation",async()=>{
+ const {setSetting}=await import("../db");setSetting("sync_backend","git");
+ const c=await connected(access);
+ try {
+  expect((await c.client.listTools()).tools.map(t=>t.name).sort()).toEqual(["preview_edit","create_note","apply_edit","get_edit_status"].sort());
+  const result=await c.client.callTool({name:"create_note",arguments:{operationId:"git-mcp-pilot-001",path:"PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md",reason:"Gate test",content:"Synthetic only"}});
+  expect(result.isError).toBe(true);
+ } finally {await c.close();setSetting("sync_backend","obsidian");}
+});
