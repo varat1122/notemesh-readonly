@@ -82,7 +82,7 @@ it("rejects POST without same Origin and rejects unauthenticated or off-scope PO
 it("owner explicitly starts preview, never writes and never executes untrusted HTML",async()=>{
   const r=await start();expect(r.status).toBe(200);
   const h=await r.text();
-  expect(h).toContain("Review exact one-note preview");
+  expect(h).toContain("Staging one-note Git Pilot — Review");
   expect(h).toContain("&lt;script&gt;untrusted note&lt;/script&gt;");
   expect(h).not.toContain("<script>");
   expect(h).toContain("Admin Approval: NOT YET VERIFIED");
