@@ -35,6 +35,7 @@ vi.mock("~/server/safe-edit/git-pilot",()=>({
   },
 }));
 vi.mock("~/server/safe-edit/engine",()=>({
+  adminPreview:()=>({path:"PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md",approved:state.approved,requiresAdminApproval:true,expiresAt:"2099-01-01T00:00:00.000Z",beforeHash:"e".repeat(64),afterHash:"a".repeat(64)}),
   status:(id:string,actor:string)=>({
     operationId:id,path:"PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md",
     status:state.receiptStatus, approved:state.approved,
