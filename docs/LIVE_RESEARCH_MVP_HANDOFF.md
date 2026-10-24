@@ -1,5 +1,13 @@
 # Live Research Intelligence MVP — 23 Oct 2026
 
+**24 Oct update:** see [Pilot #001](pilots/live-writeback-001/README_TH.md).
+Owner has since confirmed real ChatGPT Read Only success. Local Zod v3 has now
+been replaced compatibly with SDK-supported 4.6.6; current audit passes the
+existing policy and 385 focused regression tests pass. The v3 finding and peer
+description in this 23 Oct snapshot are historical, not current blockers.
+CI, original-source access, deployed version, frontend Safe Edit and actual Test
+Vault isolation remain unverified/blocked. No live write or deployment occurred.
+
 The user-facing delivery is the [installable ChatGPT Project instruction package](../integrations/investment-os-safe-edit/USER_ACCEPTANCE_TH.md),
 not a new service. Normal investment news starts research under those
 instructions; explicit fallback: **วิเคราะห์ข่าวนี้ด้วย Investment OS**.

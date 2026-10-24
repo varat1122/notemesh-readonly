@@ -6,6 +6,14 @@
 **Vault:** `Investment_OS` (Obsidian); **not included as GitHub source files**  
 **Status of this handoff:** instructions and a *dated snapshot*. Recheck latest GitHub HEAD, main, PRs, deployed SHA, CI, connector registry and permissions before acting.
 
+**24 Oct Pilot #001 update:** [current pilot package](pilots/live-writeback-001/README_TH.md)
+records owner-confirmed live Read Only success; do not repeat connectivity checks
+without a new reason. The local Zod security fix uses SDK-supported 4.6.6 with
+two record-parser compatibility changes; 385 relevant tests, build and audit pass.
+Older v3 blockers below are historical. Source and server access are currently
+proxy-blocked, deployed SHA/frontend Safe Edit/Test Vault isolation remain unknown,
+and no live write was attempted. Preserve the Production connection and mounts.
+
 **23 Oct Research MVP update:** use [Live Research MVP handoff](LIVE_RESEARCH_MVP_HANDOFF.md)
 and the [ready-to-install ChatGPT Project package](../integrations/investment-os-safe-edit/USER_ACCEPTANCE_TH.md).
 The candidate reuses the existing Source/context/Safe Edit/graph/readback path;
