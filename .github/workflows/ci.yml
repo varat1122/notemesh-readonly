@@ -53,6 +53,24 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # M3 acceptance: real local bare Git remote and disposable Vault only.
+      # Verify replay/duplicate, changed approved HEAD, concurrent push,
+      # persistent lock, uncertain push outcome and readback hash mismatch.
+      # No GitHub credentials, real Staging Vault or Railway deployment used.
+      - name: M3 Git Safe Writeback regression (offline fixtures)
+        run: pnpm exec vitest run src/server/sync/git-backend.test.ts
+
+      # Recovery proof is intentionally OFFLINE. The scripts restore only
+      # synthetic test directories in the CI runner and use a fake cloud
+      # transport. They cannot verify an actual Railway volume backup.
+      - name: M3 backup and recovery regression (offline fixtures)
+        run: |
+          node --test --test-concurrency=1 \\
+            scripts/backup/nm-backup.test.mjs \\
+            scripts/backup/nm-dr-drill.test.mjs \\
+            scripts/backup/nm-cloud-dr-drill.test.mjs \\
+            scripts/backup/nm-dr-preflight.test.mjs
+
       # Only chromium: these check that pages render and forms work, which is
       # not a cross-browser question, and the download dominates the job time.
       - name: Install the browser for the end-to-end tests
