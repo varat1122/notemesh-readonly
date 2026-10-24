@@ -82,6 +82,7 @@ export async function runGitBuffer(
       timeout: opts.timeoutMs ?? 120_000,
       reject: false,
       encoding: "buffer",
+      stripFinalNewline: false,
     });
     // execa hands back a Uint8Array here. Convert rather than cast: the two are
     // interchangeable for fs writes, but only a Buffer has an encoding-aware

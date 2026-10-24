@@ -149,3 +149,139 @@ it("rollback refuses a corrupted backup without overwriting the current note",()
  expect(()=>engine.preview(input({change:{kind:"rollback",operationId:p.operationId}}),actor)).toThrow(/checksum/);
  expect(fs.readFileSync(path.join(vault,"Fixture.md"),"utf8")).toContain("Updated statement.");
 });
+
+it("P0 synthetic end-to-end: historical retrieval → raw capture → linked review → timeline → verified readback → idempotent retry",async()=>{
+  // Synthetic-only fixture. No production Vault, broker claims or actual
+  // company business data are touched by this test.
+  const {reindexPath}=await import("../vault/indexer");
+  const {planInvestmentWriteback}=await import("../vault/investment-writeback-router");
+  const {readNote}=await import("../vault/notes");
+  const issuer="SYNZ";
+  const folders=["00_Inbox/ChatGPT","01_Companies","02_Industries_Themes",
+    "08_Daily_Weekly/Research Indexes","10_Knowledge/Company Research",
+    "10_Knowledge/Indexes","10_Knowledge/Research Methods"];
+  for(const folder of folders)fs.mkdirSync(path.join(vault,folder),{recursive:true});
+  const seed=(relative:string,content:string)=>{
+    fs.writeFileSync(path.join(vault,relative),content,"utf8");
+    reindexPath(relative);
+  };
+  const hub="01_Companies/SYNZ.md";
+  const industry="02_Industries_Themes/Software and Cybersecurity.md";
+  const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - SYNZ.md";
+  const legacy="10_Knowledge/Indexes/Company - SYNZ.md";
+  seed(hub,"---\nverification: not_reverified\n---\n# SYNZ (synthetic fixture)\n");
+  seed(industry,"# Synthetic Industry\nNo issuer-verified facts in this fixture.\n");
+  seed(legacy,"# SYNZ historical index\nSynthetic previous contextual item.\n");
+  seed(timeline,"---\nverification: not_reverified\n---\n# SYNZ\n\n## Chronology\nExisting archived synthetic baseline.\n");
+  const text="Synthetic user input for SYNZ: an internal test described a demo milestone. This is fictional fixture text, not an issuer report.";
+  const submission={
+    domain:"company" as const,entities:[issuer],
+    topic:"SYNZ demo milestone new input (synthetic 2026-10-19)",
+    inputFormat:"text" as const,sourceKind:"user_commentary" as const,
+    sourceLanguage:"en",extractedText:text
+  };
+  const planned=planInvestmentWriteback(submission);
+  expect(planned.historical.paths).toContain(hub);
+  expect(planned.historical.paths).toContain(legacy);
+  expect(planned.gates.canAutoWrite).toBe(false);
+  expect(planned.gates.duplicateAdjudicated).toBe(false);
+  const raw=planned.routes.find(x=>x.kind==="raw_input")?.path;
+  const review=planned.routes.find(x=>x.kind==="research_review")?.path;
+  expect(raw).toBeTruthy();
+  expect(review).toBeTruthy();
+  if(!raw||!review)throw Error("Fixture router did not provide safe destinations");
+
+  function reviewedWrite(relative:string,change:Record<string,unknown>){
+    const preview=engine.preview({
+      operationId:id(),path:relative,reason:"Synthetic closed-loop integration verification",
+      change
+    },actor);
+    // A preview alone never mutates the note. The regression then explicitly
+    // applies the same reviewed token; no automatic approvals are granted.
+    const receipt=apply(preview);
+    expect(receipt).toMatchObject({
+      status:"written",
+      receipt:{write:"written",readback:"verified",reindex:"verified",
+        remoteSync:"unverified",mobileSync:"unverified"}
+    });
+    return {preview,receipt};
+  }
+  const original=reviewedWrite(raw,{kind:"create",content:[
+    "---","type: investment_raw_intake","source_type: user_supplied",
+    "verification: not_reverified", "event_date: null", "---",
+    "# SYNZ Synthetic Original User Input", "", text,""
+  ].join("\n")});
+  const reviewResult=reviewedWrite(review,{kind:"create",content:[
+    "---","type: investment_research_review","source_type: archived_ai",
+    "verification: not_reverified","event_date: null","---",
+    "# SYNZ Synthetic Review — Not Issuer Verified", "",
+    "## Source and boundaries",
+    "The source is a synthetic user-input fixture, not a company release.",
+    "[["+raw.replace(/\.md$/,"")+"|Exact original input]]",
+    "[["+hub.replace(/\.md$/,"")+"|Company Hub]]",
+    "[["+industry.replace(/\.md$/,"")+"|Industry context]]",
+    "## Analysis",
+    "A demo mention does not prove bookings, ARR, cash flow, or thesis change.",""
+  ].join("\n")});
+  const timelineResult=reviewedWrite(timeline,{
+    kind:"append",heading:"Chronology",date:"2026-10-19",content:[
+      "Synthetic source submission — not an independently verified event",
+      "[["+review.replace(/\.md$/,"")+"|Source-attributed review]]",
+      "<!-- investment-intake:"+planned.planId+" -->"
+    ].join("\n")
+  });
+  expect(readNote(raw).content).toContain(text);
+  expect(readNote(review).content).toContain(raw.replace(/\.md$/,""));
+  expect(readNote(timeline).content).toContain("<!-- investment-intake:"+planned.planId+" -->");
+
+  const repeated=planInvestmentWriteback(submission);
+  expect(repeated.planId).toBe(planned.planId);
+  expect(repeated.routes.find(x=>x.kind==="raw_input")?.action).toBe("link_existing_or_hold");
+  expect(repeated.routes.find(x=>x.kind==="research_review")?.action).toBe("link_existing_or_hold");
+  expect(repeated.routes.find(x=>x.kind==="company_timeline_candidate")?.action).toBe("link_existing_or_hold");
+  // Stable apply receipt is safe to retry, with no additional append.
+  expect(apply(timelineResult.preview)).toEqual(timelineResult.receipt);
+  expect(readNote(timeline).content.match(/investment-intake:IN-/g)).toHaveLength(1);
+  expect(engine.status(original.preview.operationId,actor).status).toBe("written");
+  expect(engine.status(reviewResult.preview.operationId,actor).status).toBe("written");
+});
+
+
+it("Git pilot policy fails closed for disabled or wrongly identified deployments",async()=>{
+  const {assertGitPilot}=await import("./git-pilot-policy");
+  expect(()=>assertGitPilot()).toThrow();
+  process.env.GIT_SAFE_WRITEBACK_PILOT="1";
+  process.env.RAILWAY_PROJECT_ID="wrong-project";
+  expect(()=>assertGitPilot()).toThrow();
+  delete process.env.GIT_SAFE_WRITEBACK_PILOT;delete process.env.RAILWAY_PROJECT_ID;
+});
+it("Git Safe Edit cannot bypass the internal scoped transaction",()=>{
+  dbModule.setSetting("sync_backend","git");
+  try {expect(()=>engine.preview(input(),actor)).toThrow(/scoped pilot/);}
+  finally {dbModule.setSetting("sync_backend","obsidian");}
+});
+
+it("Git pilot attestation rejects each wrong scope even when the feature flag is enabled",async()=>{
+  const {assertGitPilot}=await import("./git-pilot-policy");
+  const variables={GIT_SAFE_WRITEBACK_PILOT:"1",RAILWAY_PROJECT_ID:"8ac4a414-9f0b-4a90-bcce-4995e5736d9d",RAILWAY_ENVIRONMENT_ID:"bce3bde4-29c1-44e5-8cfe-7400db9f7f51",RAILWAY_SERVICE_ID:"0f673bc3-e433-4641-85a8-12b2678eb040",RAILWAY_REPLICA_COUNT:"1",INVESTMENT_GRAPH_BUNDLE_ENABLED:"0",DATA_DIR:"/pilot-001-data",CLOUD_INTAKE:"0"};
+  const saved=Object.fromEntries(Object.keys(variables).map(k=>[k,process.env[k]]));
+  const settings={sync_backend:"git",git_remote:"https://github.com/varat1122/investment-os-staging-test-vault.git",git_branch:"main"};
+  const previous=Object.fromEntries(Object.keys(settings).map(k=>[k,dbModule.getSetting(k)]));
+  try {
+    Object.assign(process.env,variables);
+    for(const [k,v] of Object.entries(settings)) dbModule.setSetting(k,v);
+    // Only filesystem attestation is synthetic; no staging directory is touched.
+    vi.spyOn(fs,"realpathSync").mockImplementation(p=>String(p));
+    expect(()=>assertGitPilot()).not.toThrow();
+    for(const key of Object.keys(variables)) {
+      process.env[key]="wrong";expect(()=>assertGitPilot()).toThrow();process.env[key]=variables[key as keyof typeof variables];
+    }
+    for(const [key,value] of Object.entries(settings)) {
+      dbModule.setSetting(key,"wrong");expect(()=>assertGitPilot()).toThrow();dbModule.setSetting(key,value);
+    }
+  } finally {
+    for(const [k,v] of Object.entries(saved)) {if(v===undefined) delete process.env[k];else process.env[k]=v;}
+    for(const [k,v] of Object.entries(previous)) dbModule.setSetting(k,v??"");
+    vi.restoreAllMocks();
+  }
+});

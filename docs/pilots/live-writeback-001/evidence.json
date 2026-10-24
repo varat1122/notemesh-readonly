@@ -1,0 +1,560 @@
+{
+  "reportDate": "2026-10-24",
+  "timezone": "Etc/UTC",
+  "pilot": "LIVE WRITEBACK PILOT #001",
+  "overall": "BLOCKED_LIVE_WRITE",
+  "git": {
+    "startingLocalHead": "83786d93a651001f86e24f3de939ae603632285e",
+    "branch": "feat/real-event-context-to-writeback-handoff-20261021",
+    "remotePr108Head": "dd89be9c00bfc248c5d103c9eea327535febc372",
+    "remoteMain": "b563c55fd99c5fb2738fda0682f7b6f76a0ef42a",
+    "remoteGitRefsRechecked": true,
+    "localStack84Through108Sequential": true,
+    "mainIsAncestor": true,
+    "prStateAndCi": "BLOCKED: GraphQL Forbidden",
+    "pushedMergedDeployedPublished": false
+  },
+  "versions": {
+    "deployedSha": null,
+    "registeredChatGPTToolVersion": null,
+    "cloudRuntimeConfigVersionSuffix": "6adb5f75daec819f936e5a29688baccf",
+    "note": "Cloud environment configuration revision is not a NoteMesh deployed commit"
+  },
+  "liveReadOnly": {
+    "status": "PASS_OWNER_REPORTED",
+    "independentlyRetestedHere": false,
+    "reportedIndexedMarkdownNotes": 3375,
+    "tools": [
+      "get_vault_info",
+      "investment_context_pack",
+      "read_note",
+      "search_vault",
+      "review_investment_claim",
+      "plan_investment_writeback"
+    ],
+    "evidenceProvenance": "Owner reports successful actual ChatGPT invocation and real NVDA analysis/read-only writeback plan. No raw frontend trace or current vault note contents are available in this Codex session."
+  },
+  "sourceVerification": {
+    "status": "BLOCKED",
+    "attempt": {
+      "url": "https://nvidianews.nvidia.com/news/nvidia-and-supply-chain-partners-expand-capacity-to-accelerate-ai-infrastructure-buildout/",
+      "method": "GET",
+      "proxy": "inherited; TLS verification enabled",
+      "authenticated": false,
+      "status": "BLOCKED",
+      "error": "URLError: <urlopen error Tunnel connection failed: 403 Forbidden>"
+    },
+    "publisherAuthentication": "NOT_VERIFIED",
+    "eventDate": "2026-10-21",
+    "eventDateProvenance": "owner-supplied, not independently verified",
+    "publicationDate": null,
+    "verificationDate": null,
+    "sourceMarkdownPath": null,
+    "sourceMarkdownSha256": null,
+    "archiveSnapshotId": null,
+    "rawSourceSha256": null,
+    "sourceRegistryLookup": "NOT_TESTED_NO_CONNECTED_TOOLS",
+    "claims": {
+      "aggregate_substrate_2_5x_three_years": {
+        "status": "UNRESOLVED_USER_SUPPLIED",
+        "originalRead": false
+      },
+      "substrate_partner_agreements": {
+        "status": "UNRESOLVED_USER_SUPPLIED",
+        "originalRead": false
+      },
+      "amkor_interposer_over_300_percent_end_2028": {
+        "status": "UNRESOLVED_USER_SUPPLIED",
+        "originalRead": false
+      },
+      "kyec_advance_usd_1_1bn": {
+        "status": "UNRESOLVED_USER_SUPPLIED",
+        "originalRead": false
+      },
+      "spil_optical_15x_mid_2027": {
+        "status": "UNRESOLVED_USER_SUPPLIED",
+        "originalRead": false
+      }
+    },
+    "realNvidiaFixtureOrExecutableWritePayloadCreated": false,
+    "licensingAndArchivalRights": "NOT_TESTED"
+  },
+  "historicalComparison": {
+    "status": "BLOCKED",
+    "thesisAndRegisterReadThisSession": false,
+    "ownerReportedThesisStatus": [
+      "draft_from_archived_evidence",
+      "not_reverified"
+    ],
+    "classification": "unresolved",
+    "ibidenLoadVsAggregateCapacity": "kept distinct; no same-metric or independent confirmation claim",
+    "protectedMutations": 0,
+    "pathsReportedByOwner": [
+      "05_Thesis/NVDA - Current Thesis.md",
+      "05_Thesis/NVDA - Evidence Register.md",
+      "08_Daily_Weekly/Research Indexes/Company Evolution - NVDA.md",
+      "01_Companies/NVDA.md"
+    ]
+  },
+  "infrastructure": {
+    "liveInventoryStatus": "BLOCKED_NO_RAILWAY_MANAGEMENT_ACCESS",
+    "railwayCliAvailable": false,
+    "railwayManagementToolAvailable": false,
+    "notemeshConnectorAvailableToCodex": false,
+    "frontendToolAvailableToCodex": false,
+    "dockerPsObservedContainers": 0,
+    "localDataRootsInspectedReadOnly": [
+      {
+        "path": "/workspace/notemesh-readonly/data",
+        "sqliteIntegrity": "ok",
+        "indexedNotes": 0,
+        "vaultConfiguredSetting": null
+      },
+      {
+        "path": "/workspace/.investment-os-foundation/state/data",
+        "sqliteIntegrity": "ok",
+        "indexedNotes": 0,
+        "vaultConfiguredSetting": null
+      }
+    ],
+    "localRootIsNotProofOfRemoteTestVault": true,
+    "deployedHealthAttempt": {
+      "url": "https://notemesh-production-a893.up.railway.app/api/health",
+      "method": "GET",
+      "proxy": "inherited; TLS verification enabled",
+      "authenticated": false,
+      "status": "BLOCKED",
+      "error": "URLError: <urlopen error Tunnel connection failed: 403 Forbidden>"
+    },
+    "testEnvironmentId": null,
+    "testVolumeId": null,
+    "testOrigin": null,
+    "testSyncRemoteId": null,
+    "backupRestoreLiveStatus": "NOT_TESTED",
+    "actualCrossVaultIsolation": "BLOCKED",
+    "proposedDedicatedTestRoot": "/pilot-001-data",
+    "proposalApproval": "NOT_GRANTED"
+  },
+  "localSecurityChange": {
+    "status": "PASS_LOCAL_VALIDATED",
+    "rootZod": "3.25.76 -> 4.6.6",
+    "compatibilityCodeChange": "two Yahoo z.record calls explicitly specify string keys; existing schemas/tests and engine rules retained",
+    "newDependencies": 0,
+    "forcedOverridesAdded": 0,
+    "newAuditExceptions": 0,
+    "zodAdvisoriesReturned": 0,
+    "auditExit": 0,
+    "rawAuditCounts": {
+      "info": 0,
+      "low": 3,
+      "moderate": 16,
+      "high": 1,
+      "critical": 0
+    },
+    "activeHighCriticalAdvisoriesAfterExistingPolicy": [],
+    "existingHighExceptionVerified": "node-forge GHSA-86w9-cpqp-85rv via direct npm bulk lookup; existing runtime exclusion guard passed",
+    "remainingPeerMismatch": "better-auth requests better-sqlite3 ^12; root uses 13.0.2 (pre-existing)",
+    "deployedSecurityStatus": "NOT_VERIFIED"
+  },
+  "mcpContractCompatibility": {
+    "status": "PASS_FOR_RECORDED_INVARIANTS_AND_EXISTING_REGRESSION_CASES",
+    "captures": "local synthetic tools/list, never a ChatGPT frontend",
+    "invariants": {
+      "read-tools.json": {
+        "sameToolNames": true,
+        "sameTopLevelRequired": true,
+        "sameArgumentNames": true,
+        "sameAnnotationsAndScopes": true
+      },
+      "safe-edit-tools.json": {
+        "sameToolNames": true,
+        "sameTopLevelRequired": true,
+        "sameArgumentNames": true,
+        "sameAnnotationsAndScopes": true
+      }
+    },
+    "wireSchemasByteIdentical": false,
+    "serializationChanges": [
+      "additionalProperties omission for strip-mode objects",
+      "safe-integer maximum bounds",
+      "expanded refs/unions and date patterns"
+    ],
+    "rawDifferenceCounts": {
+      "read-tools.json": {
+        "sameNames": true,
+        "tools": 28,
+        "differences": 45
+      },
+      "safe-edit-tools.json": {
+        "sameNames": true,
+        "tools": 15,
+        "differences": 81
+      }
+    },
+    "frontendSchemaRefreshRequiredAfterApprovedRelease": true,
+    "temporaryCaptureInstrumentationRemoved": true
+  },
+  "tests": {
+    "status": "PASS",
+    "passed": 385,
+    "failed": 0,
+    "pending": 0,
+    "files": 36,
+    "newTestCases": 0,
+    "argv": [
+      "/workspace/.investment-os-foundation/toolchain/node_modules/.bin/pnpm",
+      "exec",
+      "vitest",
+      "run",
+      "src/server/auth-guard.test.ts",
+      "src/server/auth-upgrade.test.ts",
+      "src/server/backup/coordinated-offline-fixture.test.ts",
+      "src/server/backup/cross-data-restore-evidence.test.ts",
+      "src/server/cloud-intake.test.ts",
+      "src/server/intake.test.ts",
+      "src/server/market-prices/collector.test.ts",
+      "src/server/market-prices/drive.test.ts",
+      "src/server/market-prices/event-analysis.test.ts",
+      "src/server/market-prices/incremental.test.ts",
+      "src/server/market-prices/store-dr-writer-fence.test.ts",
+      "src/server/market-prices/store.test.ts",
+      "src/server/market-prices/yahoo.test.ts",
+      "src/server/mcp/alerts.test.ts",
+      "src/server/mcp/auth-dr-writer-fence.test.ts",
+      "src/server/mcp/boundary.test.ts",
+      "src/server/mcp/catalog.test.ts",
+      "src/server/mcp/oauth-endpoint.test.ts",
+      "src/server/mcp/price-tools.test.ts",
+      "src/server/mcp/ratelimit.test.ts",
+      "src/server/mcp/readonly-deployment.test.ts",
+      "src/server/mcp/safe-edit-server.test.ts",
+      "src/server/mcp/save-server.test.ts",
+      "src/server/mcp/server.test.ts",
+      "src/server/mcp/tool-auth.test.ts",
+      "src/server/oauth-refresh-scopes.test.ts",
+      "src/server/oauth-registration.test.ts",
+      "src/server/research-source-archive.test.ts",
+      "src/server/research-source-fetch.test.ts",
+      "src/server/safe-edit/engine.test.ts",
+      "src/server/safe-edit/knowledge-graph-readback.test.ts",
+      "src/server/safe-edit/sync.test.ts",
+      "src/server/user-attachment-vault.test.ts",
+      "src/server/vault/investment-claim-review.test.ts",
+      "src/server/vault/investment-context.test.ts",
+      "src/server/vault/investment-writeback-router.test.ts",
+      "--maxWorkers=1",
+      "--testTimeout=15000",
+      "--reporter=json",
+      "--outputFile=/workspace/.investment-os-foundation/live-pilot-001/regression-results.json"
+    ],
+    "purpose": "Root Zod security compatibility: existing MCP/Safe Edit contracts, all directly affected price-parser consumers, prior 234-test selection, intake and existing offline backup/restore evidence. No NVIDIA source fixture, new test case, evaluation initialization or provider request.",
+    "perFile": [
+      {
+        "file": "src/server/auth-guard.test.ts",
+        "passed": 3,
+        "failed": 0
+      },
+      {
+        "file": "src/server/auth-upgrade.test.ts",
+        "passed": 4,
+        "failed": 0
+      },
+      {
+        "file": "src/server/cloud-intake.test.ts",
+        "passed": 4,
+        "failed": 0
+      },
+      {
+        "file": "src/server/intake.test.ts",
+        "passed": 8,
+        "failed": 0
+      },
+      {
+        "file": "src/server/oauth-refresh-scopes.test.ts",
+        "passed": 6,
+        "failed": 0
+      },
+      {
+        "file": "src/server/oauth-registration.test.ts",
+        "passed": 4,
+        "failed": 0
+      },
+      {
+        "file": "src/server/research-source-archive.test.ts",
+        "passed": 9,
+        "failed": 0
+      },
+      {
+        "file": "src/server/research-source-fetch.test.ts",
+        "passed": 5,
+        "failed": 0
+      },
+      {
+        "file": "src/server/user-attachment-vault.test.ts",
+        "passed": 7,
+        "failed": 0
+      },
+      {
+        "file": "src/server/backup/coordinated-offline-fixture.test.ts",
+        "passed": 6,
+        "failed": 0
+      },
+      {
+        "file": "src/server/backup/cross-data-restore-evidence.test.ts",
+        "passed": 3,
+        "failed": 0
+      },
+      {
+        "file": "src/server/market-prices/collector.test.ts",
+        "passed": 5,
+        "failed": 0
+      },
+      {
+        "file": "src/server/market-prices/drive.test.ts",
+        "passed": 16,
+        "failed": 0
+      },
+      {
+        "file": "src/server/market-prices/event-analysis.test.ts",
+        "passed": 6,
+        "failed": 0
+      },
+      {
+        "file": "src/server/market-prices/incremental.test.ts",
+        "passed": 6,
+        "failed": 0
+      },
+      {
+        "file": "src/server/market-prices/store-dr-writer-fence.test.ts",
+        "passed": 2,
+        "failed": 0
+      },
+      {
+        "file": "src/server/market-prices/store.test.ts",
+        "passed": 12,
+        "failed": 0
+      },
+      {
+        "file": "src/server/market-prices/yahoo.test.ts",
+        "passed": 17,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/alerts.test.ts",
+        "passed": 14,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/auth-dr-writer-fence.test.ts",
+        "passed": 2,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/boundary.test.ts",
+        "passed": 21,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/catalog.test.ts",
+        "passed": 13,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/oauth-endpoint.test.ts",
+        "passed": 5,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/price-tools.test.ts",
+        "passed": 4,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/ratelimit.test.ts",
+        "passed": 25,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/readonly-deployment.test.ts",
+        "passed": 17,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/safe-edit-server.test.ts",
+        "passed": 20,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/save-server.test.ts",
+        "passed": 8,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/server.test.ts",
+        "passed": 27,
+        "failed": 0
+      },
+      {
+        "file": "src/server/mcp/tool-auth.test.ts",
+        "passed": 2,
+        "failed": 0
+      },
+      {
+        "file": "src/server/safe-edit/engine.test.ts",
+        "passed": 27,
+        "failed": 0
+      },
+      {
+        "file": "src/server/safe-edit/knowledge-graph-readback.test.ts",
+        "passed": 13,
+        "failed": 0
+      },
+      {
+        "file": "src/server/safe-edit/sync.test.ts",
+        "passed": 6,
+        "failed": 0
+      },
+      {
+        "file": "src/server/vault/investment-claim-review.test.ts",
+        "passed": 16,
+        "failed": 0
+      },
+      {
+        "file": "src/server/vault/investment-context.test.ts",
+        "passed": 25,
+        "failed": 0
+      },
+      {
+        "file": "src/server/vault/investment-writeback-router.test.ts",
+        "passed": 17,
+        "failed": 0
+      }
+    ],
+    "resultSha256": "60d94dbd341e8938d98bab0a5af18b865da888bf6b308ee64915fe384cdc78b9",
+    "prior234": "Retained prior result; inputs matched at preflight before dependency compatibility fix. Current 385 rerun includes that selection.",
+    "offlineBackupTests": {
+      "coordinatedCut": 6,
+      "crossDataRestore": 3,
+      "scope": "synthetic sources and isolated temporary filesystem/SQLite only; not live Test Vault proof"
+    },
+    "browserDockerRemoteCi": "NOT_TESTED_OR_BLOCKED"
+  },
+  "checks": {
+    "final-frozen-install": {
+      "exitCode": 0
+    },
+    "lint": {
+      "exitCode": 0
+    },
+    "typecheck": {
+      "exitCode": 0
+    },
+    "build": {
+      "exitCode": 0,
+      "prerenderError": false
+    },
+    "patched-audit": {
+      "exitCode": 0
+    },
+    "peers": {
+      "exitCode": 1
+    }
+  },
+  "acceptance": {
+    "syntheticIntegration": "PASS",
+    "liveReadOnly": "PASS_OWNER_REPORTED",
+    "liveChatGPTSafeEdit": "NOT_TESTED",
+    "liveTestVaultWriteback": "BLOCKED",
+    "livePhysicalReadback": "NOT_TESTED",
+    "liveEventBRecall": "NOT_TESTED",
+    "productionVaultWrite": "NOT_TESTED_NOT_AUTHORIZED",
+    "deviceSync": "NOT_TESTED",
+    "liveWriteReceipts": []
+  },
+  "proposedWrite": {
+    "status": "HOLD_NOT_EXECUTABLE",
+    "eventKeyCandidate": "NVDA-20261021-AI-SUPPLY-CAPACITY",
+    "operationRootReservedNotExecuted": "ios-pilot-001-nvda-20261021",
+    "sourcePath": null,
+    "expectedSourceSha256": null,
+    "analysisPathCandidate": "08_Daily_Weekly/Research Indexes/Investment Review - NVDA - NVDA-20261021-AI-SUPPLY-CAPACITY.md",
+    "timelinePathCandidate": "08_Daily_Weekly/Research Indexes/Company Evolution - NVDA.md",
+    "noDuplicateClassificationVerified": false,
+    "authorization": null
+  },
+  "preservation": {
+    "untrackedP0Files": 16,
+    "p0AllUnchanged": true,
+    "campaign": "investment-os-openai-evaluation-new-17e04411",
+    "ledgerIdentity": {
+      "campaign.sqlite": {
+        "sha256": "344b1c34c22c3db0726ec4c041a1e5d1b0c783dea97ff84613d5b28342561371",
+        "unchanged": true
+      },
+      "campaign.sqlite.identity": {
+        "sha256": "052b05f9cf99be994066d337af4bf210918613e7c1368e5096533a9ad91d3b3d",
+        "unchanged": true
+      }
+    },
+    "sqliteReadMode": "mode=ro",
+    "integrity": "ok",
+    "ledgerMutations": 0,
+    "reservationsModified": false,
+    "paidInferenceCalls": 0,
+    "evaluationCampaignsCreated": 0,
+    "productionVaultWrites": 0,
+    "credentialsChanges": 0,
+    "mountChanges": 0,
+    "hostingChanges": 0,
+    "environmentDraftOrPublishChanges": 0
+  },
+  "artifactHashes": {
+    "package.json": "520ce4b232d68f6a49287b0186978d2e2b4b267452e941efce4ef6d70ab2b6ef",
+    "pnpm-lock.yaml": "7eed15c766691268952552d86d4cd1944a6c73508db6db460915a3a1cb41aa5e",
+    "pnpm-workspace.yaml": "bf499737dc4d3c34ab52eb141f2e05eab06495f56677f3b9ebf8cc59d33a02a4",
+    "src/server/market-prices/yahoo.ts": "181c487eabd323e4ea226bc441e69ae6d52c6d97c056beae6b8c2b6ccb368b73",
+    "src/server/mcp/safe-edit-server.ts": "75ff693603e59d5f6fbaaab34520d506fc6d5ab464625d6788dbbc00b2d9bd46",
+    "src/server/mcp/server.ts": "f31b229f5a5a4b0d7e119423737342ff65c6fa92d73c221ecc0ba8066d71ab89",
+    "src/server/safe-edit/investment-review-preparation.ts": "433778edd9e7d24299ce4665e3e2948a6254bfe5be263ef9d854cfff585506df",
+    "src/server/safe-edit/investment-graph-bundle.ts": "ee494972875afc6c91ebe20fb14396dd09b3087d241f799c97d650c7a200de3e",
+    "src/server/safe-edit/knowledge-graph-readback.ts": "a0856a3fb00504a3dd827c7deac6b25985ad6cb3b5353deaa0e839a1936dedfd",
+    "src/server/safe-edit/engine.ts": "6966c7568e75edb6257d915baebfbb320b544610a40dc9f911d2a245ce6a3e5d",
+    "src/server/safe-edit/sync.ts": "0d36807e4d09365fb3123c0c23471e1f0760070f67ff64713a54ec29af96f1a0",
+    "src/server/research-source-fetch.ts": "0dc1af636e88ce6853331cbfa1691a82a74f63becd33116507bc15bf917757d8",
+    "src/server/mcp/endpoint.ts": "a9e6df0626a1d0241e2fb509b5866238647f04cf6b44575e70bfb00965348d7a",
+    "src/server/mcp/oauth.ts": "60a18efdf478ba7e2349d397c7743d51281250fa4dc035b50c17bc8cdcdb2ff2",
+    "docs/pilots/live-writeback-001/README_TH.md": "236527277ae672cb78e3ef3af1570455554e6499ff197d185276b7f637305542",
+    "docs/pilots/live-writeback-001/NVDA_REVIEW_DRAFT.md": "a0f7fbfb31ac6e21a8c512cff37c5a6c976840a552f79d37fb0fe2231dd9bd97",
+    "integrations/investment-os-safe-edit/PROJECT_INSTRUCTIONS_TH.md": "2ebda5141f3a019b989bdcc30ecd4ace1126e7399424aab0aa1add9c0645789f",
+    "integrations/investment-os-safe-edit/INVESTMENT_REVIEW_TEMPLATE.md": "b7c6d32574da5fb9dc52be33f36df16a31626aa15c74b0b741c3f24816c9bb25"
+  },
+  "retainedEvidence": {
+    "audit-summary.json": "b181a5877cf9903d789c9fddbffd8a936df6ec256c9bbc0e5fd01e300e62bd1c",
+    "audit.json": "2b46d2e848a4bb89088df85b19b33cb752dd98c5e9ff2a8448e8bf2d95383d8e",
+    "build-result.json": "49c1161b1cc0d23519eb924a45b15f8b73c3dc6d7cdc9274dae397df209f7ded",
+    "contract-invariants.json": "7392f8d4d8d8d1cd93ee401e3149abe3249698c54fadde56590f4fe1bce0db50",
+    "deployed-health-fetch.json": "ee32a95b29e6f1fa17fe77b680aae2f09fe093ad4b40b8a4b48739fdb35f10f6",
+    "existing-exception-advisories.json": "9cf2329448d37295a72c2d76f62ae66b0457a23d4bcd723bcc7a0b1f2583a8a9",
+    "existing-exception-versions.json": "6012da62507ac3f0dde04c0b3bb8ea54c28c3cffc7d02272630a7238a5f56735",
+    "final-frozen-install-result.json": "47b8b6b49d4695fe6e036bd916538aff4f46773e212ca0d429db80f3963e2cfe",
+    "lint-result.json": "47b8b6b49d4695fe6e036bd916538aff4f46773e212ca0d429db80f3963e2cfe",
+    "nvidia-original-fetch.json": "ca2a35c433ff4c3635476a56199b5e55979c3b5a75bf96d0c1ac20d73ba99162",
+    "patched-audit-result.json": "47b8b6b49d4695fe6e036bd916538aff4f46773e212ca0d429db80f3963e2cfe",
+    "patched-audit.json": "1185ead5f8c6cf03336c55b98664b1647e01fe0a96a5e2ab8f17b896b3cf55b9",
+    "peers-result.json": "f468f8bf84d59a390a40e5d5ac0291111e0e6eeb79821864810ae628cbd3507e",
+    "preflight.json": "f3023cdb8950eeec2b72bd91a964739d3b2fd21b0fd5166be5d4819264587096",
+    "read-tools-wire-diff.json": "9bddd56dca474b3b51240dfbed8cd8d5ea39e000464d1794a95e6877ba219b84",
+    "regression-command.json": "e31f6335f57bbfe03962eb8e0f52213f455a0cba44f8f2c154a59cb390234cc7",
+    "regression-results.json": "60d94dbd341e8938d98bab0a5af18b865da888bf6b308ee64915fe384cdc78b9",
+    "safe-edit-tools-wire-diff.json": "3c5bcb13c35ecbf7bf9dcd2cd0ead6640f4a1f32caf2b3faae73c206604bc69f",
+    "schema-v3-results.json": "51d9f5a056ec1744dbefc21ed7507b21021129c12cdb20954ff96b29c43b3681",
+    "schema-v4-results.json": "e03d2ad1fdc36c305812228b0d3642f31005dafe329e6e33b63f0b4eec5c3612",
+    "typecheck-result.json": "47b8b6b49d4695fe6e036bd916538aff4f46773e212ca0d429db80f3963e2cfe",
+    "wire-summary.json": "4a74951875105f2df59a6222d7da29d759b5f20f1ae9e53bba2a0481c65fe7a4",
+    "zod-availability.json": "436ce01b534f695def90d8af84fd567b2538a80c7a32a282634ccb1970020c39",
+    "zod4-install-result.json": "47b8b6b49d4695fe6e036bd916538aff4f46773e212ca0d429db80f3963e2cfe",
+    "zod4-typecheck-result.json": "47b8b6b49d4695fe6e036bd916538aff4f46773e212ca0d429db80f3963e2cfe"
+  },
+  "evidenceDirectory": "/workspace/.investment-os-foundation/live-pilot-001",
+  "nextOwnerAction": "Approve/configure exact read-only egress hosts nvidianews.nvidia.com and api.github.com through managed cloud settings with existing draft preserved; provide non-secret Railway environment/service/volume/Sync metadata. No deployment/write until remaining release/isolation/source/authorization gates are satisfied."
+}

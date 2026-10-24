@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
+import path from "node:path";
 import { claimAdmin, markConfigured, rpc, startServer, type Server } from "./harness";
 
 /**
@@ -46,7 +48,9 @@ async function connectAsClient(
    * completely different code, so both need covering.
    */
   bindResource = true,
-): Promise<{ clientId: string; accessToken: string }> {
+  scope = "vault:read",
+  endpoint = "/api/mcp",
+): Promise<{ clientId: string; accessToken: string; refreshToken?: string }> {
   const headers = { "Content-Type": "application/json", Origin: server.url };
 
   const reg = await (
@@ -56,7 +60,7 @@ async function connectAsClient(
       body: JSON.stringify({
         client_name: "revocation-test",
         redirect_uris: [REDIRECT],
-        grant_types: ["authorization_code"],
+        grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
         token_endpoint_auth_method: "none",
       }),
@@ -67,11 +71,11 @@ async function connectAsClient(
     response_type: "code",
     client_id: reg.client_id,
     redirect_uri: REDIRECT,
-    scope: "vault:read",
+    scope,
     code_challenge: CHALLENGE,
     code_challenge_method: "S256",
     state: "test",
-    ...(bindResource ? { resource: `${server.url}/api/mcp` } : {}),
+    ...(bindResource ? { resource: `${server.url}${endpoint}` } : {}),
   });
   const authorize = await fetch(`${server.url}/api/auth/oauth2/authorize?${params}`, {
     headers: { cookie },
@@ -106,14 +110,64 @@ async function connectAsClient(
         redirect_uri: REDIRECT,
         client_id: reg.client_id,
         code_verifier: VERIFIER,
-        ...(bindResource ? { resource: `${server.url}/api/mcp` } : {}),
+        ...(bindResource ? { resource: `${server.url}${endpoint}` } : {}),
       }),
     })
-  ).json()) as { access_token?: string };
+  ).json()) as { access_token?: string; refresh_token?: string };
 
   expect(token.access_token, "token exchange should succeed").toBeTruthy();
-  return { clientId: reg.client_id, accessToken: token.access_token! };
+  return { clientId: reg.client_id, accessToken: token.access_token!, refreshToken: token.refresh_token };
 }
+
+it("recovers an expired save connection through its approved refresh grant without duplicating a queued analysis", async()=>{
+  // All identities, tokens, SQLite state and Vault paths belong to this
+  // temporary server. Never change a live token's expiry to test reconnect.
+  const scope="openid offline_access vault:read inbox:submit";
+  const connection=await connectAsClient(false,scope,"/api/save-analysis");
+  expect(connection.accessToken.split(".")).not.toHaveLength(3);
+  expect(typeof connection.refreshToken).toBe("string");
+  const input={sourceChat:"SYNTHETIC RECONNECT TEST",notes:[{
+    title:"Synthetic saved analysis",eventDate:null,userInput:"Unverified synthetic user input",
+    analysis:"Historical AI hypothesis, not independent evidence.",relatedNotes:[],
+  }]};
+  async function call(token:string,name:string,args:unknown){
+    return fetch(`${server.url}/api/save-analysis`,{method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json, text/event-stream",Authorization:`Bearer ${token}`},
+      body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",params:{name,arguments:args}})});
+  }
+  async function receipt(response:Response){
+    expect(response.status).toBe(200);
+    const text=await response.text();
+    const data=response.headers.get("Content-Type")?.includes("text/event-stream")
+      ?text.split("\n").find(l=>l.startsWith("data: "))?.slice(6):text;
+    const result=JSON.parse(data!).result;
+    expect(result.isError).not.toBe(true);
+    return JSON.parse(result.content[0].text);
+  }
+  const first=await receipt(await call(connection.accessToken,"submit_investment_notes",input));
+  expect(first.status).toBe("queued");
+  const database=new Database(path.join(server.dataDir,"app.sqlite"));
+  try{
+    expect(database.prepare('UPDATE "oauthAccessToken" SET expiresAt=? WHERE clientId=?')
+      .run(Date.now()-60_000,connection.clientId).changes).toBeGreaterThan(0);
+    const expired=await call(connection.accessToken,"get_submission_status",{id:first.id});
+    expect(expired.status).toBe(401);
+    expect(expired.headers.get("WWW-Authenticate")).toContain("oauth-protected-resource/api/save-analysis");
+    // Renew via the actual provider, without a session cookie, new consent,
+    // relaxed scopes or a replacement write implementation.
+    const renewed=await fetch(`${server.url}/api/auth/oauth2/token`,{method:"POST",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({
+        grant_type:"refresh_token",client_id:connection.clientId,
+        refresh_token:connection.refreshToken!,scope,
+      })});
+    expect(renewed.status).toBe(200);
+    const token=await renewed.json();
+    expect(typeof token.access_token).toBe("string");
+    expect(await receipt(await call(token.access_token,"get_submission_status",{id:first.id}))).toEqual(first);
+    expect(await receipt(await call(token.access_token,"submit_investment_notes",input))).toEqual(first);
+    expect(database.prepare("SELECT count(*) AS n FROM intake_queue WHERE id=?").get(first.id)).toEqual({n:1});
+  }finally{database.close();}
+},60_000);
 
 function toolsList(accessToken: string) {
   return fetch(`${server.url}/api/mcp`, {

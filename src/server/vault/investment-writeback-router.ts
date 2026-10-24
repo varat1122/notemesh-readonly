@@ -6,6 +6,7 @@
  * Never edits the vault or upgrades protected investment decisions.
  */
 import { createHash } from "node:crypto";
+import { readNote } from "./notes";
 import { db } from "../db";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
@@ -60,6 +61,18 @@ export interface WritebackPlan {
     paths:string[];
     missing:string[];
   };
+  historicalEventReview:{
+    status:"possible_same_event_candidates"|"none_selected_not_proof_new";
+    candidatePaths:string[];
+    duplicateAdjudicated:false;
+  };
+  sourceEventReview:{
+    status:"possible_same_source_event_candidates"|"no_structured_match_not_proof_new"|"insufficient_identity";
+    candidatePaths:string[];
+    criteria:"same_explicit_company_event_date_and_canonical_source_url";
+    scanTruncated:boolean;
+    duplicateAdjudicated:false;
+  };
   exactClaimReview:{status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
     classification:ReviewClass|null;matchingClaimPaths:string[];scanTruncated:boolean|null};
   routes:Route[];
@@ -85,6 +98,55 @@ const validDate=(s:string|null|undefined)=>{
 };
 const safeTicker=(v:string)=>/^[A-Za-z0-9][A-Za-z0-9._-]{0,17}$/.test(v)?v.toUpperCase():null;
 const MAX_TEXT=12000;
+
+/** Structured same-source/event discovery, not a source verification or duplicate verdict.
+ * Accept only exact issuer + asserted original event date + canonical URL.
+ * File modified/imported dates never identify an economic event.
+ */
+function canonicalSourceUrl(value:string):string|null{
+  try {
+    const u=new URL(value.replace(/[),.;]+$/g,""));
+    if(!["https:","http:"].includes(u.protocol)||u.username||u.password)return null;
+    u.hash="";
+    for(const k of [...u.searchParams.keys()])
+      if(/^utm_|^(?:fbclid|gclid)$/i.test(k))u.searchParams.delete(k);
+    u.searchParams.sort();
+    return u.toString();
+  }catch{return null;}
+}
+function relatedIssuer(f:Record<string,unknown>,issuer:string):boolean{
+  const names=[f.company,f.entity,f.ticker,f.issuer].flatMap(v=>Array.isArray(v)?v:[v]);
+  return names.some(v=>typeof v==="string"&&v.trim().toUpperCase()===issuer);
+}
+function sourceEventCandidates(issuer:string|null,sourceUrl:string|null|undefined,eventDate:string|null){
+  const empty={candidatePaths:[] as string[],scanTruncated:false};
+  const wanted=sourceUrl?canonicalSourceUrl(sourceUrl):null;
+  if(!issuer||!wanted||!eventDate)return empty;
+  const max=25000;
+  const rows=db().prepare("SELECT path,frontmatter FROM notes WHERE frontmatter IS NOT NULL ORDER BY path LIMIT ?")
+    .all(max+1) as {path:string;frontmatter:string|null}[];
+  const paths:string[]=[];
+  for(const {path,frontmatter} of rows.slice(0,max)){
+    let fm:Record<string,unknown>;
+    try {fm=JSON.parse(frontmatter||"null") as Record<string,unknown>;}catch{continue;}
+    if(!fm||typeof fm!=="object"||Array.isArray(fm)||!relatedIssuer(fm,issuer))continue;
+    // A report imported on this day can discuss an entirely different event.
+    if(fm.event_date!==eventDate)continue;
+    const declared=[fm.original_source,fm.source_url,fm.primary_url].some(
+      v=>typeof v==="string"&&canonicalSourceUrl(v)===wanted);
+    let inDocument=false;
+    if(!declared){
+      try {
+        const raw=readNote(path).content;
+        const urls=raw.match(/https?:\/\/[^\s<>"'\x60]+/g)||[];
+        inDocument=urls.some(url=>canonicalSourceUrl(url)===wanted);
+      }catch{continue;}
+    }
+    if(declared||inDocument)paths.push(path);
+  }
+  return {candidatePaths:paths.slice(0,12),scanTruncated:rows.length>max||paths.length>12};
+}
+
 export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(!input.entities.length||input.entities.length>6||input.entities.some(x=>T(x).length<1||x.length>120))
     throw Error("Provide 1-6 nonempty declared entities or domains, never infer an issuer from co-mentions");
@@ -105,12 +167,31 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const publicationDate=validDate(input.publicationDate);
   const text=T(input.extractedText);
   const entities=[...new Set(input.entities.map(T))];
-  const digest=createHash("sha256").update([
+  const legacyDigest=createHash("sha256").update([
     "investment_os_intake_v1",input.domain,input.inputFormat,input.sourceKind,
     ...entities.map(x=>x.toLowerCase()),T(input.sourceUrl||""),T(input.rawAttachmentSha256||""),
-    // Hash the exact text (apart from leading/trailing whitespace) to avoid
-    // claiming that translated summaries are identical to raw originals.
+    // Preserve older IDs only for a stored raw intake with matching dates.
     text
+  ].join("\n")).digest("hex");
+  const legacyPlanId="IN-"+legacyDigest.slice(0,16).toUpperCase();
+  const legacyRawPath="00_Inbox/ChatGPT/Investment Intake - "+legacyPlanId+".md";
+  const old=db().prepare("SELECT frontmatter FROM notes WHERE path=? LIMIT 1").get(legacyRawPath) as
+    {frontmatter:string|null}|undefined;
+  let compatibleLegacy=false;
+  if(old?.frontmatter){
+    try{
+      const fm=JSON.parse(old.frontmatter) as Record<string,unknown>;
+      const recordedEvent=typeof fm.event_date==="string"?fm.event_date:null;
+      const recordedPublished=typeof fm.published_at==="string"?fm.published_at:null;
+      compatibleLegacy=recordedEvent===eventDate&&recordedPublished===publicationDate;
+    }catch{/* Invalid old metadata must not collide with a new dated intake. */}
+  }
+  // v2 includes separate economic event and publication dates so unchanged
+  // extracted text cannot alias two distinct events. An already-saved v1 raw
+  // note keeps its original path if and only if both declared dates match.
+  const digest=compatibleLegacy?legacyDigest:createHash("sha256").update([
+    "investment_os_intake_v2",legacyDigest,eventDate??"unknown_event_date",
+    publicationDate??"unknown_publication_date"
   ].join("\n")).digest("hex");
   const planId="IN-"+digest.slice(0,16).toUpperCase();
   const rawPath="00_Inbox/ChatGPT/Investment Intake - "+planId+".md";
@@ -124,6 +205,11 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     "08_Daily_Weekly/Research Indexes/Company Evolution - "+subject+".md":null;
   const exists=(path:string)=>Boolean(db().prepare("SELECT 1 FROM notes WHERE path=? LIMIT 1").get(path));
   const rawExists=exists(rawPath),reviewExists=exists(reviewPath),timelineExists=timelinePath?exists(timelinePath):false;
+  // A deterministic intake marker is added only after a reviewed Timeline
+  // append. Repeated submission of identical source text must not propose
+  // a second Timeline event even when a new research note already exists.
+  const timelineRecorded=Boolean(timelinePath && timelineExists &&
+    readNote(timelinePath).content.includes("<!-- investment-intake:"+planId+" -->"));
   const focus=input.focus??(input.sourceKind==="broker_research"?"broker":input.domain==="macro"?"macro":"general");
   const pack=buildInvestmentContextPack({
     question:(T(input.topic)+" "+entities.join(" ")+" "+text.slice(0,450)).slice(0,1150),
@@ -131,6 +217,15 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     industry:input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
     focus,maxNotes:10,maxChars:8500
   });
+  // Only high-scoring, issuer-scoped Company Research excerpts are candidate
+  // prior events; legacy archived AI is NOT a verified fact or duplicate verdict.
+  // No similarity score by itself establishes identical original source/vintage.
+  const candidateEventPaths=pack.items.filter(x=>
+    input.domain==="company" && x.role==="research" &&
+    x.path.startsWith("10_Knowledge/Company Research/") && x.score>=110
+  ).slice(0,4).map(x=>x.path);
+  const sourceMatches=sourceEventCandidates(subject,input.sourceUrl,eventDate);
+  const sameSourceEvent=sourceMatches.candidatePaths.length>0;
   const claim=input.claim;
   const claimReady=Boolean(claim&&T(claim.metric)&&T(claim.period)&&T(claim.statement).length>=8&&
     claim.value?.trim()&&claim.unit?.trim()&&input.sourceUrl?.trim()&&entities.length===1);
@@ -159,20 +254,26 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(input.sourceKind==="issuer_release"||input.sourceKind==="regulatory_filing")
     warnings.push("Source URL supplied is not proof that the original was fetched or verified.");
   if(!input.sourceUrl)warnings.push("Original source URL absent; screenshots and snippets are attributed inputs, not independently validated source records.");
+  if(candidateEventPaths.length)warnings.push("Matching-title historical research candidates require same original event/source/date review before creating a new distinct analysis; selection is not a deduplication verdict.");
+  if(sameSourceEvent)warnings.push("Existing issuer/date/original-URL source records found: review original event and provenance before creating a second Timeline entry. This is NOT a verified duplicate classification.");
   if(input.inputFormat!=="text"&&!verifiedAttachment)
     warnings.push("No verified, matching original image/PDF attachment bytes; call scoped Safe Edit store_user_attachment first.");
   const routes:Route[]=[
     {kind:"raw_input",action:rawExists?"link_existing_or_hold":"candidate_create",path:rawPath,
       reason:rawExists?"A note with the deterministic intake ID already exists; inspect identity/hash before linking.":"Preserve exact supplied text and attribution with a traceable link to actual image/PDF if available.",requiresReview:true},
     {kind:"research_review",action:reviewExists?"link_existing_or_hold":"candidate_create",path:reviewPath,
-      reason:"Separate sourced statements, user input, broker/management commentary, AI interpretation, contrary evidence, event chronology and thesis delta.",requiresReview:true}
+      reason:candidateEventPaths.length?
+        "Possible prior event research exists: inspect original source, event date, metric and period before creating a distinct analysis; never count reposts twice.":
+        "Separate sourced statements, user input, broker/management commentary, AI interpretation, contrary evidence, event chronology and thesis delta.",requiresReview:true}
   ];
   if(timelinePath)
     routes.push({kind:"company_timeline_candidate",
-      action:timelineExists&&!duplicates?"candidate_append_after_review":"link_existing_or_hold",
+      action:timelineExists&&!duplicates&&!timelineRecorded&&!sameSourceEvent?"candidate_append_after_review":"link_existing_or_hold",
       path:timelinePath,requiresReview:true,
-      reason:duplicates?"Exact numeric claim duplicate candidate: link existing event, no repeated timeline proof.":
-        timelineExists?"Timeline exists; append only when dated source/event dedup and materiality confirmed.":
+      reason:timelineRecorded?"Intake ID already recorded in this Timeline; do not append the same text a second time.":
+        sameSourceEvent?"Same declared issuer, event date, and original source URL already referenced by existing notes: inspect candidatePaths and do NOT add a new Timeline event until source-level adjudication.":
+        duplicates?"Exact numeric claim duplicate candidate: link existing event, no repeated timeline proof.":
+        timelineExists?"Timeline exists; append only when dated source/event dedup and materiality confirmed; include <!-- investment-intake:"+planId+" --> in the approved append for idempotent retries.":
         "No canonical company timeline indexed; never invent one from a partial screenshot."});
   else routes.push({kind:"industry_context_candidate",action:"link_existing_or_hold",path:null,requiresReview:true,
     reason:"Multi-issuer, non-ticker or macro item: identify existing relevant Industry/Macro notes before any additive update."});
@@ -202,6 +303,17 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     chronology:{eventDate,publicationDate,importedAt:"not_yet_written"},
     historical:{source:"bounded_lexical_context_not_exhaustive",
       selected:pack.selected,paths:pack.items.map(x=>x.path),missing:pack.incomplete},
+    historicalEventReview:{
+      status:candidateEventPaths.length?"possible_same_event_candidates":"none_selected_not_proof_new",
+      candidatePaths:candidateEventPaths,duplicateAdjudicated:false
+    },
+    sourceEventReview:{
+      status:!subject||!input.sourceUrl||!eventDate?"insufficient_identity":
+        sameSourceEvent?"possible_same_source_event_candidates":"no_structured_match_not_proof_new",
+      candidatePaths:sourceMatches.candidatePaths,
+      criteria:"same_explicit_company_event_date_and_canonical_source_url",
+      scanTruncated:sourceMatches.scanTruncated,duplicateAdjudicated:false
+    },
     exactClaimReview:{status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
     routes,gates:{

@@ -50,6 +50,8 @@ const inputSchema=z.object({
   analysisMarkdown:z.string().min(150).max(90_000),
   /** A separate, explicitly host-authorized action; NEVER an automatic replay. */
   recoverTimelineOnly:z.boolean().optional(),
+  /** Immutable source binding from read-only real-context preparation. */
+  expectedSourceSha256:z.string().regex(/^[a-f0-9]{64}$/),
 }).strict();
 export type InvestmentGraphBundleInput=z.infer<typeof inputSchema>;
 
@@ -114,13 +116,30 @@ function validatePreflight(i:InvestmentGraphBundleInput,existingAnalysis=false){
       previous?.size!==Buffer.byteLength(saved,"utf8"))
       throw Error("graph_bundle_recovery_analysis_physical_or_index_mismatch_hold");
   }
-  const src=note(loadIndexed(i.sourcePath));
+  const sourceRaw=loadIndexed(i.sourcePath);
+  if(sha256(sourceRaw)!==i.expectedSourceSha256)
+    throw Error("graph_bundle_source_changed_since_context_review_hold");
+  const src=note(sourceRaw);
+  const sourceIndex=db().prepare(`SELECT n.frontmatter,n.size,f.body
+    FROM notes AS n JOIN notes_fts AS f ON f.rowid=n.rowid WHERE n.path=?`)
+    .get(i.sourcePath) as {frontmatter:string|null;size:number;body:string}|undefined;
+  if(!sourceIndex||sourceIndex.body!==src.body||
+    sourceIndex.frontmatter!==JSON.stringify(src.data)||
+    sourceIndex.size!==Buffer.byteLength(sourceRaw,"utf8"))
+    throw Error("graph_bundle_source_physical_index_mismatch_hold");
   const evolution=note(loadIndexed(i.timelinePath));
   const analysis=note(i.analysisMarkdown);
   const m=analysis.data,s=src.data,t=evolution.data;
+  // Persist the reviewed source identity inside the exact Analysis bytes
+  // protected by the Safe Edit receipt's afterHash. Readback and recovery
+  // must use this durable binding, never a newly supplied replacement hash.
+  if(m.source_path!==i.sourcePath||m.source_sha256!==i.expectedSourceSha256)
+    throw Error("graph_bundle_reviewed_source_binding_missing_or_mismatched_hold");
   if(s.entity!==i.issuer||s.event_key!==i.eventKey||
     !["primary","attributed","user_supplied"].includes(String(s.source_type))||
-    t.entity!==i.issuer||
+    (t.entity!==undefined&&t.entity!==i.issuer)||
+    (t.company!==undefined&&t.company!==i.issuer)||
+    (t.entity!==i.issuer&&t.company!==i.issuer)||
     m.type!=="investment_review"||m.entity!==i.issuer||
     m.event_key!==i.eventKey||
     m.operation_id!==i.operationRoot||
@@ -250,6 +269,8 @@ export async function applyAuthorizedInvestmentGraphBundle(
     if(priorAnalysis||priorTimeline){
       if(priorAnalysis&&priorTimeline&&
         fullyWritten(priorAnalysis)&&fullyWritten(priorTimeline)){
+        if(note(loadIndexed(i.analysisPath)).data.source_sha256!==i.expectedSourceSha256)
+          throw Error("graph_bundle_reviewed_source_binding_missing_or_mismatched_hold");
         const check=verifyAuthorizedInvestmentGraphReadback({
           analysisOperationId:aid,timelineOperationId:tid,
           analysisPath:i.analysisPath,timelinePath:i.timelinePath,

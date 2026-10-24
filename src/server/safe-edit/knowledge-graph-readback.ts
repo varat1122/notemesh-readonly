@@ -12,7 +12,7 @@ import {createHash} from "node:crypto";
 import {db} from "../db";
 import {readVaultFile,resolveNotePath} from "../vault/paths";
 import {extractStructure,splitFrontmatter} from "../vault/markdown";
-import {status as safeEditStatus} from "./engine";
+import {status as safeEditStatus,verifyWrittenAppendHistory} from "./engine";
 
 const sha=(s:string)=>createHash("sha256").update(s,"utf8").digest("hex");
 const OP=/^[A-Za-z0-9_-]{8,80}$/;
@@ -49,6 +49,9 @@ type Port={
   getIndexed:(path:string)=>Indexed|null;
   getEdges:(path:string)=>Edge[];
   noteExists:(path:string)=>boolean;
+  verifyTimelineHistory?:(id:string,currentText:string)=>{
+    operationAfterHash:string;currentAfterHash:string;subsequentAuthenticatedAppendCount:number;
+  };
 };
 const noteData=(raw:string)=>{
   const parsed=splitFrontmatter(raw);
@@ -103,8 +106,18 @@ export function checkInvestmentGraphAgainstReadbackPort(
   const content=port.getPhysical(input.analysisPath);
   const timeline=port.getPhysical(input.timelinePath);
   const original=port.getPhysical(input.sourcePath);
-  if(sha(content)!==a||sha(timeline)!==t)
+  if(sha(content)!==a)
     throw Error("graph_readback_physical_hash_disagrees_with_receipt_hold");
+  const timelineMatchesOriginalReceipt=sha(timeline)===t;
+  let subsequentAuthenticatedAppendCount=0;
+  if(!timelineMatchesOriginalReceipt){
+    const proof=port.verifyTimelineHistory?.(input.timelineOperationId,timeline);
+    if(!proof||proof.operationAfterHash!==t||proof.currentAfterHash!==sha(timeline)||
+      !Number.isInteger(proof.subsequentAuthenticatedAppendCount)||
+      proof.subsequentAuthenticatedAppendCount<1)
+      throw Error("graph_readback_physical_hash_disagrees_with_receipt_hold");
+    subsequentAuthenticatedAppendCount=proof.subsequentAuthenticatedAppendCount;
+  }
   const analysis=assertIndexed(port,input.analysisPath,content);
   assertIndexed(port,input.timelinePath,timeline);
   const source=noteData(original);
@@ -124,6 +137,15 @@ export function checkInvestmentGraphAgainstReadbackPort(
     (word(s.entity)&&s.entity!==issuer)||
     (word(s.event_key)&&s.event_key!==m.event_key))
     throw Error("graph_readback_source_analysis_provenance_not_separated_hold");
+  // The Analysis afterHash above binds these fields to the original write.
+  // Legacy unbound reviews must be reconciled explicitly, not rebound to the
+  // current source by a caller or replay. A digest proves version, not truth.
+  if(m.source_path!==input.sourcePath||typeof m.source_sha256!=="string"||
+    !/^[a-f0-9]{64}$/.test(m.source_sha256))
+    throw Error("graph_readback_reviewed_source_binding_missing_or_mismatched_hold");
+  if(sha(original)!==m.source_sha256)
+    throw Error("graph_readback_source_changed_since_review_hold");
+  assertIndexed(port,input.sourcePath,original);
   // Catch duplicate-operation and duplicate-event replays on living timeline.
   const opRoot=input.analysisOperationId.slice(0,-9);
   const opMarker="<!-- investment-os-operation:"+opRoot+" -->";
@@ -170,7 +192,11 @@ export function checkInvestmentGraphAgainstReadbackPort(
     fullPathOutgoingWikilinksResolved:outgoing.length,
     livingTimelineBacklinkVerified:true as const,
     physicalMarkdownAndFTSAgree:true as const,
-    exactOperationAfterHashesVerified:true as const,
+    exactOperationAfterHashesVerified:timelineMatchesOriginalReceipt,
+    historicalWriteReceiptsVerified:true as const,
+    currentGraphIntegrityVerified:true as const,
+    subsequentAuthenticatedAppendCount,
+    reviewedSourceVersionVerified:true as const,
     userOrOwnerAuthorizationDerivedFromInput:false as const,
     protectedCurrentThesisModifiedByVerifier:false as const,
     vaultWrittenByVerifier:false as const,
@@ -189,6 +215,7 @@ export function verifyAuthorizedInvestmentGraphReadback(
   const database=db();
   const port:Port={
     getReceipt:id=>safeEditStatus(id,authenticatedActor) as Receipt,
+    verifyTimelineHistory:(id,text)=>verifyWrittenAppendHistory(id,authenticatedActor,text),
     getPhysical:p=>readVaultFile(resolveNotePath(p)),
     noteExists:p=>{
       const row=database.prepare("SELECT path FROM notes WHERE path=?")

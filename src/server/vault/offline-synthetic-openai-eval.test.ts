@@ -1,8 +1,14 @@
 import {afterEach,describe,it,expect} from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {OpenAIEvaluationBudget,budgetedEvaluationTransport}
+  from "./openai-evaluation-budget";
 import {SYNTHETIC_SEMANTIC_CASES}
   from "./offline-semantic-benchmark-corpus";
 import {
   evaluateSyntheticCasesWithTransport,
+  evaluationCredentialFromEnvironment,
   runOptInRealOpenAISyntheticEvaluation,
   SYNTHETIC_OPENAI_ENDPOINT,
 } from "./offline-synthetic-openai-eval";
@@ -46,6 +52,46 @@ afterEach(()=>{
   delete process.env.NM_ENABLE_SYNTHETIC_OPENAI_RUN;
 });
 describe("PR #91: real-provider-ready, mock-transport-tested SYNTH-only adapter",()=>{
+  it("accepts opaque cloud proxy bindings without treating syntax as authentication or falling back",()=>{
+    expect(evaluationCredentialFromEnvironment({NM_EVAL_API_KEY:"proxy-token"})).toBe("proxy-token");
+    expect(evaluationCredentialFromEnvironment({OPENAI_API_KEY:"sk-local-fixture"})).toBe("sk-local-fixture");
+    expect(evaluationCredentialFromEnvironment({NM_EVAL_API_KEY:"proxy-token",
+      OPENAI_API_KEY:"sk-local-fixture"})).toBe("proxy-token");
+    expect(evaluationCredentialFromEnvironment({})).toBeUndefined();
+    for(const key of [""," ","token\nheader", "x".repeat(8193)]){
+      expect(()=>evaluationCredentialFromEnvironment({NM_EVAL_API_KEY:key,
+        OPENAI_API_KEY:"sk-local-fixture"})).toThrow("invalid_credential_binding_hold");
+    }
+  });
+  it("runs the existing eight-case workflow through cumulative accounting and charges invalid semantic output",async()=>{
+    const root=fs.mkdtempSync(path.join(os.tmpdir(),"nm-triage-budget-"));
+    const file=path.join(root,"campaign.sqlite");
+    OpenAIEvaluationBudget.initialize(file);
+    const budget=new OpenAIEvaluationBudget(file);
+    const pricing={model:"gpt-test-2026-10-21",contextTokens:400_000,maxOutputTokens:128_000,
+      inputUsdPerMillion:"1.25",outputUsdPerMillion:"10",evidenceSha256:"c".repeat(64)};
+    let calls=0;
+    const transport=async(_url:string,init:RequestInit)=>{
+      calls++;
+      const {input}=decode(init);
+      const output=await responseText(ideal(calls===9?"different_period_same_number":input.id)).json();
+      return Response.json({...output,id:"resp_triage_"+calls,model:pricing.model,service_tier:"default",
+        usage:{input_tokens:1000,output_tokens:2000,total_tokens:3000,
+          input_tokens_details:{cached_tokens:500},output_tokens_details:{reasoning_tokens:1000}}});
+    };
+    const options={model:pricing.model,maxOutputTokens:32_768,reasoningEffort:"high" as const};
+    try{
+      const result=await evaluateSyntheticCasesWithTransport(
+        budgetedEvaluationTransport(budget,pricing,"baseline",transport),"fake",options);
+      expect(result.cases).toBe(8);
+      expect(budget.status()).toMatchObject({requests:8,chargedNanoUsd:170_000_000,reservedNanoUsd:0});
+      await expect(evaluateSyntheticCasesWithTransport(
+        budgetedEvaluationTransport(budget,pricing,"deliberate-second-round",transport),"fake",options))
+        .rejects.toThrow("case_identity_mismatch");
+      expect(calls).toBe(9);
+      expect(budget.status().chargedNanoUsd).toBe(191_250_000);
+    }finally{budget.close();fs.rmSync(root,{recursive:true,force:true});}
+  });
   it("would send precisely 8 fixed fictional cases to constant HTTPS endpoint, never Vault data",async()=>{
     const received:string[]=[];
     const transport=async(url:string,init:RequestInit)=>{
@@ -138,7 +184,7 @@ describe("PR #91: real-provider-ready, mock-transport-tested SYNTH-only adapter"
       await expect(runOptInRealOpenAISyntheticEvaluation(undefined,false))
         .rejects.toThrow("synthetic_openai_explicit_local_opt_in_and_key_required");
       process.env.NM_ENABLE_SYNTHETIC_OPENAI_RUN="YES";
-      await expect(runOptInRealOpenAISyntheticEvaluation("sk-short",true))
+      await expect(runOptInRealOpenAISyntheticEvaluation("invalid header\n",true))
         .rejects.toThrow("synthetic_openai_explicit_local_opt_in_and_key_required");
     }
     process.env.RAILWAY_PROJECT_ID="do-not-contact-any-provider";

@@ -302,3 +302,136 @@ describe("modification times", () => {
     expect(Date.parse(old.modified)).toBeGreaterThanOrEqual(before - 1000);
   });
 });
+
+// Same real bare-repository fixture as the existing Git backend acceptance.
+// Only deployment attestation is replaced; policy itself is tested separately.
+describe("approved single-note Safe Edit Git pilot",()=>{
+  const note="PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md";
+  const actor="oauth:git-pilot-test";
+  async function fixture() {
+    const configured=await configuredBackend();
+    process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
+    process.env.GIT_SAFE_WRITEBACK_PILOT="1";
+    vi.doMock("~/server/safe-edit/git-pilot-policy",()=>({assertGitPilot:()=>{},note,remote}));
+    const pilot=await import("~/server/safe-edit/git-pilot");
+    const engine=await import("~/server/safe-edit/engine");
+    const input={operationId:"git-pilot-operation-001",path:note,reason:"Controlled synthetic test",change:{kind:"create",content:"# Synthetic Git Pilot\n\nNo real investment data.\n"}};
+    return {...configured,pilot,engine,input};
+  }
+  afterEach(()=>{
+    vi.doUnmock("~/server/safe-edit/git-pilot-policy");vi.restoreAllMocks();
+    for(const key of ["SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER","GIT_SAFE_WRITEBACK_PILOT"]) delete process.env[key];
+  });
+  it("requires human approval, commits only the new note, verifies remote bytes and never duplicates on replay",async()=>{
+    const {pilot,engine,input,vault}=await fixture();
+    const p=await pilot.previewGitPilot(input,actor);
+    const args={operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash};
+    await expect(pilot.applyGitPilot(args,actor)).rejects.toThrow(/approval/);
+    expect(fs.existsSync(path.join(vault,note))).toBe(false);
+    engine.approve(p.operationId,"human-test",p.afterHash);
+    const result=await pilot.applyGitPilot(args,actor);
+    expect(result.receipt.gitPilot.state).toBe("verified");
+    expect(git(remote,"show",`main:${note}`)).toBe(input.change.content);
+    expect(git(remote,"diff-tree","--no-commit-id","--name-status","-r","main").trim()).toBe(`A\t${note}`);
+    const count=git(remote,"rev-list","--count","main");
+    await expect(pilot.applyGitPilot({...args,previewToken:"0".repeat(64)},actor)).rejects.toThrow(/token/);
+    await pilot.applyGitPilot(args,actor);
+    expect(git(remote,"rev-list","--count","main")).toBe(count);
+    await expect(pilot.previewGitPilot({...input,operationId:"git-pilot-operation-002"},actor)).rejects.toThrow(/already exists/);
+  });
+  it("rejects wrong paths, dirty files, and changed approved remote HEAD",async()=>{
+    const {pilot,engine,input,vault}=await fixture();
+    await expect(pilot.previewGitPilot({...input,path:"Other.md"},actor)).rejects.toThrow(/approved/);
+    fs.writeFileSync(path.join(vault,"unrelated.md"),"unrelated");
+    await expect(pilot.previewGitPilot(input,actor)).rejects.toThrow(/Dirty/);
+    fs.unlinkSync(path.join(vault,"unrelated.md"));
+    const p=await pilot.previewGitPilot(input,actor);engine.approve(p.operationId,"human",p.afterHash);
+    write(device,"another.md","remote moved");commitAll(device,"remote change");git(device,"push","-q");
+    await expect(pilot.applyGitPilot({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor)).rejects.toThrow(/Stale/);
+    expect(fs.existsSync(path.join(vault,note))).toBe(false);
+  });
+  it("holds a rejected push durably and blocks background sync and replay after restart",async()=>{
+    const {pilot,engine,input,vault}=await fixture();
+    const p=await pilot.previewGitPilot(input,actor);engine.approve(p.operationId,"human",p.afterHash);
+    fs.writeFileSync(path.join(remote,"hooks/pre-receive"),"#!/bin/sh\nexit 1\n",{mode:0o700});
+    const args={operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash};
+    await expect(pilot.applyGitPilot(args,actor)).rejects.toThrow(/manual review/);
+    expect(engine.status(p.operationId,actor).receipt.gitPilot.state).toBe("push_unknown");
+    const localHead=git(vault,"rev-parse","HEAD");
+    fs.unlinkSync(path.join(remote,"hooks/pre-receive"));
+    delete (globalThis as Record<string,unknown>).__obSyncGitBackend;
+    delete process.env.GIT_SAFE_WRITEBACK_PILOT;
+    const {gitBackend}=await import("~/server/sync/git");
+    expect((await gitBackend().syncNow()).ok).toBe(false);
+    process.env.GIT_SAFE_WRITEBACK_PILOT="1";
+    const replay=await pilot.applyGitPilot(args,actor);
+    expect(replay).toMatchObject({manualReviewRequired:true});
+    expect(git(vault,"rev-parse","HEAD")).toBe(localHead);
+    expect(git(remote,"rev-parse","main")).not.toBe(localHead);
+  });
+  it("does not repeat an ambiguous push even if the remote actually accepted it",async()=>{
+    const {pilot,engine,input}=await fixture();
+    const p=await pilot.previewGitPilot(input,actor);engine.approve(p.operationId,"human",p.afterHash);
+    const exec=await import("~/server/sync/git-exec"),original=exec.runGit;
+    let pushes=0;
+    vi.spyOn(exec,"runGit").mockImplementation(async(args,opts)=>{
+      const result=await original(args,opts);
+      if(args.includes("push")) {pushes++;return {...result,ok:false,code:null};}
+      return result;
+    });
+    const args={operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash};
+    await expect(pilot.applyGitPilot(args,actor)).rejects.toThrow();
+    expect(engine.status(p.operationId,actor).receipt.gitPilot.state).toBe("push_unknown");
+    expect(git(remote,"show",`main:${note}`)).toBe(input.change.content);
+    await pilot.applyGitPilot(args,actor);expect(pushes).toBe(1);
+  });
+  it("rejects a remote ref changed after local commit but before push advertisement",async()=>{
+    const {pilot,engine,input}=await fixture();
+    const p=await pilot.previewGitPilot(input,actor);engine.approve(p.operationId,"human",p.afterHash);
+    const exec=await import("~/server/sync/git-exec"),original=exec.runGit;
+    vi.spyOn(exec,"runGit").mockImplementation(async(args,opts)=>{
+      if(args.includes("push")) {
+        write(device,"competing.md","concurrent remote update");commitAll(device,"competing update");git(device,"push","-q");
+      }
+      return original(args,opts);
+    });
+    const args={operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash};
+    await expect(pilot.applyGitPilot(args,actor)).rejects.toThrow();
+    expect(git(remote,"ls-tree","--name-only","main")).not.toContain(note);
+    expect(engine.status(p.operationId,actor).receipt.gitPilot.state).toBe("push_unknown");
+  });
+  it("holds a remote blob readback mismatch without attempting another push",async()=>{
+    const {pilot,engine,input}=await fixture();
+    const p=await pilot.previewGitPilot(input,actor);engine.approve(p.operationId,"human",p.afterHash);
+    const exec=await import("~/server/sync/git-exec"),original=exec.runGitBuffer;
+    vi.spyOn(exec,"runGitBuffer").mockImplementation(async(args,opts)=>
+      args.some(a=>a.startsWith("FETCH_HEAD:"))?{ok:true,stdout:Buffer.from("wrong bytes")}:original(args,opts));
+    const args={operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash};
+    await expect(pilot.applyGitPilot(args,actor)).rejects.toThrow(/hash mismatch/);
+    expect(engine.status(p.operationId,actor).receipt.gitPilot.state).toBe("pushed");
+    const count=git(remote,"rev-list","--count","main");
+    await pilot.applyGitPilot(args,actor);expect(git(remote,"rev-list","--count","main")).toBe(count);
+  });
+  it("refuses a persistent transaction lock instead of stealing it after a crash",async()=>{
+    const {pilot,input}=await fixture();
+    const hold=path.join(process.env.DATA_DIR!,"git-pilot-hold");
+    fs.mkdirSync(path.join(hold,"transaction.lock"),{recursive:true});
+    await expect(pilot.previewGitPilot(input,actor)).rejects.toThrow();
+    expect(fs.existsSync(path.join(hold,"transaction.lock"))).toBe(true);
+  });
+  it("waits for an in-flight Git cycle before entering the pilot",async()=>{
+    const {backend}=await configuredBackend();
+    const exec=await import("~/server/sync/git-exec");
+    const original=exec.runGit;let unblock:()=>void=()=>{};
+    const barrier=new Promise<void>(resolve=>{unblock=resolve;});
+    let entered:()=>void=()=>{};const ready=new Promise<void>(resolve=>{entered=resolve;});
+    vi.spyOn(exec,"runGit").mockImplementation(async(args,opts)=>{
+      if(args[0]==="status") {entered();await barrier;}
+      return original(args,opts);
+    });
+    const cycle=backend.syncNow();await ready;
+    let done=false;const drain=backend.holdForPilot().then(()=>{done=true;});
+    await Promise.resolve();expect(done).toBe(false);
+    unblock();await cycle;await drain;expect(done).toBe(true);
+  });
+});
