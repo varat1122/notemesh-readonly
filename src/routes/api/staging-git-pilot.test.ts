@@ -1,6 +1,6 @@
 import {beforeEach,expect,it,vi} from "vitest";
 const state=vi.hoisted(()=>({
-  signedIn:true, pilotEnabled:true, approved:false, receiptStatus:"preview",
+  signedIn:true, pilotEnabled:true, approved:false, expired:false, receiptStatus:"preview",
   previewCalls:[] as unknown[], applyCalls:[] as unknown[],
 }));
 vi.mock("~/server/auth",()=>({
@@ -35,7 +35,7 @@ vi.mock("~/server/safe-edit/git-pilot",()=>({
   },
 }));
 vi.mock("~/server/safe-edit/engine",()=>({
-  adminPreview:()=>({path:"PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md",approved:state.approved,requiresAdminApproval:true,expiresAt:"2099-01-01T00:00:00.000Z",beforeHash:"e".repeat(64),afterHash:"a".repeat(64)}),
+  adminPreview:()=>({path:"PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md",approved:state.approved,requiresAdminApproval:true,expiresAt:state.expired?"2000-01-01T00:00:00.000Z":"2099-01-01T00:00:00.000Z",beforeHash:"e".repeat(64),afterHash:"a".repeat(64)}),
   status:(id:string,actor:string)=>({
     operationId:id,path:"PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md",
     status:state.receiptStatus, approved:state.approved,
@@ -57,7 +57,8 @@ const post=(data:URLSearchParams, origin:string|null="https://staging-fixture.te
 const start=()=>post(new URLSearchParams({action:"preview"}));
 const applyForm=(id="pilot001-owner-0123456789abcdef0123")=>
   new URLSearchParams({action:"apply",operationId:id,previewToken:"d".repeat(64),expectedHash:"e".repeat(64)});
-beforeEach(()=>{state.signedIn=true;state.pilotEnabled=true;state.approved=false;
+const checkForm=()=>new URLSearchParams({...Object.fromEntries(applyForm()),action:"check"});
+beforeEach(()=>{state.signedIn=true;state.pilotEnabled=true;state.approved=false;state.expired=false;
   state.receiptStatus="preview";state.previewCalls=[];state.applyCalls=[];});
 it("GET never creates preview, requires login and the exact staging policy",async()=>{
   state.signedIn=false;expect((await get()).status).toBe(401);
@@ -84,6 +85,9 @@ it("owner explicitly starts preview, never writes and never executes untrusted H
   expect(h).toContain("Review exact one-note preview");
   expect(h).toContain("&lt;script&gt;untrusted note&lt;/script&gt;");
   expect(h).not.toContain("<script>");
+  expect(h).toContain("Admin Approval: NOT YET VERIFIED");
+  expect(h).toContain('name="action" value="check"');
+  expect(h).not.toContain('name="action" value="apply"');
   expect(h).toContain('name="previewToken"');
   expect(h).toContain('name="expectedHash"');
   expect(h).toContain('name="operationId"');
@@ -97,9 +101,20 @@ it("owner explicitly starts preview, never writes and never executes untrusted H
   expect(p.operationId).toMatch(/^pilot001-owner-[a-f0-9]{20}$/);
   expect(p.change.content).toContain("Synthetic operational test");
 });
-it("does not write without separate admin approval",async()=>{
-  const r=await post(applyForm());expect(r.status).toBe(409);
+it("checks approval without write; only reveals Apply for this exact operation after admin approval",async()=>{
+  const initial=await start();expect(initial.status).toBe(200);
+  const early=await post(checkForm());expect(early.status).toBe(200);
+  expect(await early.text()).toContain("NOT YET VERIFIED");
+  const unapproved=await post(applyForm());expect(unapproved.status).toBe(200);
+  expect(await unapproved.text()).not.toContain('name="action" value="apply"');
   expect(state.applyCalls).toHaveLength(0);
+  state.approved=true;
+  const checked=await post(checkForm());expect(checked.status).toBe(200);
+  const approvedHtml=await checked.text();
+  expect(approvedHtml).toContain("VERIFIED for this exact preview");
+  expect(approvedHtml).toContain('name="action" value="apply"');
+  expect(state.previewCalls).toHaveLength(1); // never generates new preview on check
+  expect(state.applyCalls).toHaveLength(0); // no auto-apply
 });
 it("with exact approved preview an explicit owner POST can invoke existing Git Pilot gates",async()=>{
   state.approved=true;
@@ -119,6 +134,8 @@ it("refuses invalid operation IDs, missing token, duplicate terminal or unrecogn
   expect((await post(noToken)).status).toBe(400);
   state.receiptStatus="written";
   expect((await post(applyForm())).status).toBe(409);
+  state.receiptStatus="preview";state.expired=true;
+  expect((await post(checkForm())).status).toBe(409);
   expect((await post(new URLSearchParams({action:"other"}))).status).toBe(400);
   expect(state.applyCalls).toHaveLength(0);
 });
