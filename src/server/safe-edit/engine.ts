@@ -320,7 +320,11 @@ export function status(id:string,actor:string) {
 function statusUnderFence(id:string,actor:string) {
   const r=owned(id,actor);
   return {operationId:id,status:r.status,path:(JSON.parse(r.payload) as PreviewInput).path,
-    beforeHash:r.before_hash,afterHash:r.after_hash,receipt:r.receipt?JSON.parse(r.receipt):null};
+    beforeHash:r.before_hash,afterHash:r.after_hash,
+    // Read-only diagnostics: never return the one-time preview token or its hash.
+    approvalRequired:requiresApproval(r),adminApproved:Boolean(r.approval),
+    previewExpiresAt:new Date(r.expires).toISOString(),previewExpired:Date.now()>r.expires,
+    receipt:r.receipt?JSON.parse(r.receipt):null};
 }
 /** Internal readback only: prove current bytes through this actor's durable
  * append receipts. No snapshots or other clients' history leave the engine.
