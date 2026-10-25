@@ -599,7 +599,7 @@ describe("M4 fixed synthetic bootstrap acceptance",()=>{
     expect(git(remote,"rev-parse","main")).toBe(before);
   });
   it("M4.6 one-note Staging review requires separate approval and verifies exact Git+FTS after Apply",async()=>{
-    const {bootstrap,engine,fixtures,vault}=await fixture();
+    const {bootstrap,engine,vault}=await fixture();
     const p=await bootstrap.previewOwnerBootstrap(actor);
     for(const x of p.previews)engine.approve(x.operationId,"human",x.afterHash);
     await bootstrap.applyOwnerBootstrap(args(p),actor);
