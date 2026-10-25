@@ -12,7 +12,6 @@ import {exclusive,cleanBase,commitApprovedEdits} from "./git-pilot";
 import {preview,apply,status,adminPreview,recordGitPilot,gitPilotContext,sha256,validateApprovedEdit} from "./engine";
 import {applySchema} from "./schema";
 import {M46_SOURCE} from "./m46-staging-package";
-import {z} from "zod";
 
 export const M46_NOTE_ID="m46-nvda-shadow-20261025-one";
 export const M46_NOTE_PATH="10_Knowledge/M46 - NVDA - Owner Reviewed Shadow 20261021.md";
