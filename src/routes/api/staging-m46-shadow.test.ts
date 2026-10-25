@@ -21,7 +21,7 @@ it("GET shows exact immutable shadow manifest with no writable control",async()=
  const r=await GET(event(new Request("https://staging.test/api/staging-m46-shadow")));
  const h=await r.text();
  expect(r.status).toBe(200);
- expect(h).toContain("NO WRITE");
+ expect(h).toContain("NO AUTOMATIC WRITE");
  expect(h).toContain("M4.6 NVDA real-news");
  expect(h).toContain("KYEC");
  expect(h).not.toContain('method="post"');
