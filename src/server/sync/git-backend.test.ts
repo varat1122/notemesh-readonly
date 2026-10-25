@@ -532,3 +532,127 @@ describe("M4 owner-reviewed research over the existing Git transaction",()=>{
     expect(await m4.applyOwnerResearch(args(p),actor)).toMatchObject({newWriteExecuted:false});expect(pushes).toBe(1);
   });
 });
+
+// Bootstrap regression: start with NO Source/Company/Evolution folders. Do not
+// pre-seed the anchors via test helpers; exercise the real approved write path.
+describe("M4 fixed synthetic bootstrap acceptance",()=>{
+  const actor="staging-owner-research:bootstrap-admin";
+  afterEach(()=>{
+    vi.doUnmock("~/server/safe-edit/git-pilot-policy");vi.restoreAllMocks();
+    for(const k of ["GIT_RESEARCH_BOOTSTRAP_M4","GIT_RESEARCH_WRITEBACK_M4","GIT_SAFE_WRITEBACK_PILOT","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];
+  });
+  async function fixture(){
+    const setup=await configuredBackend();
+    Object.assign(process.env,{GIT_RESEARCH_BOOTSTRAP_M4:"1",GIT_RESEARCH_WRITEBACK_M4:"1",GIT_SAFE_WRITEBACK_PILOT:"1",SAFE_EDIT_ENABLED:"1",SAFE_EDIT_SINGLE_WRITER:"1"});
+    vi.doMock("~/server/safe-edit/git-pilot-policy",()=>({assertGitPilot:()=>{},note:"PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md",remote}));
+    const bootstrap=await import("~/server/safe-edit/owner-bootstrap"),engine=await import("~/server/safe-edit/engine");
+    const {BOOTSTRAP_FIXTURES:fixtures}=await import("~/server/safe-edit/synthetic-bootstrap-fixtures");
+    return {...setup,bootstrap,engine,fixtures};
+  }
+  function args(p:Awaited<ReturnType<(typeof import("~/server/safe-edit/owner-bootstrap"))["previewOwnerBootstrap"]>>){return p.previews.map(p=>({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash}));}
+  it("previews without mkdir, requires all four approvals, then bootstraps → graph A → remote/FTS readback → Source B recall",async()=>{
+    const {bootstrap,engine,fixtures,vault}=await fixture();const before=git(remote,"rev-list","--count","main");
+    const p=await bootstrap.previewOwnerBootstrap(actor);expect(p.previews).toHaveLength(4);
+    for(const dir of ["10_Knowledge","01_Companies","08_Daily_Weekly"])expect(fs.existsSync(path.join(vault,dir))).toBe(false);
+    await expect(bootstrap.applyOwnerBootstrap(args(p),actor)).rejects.toThrow(/approval/);
+    for(const preview of p.previews.slice(0,3))engine.approve(preview.operationId,"human",preview.afterHash);
+    await expect(bootstrap.applyOwnerBootstrap(args(p),actor)).rejects.toThrow(/approval/);
+    expect(fs.existsSync(path.join(vault,"10_Knowledge"))).toBe(false);
+    const last=p.previews[3];engine.approve(last.operationId,"human",last.afterHash);
+    const result=await bootstrap.applyOwnerBootstrap(args(p),actor);
+    expect(result.status).toBe("synthetic_bootstrap_git_physical_fts_verified");
+    if(!result.researchPackage)throw Error("Missing readback-bound package");
+    for(const f of fixtures){expect(read(vault,f.path)).toBe(f.content);expect(git(remote,"show",`main:${f.path}`)).toBe(f.content);}
+    expect(result.researchPackage.expectedSourceSha256).toBe("f3d18f737976ba6bcf15b43093f59ad70ab39695cbe446919c67392fecd20bae");
+    expect(Number(git(remote,"rev-list","--count","main"))).toBe(Number(before)+1);
+    const diff=git(remote,"diff-tree","--no-commit-id","--name-status","-r","main").trim().split("\n");
+    expect(diff).toHaveLength(4);expect(diff.every(line=>line.startsWith("A\t"))).toBe(true);
+    const after=git(remote,"rev-parse","main");
+    expect(await bootstrap.applyOwnerBootstrap(args(p),actor)).toMatchObject({newWriteExecuted:false});
+    expect(git(remote,"rev-parse","main")).toBe(after);
+    await expect(bootstrap.previewOwnerBootstrap(actor)).rejects.toThrow(/already exists/);
+    const m4=await import("~/server/safe-edit/owner-research");
+    const research=await m4.previewOwnerResearch(result.researchPackage,actor);
+    engine.approve(research.analysis.operationId,"human",research.analysis.afterHash);engine.approve(research.timeline.operationId,"human",research.timeline.afterHash);
+    const researchResult=await m4.applyOwnerResearch({analysis:{operationId:research.analysis.operationId,previewToken:research.analysis.previewToken,expectedHash:research.analysis.beforeHash},timeline:{operationId:research.timeline.operationId,previewToken:research.timeline.previewToken,expectedHash:research.timeline.beforeHash}},actor);
+    expect(researchResult.status).toBe("owner_research_git_and_graph_verified");
+    const {prepareRealInvestmentReviewHandoff}=await import("~/server/safe-edit/investment-review-preparation");
+    const next=prepareRealInvestmentReviewHandoff({issuer:"M4TEST",eventKey:"M4TEST-SYNTH-B-20261025",period:"SYNTHETIC",sourcePath:fixtures[1].path,question:"M4TEST synthetic demand delivery compare historical analysis"});
+    expect(JSON.stringify(next)).toContain(result.researchPackage.analysisPath);
+    expect(JSON.stringify(next)).toContain('"declaredSourceType":"archived_ai"');
+    expect(JSON.stringify(next)).toContain('"declaredIndependentEvidence":false');
+  });
+  it("rejects disabled gate, forged actors, wrong IDs/tokens/hash and existing targets without overwrite",async()=>{
+    const {bootstrap,engine,fixtures,vault}=await fixture();
+    delete process.env.GIT_RESEARCH_BOOTSTRAP_M4;await expect(bootstrap.previewOwnerBootstrap(actor)).rejects.toThrow(/disabled/);
+    process.env.GIT_RESEARCH_BOOTSTRAP_M4="1";await expect(bootstrap.previewOwnerBootstrap("oauth:spoofed")).rejects.toThrow(/owner session/);
+    const p=await bootstrap.previewOwnerBootstrap(actor);
+    for(const preview of p.previews)engine.approve(preview.operationId,"human",preview.afterHash);
+    const a=args(p);
+    await expect(bootstrap.applyOwnerBootstrap(a.map((x,n)=>n===0?{...x,operationId:"protected-other-id"}:x),actor)).rejects.toThrow(/scope/);
+    await expect(bootstrap.applyOwnerBootstrap(a.map((x,n)=>n===0?{...x,previewToken:"0".repeat(64)}:x),actor)).rejects.toThrow(/token/);
+    await expect(bootstrap.applyOwnerBootstrap(a.map((x,n)=>n===0?{...x,expectedHash:"0".repeat(64)}:x),actor)).rejects.toThrow(/hash/);
+    expect(fs.existsSync(path.join(vault,"10_Knowledge"))).toBe(false);
+    write(vault,fixtures[0].path,"Existing data must survive");commitAll(vault,"existing target");git(vault,"push","-q");
+    await expect(bootstrap.applyOwnerBootstrap(a,actor)).rejects.toThrow(/already exists/);
+    expect(read(vault,fixtures[0].path)).toBe("Existing data must survive");
+  });
+  it("engine refuses altered fixture bytes, arbitrary/protected paths and missing bootstrap context",async()=>{
+    const {engine,fixtures}=await fixture();const f=fixtures[0],base=git(device,"rev-parse","HEAD").trim();
+    const context={base,bootstrap:true,operations:fixtures.map(f=>({id:f.id,path:f.path,kind:"create"}))};
+    const input={operationId:f.id,path:f.path,reason:"Synthetic scope rejection",change:{kind:"create",content:f.content}};
+    expect(()=>engine.preview(input,actor)).toThrow(/scoped/);
+    for(const p of [{...input,change:{kind:"create",content:"tampered"}},{...input,path:"05_Thesis/M4TEST - Current Thesis.md"},{...input,path:"../escape.md"}])expect(()=>engine.gitPilotContext.run(context,()=>engine.preview(p,actor))).toThrow(/scope/);
+  });
+  it("rejects dirty worktree and stale approved remote before creating directories",async()=>{
+    const {bootstrap,engine,vault}=await fixture();const p=await bootstrap.previewOwnerBootstrap(actor);
+    for(const preview of p.previews)engine.approve(preview.operationId,"human",preview.afterHash);
+    write(vault,"unrelated.md","do not commit me");await expect(bootstrap.applyOwnerBootstrap(args(p),actor)).rejects.toThrow(/Dirty/);fs.unlinkSync(path.join(vault,"unrelated.md"));
+    write(device,"remote-event.md","other writer");commitAll(device,"new remote event");git(device,"push","-q");
+    await expect(bootstrap.applyOwnerBootstrap(args(p),actor)).rejects.toThrow(/Stale/);
+    expect(fs.existsSync(path.join(vault,"10_Knowledge"))).toBe(false);
+  });
+  it("a symlink planted at directory creation cannot escape the Vault",async()=>{
+    const {bootstrap,engine}=await fixture();const p=await bootstrap.previewOwnerBootstrap(actor);
+    for(const preview of p.previews)engine.approve(preview.operationId,"human",preview.afterHash);
+    const outside=path.join(root,"outside-bootstrap");fs.mkdirSync(outside);const mkdir=fs.mkdirSync;
+    vi.spyOn(fs,"mkdirSync").mockImplementation((folder,options)=>{
+      if(String(folder).startsWith("/proc/self/fd/")&&String(folder).endsWith("/10_Knowledge"))fs.symlinkSync(outside,String(folder),"dir");
+      return mkdir(folder,options);
+    });
+    await expect(bootstrap.applyOwnerBootstrap(args(p),actor)).rejects.toThrow();
+    expect(fs.readdirSync(outside)).toEqual([]);
+    expect(bootstrap.ownerBootstrapStatus(actor).records[0].receipt.gitPilot.state).toBe("bootstrap_applying");
+  });
+  it("partial and unknown outcomes survive restart and never retry/background-push",async()=>{
+    const {bootstrap,engine}=await fixture();const p=await bootstrap.previewOwnerBootstrap(actor);
+    for(const preview of p.previews)engine.approve(preview.operationId,"human",preview.afterHash);
+    const link=fs.linkSync;let links=0;vi.spyOn(fs,"linkSync").mockImplementation((a,b)=>{if(++links===2)throw Error("synthetic interrupted bootstrap");return link(a,b);});
+    await expect(bootstrap.applyOwnerBootstrap(args(p),actor)).rejects.toThrow();vi.restoreAllMocks();
+    delete (globalThis as Record<string,unknown>).__obSyncGitBackend;delete process.env.GIT_SAFE_WRITEBACK_PILOT;
+    const {gitBackend}=await import("~/server/sync/git");expect((await gitBackend().syncNow()).ok).toBe(false);
+    process.env.GIT_SAFE_WRITEBACK_PILOT="1";
+    expect(await bootstrap.applyOwnerBootstrap(args(p),actor)).toMatchObject({newWriteExecuted:false});
+    expect(bootstrap.ownerBootstrapStatus(actor).records[0].receipt.gitPilot.manualReviewRequired).toBe(true);
+  });
+  it("refuses physical/FTS disagreement before committing any bootstrap note",async()=>{
+    const {bootstrap,engine,fixtures}=await fixture();const p=await bootstrap.previewOwnerBootstrap(actor);
+    for(const preview of p.previews)engine.approve(preview.operationId,"human",preview.afterHash);
+    const {db}=await import("~/server/db"),indexer=await import("~/server/vault/indexer"),original=indexer.reindexPath;let indexed=0;
+    vi.spyOn(indexer,"reindexPath").mockImplementation(p=>{const result=original(p);if(++indexed===4)db().prepare("UPDATE notes_fts SET body='corrupted synthetic index' WHERE path=?").run(fixtures[0].path);return result;});
+    const before=git(remote,"rev-parse","main");
+    await expect(bootstrap.applyOwnerBootstrap(args(p),actor)).rejects.toThrow(/FTS/);
+    expect(git(remote,"rev-parse","main")).toBe(before);
+    expect(await bootstrap.applyOwnerBootstrap(args(p),actor)).toMatchObject({newWriteExecuted:false});
+  });
+  it("accepted-but-unknown push is held; remote bytes exist but replay cannot push again",async()=>{
+    const {bootstrap,engine,fixtures}=await fixture();const p=await bootstrap.previewOwnerBootstrap(actor);
+    for(const preview of p.previews)engine.approve(preview.operationId,"human",preview.afterHash);
+    const exec=await import("~/server/sync/git-exec"),original=exec.runGit;let pushes=0;
+    vi.spyOn(exec,"runGit").mockImplementation(async(a,o)=>{const result=await original(a,o);if(a.includes("push")){pushes++;return {...result,ok:false,code:null};}return result;});
+    await expect(bootstrap.applyOwnerBootstrap(args(p),actor)).rejects.toThrow();
+    expect(bootstrap.ownerBootstrapStatus(actor).records[0].receipt.gitPilot.state).toBe("push_unknown");
+    for(const f of fixtures)expect(git(remote,"show",`main:${f.path}`)).toBe(f.content);
+    expect(await bootstrap.applyOwnerBootstrap(args(p),actor)).toMatchObject({newWriteExecuted:false});expect(pushes).toBe(1);
+  });
+});

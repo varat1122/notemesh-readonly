@@ -1,5 +1,6 @@
 /** Single-note staging pilot. No general Git writer or automatic recovery. */
 import fs from "node:fs";
+import { BOOTSTRAP_FIXTURES } from "./synthetic-bootstrap-fixtures";
 import path from "node:path";
 import os from "node:os";
 import { env } from "../env";
@@ -107,7 +108,9 @@ export async function applyGitPilot(input:unknown,actor:string) {
 /** Internal Git transaction shared by the fixed pilot and owner-reviewed M4. */
 export async function commitApprovedEdits(base:string,operationId:string,
   edits:{path:string;kind:"A"|"M";afterHash:string}[],record:(d:Record<string,unknown>)=>void) {
-  if(edits.length<1||edits.length>2||new Set(edits.map(e=>e.path)).size!==edits.length) throw Error("Invalid Git edit scope");
+  const bootstrap=process.env.GIT_RESEARCH_BOOTSTRAP_M4==="1"&&edits.length===BOOTSTRAP_FIXTURES.length&&
+    BOOTSTRAP_FIXTURES.every(f=>edits.some(e=>e.path===f.path&&e.kind==="A"&&e.afterHash===sha256(f.content)));
+  if(edits.length<1||(edits.length>2&&!bootstrap)||new Set(edits.map(e=>e.path)).size!==edits.length) throw Error("Invalid Git edit scope");
   const changed=(await git("status","--porcelain","-z","--untracked-files=all")).split("\0").filter(Boolean).map(s=>s.trimStart()).sort();
   const expected=edits.map(e=>(e.kind==="A"?"??":"M")+" "+e.path).sort();
   if(JSON.stringify(changed)!==JSON.stringify(expected)) throw Error("Unexpected commit scope");

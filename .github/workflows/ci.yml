@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/m4-owner-reviewed-research-writeback]
+    branches: [main, feat/m4-owner-reviewed-research-writeback, feat/m4-synthetic-bootstrap]
   pull_request:
   # A branch can be run by hand: gh workflow run ci.yml --ref <branch>.
   workflow_dispatch:

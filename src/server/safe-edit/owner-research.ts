@@ -14,7 +14,7 @@ export function assertOwnerResearch(){
   assertGitPilot();
   if(process.env.GIT_RESEARCH_WRITEBACK_M4!=="1") throw Error("Owner research writeback disabled");
 }
-function ownerActor(actor:string){
+export function ownerActor(actor:string){
   if(!/^staging-owner-research:[A-Za-z0-9_-]{1,120}$/.test(actor)) throw Error("Authenticated owner session required");
 }
 const read=(p:string)=>readVaultFile(resolveNotePath(p));
