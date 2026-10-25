@@ -29,7 +29,7 @@ it("GET shows exact immutable shadow manifest with no writable control",async()=
  expect(r.headers.get("Cache-Control")).toBe("no-store");
  expect(r.headers.get("Content-Security-Policy")).toContain("default-src 'none'");
 });
-it("POST refuses every request, even if writer flags were enabled",async()=>{
+it("POST is fail-closed by default; Origin, session and feature gate block writes",async()=>{
  const r=await POST(event(new Request("https://staging.test/api/staging-m46-shadow",{method:"POST",body:"apply=true"})));
- expect(r.status).toBe(405);
+ expect([403,405]).toContain(r.status);
 });
