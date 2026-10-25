@@ -326,6 +326,7 @@ describe("M5.2 classification and canonical routing acceptance fixtures",()=>{
   expect(p.routingV2.companyHubs.map(x=>x.path).sort()).toEqual([
     "01_Companies/Kioxia.md","01_Companies/MU.md","01_Companies/SK hynix.md","01_Companies/Samsung.md"].sort());
   expect(p.routingV2.industryHubs.map(x=>x.path)).toEqual(["02_Industries_Themes/Memory.md"]);
+  expect(p.routingV2.unresolvedThemes).toEqual([]);
   expect(p.routingV2.reviewScope).toBe("industry");
   expect(p.routingV2.preferredReviewSubject).toBe("Memory");
   expect(p.routingV2.timelineEligibility).toBe("not_eligible_without_event_review");

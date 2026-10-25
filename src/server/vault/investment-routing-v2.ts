@@ -136,7 +136,14 @@ export function planCanonicalRoutingV2(input:RoutingV2Input):RoutingV2{
       if(!companyHubs.some(x=>x.path===hub.path))companyHubs.push({label,...hub,role});
     }else unresolvedEntities.push(label);
   }
-  const themes=[...new Set([...(input.themes??[]),...(input.domain==="industry"?input.entities:[])])];
+  // In industry coverage, named companies remain company subjects even when
+  // the parent topic is an industry. Never classify covered issuers as missing
+  // Industry Hubs simply because they appear in `entities`.
+  const declaredCompanyKeys=new Set(tags.map(x=>key(x.entity)));
+  const industryEntities=input.domain==="industry"
+    ?input.entities.filter(x=>!declaredCompanyKeys.has(key(x)))
+    :[];
+  const themes=[...new Set([...(input.themes??[]),...industryEntities])];
   for(const label of themes){
     const hub=findHub(label,industryIndex,false);
     if(hub){if(!industryHubs.some(x=>x.path===hub.path))industryHubs.push({label,...hub});}
