@@ -305,3 +305,148 @@ describe("date-scoped intake identity with v1 source preservation",()=>{
   expect(route({...baseRequest,publicationDate:"2026-10-16"}).planId).not.toBe(legacyId);
  });
 });
+
+describe("M5.2 classification and canonical routing acceptance fixtures",()=>{
+ const memoryText="J.P. Morgan-attributed commentary on Memory ASP momentum, SK hynix HBM4 yield rumours, Samsung HBM4 pricing, Kioxia QLC, and Micron. Original full report unavailable.";
+ const memory={domain:"industry" as const,entities:["SK hynix","Samsung Electronics","Micron","Kioxia"],
+   themes:["Memory"],topic:"J.P. Morgan Memory HBM4 and NAND 4Q26",
+   sourceKind:"broker_research" as const,inputFormat:"screenshot" as const,
+   contentTypes:["analyst_opinion","industry_data"] as const,
+   entityRoles:[
+     {entity:"SK hynix",role:"covered_company" as const},
+     {entity:"Samsung Electronics",role:"covered_company" as const},
+     {entity:"Micron",role:"covered_company" as const},
+     {entity:"Kioxia",role:"covered_company" as const}],
+   extractedText:memoryText};
+ it("F01 multi-issuer Memory broker comment links four existing company hubs and one Industry Hub without Timeline appends",async()=>{
+  for(const hub of ["01_Companies/SK hynix.md","01_Companies/Samsung.md","01_Companies/MU.md",
+    "01_Companies/Kioxia.md","02_Industries_Themes/Memory.md"])await add(hub,"# Synthetic existing hub");
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route({...memory,contentTypes:[...memory.contentTypes]});
+  expect(p.routingV2.companyHubs.map(x=>x.path).sort()).toEqual([
+    "01_Companies/Kioxia.md","01_Companies/MU.md","01_Companies/SK hynix.md","01_Companies/Samsung.md"].sort());
+  expect(p.routingV2.industryHubs.map(x=>x.path)).toEqual(["02_Industries_Themes/Memory.md"]);
+  expect(p.routingV2.reviewScope).toBe("industry");
+  expect(p.routingV2.preferredReviewSubject).toBe("Memory");
+  expect(p.routingV2.timelineEligibility).toBe("not_eligible_without_event_review");
+  expect(p.routes.some(x=>x.kind==="company_timeline_candidate")).toBe(false);
+  expect(p.routes.find(x=>x.kind==="industry_context_candidate")?.path).toBe("02_Industries_Themes/Memory.md");
+  expect(p.historical.paths).toContain("02_Industries_Themes/Memory.md");
+  expect(p.gates.canAutoWrite).toBe(false);
+ });
+ it("F02 broker reiteration with no previous actual PT must not be called a raise",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route({...base,contentTypes:["broker_rating","broker_price_target"],brokerUpdate:{
+    bank:"BofA",reportDate:"2026-10-14",rating:"Buy",targetPrice:"540",currency:"USD"}});
+  expect(p.routingV2.brokerRevision.status).toBe("rating_only_or_estimate_update");
+  expect(p.routingV2.classification.contentTypes).toEqual(["broker_rating","broker_price_target"]);
+  expect(p.gates.canAutoUpdateThesis).toBe(false);
+ });
+ it("F03 explicit same-bank older and current PT versions give a candidate, never verified broker fact",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const b={bank:"BofA",priorBank:"BofA",reportDate:"2026-10-14",priorReportDate:"2026-09-20",
+    priorTargetPrice:"500",targetPrice:"540",currency:"USD",priorCurrency:"USD",
+    targetHorizon:"12M",priorTargetHorizon:"12M"};
+  expect(route({...base,brokerUpdate:b}).routingV2.brokerRevision.status).toBe("pt_raise_candidate");
+  expect(route({...base,brokerUpdate:{...b,priorTargetPrice:"540"}}).routingV2.brokerRevision.status).toBe("pt_reiteration_candidate");
+  expect(route({...base,brokerUpdate:{...b,targetPrice:"480"}}).routingV2.brokerRevision.status).toBe("pt_cut_candidate");
+  expect(route({...base,brokerUpdate:{...b,priorBank:"Morgan Stanley"}}).routingV2.brokerRevision.status)
+    .toBe("insufficient_same_bank_vintage");
+  expect(route({...base,brokerUpdate:{...b,priorCurrency:"EUR"}}).routingV2.brokerRevision.status)
+    .toBe("insufficient_same_bank_vintage");
+  expect(route({...base,brokerUpdate:{...b,priorTargetHorizon:"6M"}}).routingV2.brokerRevision.status)
+    .toBe("insufficient_same_bank_vintage");
+ });
+ it("F04 missing or reversed vintages block PT comparisons; FY estimate rows preserve period and unit",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route({...base,brokerUpdate:{bank:"GS",priorBank:"GS",reportDate:"2026-10-14",
+    priorReportDate:"2026-11-01",priorTargetPrice:"400",targetPrice:"450",currency:"USD",
+    estimateChanges:[{metric:"EPS",period:"2027E",oldValue:"18.5",newValue:"20",unit:"USD/share"}]}});
+  expect(p.routingV2.brokerRevision.status).toBe("insufficient_same_bank_vintage");
+  expect(p.routingV2.brokerRevision.estimateRows).toEqual([
+    {metric:"EPS",period:"2027E",oldValue:"18.5",newValue:"20",unit:"USD/share"}]);
+ });
+ it("F05 single issuer filing resolves existing hub, but date/event/verification remain gated",async()=>{
+  await add("01_Companies/NVDA.md","# NVIDIA");
+  await add("08_Daily_Weekly/Research Indexes/Company Evolution - NVDA.md","# Historical NVDA");
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route({domain:"company",entities:["NVDA"],topic:"NVDA guidance excerpt",
+    inputFormat:"pdf",sourceKind:"issuer_release",eventDate:"2026-10-24",
+    contentTypes:["guidance"],extractedText:"User-supplied issuer PDF excerpt reports forward guidance; full PDF not inspected."});
+  expect(p.routingV2.companyHubs[0].path).toBe("01_Companies/NVDA.md");
+  expect(p.routingV2.timelineEligibility).toBe("primary_single_company_candidate_only");
+  expect(p.routes.find(x=>x.kind==="company_timeline_candidate")?.action).toBe("candidate_append_after_review");
+  expect(p.gates.fullSourceRead).toBe(false);
+  expect(p.gates.canAutoWrite).toBe(false);
+ });
+ it("F06 social repost remains independently unverified, even with a familiar analyst attribution",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route({...memory,sourceKind:"social_repost",contentTypes:["market_commentary"],
+    extractedText:"Social-media repost attributes speculative HBM4 yield rumours to an unnamed investment bank."});
+  expect(p.sourceKind).toBe("social_repost");
+  expect(p.sourceCapture.originalSourceVerified).toBe(false);
+  expect(p.routingV2.classification.basis).toBe("caller_declared_not_independently_verified");
+  expect(p.routingV2.classification.novelty).toBe("unresolved_pending_original_event_review");
+ });
+ it("F07 Thai macro policy item carries policy/data types without inventing any company hub",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route({domain:"macro",entities:["Thailand"],topic:"นโยบายธนาคารแห่งประเทศไทย",
+    sourceKind:"official_macro",inputFormat:"text",sourceLanguage:"th",
+    contentTypes:["policy","macro_data"],extractedText:"ข้อมูลจากข้อความผู้ใช้ว่าด้วยนโยบายการเงินไทย ยังไม่ตรวจประกาศต้นฉบับ"});
+  expect(p.routingV2.reviewScope).toBe("macro");
+  expect(p.routingV2.companyHubs).toHaveLength(0);
+  expect(p.routingV2.classification.contentTypes).toEqual(["policy","macro_data"]);
+  expect(p.gates.canAutoWrite).toBe(false);
+ });
+ it("F08 Thai-extracted broker PDF is a genre, not a verified report or verified old→new EPS",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route({...base,inputFormat:"pdf",sourceLanguage:"th",contentTypes:["broker_estimate","analyst_opinion"],
+    extractedText:"ข้อความภาษาไทยจากเอกสารที่อ้างว่าเป็นรายงาน Goldman Sachs คาดการณ์ EPS ปี 2027E ยังไม่พบรายงานฉบับเต็ม",
+    brokerUpdate:{bank:"GS",estimateChanges:[{metric:"EPS",period:"2027E",oldValue:"2.1",newValue:"2.5",unit:"USD/share"}]}});
+  expect(p.routingV2.brokerRevision.status).toBe("rating_only_or_estimate_update");
+  expect(p.sourceCapture.attachmentVerified).toBe(false);
+  expect(p.sourceCapture.originalSourceVerified).toBe(false);
+ });
+ it("F09 portfolio capture remains protected and never opens company event or portfolio writes",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route({domain:"asset",entities:["Team Portfolio"],topic:"ทีมลงทุน capture 25 Oct",
+    inputFormat:"screenshot",sourceKind:"user_commentary",contentTypes:["portfolio_snapshot"],
+    extractedText:"User-provided portfolio capture; allocations not independently checked."});
+  expect(p.routingV2.reviewScope).toBe("asset");
+  expect(p.routingV2.neverAutoWriteProtected).toBe(true);
+  expect(p.routes.some(x=>x.kind==="company_timeline_candidate")).toBe(false);
+  expect(p.gates.canAutoWrite).toBe(false);
+  expect(p.gates.canAutoUpdateThesis).toBe(false);
+ });
+ it("F10 absent hubs and ambiguous company identifiers never trigger invented canonical paths",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route({...memory,contentTypes:[...memory.contentTypes]});
+  expect(p.routingV2.companyHubs).toHaveLength(0);
+  expect(p.routingV2.industryHubs).toHaveLength(0);
+  expect(p.routingV2.unresolvedEntities).toContain("Samsung Electronics");
+  expect(p.routingV2.unresolvedThemes).toContain("Memory");
+  expect(p.routes.find(x=>x.kind==="industry_context_candidate")?.path).toBeNull();
+ });
+ it("F11 extra classification hints never mutate raw receipt identity or write the Vault",async()=>{
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const a=route(base),b=route({...base,contentTypes:["broker_price_target"],themes:["AI"],
+    entityRoles:[{entity:"MDB",role:"primary_subject"}],brokerUpdate:{bank:"BofA"}});
+  expect(a.planId).toBe(b.planId);
+  expect(a.routes.find(x=>x.kind==="raw_input")?.path).toBe(b.routes.find(x=>x.kind==="raw_input")?.path);
+  expect(a.routes.find(x=>x.kind==="research_review")?.path).toBe(b.routes.find(x=>x.kind==="research_review")?.path);
+  expect(fs.readdirSync(vault)).toHaveLength(0);
+ });
+ it("F12 repeated multi-company source/event finds indexed origin without claiming a verified duplicate",async()=>{
+  await add("01_Companies/SK hynix.md","# SK hynix");
+  const origin="10_Knowledge/Industry and Concepts/Memory bank attribution.md";
+  const url="https://example.org/research/memory-report-2026-10-21";
+  await add(origin,["---","company: [SK hynix]","event_date: 2026-10-21",
+    "source_url: "+url,"verification: not_reverified","---","# Synthetic source record"].join("\n"));
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route({...memory,contentTypes:[...memory.contentTypes],eventDate:"2026-10-21",sourceUrl:url});
+  expect(p.sourceEventReview.status).toBe("possible_same_source_event_candidates");
+  expect(p.sourceEventReview.candidatePaths).toContain(origin);
+  expect(p.sourceEventReview.duplicateAdjudicated).toBe(false);
+  expect(p.gates.duplicateAdjudicated).toBe(false);
+ });
+});
