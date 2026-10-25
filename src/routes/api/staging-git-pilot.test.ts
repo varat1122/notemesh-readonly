@@ -214,7 +214,7 @@ it("bootstrap preview/check never write or auto-approve; Apply requires ALL FOUR
  bootstrap.calls=[];bootstrap.approved=0;process.env.GIT_RESEARCH_BOOTSTRAP_M4="1";
  try{
   const p=await bootstrapRequest(bootstrapForm("bootstrap-preview"));const body=await p.text();expect(p.status).toBe(200);
-  expect(body).toContain("Fixed Synthetic Bootstrap — Owner Review");expect(body).toContain("&lt;script&gt;");expect(body).not.toContain('value="bootstrap-apply"');
+  expect(body).toContain("M4 TEST — Review 4 files");expect(body).toContain("&lt;script&gt;");expect(body).not.toContain('value="bootstrap-apply"');
   expect(bootstrap.calls[0]).toEqual({action:"preview",actor:"staging-owner-research:fixture-admin"});
   bootstrap.approved=3;
   const check=await bootstrapRequest(bootstrapForm("bootstrap-check"));expect(await check.text()).not.toContain('value="bootstrap-apply"');
