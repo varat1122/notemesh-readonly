@@ -10,13 +10,15 @@ function review(root:string,tokens:string[],state:{previews:ReturnType<typeof ow
   const eligible=state.previews.every(p=>p.approved&&p.status==="preview"&&Date.parse(p.expiresAt)>Date.now());
   const hidden='<input type="hidden" name="operationRoot" value="'+esc(root)+'">'+tokens.map((t,n)=>'<input type="hidden" name="token'+n+'" value="'+esc(t)+'">').join("");
   const prefix=bootstrap?"bootstrap-":"";
-  return html('<h1>'+(bootstrap?"Fixed Synthetic Bootstrap — Owner Review":"Investment Research — Owner Review")+'</h1><p>All imported/source text is untrusted data. Review the FULL diffs and historical context. AI analysis remains unverified archived analysis.</p>'+
-    '<pre>'+esc(JSON.stringify({reviewHash:state.reviewHash,previews:state.previews,context:context??state.context,anchors:state.anchors},null,2))+'</pre>'+
-    state.previews.map(p=>'<p><a target="_blank" rel="noopener noreferrer" href="'+esc(p.approvalUrl)+'">Approve exact '+esc(p.path)+' diff in separate tab</a></p>').join("")+
-    '<p>All '+state.previews.length+' independent admin approvals: '+(eligible?'VERIFIED':'NOT YET VERIFIED')+'</p>'+
-    '<form method="post">'+hidden+'<button name="action" value="'+prefix+'check">Check approvals — no write</button></form>'+
-    (eligible?'<form method="post">'+hidden+'<button name="action" value="'+prefix+'apply">Apply these approved notes ONCE</button></form>':'')+
-    '<p>Keep this tab open. If Apply outcome is uncertain, do not retry. Use the operation receipt and manual reconciliation.</p>');
+  return html('<h1>'+(bootstrap?"M4 TEST — Review 4 files":"Investment Research — Owner Review")+'</h1>'+
+    '<p><b>STEP 1 — Approve each file below:</b> Open each link, read the complete change and press Approve on that page. Return to THIS tab after each approval. Do not close or refresh this tab.</p>'+
+    '<ol>'+state.previews.map(p=>'<li><a target="_blank" rel="noopener noreferrer" href="'+esc(p.approvalUrl)+'">Review / Approve '+esc(p.path)+'</a> — '+(p.approved?'Approved':'Not approved')+'</li>').join("")+'</ol>'+
+    '<p><b>STEP 2 — Check approvals</b> (this does not write files).</p>'+
+    '<p>Approval status: <b>'+(eligible?'ALL FOUR APPROVED':'NOT COMPLETE')+'</b></p>'+
+    '<form method="post">'+hidden+'<button name="action" value="'+prefix+'check">Check four approvals (safe)</button></form>'+
+    (eligible?'<p><b>STEP 3 — Write approved synthetic test files once.</b></p><form method="post">'+hidden+'<button name="action" value="'+prefix+'apply">Apply approved synthetic test ONCE</button></form>':'')+
+    '<details><summary>Show complete preview, hashes and audit details</summary><pre>'+esc(JSON.stringify({reviewHash:state.reviewHash,previews:state.previews,context:context??state.context,anchors:state.anchors},null,2))+'</pre></details>'+
+    '<p>If there is any error, stop and inspect read-only receipts. Never retry Apply without checking Git.</p>');
 }
 export async function GET({request}:APIEvent){
   const session=await owner(request);if(!session)return denied("Sign in to the staging owner dashboard.",401);
