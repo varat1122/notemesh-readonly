@@ -84,7 +84,7 @@ function assertPreviousUnwritten(actor:string){
  const prior=status(M46_PREVIOUS_NOTE_ID,actor),b=prior.receipt?.gitPilot;
  if(prior.path!==M46_NOTE_PATH||prior.beforeHash!==sha256("")||
    prior.afterHash!==sha256(M46_NOTE_CONTENT)||prior.status!=="preview"||
-   !prior.approved||b?.state!=="m46_preview"||b.manualReviewRequired||
+   !prior.adminApproved||b?.state!=="m46_preview"||b.manualReviewRequired||
    typeof b.base!=="string"||prior.receipt?.write==="writing"||
    prior.receipt?.write==="written"||prior.receipt?.readback==="verified"||
    prior.receipt?.reindex==="verified")
