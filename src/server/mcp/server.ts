@@ -380,13 +380,13 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     {
       title: "Plan multilingual investment intake and evidence-safe Vault writeback",
       annotations: READ,
-      description: "Read-only plan for Thai/English/other-language user-provided text or ChatGPT-extracted screenshot/PDF material. Routes raw input, source-attributed research review, exact-claim dedup and canonical timelines with stable retry IDs. No binary is written by this tool; it can read back a Safe Edit SHA receipt when supplied; verify publisher originals, read related notes fully, and use separate Safe Edit permission for any write. Never auto changes protected Thesis/Evidence Register or Portfolio.",
+      description: "Read-only M5.2 plan for multilingual investment intake, including mixed company/industry items, broker PT and EPS vintages, and existing indexed company/industry hub links. Optional caller-declared classifications never verify a fact, source, thesis, or estimate. Stable raw/review retry IDs and SHA readback are preserved. No binary or note is written by this tool; use separately authorized Safe Edit after original-source/event review. Never auto changes protected Thesis/Evidence Register or Portfolio.",
       inputSchema: {
         domain:z.enum(["company","industry","macro","asset"]).describe("Claim/knowledge domain; not an inferred company ticker"),
         entities:z.array(z.string().min(1).max(120)).min(1).max(6).describe("Explicit issuer ticker(s), macro geography, or industry topics. Do not include inferred suppliers as confirmed issuers."),
         topic:z.string().min(1).max(250).describe("Short source topic; may be in Thai, English, or any language"),
         inputFormat:z.enum(["text","screenshot","pdf","mixed"]).describe("User material actually received; screenshot/PDF binary is NOT automatically preserved"),
-        sourceKind:z.enum(["broker_research","issuer_release","regulatory_filing","news_media","user_commentary","archived_chat","unknown"]).describe("Attributed genre, not independent primary verification"),
+        sourceKind:z.enum(["broker_research","issuer_release","regulatory_filing","news_media","user_commentary","archived_chat","social_repost","industry_research","official_macro","unknown"]).describe("Attributed genre, not independent primary verification; social repost is not original broker/issuer research"),
         extractedText:z.string().min(1).max(12000).describe("Faithful model-extracted/user-supplied text; preserve original language, mark illegible or omitted parts rather than invent"),
         sourceLanguage:z.string().max(35).nullable().optional().describe("Language declared by the caller, not automatically detected or translated"),
         sourceUrl:z.string().max(1000).nullable().optional().describe("Actual cited source page URL if supplied; never fabricate an original broker PDF"),
@@ -403,6 +403,31 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
           value:z.string().max(150).optional(),
           unit:z.string().max(80).optional(),
         }).optional().describe("OPTIONAL exact dated metric; incomplete or absent values never establish a numeric duplicate"),
+        contentTypes:z.array(z.enum(["reported_fact","earnings","guidance","industry_data","macro_data","policy","broker_rating","broker_price_target","broker_estimate","analyst_opinion","market_commentary","portfolio_snapshot","other"]))
+          .max(12).optional().describe("M5.2 multi-label content classification declared from actual read text; not independently verified"),
+        entityRoles:z.array(z.object({
+          entity:z.string().min(1).max(120),
+          role:z.enum(["primary_subject","covered_company","supplier","customer","competitor","mentioned"])
+        })).max(12).optional().describe("M5.2 explicit roles for entities listed above; do not promote a casual mention to a confirmed supplier or customer"),
+        themes:z.array(z.string().min(1).max(120)).max(12).optional().describe("M5.2 explicit industry/theme subjects, e.g. Memory; links only to already indexed existing hub paths"),
+        brokerUpdate:z.object({
+          bank:z.string().min(1).max(120),
+          reportDate:z.string().max(10).optional(),
+          priorBank:z.string().max(120).optional(),
+          priorReportDate:z.string().max(10).optional(),
+          rating:z.string().max(80).optional(),
+          priorRating:z.string().max(80).optional(),
+          targetPrice:z.string().max(80).optional(),
+          priorTargetPrice:z.string().max(80).optional(),
+          currency:z.string().max(20).optional(),
+          priorCurrency:z.string().max(20).optional(),
+          targetHorizon:z.string().max(80).optional(),
+          priorTargetHorizon:z.string().max(80).optional(),
+          estimateChanges:z.array(z.object({
+            metric:z.string().min(1).max(120),period:z.string().min(1).max(120),
+            oldValue:z.string().max(80),newValue:z.string().max(80),unit:z.string().max(60)
+          })).max(12).optional()
+        }).optional().describe("M5.2 caller-declared broker old/new versions; same bank, dated vintages, matching old/new currencies and comparable PT horizons required before candidate PT direction"),
         focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Historical context relevance; does not verify issuer claims")
       }
     },

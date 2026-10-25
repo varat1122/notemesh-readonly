@@ -11,9 +11,11 @@ import { db } from "../db";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
 import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
+import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTag,
+  type BrokerUpdate } from "./investment-routing-v2";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
-export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"unknown";
+export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
 export interface WritebackInput {
   domain:Domain;
   entities:string[];
@@ -31,6 +33,11 @@ export interface WritebackInput {
   rawAttachmentContentType?:AttachmentType|null;
   claim?:{metric:string;period:string;statement:string;value?:string;unit?:string};
   focus?:Focus;
+  /** Optional M5.2 caller-declared labels; never silently treat them as verified facts. */
+  contentTypes?:ContentType[];
+  entityRoles?:EntityTag[];
+  themes?:string[];
+  brokerUpdate?:BrokerUpdate;
 }
 type Route={kind:"raw_input"|"research_review"|"company_timeline_candidate"|"industry_context_candidate"|"claim_registry_candidate";
   action:"candidate_create"|"candidate_append_after_review"|"link_existing_or_hold";
@@ -75,6 +82,7 @@ export interface WritebackPlan {
   };
   exactClaimReview:{status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
     classification:ReviewClass|null;matchingClaimPaths:string[];scanTruncated:boolean|null};
+  routingV2:RoutingV2;
   routes:Route[];
   gates:{
     fullSourceRead:boolean;
@@ -116,12 +124,12 @@ function canonicalSourceUrl(value:string):string|null{
 }
 function relatedIssuer(f:Record<string,unknown>,issuer:string):boolean{
   const names=[f.company,f.entity,f.ticker,f.issuer].flatMap(v=>Array.isArray(v)?v:[v]);
-  return names.some(v=>typeof v==="string"&&v.trim().toUpperCase()===issuer);
+  return names.some(v=>typeof v==="string"&&v.trim().toUpperCase()===issuer.trim().toUpperCase());
 }
-function sourceEventCandidates(issuer:string|null,sourceUrl:string|null|undefined,eventDate:string|null){
+function sourceEventCandidates(issuers:string[],sourceUrl:string|null|undefined,eventDate:string|null){
   const empty={candidatePaths:[] as string[],scanTruncated:false};
   const wanted=sourceUrl?canonicalSourceUrl(sourceUrl):null;
-  if(!issuer||!wanted||!eventDate)return empty;
+  if(!issuers.length||!wanted||!eventDate)return empty;
   const max=25000;
   const rows=db().prepare("SELECT path,frontmatter FROM notes WHERE frontmatter IS NOT NULL ORDER BY path LIMIT ?")
     .all(max+1) as {path:string;frontmatter:string|null}[];
@@ -129,7 +137,7 @@ function sourceEventCandidates(issuer:string|null,sourceUrl:string|null|undefine
   for(const {path,frontmatter} of rows.slice(0,max)){
     let fm:Record<string,unknown>;
     try {fm=JSON.parse(frontmatter||"null") as Record<string,unknown>;}catch{continue;}
-    if(!fm||typeof fm!=="object"||Array.isArray(fm)||!relatedIssuer(fm,issuer))continue;
+    if(!fm||typeof fm!=="object"||Array.isArray(fm)||!issuers.some(issuer=>relatedIssuer(fm,issuer)))continue;
     // A report imported on this day can discuss an entirely different event.
     if(fm.event_date!==eventDate)continue;
     const declared=[fm.original_source,fm.source_url,fm.primary_url].some(
@@ -167,6 +175,14 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const publicationDate=validDate(input.publicationDate);
   const text=T(input.extractedText);
   const entities=[...new Set(input.entities.map(T))];
+  if(input.themes?.some(x=>!T(x)||x.length>120)||input.themes&&input.themes.length>12)
+    throw Error("Provide up to 12 nonempty themes of at most 120 characters");
+  if(input.entityRoles?.length && (input.entityRoles.length>12||input.entityRoles.some(x=>
+    !T(x.entity)||x.entity.length>120||!entities.some(e=>e.toLowerCase()===T(x.entity).toLowerCase()))))
+    throw Error("Entity roles must refer to explicitly declared entities (maximum 12)");
+  if(input.brokerUpdate?.estimateChanges && input.brokerUpdate.estimateChanges.length>12)
+    throw Error("At most 12 attributed broker estimate changes per plan");
+  const routingV2=planCanonicalRoutingV2({...input,entities});
   const legacyDigest=createHash("sha256").update([
     "investment_os_intake_v1",input.domain,input.inputFormat,input.sourceKind,
     ...entities.map(x=>x.toLowerCase()),T(input.sourceUrl||""),T(input.rawAttachmentSha256||""),
@@ -213,8 +229,13 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const focus=input.focus??(input.sourceKind==="broker_research"?"broker":input.domain==="macro"?"macro":"general");
   const pack=buildInvestmentContextPack({
     question:(T(input.topic)+" "+entities.join(" ")+" "+text.slice(0,450)).slice(0,1150),
-    issuers:input.domain==="company"?entities.map(safeTicker).filter((x):x is string=>!!x).slice(0,6):[],
-    industry:input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
+    issuers:[...new Set([
+      ...routingV2.companyHubs.map(x=>x.path.slice("01_Companies/".length,-3)),
+      ...(input.domain==="company"?entities.map(x=>safeTicker(x)).filter((x):x is string=>!!x):[])
+    ])].filter(x=>/^[A-Z][A-Z0-9.-]{0,11}$/.test(x)).slice(0,6),
+    industry:routingV2.industryHubs.length?
+      routingV2.industryHubs.map(x=>x.label).join(" / ").slice(0,140):
+      input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
     focus,maxNotes:10,maxChars:8500
   });
   // Only high-scoring, issuer-scoped Company Research excerpts are candidate
@@ -224,7 +245,14 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     input.domain==="company" && x.role==="research" &&
     x.path.startsWith("10_Knowledge/Company Research/") && x.score>=110
   ).slice(0,4).map(x=>x.path);
-  const sourceMatches=sourceEventCandidates(subject,input.sourceUrl,eventDate);
+  // The same broker/industry source can mention several declared companies.
+  // Reconcile all already-resolved issuer identities by exact URL/event date,
+  // never counting co-mentions or raw message repetitions as independent proof.
+  const sourceIssuers=[...new Set([
+    ...(subject?[subject]:[]),
+    ...routingV2.companyHubs.map(x=>x.path.slice("01_Companies/".length,-3))
+  ])];
+  const sourceMatches=sourceEventCandidates(sourceIssuers,input.sourceUrl,eventDate);
   const sameSourceEvent=sourceMatches.candidatePaths.length>0;
   const claim=input.claim;
   const claimReady=Boolean(claim&&T(claim.metric)&&T(claim.period)&&T(claim.statement).length>=8&&
@@ -251,6 +279,10 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   ];
   if(input.sourceKind==="broker_research")
     warnings.push("Broker model/version dedup requires exact bank, report date, prior same-bank PT, EPS vintage and actual report; 'reiterates' is not a new PT raise.");
+  if(routingV2.unresolvedEntities.length||routingV2.unresolvedThemes.length)
+    warnings.push("M5.2 hub links use only existing indexed titles or explicit aliases; unresolved names must be adjudicated, never created or mapped by guesswork.");
+  if(input.brokerUpdate)
+    warnings.push("M5.2 broker PT/estimate old→new figures are caller-declared; same bank and dated versions are necessary but not independent verification or consensus.");
   if(input.sourceKind==="issuer_release"||input.sourceKind==="regulatory_filing")
     warnings.push("Source URL supplied is not proof that the original was fetched or verified.");
   if(!input.sourceUrl)warnings.push("Original source URL absent; screenshots and snippets are attributed inputs, not independently validated source records.");
@@ -275,8 +307,9 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
         duplicates?"Exact numeric claim duplicate candidate: link existing event, no repeated timeline proof.":
         timelineExists?"Timeline exists; append only when dated source/event dedup and materiality confirmed; include <!-- investment-intake:"+planId+" --> in the approved append for idempotent retries.":
         "No canonical company timeline indexed; never invent one from a partial screenshot."});
-  else routes.push({kind:"industry_context_candidate",action:"link_existing_or_hold",path:null,requiresReview:true,
-    reason:"Multi-issuer, non-ticker or macro item: identify existing relevant Industry/Macro notes before any additive update."});
+  else routes.push({kind:"industry_context_candidate",action:"link_existing_or_hold",
+    path:routingV2.industryHubs.length===1?routingV2.industryHubs[0].path:null,requiresReview:true,
+    reason:"Multi-issuer, non-ticker or macro item: use existing indexed Industry/Macro hubs only after dated source/event review; this is a link candidate, not an auto-append."});
   if(claimReady&&!duplicates)
     routes.push({kind:"claim_registry_candidate",action:"candidate_create",path:null,requiresReview:true,
       reason:"Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
@@ -308,7 +341,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       candidatePaths:candidateEventPaths,duplicateAdjudicated:false
     },
     sourceEventReview:{
-      status:!subject||!input.sourceUrl||!eventDate?"insufficient_identity":
+      status:!sourceIssuers.length||!input.sourceUrl||!eventDate?"insufficient_identity":
         sameSourceEvent?"possible_same_source_event_candidates":"no_structured_match_not_proof_new",
       candidatePaths:sourceMatches.candidatePaths,
       criteria:"same_explicit_company_event_date_and_canonical_source_url",
@@ -316,6 +349,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     },
     exactClaimReview:{status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
+    routingV2,
     routes,gates:{
       fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,
