@@ -1,0 +1,184 @@
+import {afterAll,beforeAll,expect,it,vi} from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {Client} from "@modelcontextprotocol/sdk/client/index.js";
+import {InMemoryTransport} from "@modelcontextprotocol/sdk/inMemory.js";
+import type {McpAccess} from "./server";
+
+vi.mock("../safe-edit/sync",()=>({withPausedSync:async(run:()=>unknown)=>run()}));
+const root=fs.mkdtempSync(path.join(os.tmpdir(),"m54-mcp-integration-"));
+const vault=path.join(root,"vault");
+process.env.DATA_DIR=root;
+process.env.BASE_URL="https://m54-fixture.test";
+process.env.SAFE_EDIT_ENABLED="1";
+process.env.SAFE_EDIT_SINGLE_WRITER="1";
+process.env.ENCRYPTION_KEY??=Buffer.alloc(32,7).toString("base64");
+const access:McpAccess={read:true,write:false,label:"oauth:m54-edit",scopes:["vault:read","vault:edit"]};
+const news={domain:"company",entities:["NVDA"],topic:"Synthetic NVIDIA supply demand note",
+  sourceKind:"archived_chat",inputFormat:"text",sourceChat:"Micro 251026",
+  extractedText:"Synthetic test source: Nvidia supply is hypothetical; no real claims or facts.",
+  completedAnalysis:"## สรุป\nข้อมูลสมมติสำหรับระบบทดสอบ ไม่ใช้ปรับ Thesis."};
+function unpack(result:any){
+  expect(result.isError,JSON.stringify(result.content)).not.toBe(true);
+  const outer=JSON.parse(result.content[0].text);
+  return JSON.parse(outer.result.split("\n").slice(1,-1).join("\n"));
+}
+async function connect(){
+  const {createSafeEditMcpServer}=await import("./safe-edit-server");
+  const server=createSafeEditMcpServer(access),client=new Client({name:"m54-test",version:"1"});
+  const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(b);await client.connect(a);
+  return {client,close:async()=>{await client.close();await server.close();}};
+}
+const tokenRows=(p:any)=>p.previews.map((x:any)=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}));
+async function prepare(c:any,input:any){return unpack(await c.callTool({name:"prepare_canonical_writeback",arguments:input}));}
+async function commit(c:any,input:any,p:any){return unpack(await c.callTool({name:"apply_canonical_writeback",arguments:{input,planId:p.planId,authorizations:tokenRows(p)}}));}
+
+beforeAll(async()=>{
+  for(const folder of ["00_Inbox/ChatGPT","10_Knowledge/Company Research","10_Knowledge/Industry and Concepts",
+    "10_Knowledge/Macro and Markets","01_Companies","05_Thesis","06_Portfolio"])
+    fs.mkdirSync(path.join(vault,folder),{recursive:true});
+  for(const [rel,content] of [
+    ["01_Companies/NVDA.md","# NVDA fixture\n"],
+    ["05_Thesis/NVDA - Current Thesis.md","# Protected thesis fixture\n"],
+    ["05_Thesis/NVDA - Evidence Register.md","# Protected evidence fixture\n"],
+    ["06_Portfolio/Team.md","# Protected portfolio fixture\n"]]){
+    fs.writeFileSync(path.join(vault,rel),content);
+    const {reindexPath}=await import("../vault/indexer");reindexPath(rel);
+  }
+});
+afterAll(async()=>{
+  (await import("../db")).db().close();fs.rmSync(root,{recursive:true,force:true});
+  for(const k of ["DATA_DIR","BASE_URL","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];
+});
+
+it("M54-F01 fresh Micro: one scoped preview + apply saves source/review, verifies hashes/index and protects governed notes",async()=>{
+  const c=await connect();
+  try{
+    const tools=await c.client.listTools();
+    const prepareTool=tools.tools.find(t=>t.name==="prepare_canonical_writeback");
+    expect(prepareTool?.inputSchema.properties).toHaveProperty("completedAnalysis");
+    expect(prepareTool?.inputSchema.properties).toHaveProperty("sourceChat");
+    const p=await prepare(c.client,news);
+    expect(p.phase).toBe("preview_only");expect(p.writesPerformed).toBe(false);
+    expect(p.previews).toHaveLength(2);
+    expect(p.steps.map((x:any)=>x.state)).toEqual(["needs_create","needs_create"]);
+    for(const row of p.previews)expect(fs.existsSync(path.join(vault,row.path))).toBe(false);
+    const applied=await commit(c.client,news,p);
+    expect(applied).toMatchObject({status:"saved_verified",readyForNextNews:true,outcome:"saved_verified",
+      interrupted:null,perDeviceSync:"unverified",protectedNotesTouched:false});
+    expect(applied.receipts).toHaveLength(2);
+    expect(applied.receipts.every((x:any)=>x.receipt.write==="written"&&
+      x.receipt.readback==="verified"&&x.receipt.reindex==="verified")).toBe(true);
+    expect(applied.steps.every((x:any)=>x.readbackVerified&&x.indexed&&x.searchable)).toBe(true);
+    const retry=await prepare(c.client,news);
+    expect(retry.previews).toHaveLength(0);expect(retry.steps.map((x:any)=>x.state)).toEqual(["verified_existing","verified_existing"]);
+    const duplicate=await commit(c.client,news,retry);
+    expect(duplicate.outcome).toBe("saved_verified");expect(duplicate.receipts).toHaveLength(0);
+    expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected thesis fixture\n");
+    expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Evidence Register.md"),"utf8")).toBe("# Protected evidence fixture\n");
+    expect(fs.readFileSync(path.join(vault,"06_Portfolio/Team.md"),"utf8")).toBe("# Protected portfolio fixture\n");
+  }finally{await c.close();}
+});
+
+it("M54-F02 lost preview response rotates token; stale token is refused and fresh retry succeeds",async()=>{
+  const input={...news,extractedText:"Synthetic unique source for token-retry test"};
+  const c=await connect();
+  try{
+    const first=await prepare(c.client,input),second=await prepare(c.client,input);
+    expect(first.planId).toBe(second.planId);
+    expect(first.previews[0].previewToken).not.toBe(second.previews[0].previewToken);
+    const bad=unpack(await c.client.callTool({name:"apply_canonical_writeback",arguments:{input,planId:first.planId,authorizations:tokenRows(first)}}));
+    expect(bad.outcome).toBe("pending_or_blocked");
+    expect(bad.interrupted).toMatch(/Invalid preview token/);
+    for(const step of second.steps)expect(fs.existsSync(path.join(vault,step.path))).toBe(false);
+    const outcome=await commit(c.client,input,second);
+    expect(outcome.outcome).toBe("saved_verified");
+  }finally{await c.close();}
+});
+
+it("M54-F03 Feed Only saves just source, then reviewed retry adds canonical review without duplicate source",async()=>{
+  const input={...news,extractedText:"Synthetic Feed Only unique source",completedAnalysis:undefined,captureOnly:true};
+  const c=await connect();
+  try{
+    const p=await prepare(c.client,input);
+    expect(p.previews).toHaveLength(1);
+    const saved=await commit(c.client,input,p);
+    expect(saved).toMatchObject({outcome:"source_saved_analysis_pending",status:"source_saved_analysis_pending"});
+    const full={...input,captureOnly:false,completedAnalysis:"## สรุป\nSynthetic deferred review."};
+    const next=await prepare(c.client,full);
+    expect(next.steps.map((x:any)=>x.state)).toEqual(["verified_existing","needs_create"]);
+    expect(next.previews).toHaveLength(1);
+    expect((await commit(c.client,full,next)).outcome).toBe("saved_verified");
+  }finally{await c.close();}
+});
+
+it("M54-F04 conflict blocks overwrite; changed analysis for one original intake does not create duplicate review",async()=>{
+  const input={...news,extractedText:"Synthetic source for M54 conflict",completedAnalysis:"Original synthetic analysis"};
+  const c=await connect();
+  try{
+    const p=await prepare(c.client,input);
+    expect((await commit(c.client,input,p)).outcome).toBe("saved_verified");
+    const changed=await prepare(c.client,{...input,completedAnalysis:"Revised synthetic analysis"});
+    expect(changed.previews).toHaveLength(0);
+    expect(changed.steps.map((x:any)=>x.state)).toEqual(["verified_existing","hold_conflict"]);
+  }finally{await c.close();}
+});
+
+it("M54-F05 no bypass: complete analysis and sourceChat are required, protected routes never exposed",async()=>{
+  const c=await connect();
+  try{
+    const missing=await c.client.callTool({name:"prepare_canonical_writeback",arguments:{...news,sourceChat:undefined}});
+    expect(missing.isError).toBe(true);
+    const mixed=await c.client.callTool({name:"prepare_canonical_writeback",arguments:{...news,captureOnly:true}});
+    expect(mixed.isError).toBe(true);
+    const p=await prepare(c.client,{...news,extractedText:"Synthetic protected route test"});
+    expect(p.steps.every((x:any)=>!x.path.startsWith("05_Thesis/")&&!x.path.startsWith("06_Portfolio/"))).toBe(true);
+  }finally{await c.close();}
+});
+
+it("M54-F06 conflict between preview and apply stops before any batch write",async()=>{
+  const input={...news,extractedText:"Synthetic source for partial-write crash recovery",completedAnalysis:"Synthetic unique partial-write analysis"};
+  const c=await connect();
+  try{
+    const p=await prepare(c.client,input);
+    const source=p.steps.find((s:any)=>s.kind==="source_intake");
+    const review=p.steps.find((s:any)=>s.kind==="canonical_review");
+    const external="# External review inserted after preview; must survive unchanged.\n";
+    fs.writeFileSync(path.join(vault,review.path),external);
+    const refused=await c.client.callTool({name:"apply_canonical_writeback",arguments:{input,planId:p.planId,authorizations:tokenRows(p)}});
+    expect(refused.isError).toBe(true);
+    expect(String((refused.content as Array<{text?:string}>)[0]?.text)).toMatch(/Authorization must exactly match/);
+    expect(fs.existsSync(path.join(vault,source.path))).toBe(false);
+    expect(fs.readFileSync(path.join(vault,review.path),"utf8")).toBe(external);
+    const retry=await prepare(c.client,input);
+    expect(retry.previews).toHaveLength(1);
+    expect(retry.steps.map((s:any)=>s.state)).toEqual(["needs_create","hold_conflict"]);
+  }finally{await c.close();}
+});
+
+it("M54-F07 fault during second create preserves verified source and refuses blind review replay",async()=>{
+  const input={...news,extractedText:"Synthetic source for interrupted second create",completedAnalysis:"Synthetic partial failure analysis"};
+  const c=await connect();
+  try{
+    const p=await prepare(c.client,input);
+    const source=p.steps.find((s:any)=>s.kind==="source_intake");
+    const review=p.steps.find((s:any)=>s.kind==="canonical_review");
+    const link=fs.linkSync.bind(fs);
+    const failure=vi.spyOn(fs,"linkSync").mockImplementation((a,b)=>{
+      if(String(b).includes("Investment Review"))throw Error("Synthetic review publication failure");
+      link(a,b);
+    });
+    const outcome=await commit(c.client,input,p);
+    failure.mockRestore();
+    expect(outcome).toMatchObject({outcome:"pending_or_blocked",readyForNextNews:false});
+    expect(outcome.interrupted).toMatch(/Synthetic review publication failure/);
+    expect(outcome.receipts).toHaveLength(1);
+    expect(outcome.steps.map((s:any)=>s.state)).toEqual(["verified_existing","needs_create"]);
+    expect(fs.readFileSync(path.join(vault,source.path),"utf8")).toContain(input.extractedText);
+    expect(fs.existsSync(path.join(vault,review.path))).toBe(false);
+    const refused=await c.client.callTool({name:"prepare_canonical_writeback",arguments:input});
+    expect(refused.isError).toBe(true);
+    expect(String((refused.content as Array<{text?:string}>)[0]?.text)).toMatch(/interrupted operation/i);
+  }finally{vi.restoreAllMocks();await c.close();}
+});
