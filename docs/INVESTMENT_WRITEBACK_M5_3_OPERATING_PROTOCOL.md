@@ -5,8 +5,8 @@
 This design is tested against **synthetic local Vault fixtures**. M5.3 has not
 been deployed to Railway or exercised on the Production Investment_OS Vault.
 It adds a deterministic, read-only write recipe to the **existing**
-`plan_investment_writeback` MCP tool and reuses the seven existing Web Safe Edit
-actions. No new Safe Edit action, OAuth scope or bypass of write confirmation
+`plan_investment_writeback` MCP tool and reuses the existing Web Safe Edit
+`preview_edit` / `apply_edit` actions. No new Safe Edit action, OAuth scope or bypass of write confirmation
 is introduced.
 
 M5.2 `routingV2` identifies existing Company/Industry Hubs and classifies
@@ -41,8 +41,8 @@ For each input item:
    `contentTypes[]`, `entityRoles[]`, `themes[]` and `completedAnalysis`.
    Feed Only instead sets `captureOnly:true` and omits `completedAnalysis`.
 4. Inspect `safeEditWorkflow.steps` in source-then-review order:
-   - `needs_create`: invoke existing Safe Edit `create_note` with the exact
-     `safeEditRequest` (preview); then authorized `apply_edit` with its token
+   - `needs_create`: invoke existing Safe Edit `preview_edit` with the exact
+     `safeEditRequest` (change.kind=`create`); then authorized `apply_edit` with its token
      and beforeHash. Check write/readback/reindex stages in the receipt.
    - `verified_existing`: do not create a duplicate.
    - `hold_event_review`: preserve source but reconcile same original event,
@@ -148,3 +148,19 @@ its state.
 - Confirm restart/idempotency/error handling and partial-save recovery.
 - Decide release/merge/deploy separately; verify Android Sync on a chosen
   delivered note. Never treat staging tests as Production evidence.
+
+### Observed Staging boundary (2026-10-25)
+
+Railway project `Investment-OS-DR-Staging` currently contains
+`notemesh-pilot-001`, using the `feat/m4-synthetic-bootstrap` branch, a
+persistent 1 GB volume and a manual deployment watch-pattern gate. Its latest
+deployment was `SLEEPING` at inspection. That M4/DR pilot is **not** an empty
+disposable M5.3 environment. Do not silently switch its branch, remove the
+gate or write into its persistent Vault. A separate isolated test target or
+explicit owner-approved reuse is required for an actual Railway staging run.
+
+The in-memory MCP integration regression exercises the real read-only
+planner, a consent-scoped Safe Edit server, preview/apply receipts, indexed
+search, and protected-note invariance against a temporary local Vault. It
+does **not** certify the installed ChatGPT Web host against a deployed M5.3
+endpoint or any real device's Obsidian Sync.
