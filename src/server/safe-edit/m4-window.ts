@@ -12,7 +12,7 @@ export function assertM4Window(phase: "preflight" | "write" = "preflight", nowMs
   const start = instant(process.env.GIT_RESEARCH_M4_WINDOW_START);
   const end = instant(process.env.GIT_RESEARCH_M4_WINDOW_END);
   if (!Number.isFinite(nowMs) || end <= start || end - start > MAX_MS ||
-      nowMs < start || nowMs >= end || (phase === "write" && end - nowMs < RESERVE_MS))
+      nowMs < start || nowMs >= end || (phase === "write" && end - nowMs <= RESERVE_MS))
     throw Error("M4 time window closed or invalid");
 }
 
