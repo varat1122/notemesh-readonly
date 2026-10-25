@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { BOOTSTRAP_FIXTURES } from "./synthetic-bootstrap-fixtures";
+import { assertM4Window } from "./m4-window";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getSetting } from "../db";
 import fs from "node:fs";
@@ -27,8 +28,12 @@ function gitPilotGuard(p:PreviewInput) {
   if(getSetting("sync_backend")!=="git") return;
   const context=gitPilotContext.getStore();
   if(context?.bootstrap&&!bootstrapCreate(p)) throw Error("Bootstrap fixture scope or gate refused");
-  if(context?.operations && process.env.GIT_RESEARCH_WRITEBACK_M4==="1" &&
-    process.env.GIT_SAFE_WRITEBACK_PILOT==="1" && context.operations.some(o=>o.id===p.operationId&&o.path===p.path&&o.kind===p.change.kind)) return;
+  if(context?.operations) {
+    assertM4Window(); // enforce deadline again at every actual Safe Edit
+    if(process.env.GIT_RESEARCH_WRITEBACK_M4==="1" && process.env.GIT_SAFE_WRITEBACK_PILOT==="1" &&
+      context.operations.some(o=>o.id===p.operationId&&o.path===p.path&&o.kind===p.change.kind)) return;
+    throw Error("M4 Git Safe Edit disabled or outside approved scope");
+  }
   if(!context || process.env.GIT_SAFE_WRITEBACK_PILOT!=="1" ||
     p.path!=="PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md" || p.change.kind!=="create")
     throw Error("Git Safe Edit requires the scoped pilot transaction");

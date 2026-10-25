@@ -437,15 +437,20 @@ describe("approved single-note Safe Edit Git pilot",()=>{
 });
 
 // M4 uses the SAME temporary Git fixture, Safe Edit engine, and graph readback.
+function syntheticM4Window(){
+  const n=Math.floor(Date.now()/1000)*1000;
+  process.env.GIT_RESEARCH_M4_WINDOW_START=new Date(n-60_000).toISOString().replace(".000Z","Z");
+  process.env.GIT_RESEARCH_M4_WINDOW_END=new Date(n+25*60_000).toISOString().replace(".000Z","Z");
+}
 describe("M4 owner-reviewed research over the existing Git transaction",()=>{
   const actor="staging-owner-research:synthetic-admin";
   afterEach(()=>{
     vi.doUnmock("~/server/safe-edit/git-pilot-policy");vi.restoreAllMocks();
-    for(const k of ["GIT_RESEARCH_WRITEBACK_M4","GIT_SAFE_WRITEBACK_PILOT","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];
+    for(const k of ["GIT_RESEARCH_WRITEBACK_M4","GIT_RESEARCH_M4_WINDOW_START","GIT_RESEARCH_M4_WINDOW_END","GIT_SAFE_WRITEBACK_PILOT","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];
   });
   async function fixture(){
     const setup=await configuredBackend();
-    Object.assign(process.env,{GIT_RESEARCH_WRITEBACK_M4:"1",GIT_SAFE_WRITEBACK_PILOT:"1",SAFE_EDIT_ENABLED:"1",SAFE_EDIT_SINGLE_WRITER:"1"});
+    Object.assign(process.env,{GIT_RESEARCH_WRITEBACK_M4:"1",GIT_SAFE_WRITEBACK_PILOT:"1",SAFE_EDIT_ENABLED:"1",SAFE_EDIT_SINGLE_WRITER:"1"});syntheticM4Window();
     vi.doMock("~/server/safe-edit/git-pilot-policy",()=>({assertGitPilot:()=>{},note:"PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md",remote}));
     const {reindexPath}=await import("~/server/vault/indexer");
     const engine=await import("~/server/safe-edit/engine");
@@ -539,11 +544,11 @@ describe("M4 fixed synthetic bootstrap acceptance",()=>{
   const actor="staging-owner-research:bootstrap-admin";
   afterEach(()=>{
     vi.doUnmock("~/server/safe-edit/git-pilot-policy");vi.restoreAllMocks();
-    for(const k of ["GIT_RESEARCH_BOOTSTRAP_M4","GIT_RESEARCH_WRITEBACK_M4","GIT_SAFE_WRITEBACK_PILOT","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];
+    for(const k of ["GIT_RESEARCH_BOOTSTRAP_M4","GIT_RESEARCH_WRITEBACK_M4","GIT_RESEARCH_M4_WINDOW_START","GIT_RESEARCH_M4_WINDOW_END","GIT_SAFE_WRITEBACK_PILOT","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];
   });
   async function fixture(){
     const setup=await configuredBackend();
-    Object.assign(process.env,{GIT_RESEARCH_BOOTSTRAP_M4:"1",GIT_RESEARCH_WRITEBACK_M4:"1",GIT_SAFE_WRITEBACK_PILOT:"1",SAFE_EDIT_ENABLED:"1",SAFE_EDIT_SINGLE_WRITER:"1"});
+    Object.assign(process.env,{GIT_RESEARCH_BOOTSTRAP_M4:"1",GIT_RESEARCH_WRITEBACK_M4:"1",GIT_SAFE_WRITEBACK_PILOT:"1",SAFE_EDIT_ENABLED:"1",SAFE_EDIT_SINGLE_WRITER:"1"});syntheticM4Window();
     vi.doMock("~/server/safe-edit/git-pilot-policy",()=>({assertGitPilot:()=>{},note:"PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md",remote}));
     const bootstrap=await import("~/server/safe-edit/owner-bootstrap"),engine=await import("~/server/safe-edit/engine");
     const {BOOTSTRAP_FIXTURES:fixtures}=await import("~/server/safe-edit/synthetic-bootstrap-fixtures");

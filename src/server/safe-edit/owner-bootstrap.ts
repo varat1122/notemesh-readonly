@@ -5,6 +5,7 @@ import {readVaultFile,resolveNotePath} from "../vault/paths";
 import {splitFrontmatter} from "../vault/markdown";
 import {BOOTSTRAP_FIXTURES as fixtures,BOOTSTRAP_ROOT} from "./synthetic-bootstrap-fixtures";
 import {assertOwnerResearch,ownerActor} from "./owner-research";
+import {assertM4Window} from "./m4-window";
 import {exclusive,cleanBase,commitApprovedEdits} from "./git-pilot";
 import {preview,apply,status,adminPreview,recordGitPilot,gitPilotContext,sha256,validateApprovedEdit} from "./engine";
 import {applySchema} from "./schema";
@@ -72,6 +73,7 @@ export async function applyOwnerBootstrap(input:unknown,actor:string){
       if(p.path!==fixtures[n].path||p.afterHash!==manifest[n].sha256||p.beforeHash!==sha256(""))throw Error("Bootstrap approved content mismatch");
     }
     if(await cleanBase(fixtures.map(f=>f.path),true)!==base)throw Error("Approved bootstrap Git HEAD changed");
+    assertM4Window("write");
     const record=(detail:Record<string,unknown>)=>{for(const f of fixtures)recordGitPilot(f.id,actor,detail);};
     record({state:"bootstrap_applying"});
     try{

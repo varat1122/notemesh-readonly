@@ -2,6 +2,7 @@
 import {readVaultFile,resolveNotePath} from "../vault/paths";
 import {db} from "../db";
 import {assertGitPilot} from "./git-pilot-policy";
+import {assertM4Window} from "./m4-window";
 import {exclusive,cleanBase,commitApprovedEdits} from "./git-pilot";
 import {inputSchema,validatePreflight} from "./investment-graph-bundle";
 import {prepareRealInvestmentReviewHandoff} from "./investment-review-preparation";
@@ -13,6 +14,7 @@ import {z} from "zod";
 export function assertOwnerResearch(){
   assertGitPilot();
   if(process.env.GIT_RESEARCH_WRITEBACK_M4!=="1") throw Error("Owner research writeback disabled");
+  assertM4Window();
 }
 export function ownerActor(actor:string){
   if(!/^staging-owner-research:[A-Za-z0-9_-]{1,120}$/.test(actor)) throw Error("Authenticated owner session required");
@@ -87,6 +89,7 @@ export async function applyOwnerResearch(input:unknown,actor:string){
     validatePreflight(i);
     if(JSON.stringify(anchorHashes(i))!==JSON.stringify(binding.anchors)) throw Error("Reviewed anchors changed");
     if(sha256(read(i.timelinePath))!==t.beforeHash) throw Error("Timeline CAS changed");
+    assertM4Window("write");
     const ops=operations(i),record=(detail:Record<string,unknown>)=>{
       // First receipt is authoritative if a crash interrupts the second log.
       recordGitPilot(ops[0].id,actor,detail);recordGitPilot(ops[1].id,actor,detail);
