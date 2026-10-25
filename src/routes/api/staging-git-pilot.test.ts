@@ -182,3 +182,74 @@ it("M4 import escapes the full diff, never approves/applies automatically and ne
  expect((await researchRequest("apply")).status).toBe(200);
  expect(research.calls.filter(c=>c.action==="apply")).toHaveLength(1);
 });
+
+const bootstrap=vi.hoisted(()=>({approved:0,verified:false,calls:[] as {action:string;actor:string}[]}));
+vi.mock("~/server/safe-edit/owner-bootstrap",async()=>{
+ const {BOOTSTRAP_FIXTURES:f}=await import("~/server/safe-edit/synthetic-bootstrap-fixtures");
+ const gate=()=>{if(!state.pilotEnabled||process.env.GIT_RESEARCH_BOOTSTRAP_M4!=="1")throw Error("disabled");};
+ const view=()=>({manifestHash:"a".repeat(64),records:f.map(x=>({operationId:x.id,beforeHash:"e".repeat(64)})),previews:f.map((x,n)=>({operationId:x.id,path:x.path,status:"preview",approved:n<bootstrap.approved,requiresAdminApproval:true,expiresAt:"2099-01-01",approvalUrl:"https://staging-fixture.test/api/safe-edit-approval?id="+x.id,diff:{added:["<script>untrusted preview</script>"]}}))});
+ return {
+  assertOwnerBootstrap:gate,
+  ownerBootstrapStatus:(actor:string)=>{gate();bootstrap.calls.push({action:"status",actor});return {...view(),records:view().records.map(r=>({...r,status:bootstrap.verified?"written":"preview",receipt:{gitPilot:{state:bootstrap.verified?"bootstrap_verified":"bootstrap_preview"}}}))};},
+  verifiedBootstrapResearchPackage:(actor:string)=>{gate();if(!bootstrap.verified)throw Error("not verified");bootstrap.calls.push({action:"package",actor});return {synthetic:true};},
+  previewOwnerBootstrap:async(actor:string)=>{gate();bootstrap.calls.push({action:"preview",actor});return {previews:view().previews.map(p=>({...p,previewToken:"a".repeat(64)}))};},
+  applyOwnerBootstrap:async(_input:unknown,actor:string)=>{gate();if(bootstrap.approved!==4)throw Error("all approvals required");bootstrap.calls.push({action:"apply",actor});return {status:"synthetic_bootstrap_git_physical_fts_verified"};},
+ };
+});
+const bootstrapForm=(action:string)=>new URLSearchParams(action==="bootstrap-preview"?{action}:{action,operationRoot:"m4-bootstrap-20261025",token0:"a".repeat(64),token1:"a".repeat(64),token2:"a".repeat(64),token3:"a".repeat(64)});
+const bootstrapRequest=(form:URLSearchParams,origin="https://staging-fixture.test")=>researchPost(event(new Request(researchURL,{method:"POST",headers:{Origin:origin},body:form})));
+it("M4 synthetic Analysis A requires verified bootstrap; previews two hashes but never auto-applies",async()=>{
+  bootstrap.approved=0;bootstrap.verified=false;bootstrap.calls=[];research.calls=[];research.approved=false;
+  process.env.GIT_RESEARCH_BOOTSTRAP_M4="1";
+  try{
+    const before=await researchGet(event(new Request(researchURL)));
+    expect(before.status).toBe(200);
+    expect(await before.text()).not.toContain("Preview Synthetic Analysis A");
+    const blocked=await bootstrapRequest(new URLSearchParams({action:"synthetic-research-preview"}));
+    expect(blocked.status).toBe(409);
+    expect(research.calls.some(x=>x.action==="apply")).toBe(false);
+    bootstrap.verified=true;
+    const page=await researchGet(event(new Request(researchURL)));
+    expect(await page.text()).toContain("Preview Synthetic Analysis A");
+    const p=await bootstrapRequest(new URLSearchParams({action:"synthetic-research-preview"}));
+    const html=await p.text();
+    expect(p.status).toBe(200);
+    expect(html).toContain("Investment Research — Owner Review");
+    expect(html).toContain('value="check"');
+    expect(html).not.toContain('value="apply"');
+    expect(bootstrap.calls.some(x=>x.action==="package")).toBe(true);
+    expect(research.calls.some(x=>x.action==="preview")).toBe(true);
+    expect(research.calls.some(x=>x.action==="apply")).toBe(false);
+    expect((await bootstrapRequest(new URLSearchParams({action:"synthetic-research-preview",path:"05_Thesis/ABC.md"}))).status).toBe(400);
+  }finally{bootstrap.verified=false;delete process.env.GIT_RESEARCH_BOOTSTRAP_M4;}
+});
+it("bootstrap HTTP is default-off, authenticated, CSRF protected and rejects caller-defined content/paths",async()=>{
+ bootstrap.calls=[];bootstrap.approved=0;delete process.env.GIT_RESEARCH_BOOTSTRAP_M4;
+ expect((await bootstrapRequest(bootstrapForm("bootstrap-preview"))).status).toBe(403);
+ process.env.GIT_RESEARCH_BOOTSTRAP_M4="1";
+ try{
+  state.signedIn=false;expect((await bootstrapRequest(bootstrapForm("bootstrap-preview"))).status).toBe(401);state.signedIn=true;
+  expect((await bootstrapRequest(bootstrapForm("bootstrap-preview"),"https://evil.test")).status).toBe(403);
+  const bad=bootstrapForm("bootstrap-preview");bad.set("path","05_Thesis/Protected.md");
+  expect((await bootstrapRequest(bad)).status).toBe(400);
+  const badRoot=bootstrapForm("bootstrap-apply");badRoot.set("operationRoot","different-root");expect((await bootstrapRequest(badRoot)).status).toBe(400);
+  expect(bootstrap.calls).toEqual([]);
+ }finally{delete process.env.GIT_RESEARCH_BOOTSTRAP_M4;}
+});
+it("bootstrap preview/check never write or auto-approve; Apply requires ALL FOUR exact independent approvals",async()=>{
+ bootstrap.calls=[];bootstrap.approved=0;process.env.GIT_RESEARCH_BOOTSTRAP_M4="1";
+ try{
+  const p=await bootstrapRequest(bootstrapForm("bootstrap-preview"));const body=await p.text();expect(p.status).toBe(200);
+  expect(body).toContain("M4 TEST — Review 4 files");expect(body).toContain("&lt;script&gt;");expect(body).not.toContain('value="bootstrap-apply"');
+  expect(bootstrap.calls[0]).toEqual({action:"preview",actor:"staging-owner-research:fixture-admin"});
+  bootstrap.approved=3;
+  const check=await bootstrapRequest(bootstrapForm("bootstrap-check"));expect(await check.text()).not.toContain('value="bootstrap-apply"');
+  expect((await bootstrapRequest(bootstrapForm("bootstrap-apply"))).status).toBe(409);
+  expect(bootstrap.calls.some(c=>c.action==="apply")).toBe(false);
+  bootstrap.approved=4;
+  const ready=await bootstrapRequest(bootstrapForm("bootstrap-check"));expect(await ready.text()).toContain('value="bootstrap-apply"');
+  expect(bootstrap.calls.some(c=>c.action==="apply")).toBe(false);
+  expect((await bootstrapRequest(bootstrapForm("bootstrap-apply"))).status).toBe(200);
+  expect(bootstrap.calls.filter(c=>c.action==="apply")).toHaveLength(1);
+ }finally{delete process.env.GIT_RESEARCH_BOOTSTRAP_M4;}
+});

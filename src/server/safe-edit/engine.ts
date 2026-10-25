@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { BOOTSTRAP_FIXTURES } from "./synthetic-bootstrap-fixtures";
+import { assertM4Window } from "./m4-window";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getSetting } from "../db";
 import fs from "node:fs";
@@ -17,12 +19,21 @@ import { previewSchema, applySchema, operationId as idSchema, type PreviewInput 
 
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
 // Internal transaction context, never accepted from MCP input.
-export const gitPilotContext = new AsyncLocalStorage<{base:string; operations?:{id:string;path:string;kind:string}[]}>();
+export const gitPilotContext = new AsyncLocalStorage<{base:string; operations?:{id:string;path:string;kind:string}[];bootstrap?:boolean}>();
+function bootstrapCreate(p:PreviewInput) {
+  return gitPilotContext.getStore()?.bootstrap===true && process.env.GIT_RESEARCH_BOOTSTRAP_M4==="1" &&
+    p.change.kind==="create" && BOOTSTRAP_FIXTURES.some(f=>f.id===p.operationId&&f.path===p.path&&p.change.kind==="create"&&f.content===p.change.content);
+}
 function gitPilotGuard(p:PreviewInput) {
   if(getSetting("sync_backend")!=="git") return;
   const context=gitPilotContext.getStore();
-  if(context?.operations && process.env.GIT_RESEARCH_WRITEBACK_M4==="1" &&
-    process.env.GIT_SAFE_WRITEBACK_PILOT==="1" && context.operations.some(o=>o.id===p.operationId&&o.path===p.path&&o.kind===p.change.kind)) return;
+  if(context?.bootstrap&&!bootstrapCreate(p)) throw Error("Bootstrap fixture scope or gate refused");
+  if(context?.operations) {
+    assertM4Window(); // enforce deadline again at every actual Safe Edit
+    if(process.env.GIT_RESEARCH_WRITEBACK_M4==="1" && process.env.GIT_SAFE_WRITEBACK_PILOT==="1" &&
+      context.operations.some(o=>o.id===p.operationId&&o.path===p.path&&o.kind===p.change.kind)) return;
+    throw Error("M4 Git Safe Edit disabled or outside approved scope");
+  }
   if(!context || process.env.GIT_SAFE_WRITEBACK_PILOT!=="1" ||
     p.path!=="PILOT_001_GIT_SAFE_WRITEBACK_2026-10-24.md" || p.change.kind!=="create")
     throw Error("Git Safe Edit requires the scoped pilot transaction");
@@ -77,13 +88,14 @@ function row(id:string) {
 function owned(id:string, actor:string) {
   const r=row(id); if(r.actor!==actor) throw Error("Operation belongs to another OAuth client"); return r;
 }
-function target(p:string) {
+function target(p:string,allowMissingParents=false) {
   // Reject traversal before normalization, including paths that stay in root.
   if(p.split(/[\\/]/).includes("..")) throw Error("Traversal is not allowed");
   const abs=resolveNotePath(p), rel=toVaultRelative(abs);
   if(!rel.endsWith(".md")) throw Error("Only Markdown notes can be edited");
   if(/^(07_Sources|06_Portfolio)(\/|$)/i.test(rel)) throw Error("Source archives and portfolio records are protected; save a separate correction/review");
-  if(!fs.statSync(path.dirname(abs)).isDirectory()) throw Error("Parent folder must already exist");
+  try {if(!fs.statSync(path.dirname(abs)).isDirectory()) throw Error("Parent folder must already exist");}
+  catch(e){if(!allowMissingParents||(e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
   return {abs,rel};
 }
 function read(abs:string):string|null {
@@ -230,7 +242,7 @@ export function preview(input:unknown,actor:string) {
   return inProcessDrWriterFence.withWriteSync(()=>previewUnderFence(input,actor), "protected_safe_edits");
 }
 function previewUnderFence(input:unknown,actor:string) {
-  assertEnabled();const p=previewSchema.parse(input);gitPilotGuard(p);const t=target(p.path);p.path=t.rel;
+  assertEnabled();const p=previewSchema.parse(input);gitPilotGuard(p);const t=target(p.path,bootstrapCreate(p));p.path=t.rel;
   if(store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND status='writing' LIMIT 1").get(p.path)) throw Error("This path has an interrupted operation; administrator recovery required");
   const before=read(t.abs);
   if(p.change.kind==="create"?before!==null:before===null) throw Error("Create never overwrites; other edits require an existing note");
@@ -302,7 +314,30 @@ function backup(r:RecordRow,p:PreviewInput) {
 }
 // All names used after opening the directory are anchored to that descriptor,
 // not a re-resolved ancestor. create uses link(2) for no-clobber publication.
+// Only the exact bootstrap creates may create parents, after approval and the
+// durable writing journal/backup. No recursive mkdir or symlink traversal.
+function bootstrapParents(r:RecordRow,p:PreviewInput) {
+  if(!bootstrapCreate(p)) throw Error("Bootstrap parent scope refused");
+  let fd=fs.openSync(env.vaultDir,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);
+  let rel="";
+  try {
+    for(const segment of path.dirname(p.path).split("/")) {
+      assertDescriptorInVault(fd);
+      const child=path.join(`/proc/self/fd/${fd}`,segment);
+      rel=rel?rel+"/"+segment:segment;
+      try {
+        fs.mkdirSync(child,{mode:0o700});fs.fsyncSync(fd);
+        log(r.id,r.actor,"bootstrap_directory_created",{path:rel});
+      } catch(e) {if((e as NodeJS.ErrnoException).code!=="EEXIST")throw e;}
+      const next=fs.openSync(child,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);
+      try {assertDescriptorInVault(next);} catch(e){fs.closeSync(next);throw e;}
+      fs.closeSync(fd);fd=next;
+    }
+    assertDescriptorInVault(fd);
+  } finally {fs.closeSync(fd);}
+}
 function atomic(r:RecordRow,p:PreviewInput) {
+  if(bootstrapCreate(p)) bootstrapParents(r,p);
   const {abs}=target(p.path),dir=path.dirname(abs);
   const fd=fs.openSync(dir,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);
   let temp="";
@@ -397,7 +432,7 @@ function applyUnderFence(input:unknown,actor:string) {
   const lock=path.join(env.dataDir,"safe-edit.lock");
   fs.mkdirSync(lock,{mode:0o700});
   try {
-    const {abs}=target(p.path),current=read(abs);
+    const {abs}=target(p.path,bootstrapCreate(p)),current=read(abs);
     if((p.change.kind==="create"?current!==null:current===null)||sha256(current??"")!==r.before_hash) throw Error("Version conflict: re-preview; another writer changed this note");
     checkEvidence(p,current??"");
     document(r.after_text);assertHeadroom(Buffer.byteLength(r.before_text)*2+Buffer.byteLength(r.after_text)+64_000);
