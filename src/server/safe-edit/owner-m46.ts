@@ -89,7 +89,7 @@ export async function previewOwnerM46(actor:string){
      independent:false,verification:"not_reverified",sourceType:"archived_ai",
      event_date:"2026-10-21",published_at:"2026-10-21",received_at:"2026-10-25",
      imported_at:null,verified_at:null,relatedPaths:[]},
-  }),actor);
+  },actor));
   if(!note.previewToken)throw Error("M4.6 preview was already started; do not replay");
   recordGitPilot(M46_NOTE_ID,actor,{base,manifestHash:manifest,state:"m46_preview"});
   return {preview:note,base,manifestHash:manifest};
