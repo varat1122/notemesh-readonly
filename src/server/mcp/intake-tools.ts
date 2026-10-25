@@ -9,8 +9,8 @@ function needsConsent(metadataUrl:string){
 }
 export function registerIntakeTools(server:McpServer, granted:boolean, metadataUrl=`${env.baseUrl}/.well-known/oauth-protected-resource`){
   server.registerTool("submit_investment_notes",{
-    title:"Save analysis to Investment OS inbox",
-    description:"Queue completed investment analysis for import as new Markdown notes in Investment_OS. Each item contains source material, analysis, an event date, and existing related note paths for wikilinks. Returns a durable submission receipt. Identical payloads are deduplicated. This action creates new content; it cannot edit or delete existing notes. The Railway cloud receiver imports queued packages without the user computer. imported confirms server files; arrival on other devices depends on Obsidian Sync.",
+    title:"LEGACY: Inbox-only analysis archive (not canonical Company/Industry Review)",
+    description:"LEGACY INBOX-ONLY ARCHIVE. This tool always imports N01.md/N02.md and Submission.md under 00_Inbox/ChatGPT/<date>-<submission-id>/; it NEVER places a Research Review under Company/Industry/Macro knowledge folders. DO NOT call it for newly analyzed Micro/Macro/PDF/Stock news when canonical Company/Industry/Macro writeback is requested or authorized. Instead call plan_investment_writeback with sourceChat and completedAnalysis on Investment OS -NoteMesh V2, then use separately authorized Investment OS — Safe Edit Chat create_note/apply_edit for the planner's exact add-only Source and canonical Research Review steps. Only use this legacy tool if the user specifically requests an Inbox-only archive; no automatic conversion to canonical is implied. Identical payloads deduplicate; cloud import confirms server files, not device Sync.",
     inputSchema:intakeSchema.shape,
     annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     _meta:{securitySchemes},
