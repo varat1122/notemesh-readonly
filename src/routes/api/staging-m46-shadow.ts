@@ -5,18 +5,23 @@ import type {APIEvent} from "@solidjs/start/server";
 import {owner,html,denied,escapeHtml as esc,smallForm} from "./staging-git-pilot";
 import {env} from "~/server/env";
 import {assertGitPilot} from "~/server/safe-edit/git-pilot-policy";
+import {m4WindowInfo} from "~/server/safe-edit/m4-window";
 import {M46_FILES,M46_MANIFEST,M46_MANIFEST_SHA256,M46_ROOT,M46_SOURCE} from "~/server/safe-edit/m46-staging-package";
 import {assertOwnerM46,previewOwnerM46,ownerM46Status,applyOwnerM46,M46_NOTE_ID,M46_NOTE_PATH} from "~/server/safe-edit/owner-m46";
 const actor=(id:string)=>"staging-owner-research:"+id;
 function review(token:string,prev:ReturnType<typeof ownerM46Status>){
- const p=prev.preview,eligible=p.approved&&p.status==="preview"&&Date.parse(p.expiresAt)>Date.now();
+ const p=prev.preview,window=m4WindowInfo();
+ const eligible=Boolean(window?.writeOpen)&&p.approved&&p.status==="preview"&&Date.parse(p.expiresAt)>Date.now();
  const hidden='<input type="hidden" name="operationId" value="'+esc(M46_NOTE_ID)+'">'+
    '<input type="hidden" name="previewToken" value="'+esc(token)+'">'+
    '<input type="hidden" name="expectedHash" value="'+esc(prev.record.beforeHash)+'">';
  return html('<h1>M4.6 STAGING — Review exactly ONE NVDA Research Draft</h1>'+
    '<p><b>Action 1:</b> Open the approval page and inspect the entire exact diff. This note is Staging-only, never a Production Thesis update.</p>'+
    '<p><a href="'+esc(p.approvalUrl)+'" target="_blank" rel="noopener noreferrer">Approve exact SHA-256 '+esc(p.afterHash)+'</a></p>'+
-   '<p>Approved: '+(eligible?'YES':'NOT YET')+'</p>'+
+   '<p><b>Latest safe Apply time:</b> '+esc(window?.applyUntilLocal??"Unavailable")+
+    '. Hard expiry: '+esc(window?.actualEndLocal??"Unavailable")+'.</p>'+
+   '<p>Approved: '+(p.approved?'YES':'NOT YET')+'</p>'+
+   (!window?.writeOpen?'<p><b>APPLY CLOSED.</b> Do not retry old tokens or Apply. The 2-minute Git safety reserve has started or the window is invalid.</p>':'')+
    '<form method="post">'+hidden+'<button name="action" value="check">Check human approval — no write</button></form>'+
    (eligible?'<form method="post">'+hidden+'<button name="action" value="apply">Apply exactly one Staging note ONCE</button></form>':'')+
    '<details><summary>Hash and complete diff</summary><pre>'+esc(JSON.stringify(p,null,2))+'</pre></details>'+
@@ -29,11 +34,15 @@ export async function GET({request}:APIEvent){
  const readOnly=M46_FILES.map((f,i)=>
   '<details><summary>'+esc(f.role)+' — '+esc(f.path)+'</summary><pre>'+
   esc(f.content)+'</pre></details><p>SHA-256: <code>'+esc(M46_MANIFEST[i].sha256)+'</code></p>').join("");
+ const clock=m4WindowInfo();
  let writerPanel='<p><b>Writer disabled:</b> review only. No Safe Edit journal or Vault file created by GET.</p>';
  try{
   assertOwnerM46();
-  writerPanel='<p><b>One-note M4.6 Safe Edit is enabled within a limited Staging time window.</b> Human owner SHA-256 approval required; only '+esc(M46_NOTE_PATH)+' may be created.</p>'+
-   '<form method="post"><button name="action" value="preview">Preview one fixed NVDA research note (no Vault write)</button></form>';
+  writerPanel='<p><b>Latest safe Apply time:</b> '+esc(clock?.applyUntilLocal??"Unavailable")+
+    ' (two minutes BEFORE hard expiry '+esc(clock?.actualEndLocal??"Unavailable")+').</p>'+
+    (clock?.previewOpen?'<p>New retry operation; the previous approved preview is retained as immutable audit evidence. A NEW human approval is required.</p>'+
+      '<form method="post"><button name="action" value="preview">Preview one fixed NVDA research note (no Vault write)</button></form>':
+      '<p><b>Preview disabled:</b> fewer than five minutes remain before the safe Apply cutoff, or the time window is closed. No write requested.</p>');
  }catch{/* Leave fail-closed read-only panel. */}
  return html('<h1>M4.6 NVDA real-news shadow — read-only report + optional owner gate</h1>'+
    '<p><b>NO AUTOMATIC WRITE:</b> this GET only reads a fixed SHA-bound package.</p>'+
@@ -57,11 +66,13 @@ export async function POST({request}:APIEvent){
  try{
   const a=actor(session.user.id);
   if(action==="preview"){
+   if(!m4WindowInfo()?.previewOpen)return denied("Not enough time to safely approve and Apply. No preview created.",409);
    const x=await previewOwnerM46(a);
    return review(x.preview.previewToken!,ownerM46Status(a));
   }
   const p=ownerM46Status(a);
   if(action==="check")return review(form.get("previewToken")??"",p);
+  if(!m4WindowInfo()?.writeOpen)return denied("Safe Apply cutoff passed (2 minutes before hard expiry). No write started; do not retry.",409);
   const result=await applyOwnerM46({operationId:M46_NOTE_ID,previewToken:form.get("previewToken")||"",expectedHash:form.get("expectedHash")||""},a);
   if(result.status!=="m46_single_note_staging_git_fts_verified")
     return denied("Operation previously attempted; inspect receipts and Git. No replay.",409);

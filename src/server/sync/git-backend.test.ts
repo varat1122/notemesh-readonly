@@ -609,7 +609,20 @@ describe("M4 fixed synthetic bootstrap acceptance",()=>{
     await expect(m46.previewOwnerM46(actor)).rejects.toThrow(/disabled/);
     process.env.GIT_RESEARCH_M46_SHADOW_TEST="1";
     try{
+      // Synthesize the exact earlier owner-approved but unwritten preview in
+      // the same isolated Git fixture; the new attempt must never mutate it.
+      const original="m46-nvda-shadow-20261025-one";
+      const base=git(device,"rev-parse","HEAD");
+      const old=engine.gitPilotContext.run({base,operations:[{id:original,path:m46.M46_NOTE_PATH,kind:"create"}]},()=>engine.preview({
+        operationId:original,path:m46.M46_NOTE_PATH,reason:"Previous fixed owner preview (not written)",
+        change:{kind:"create",content:m46.M46_NOTE_CONTENT}
+      },actor));
+      engine.recordGitPilot(original,actor,{base,state:"m46_preview"});
+      engine.approve(original,"human",old.afterHash);
       const preview=await m46.previewOwnerM46(actor);
+      expect(preview.preview.operationId).toBe(m46.M46_NOTE_ID);
+      expect(preview.preview.operationId).not.toBe(original);
+      expect(engine.status(original,actor).status).toBe("preview");
       expect(preview.preview.path).toBe(m46.M46_NOTE_PATH);
       expect(preview.preview.requiresAdminApproval).toBe(true);
       expect(preview.preview.approved).toBe(false);
@@ -626,8 +639,21 @@ describe("M4 fixed synthetic bootstrap acceptance",()=>{
       expect(diff).toBe("A\t"+m46.M46_NOTE_PATH);
       expect(await m46.applyOwnerM46(handoff,actor)).toMatchObject({newWriteExecuted:false});
       expect(git(remote,"rev-parse","main")).not.toBe(previous);
+      expect(engine.status(original,actor).status).toBe("preview"); // immutable previous approval
       expect(fs.existsSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"))).toBe(false);
     } finally {delete process.env.GIT_RESEARCH_M46_SHADOW_TEST;}
+  });
+  it("refuses M4.6 retry if original operation or remote target is not clearly unwritten",async()=>{
+    const {bootstrap,engine,vault}=await fixture();
+    const p=await bootstrap.previewOwnerBootstrap(actor);
+    for(const x of p.previews)engine.approve(x.operationId,"human",x.afterHash);
+    await bootstrap.applyOwnerBootstrap(args(p),actor);
+    const m46=await import("~/server/safe-edit/owner-m46");
+    process.env.GIT_RESEARCH_M46_SHADOW_TEST="1";
+    try{
+      await expect(m46.previewOwnerM46(actor)).rejects.toThrow(/Unknown operation/);
+      expect(fs.existsSync(path.join(vault,m46.M46_NOTE_PATH))).toBe(false);
+    }finally{delete process.env.GIT_RESEARCH_M46_SHADOW_TEST;}
   });
   it("rejects disabled gate, forged actors, wrong IDs/tokens/hash and existing targets without overwrite",async()=>{
     const {bootstrap,engine,fixtures,vault}=await fixture();

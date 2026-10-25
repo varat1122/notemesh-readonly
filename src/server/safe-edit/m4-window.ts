@@ -15,3 +15,20 @@ export function assertM4Window(phase: "preflight" | "write" = "preflight", nowMs
       nowMs < start || nowMs >= end || (phase === "write" && end - nowMs < RESERVE_MS))
     throw Error("M4 time window closed or invalid");
 }
+
+/** Display-only clock hints, never a replacement for assertM4Window at commit. */
+export function m4WindowInfo(nowMs=Date.now()){
+ try{
+  const start=instant(process.env.GIT_RESEARCH_M4_WINDOW_START);
+  const end=instant(process.env.GIT_RESEARCH_M4_WINDOW_END);
+  if(end<=start||end-start>MAX_MS)return null;
+  const safeUntil=end-RESERVE_MS;
+  const format=(n:number)=>new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Bangkok",
+    day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",
+    hourCycle:"h23"}).format(new Date(n))+" (Bangkok)";
+  return {actualEnd:new Date(end).toISOString(),applyUntil:new Date(safeUntil).toISOString(),
+    actualEndLocal:format(end),applyUntilLocal:format(safeUntil),
+    writeOpen:nowMs>=start&&nowMs<safeUntil,
+    previewOpen:nowMs>=start&&nowMs<safeUntil-5*60_000};
+ }catch{return null;}
+}

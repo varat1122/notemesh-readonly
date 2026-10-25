@@ -13,7 +13,8 @@ import {preview,apply,status,adminPreview,recordGitPilot,gitPilotContext,sha256,
 import {applySchema} from "./schema";
 import {M46_SOURCE} from "./m46-staging-package";
 
-export const M46_NOTE_ID="m46-nvda-shadow-20261025-one";
+export const M46_PREVIOUS_NOTE_ID="m46-nvda-shadow-20261025-one";
+export const M46_NOTE_ID="m46-nvda-shadow-20261025-retry2";
 export const M46_NOTE_PATH="10_Knowledge/M46 - NVDA - Owner Reviewed Shadow 20261021.md";
 export const M46_NOTE_CONTENT=`---
 type: investment_review
@@ -75,10 +76,26 @@ export function ownerM46Status(actor:string){
  const {r,b}=bound(actor);
  return {record:r,base:b.base,manifestHash:manifest,preview:adminPreview(M46_NOTE_ID)};
 }
+/** A prior approved preview failed BEFORE starting the write because its 2-minute
+ * server reserve had begun. Re-open only after proving that the exact same
+ * Staging note was never written/attempted. Never reissue the old token.
+ */
+function assertPreviousUnwritten(actor:string){
+ const prior=status(M46_PREVIOUS_NOTE_ID,actor),b=prior.receipt?.gitPilot;
+ if(prior.path!==M46_NOTE_PATH||prior.beforeHash!==sha256("")||
+   prior.afterHash!==sha256(M46_NOTE_CONTENT)||prior.status!=="preview"||
+   !prior.approved||b?.state!=="m46_preview"||b.manualReviewRequired||
+   typeof b.base!=="string"||prior.receipt?.write==="writing"||
+   prior.receipt?.write==="written"||prior.receipt?.readback==="verified"||
+   prior.receipt?.reindex==="verified")
+   throw Error("M4.6 previous outcome is not a confirmed unwritten preview; manual reconciliation required");
+ return {previousId:M46_PREVIOUS_NOTE_ID,previousHash:prior.afterHash,previousBase:b.base};
+}
 export async function previewOwnerM46(actor:string){
  assertOwnerM46();ownerActor(actor);
  return exclusive(async()=>{
   assertOwnerM46();
+  const previous=assertPreviousUnwritten(actor);
   const base=await cleanBase([M46_NOTE_PATH],true);
   const note=gitPilotContext.run({base,operations:ops},()=>preview({
    operationId:M46_NOTE_ID,path:M46_NOTE_PATH,reason:"Owner-reviewed M4.6 source-attributed NVDA shadow research in isolated Staging Test Vault only",
@@ -91,7 +108,8 @@ export async function previewOwnerM46(actor:string){
      imported_at:null,verified_at:null,relatedPaths:[]},
   },actor));
   if(!note.previewToken)throw Error("M4.6 preview was already started; do not replay");
-  recordGitPilot(M46_NOTE_ID,actor,{base,manifestHash:manifest,state:"m46_preview"});
+  recordGitPilot(M46_NOTE_ID,actor,{base,manifestHash:manifest,state:"m46_preview",
+    priorOperationId:previous.previousId,priorAfterHash:previous.previousHash,priorGitBase:previous.previousBase});
   return {preview:note,base,manifestHash:manifest};
  });
 }
