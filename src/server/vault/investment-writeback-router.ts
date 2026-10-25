@@ -13,6 +13,7 @@ import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investme
 import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
 import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTag,
   type BrokerUpdate } from "./investment-routing-v2";
+import { buildCanonicalSafeEditWorkflow, type CanonicalSafeEditWorkflow } from "./canonical-writeback-workflow";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
@@ -38,6 +39,10 @@ export interface WritebackInput {
   entityRoles?:EntityTag[];
   themes?:string[];
   brokerUpdate?:BrokerUpdate;
+  /** M5.3: supply ONLY finished, source-separated analysis to obtain a Safe Edit recipe. */
+  sourceChat?:string;
+  completedAnalysis?:string;
+  captureOnly?:boolean;
 }
 type Route={kind:"raw_input"|"research_review"|"company_timeline_candidate"|"industry_context_candidate"|"claim_registry_candidate";
   action:"candidate_create"|"candidate_append_after_review"|"link_existing_or_hold";
@@ -76,13 +81,14 @@ export interface WritebackPlan {
   sourceEventReview:{
     status:"possible_same_source_event_candidates"|"no_structured_match_not_proof_new"|"insufficient_identity";
     candidatePaths:string[];
-    criteria:"same_explicit_company_event_date_and_canonical_source_url";
+    criteria:"same_explicit_company_event_date_and_canonical_source_url"|"same_explicit_unscoped_event_date_and_canonical_source_url";
     scanTruncated:boolean;
     duplicateAdjudicated:false;
   };
   exactClaimReview:{status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
     classification:ReviewClass|null;matchingClaimPaths:string[];scanTruncated:boolean|null};
   routingV2:RoutingV2;
+  safeEditWorkflow?:CanonicalSafeEditWorkflow;
   routes:Route[];
   gates:{
     fullSourceRead:boolean;
@@ -129,7 +135,7 @@ function relatedIssuer(f:Record<string,unknown>,issuer:string):boolean{
 function sourceEventCandidates(issuers:string[],sourceUrl:string|null|undefined,eventDate:string|null){
   const empty={candidatePaths:[] as string[],scanTruncated:false};
   const wanted=sourceUrl?canonicalSourceUrl(sourceUrl):null;
-  if(!issuers.length||!wanted||!eventDate)return empty;
+  if(!wanted||!eventDate)return empty;
   const max=25000;
   const rows=db().prepare("SELECT path,frontmatter FROM notes WHERE frontmatter IS NOT NULL ORDER BY path LIMIT ?")
     .all(max+1) as {path:string;frontmatter:string|null}[];
@@ -137,7 +143,13 @@ function sourceEventCandidates(issuers:string[],sourceUrl:string|null|undefined,
   for(const {path,frontmatter} of rows.slice(0,max)){
     let fm:Record<string,unknown>;
     try {fm=JSON.parse(frontmatter||"null") as Record<string,unknown>;}catch{continue;}
-    if(!fm||typeof fm!=="object"||Array.isArray(fm)||!issuers.some(issuer=>relatedIssuer(fm,issuer)))continue;
+    if(!fm||typeof fm!=="object"||Array.isArray(fm))continue;
+    const declaredIssuer=[fm.company,fm.entity,fm.ticker,fm.issuer]
+      .flatMap(x=>Array.isArray(x)?x:[x]).some(x=>typeof x==="string"&&x.trim().length>0);
+    // For a thematic Macro/Industry raw receipt without issuer metadata,
+    // matching exact URL + economic event date is still a source-event
+    // candidate. Never merge a differently tagged issuer by co-mention.
+    if(declaredIssuer&&!issuers.some(issuer=>relatedIssuer(fm,issuer)))continue;
     // A report imported on this day can discuss an entirely different event.
     if(fm.event_date!==eventDate)continue;
     const declared=[fm.original_source,fm.source_url,fm.primary_url].some(
@@ -182,6 +194,12 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     throw Error("Entity roles must refer to explicitly declared entities (maximum 12)");
   if(input.brokerUpdate?.estimateChanges && input.brokerUpdate.estimateChanges.length>12)
     throw Error("At most 12 attributed broker estimate changes per plan");
+  if((input.completedAnalysis!==undefined||input.captureOnly===true) && (!input.sourceChat?.trim()||input.sourceChat.length>120))
+    throw Error("M5.3 captureOnly/completedAnalysis requires sourceChat (1-120)");
+  if(input.captureOnly===true&&input.completedAnalysis!==undefined)
+    throw Error("captureOnly and completedAnalysis are mutually exclusive");
+  if(input.completedAnalysis!==undefined && (!T(input.completedAnalysis)||input.completedAnalysis.length>30000))
+    throw Error("M5.3 completedAnalysis must be 1-30000 characters");
   const routingV2=planCanonicalRoutingV2({...input,entities});
   const legacyDigest=createHash("sha256").update([
     "investment_os_intake_v1",input.domain,input.inputFormat,input.sourceKind,
@@ -323,7 +341,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     "Preview/approve/apply one non-protected write at a time; verify readback, reindex, links, retry identity and rollback capability.",
     "Propose protected Thesis/Evidence Register or Portfolio revisions only through separate owner-approval workflow."
   ];
-  return {
+  const plan:WritebackPlan={
     status:"read_only_plan_not_written",planId,entityScope:entities,domain:input.domain,
     inputFormat:input.inputFormat,sourceKind:input.sourceKind,
     sourceLanguage:input.sourceLanguage?T(input.sourceLanguage):null,
@@ -341,10 +359,11 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       candidatePaths:candidateEventPaths,duplicateAdjudicated:false
     },
     sourceEventReview:{
-      status:!sourceIssuers.length||!input.sourceUrl||!eventDate?"insufficient_identity":
+      status:!input.sourceUrl||!eventDate?"insufficient_identity":
         sameSourceEvent?"possible_same_source_event_candidates":"no_structured_match_not_proof_new",
       candidatePaths:sourceMatches.candidatePaths,
-      criteria:"same_explicit_company_event_date_and_canonical_source_url",
+      criteria:sourceIssuers.length?"same_explicit_company_event_date_and_canonical_source_url":
+        "same_explicit_unscoped_event_date_and_canonical_source_url",
       scanTruncated:sourceMatches.scanTruncated,duplicateAdjudicated:false
     },
     exactClaimReview:{status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
@@ -356,4 +375,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       protectedThesisApprovalRequired:true,canAutoWrite:false},
     warnings,nextActions:needed
   };
+  if(input.completedAnalysis!==undefined||input.captureOnly===true)
+    plan.safeEditWorkflow=buildCanonicalSafeEditWorkflow(input,plan);
+  return plan;
 }

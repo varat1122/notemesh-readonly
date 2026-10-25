@@ -380,7 +380,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     {
       title: "Plan multilingual investment intake and evidence-safe Vault writeback",
       annotations: READ,
-      description: "Read-only M5.2 plan for multilingual investment intake, including mixed company/industry items, broker PT and EPS vintages, and existing indexed company/industry hub links. Optional caller-declared classifications never verify a fact, source, thesis, or estimate. Stable raw/review retry IDs and SHA readback are preserved. No binary or note is written by this tool; use separately authorized Safe Edit after original-source/event review. Never auto changes protected Thesis/Evidence Register or Portfolio.",
+      description: "Read-only M5.2/M5.3 investment intake plan. Resolves existing Company/Industry Hubs, broker vintage and duplicate candidates; when sourceChat + completedAnalysis are supplied, emits exact add-only Safe Edit source/review create-note recipes and verifies their SHA readback plus search index on retries. Use separately authorized Safe Edit preview/apply; this planner NEVER writes. Never automatically changes Thesis/Evidence Register, Portfolio or Company Evolution Timeline.",
       inputSchema: {
         domain:z.enum(["company","industry","macro","asset"]).describe("Claim/knowledge domain; not an inferred company ticker"),
         entities:z.array(z.string().min(1).max(120)).min(1).max(6).describe("Explicit issuer ticker(s), macro geography, or industry topics. Do not include inferred suppliers as confirmed issuers."),
@@ -428,6 +428,9 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
             oldValue:z.string().max(80),newValue:z.string().max(80),unit:z.string().max(60)
           })).max(12).optional()
         }).optional().describe("M5.2 caller-declared broker old/new versions; same bank, dated vintages, matching old/new currencies and comparable PT horizons required before candidate PT direction"),
+        sourceChat:z.string().min(1).max(120).optional().describe("M5.3 original Micro, Macro or PDF chat identifier. Required with completedAnalysis; source provenance, not necessarily publication date"),
+        completedAnalysis:z.string().min(1).max(30000).optional().describe("M5.3 final analyst-reviewed Markdown separated from the exact extractedText. When set with sourceChat, produces source + canonical review Safe Edit recipes without writing anything"),
+        captureOnly:z.boolean().optional().describe("M5.3 Feed Only: with sourceChat, prepare a source-only Safe Edit recipe. The Research Review remains pending. Must not be combined with completedAnalysis"),
         focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Historical context relevance; does not verify issuer claims")
       }
     },
