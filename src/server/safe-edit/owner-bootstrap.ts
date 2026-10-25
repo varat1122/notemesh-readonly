@@ -62,6 +62,17 @@ function researchPackage(hashes:Record<string,string>){
     analysisPath:"08_Daily_Weekly/Research Indexes/Investment Review - M4TEST - "+eventKey+".md",timelinePath,sourcePath,expectedSourceSha256:sourceSha,
     analysisMarkdown:["---","type: investment_review","entity: M4TEST","event_key: "+eventKey,"operation_id: "+operationRoot,"source_type: archived_ai","independent_evidence: false","verification: not_reverified","status: draft","analysis_origin: synthetic_acceptance_fixture","source_path: "+sourcePath,"source_sha256: "+sourceSha,"---","# Synthetic acceptance analysis","<!-- investment-os-operation:"+operationRoot+" -->","<!-- investment-os-event:"+eventKey+" -->","This is a fictional operational fixture, not investment research. Source A suggests hypothetical demand; conversion to revenue is unknown. Margins, earnings, cash flow and ROIC cannot be inferred. Counter-evidence is missing. No thesis update is authorized.",... [sourcePath,fixtures[2].path,timelinePath].map(p=>"[["+p.slice(0,-3)+"]]"),""].join("\n")});
 }
+/** Rebuild the fixed synthetic Analysis A proposal from verified bootstrap
+ * receipts, physical bytes and the local FTS index. Never grants approval or writes.
+ */
+export function verifiedBootstrapResearchPackage(actor:string){
+  assertOwnerBootstrap();
+  const {rows}=records(actor);
+  if(rows.some(r=>r.status!=="written" || r.receipt?.gitPilot?.state!=="bootstrap_verified" ||
+      r.receipt?.gitPilot?.manualReviewRequired))
+    throw Error("M4 synthetic bootstrap not fully verified");
+  return researchPackage(verifyBootstrap(actor));
+}
 export async function applyOwnerBootstrap(input:unknown,actor:string){
   assertOwnerBootstrap();ownerActor(actor);const args=argsSchema.parse(input);
   if(args.some((a,n)=>a.operationId!==fixtures[n].id))throw Error("Bootstrap operation scope/order mismatch");

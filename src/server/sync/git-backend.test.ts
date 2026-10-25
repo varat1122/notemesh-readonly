@@ -587,6 +587,17 @@ describe("M4 fixed synthetic bootstrap acceptance",()=>{
     expect(JSON.stringify(next)).toContain('"declaredSourceType":"archived_ai"');
     expect(JSON.stringify(next)).toContain('"declaredIndependentEvidence":false');
   });
+  it("rebuilds the fixed Analysis A package only after verified bootstrap without any writes",async()=>{
+    const {bootstrap,engine,fixtures}=await fixture();const p=await bootstrap.previewOwnerBootstrap(actor);
+    expect(()=>bootstrap.verifiedBootstrapResearchPackage(actor)).toThrow(/fully verified/);
+    for(const x of p.previews)engine.approve(x.operationId,"human",x.afterHash);
+    const result=await bootstrap.applyOwnerBootstrap(args(p),actor);
+    const before=git(remote,"rev-parse","main");
+    const regenerated=bootstrap.verifiedBootstrapResearchPackage(actor);
+    expect(regenerated).toEqual(result.researchPackage);
+    expect(regenerated.sourcePath).toBe(fixtures[0].path);
+    expect(git(remote,"rev-parse","main")).toBe(before);
+  });
   it("rejects disabled gate, forged actors, wrong IDs/tokens/hash and existing targets without overwrite",async()=>{
     const {bootstrap,engine,fixtures,vault}=await fixture();
     delete process.env.GIT_RESEARCH_BOOTSTRAP_M4;await expect(bootstrap.previewOwnerBootstrap(actor)).rejects.toThrow(/disabled/);

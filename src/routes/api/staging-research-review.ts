@@ -2,7 +2,7 @@
 import type {APIEvent} from "@solidjs/start/server";
 import {env} from "~/server/env";
 import {BOOTSTRAP_FIXTURES,BOOTSTRAP_ROOT} from "~/server/safe-edit/synthetic-bootstrap-fixtures";
-import {assertOwnerBootstrap,previewOwnerBootstrap,ownerBootstrapStatus,applyOwnerBootstrap} from "~/server/safe-edit/owner-bootstrap";
+import {assertOwnerBootstrap,previewOwnerBootstrap,ownerBootstrapStatus,applyOwnerBootstrap,verifiedBootstrapResearchPackage} from "~/server/safe-edit/owner-bootstrap";
 import {assertOwnerResearch,previewOwnerResearch,ownerResearchStatus,applyOwnerResearch} from "~/server/safe-edit/owner-research";
 import {owner,smallForm,escapeHtml as esc,html,denied} from "./staging-git-pilot";
 
@@ -28,8 +28,17 @@ export async function GET({request}:APIEvent){
     if(query.get("bootstrap")==="1")return html('<h1>Synthetic bootstrap receipts — read only</h1><pre>'+esc(JSON.stringify(ownerBootstrapStatus("staging-owner-research:"+session.user.id),null,2))+'</pre>');
     const root=query.get("operationRoot");
     if(root)return html('<h1>Research operation receipt — read only</h1><pre>'+esc(JSON.stringify(ownerResearchStatus(root,"staging-owner-research:"+session.user.id),null,2))+'</pre>');
-    return html('<h1>Import Investment Research Review Package</h1><p>Paste the existing graph bundle JSON from ChatGPT. Import creates previews only. It grants no approval and performs no note write, commit or push.</p><form method="post"><textarea name="package" rows="24" cols="100" maxlength="120000" required></textarea><button name="action" value="import">Import and preview</button></form>'+
-      (process.env.GIT_RESEARCH_BOOTSTRAP_M4==="1"?'<section><h2>Fixed synthetic bootstrap</h2><p>Only four fixed handoff fixtures. Preview creates no folders or notes. Approve ALL four exact diffs separately before Apply.</p><form method="post"><button name="action" value="bootstrap-preview">Preview four synthetic fixtures</button></form></section>':''));
+    let testPanel='';
+    if(process.env.GIT_RESEARCH_BOOTSTRAP_M4==="1"){
+      try{
+        const s=ownerBootstrapStatus("staging-owner-research:"+session.user.id);
+        if(s.records.every(r=>r.status==="written"&&r.receipt?.gitPilot?.state==="bootstrap_verified"&&!r.receipt?.gitPilot?.manualReviewRequired))
+          testPanel='<section><h2>M4 TEST — Step 2: Analysis A + Timeline</h2><p>Bootstrap passed. This preview is generated from the verified fixed synthetic Source A; it creates no notes and requires TWO separate exact-hash approvals.</p><form method="post"><button name="action" value="synthetic-research-preview">Preview Synthetic Analysis A (no write)</button></form><p>Only click once. Keep the preview page open, approve the two diffs, Check and Apply once.</p></section>';
+      }catch{/* No verified bootstrap for this owner; never infer approval. */}
+    }
+    return html('<h1>M4 Staging Test</h1>'+testPanel+
+      '<details><summary>Advanced: import a separate review package</summary><p>Import previews only; it never approves or writes.</p><form method="post"><textarea name="package" rows="24" cols="100" maxlength="120000" required></textarea><button name="action" value="import">Import and preview</button></form></details>'+
+      (process.env.GIT_RESEARCH_BOOTSTRAP_M4==="1"&&!testPanel?'<p>Fixed synthetic bootstrap must be completed before Analysis A. The previous bootstrap is not automatically retried.</p>':''));
   }catch{return denied("Research review disabled, unavailable or outside staging scope.",403);}
 }
 export async function POST({request}:APIEvent){
@@ -58,6 +67,13 @@ export async function POST({request}:APIEvent){
       const result=await applyOwnerBootstrap(BOOTSTRAP_FIXTURES.map((f,n)=>({operationId:f.id,previewToken:tokens[n],expectedHash:state.records[n].beforeHash})),actor);
       if(result.status!=="synthetic_bootstrap_git_physical_fts_verified")return denied("Bootstrap already attempted; inspect receipts and reconcile manually. No retry performed.",409);
       return html('<h1>Synthetic bootstrap verified</h1><pre>'+esc(JSON.stringify(result,null,2))+'</pre><p>Copy the returned research package only after independent readback and a fresh Git HEAD check. Research import/approval/apply are separate actions.</p>');
+    }
+    if(action==="synthetic-research-preview"){
+      if([...form.keys()].length!==1)return denied("Unexpected synthetic test input",400);
+      const pkg=verifiedBootstrapResearchPackage(actor);
+      const p=await previewOwnerResearch(pkg,actor);
+      const root=p.analysis.operationId.slice(0,-9);
+      return review(root,[p.analysis.previewToken!,p.timeline.previewToken!],ownerResearchStatus(root,actor),p.context);
     }
     if(form.get("action")==="import"){
       const p=await previewOwnerResearch(JSON.parse(form.get("package")??""),actor);
