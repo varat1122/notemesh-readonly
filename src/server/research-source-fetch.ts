@@ -20,7 +20,7 @@ export interface SourceFetchResult {
   publisherAuthenticityVerified:false;fullRevisionHistoryComplete:false;
   vaultModified:false;
 }
-function trustedHttpsUrl(input:string):URL{
+export function trustedHttpsUrl(input:string):URL{
   if(input.length>2000)throw new Error("source_url_too_long");
   let u:URL;
   try{u=new URL(input);}catch{throw new Error("source_url_invalid");}

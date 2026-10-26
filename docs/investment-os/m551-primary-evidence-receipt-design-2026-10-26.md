@@ -15,10 +15,13 @@ For each `resolution: verified_primary`, the server requires a claim-scoped
 `primarySourceUrl` and competing values. The entity must belong to the current
 intake scope. A server-side registry record must match the exact scope and have:
 
-1. A separate **operator adjudication** with an OAuth-labeled reviewer, UTC
-   approval timestamp, exact locator, primary-origin approval and (when values
-   conflict) explicit conflict adjudication. An indexed Vault note cannot issue
-   this approval, and no MCP route in this branch can create an approved record.
+1. A separate **operator adjudication** with a signed UTC review timestamp,
+   exact locator, primary-origin approval and (when values conflict) explicit
+   conflict adjudication. An indexed Vault note cannot issue this approval,
+   and no MCP route in this branch can create an approved record. Both an
+   externally assigned reviewer and approver must sign the exact canonical
+   attestation with distinct Ed25519 private keys. The server stores only
+   their previously authorized public keys.
 2. A referenced, complete `source_snapshots` document fetched through the
    authorized HTTPS archive channel, with matching URL, snapshot SHA-256 and
    byte-by-byte rehash/readback. Manual uploads do not count as issuer fetches.
@@ -39,18 +42,65 @@ that claim issuer verification without any assessment. Neither rule solves
 general-language semantic entailment; incorrect content-type labels and subtle
 paraphrases are still attack surfaces requiring broader evaluation.
 
-## Remaining blocker: issuance is deliberately absent
+## Signed issuance (draft implementation; not activated in Production)
 
-The schema is additive and read-only validation is implemented, but **there is
-no production issuance flow yet**. Before production treats any receipt as
-approved, add a separately authorized, audited operator workflow with original
-document review, issuer-origin checks, exact numeric semantics, vintage/period
-adjudication, counter-evidence disposition, and revocation/change history.
-Require independent reviewer permissions and append-only audit (plus signature
-or equivalent server provenance control) before enabling live issuance.
-Direct SQL INSERT used by unit tests is a synthetic fixture, not a deployment
-runbook. Do not manually approve records in Production merely to make a test
-pass.
+This instance deliberately permits **one Better Auth admin account only**.
+Adding a second app admin would undermine its security invariant. Therefore
+reviewer and approver identities are *external signing keys*, not fake second
+admin sessions. The code enforces two distinct Ed25519 public-key fingerprints
+with different configured roles. A single person could still hold both private
+keys: organizational key custody and independent real-human review are outside
+what the server can prove.
+
+- Operator-controlled server config: `PRIMARY_EVIDENCE_SIGNERS_JSON`, an array
+  of `{keyId, role: "reviewer" | "approver", publicKeyPem}`. Two different
+  public keys are required. **Never upload or configure either private key on
+  NoteMesh, ChatGPT, GitHub, the Vault, or the MCP connector.** No keys are
+  supplied by this repository and an absent/invalid config fails closed.
+- Independently enable `PRIMARY_EVIDENCE_ISSUANCE_ENABLED=1` only after signer
+  custody and human operating rules are approved; default is disabled even if
+  public keys happen to be configured.
+- Admin-session-only `POST /api/primary-evidence-receipt`, JSON actions:
+  `prepare`, `issue`, `revoke`. Requires an actual signed-in Better Auth admin
+  session and exact same-origin header. OAuth `vault:edit`, API keys and signed
+  MCP tool arguments do not authorize it.
+- `prepare` checks exact HTTPS allowlisted original URL, full archived byte
+  integrity, anchored verified value, source vintage and scope; returns a
+  canonical domain-separated `messageBase64` for external signatures. This
+  step is read-only and issues no approved receipt.
+- Two external reviewers verify publisher provenance, relevant source section,
+  metric/period/unit/value and conflicting vintages. For contradictory numbers,
+  the signed payload includes a **counterClaims[] row for each competing
+  value**, its attributed source/label, optional publication date, disposition
+  and rationale. Reviews citing values not covered by those adjudications are
+  held; a naked `conflictingValuesAdjudicated: true` cannot unlock a Review.
+  Each signer signs the same
+  decoded `messageBase64` using offline Ed25519. The admin submits both
+  signatures through `issue`; server revalidates the document, signer roles and
+  signatures, then records an immutable approved row and append-only audit
+  event in one transaction. Receipt ID is content-derived.
+- `revoke` adds an irreversible revocation row and event with a reason. Neither
+  approved rows nor audit/revocation entries can be updated/deleted by normal
+  app operations. Read-time validation checks revocations, signer configuration
+  and both signatures again. Dropping keys from the allowlist causes existing
+  receipts to fail closed until key migration/adjudication is completed.
+- A unique Claim Scope index prevents a second Receipt for the same archived
+  document, Entity, Metric, Period, Unit and Value even if signed again with a
+  different review timestamp. Revoked approval cannot be resurrected by a
+  duplicate receipt that inflates evidence weight.
+
+The code does not automatically determine issuer authorship or economic claim
+truth: it verifies **human-signed attestation bound to exact original bytes**.
+No private-key issuance, signer custody, reviewer appointment, operational UI,
+or real-world dual-human acceptance has been performed. Signing fixtures in
+tests are synthetic only. PDF anchors remain unsupported. Production issuance
+must stay disabled by missing signer configuration until the owner authorizes
+operational roles and an audited pilot with real primary evidence.
+
+This costly two-signature process is required only to promote a **confirmed
+primary** claim. Ordinary Source Intake and conservative, uncertainty-labeled
+research Reviews can continue through the existing Safe Edit workflow; do not
+subject every Micro/Macro news item to manual cryptographic attestation.
 
 ## MCP schema and rollout
 
@@ -73,8 +123,9 @@ pass.
 1. Full TypeScript, ESLint, tests and build on the PR head; security review of
    source archive readback and all gate failure states.
 2. Review, refresh and exercise the Safe Edit connector's real tool schema.
-3. Review production issuance trust boundary; decide whether to deploy a
-   fail-closed validator without issuance or implement issuance separately.
+3. Assign and independently verify two real signer/key owners, secure private
+   key custody, review the admin import interface and execute a genuine
+   approval/revocation acceptance pilot before enabling Production issuance.
 4. Only after authorized merge, verify Railway successful commit SHA. Run the
    two synthetic cases **Production Preview Only**, no Apply of fictitious
    content; confirm zero synthetic search hits in the Production Vault.

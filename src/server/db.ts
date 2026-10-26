@@ -121,6 +121,24 @@ function migrate(d: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_primary_claim_verifications_snapshot
       ON primary_claim_verifications(snapshot_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_primary_claim_exact_scope
+      ON primary_claim_verifications(snapshot_id,lower(entity),lower(metric),lower(period),lower(unit),verified_value);
+    -- One-way revocation and append-only audit. Neither approval state nor
+    -- past observations can be silently restored by an ordinary app action.
+    CREATE TABLE IF NOT EXISTS primary_claim_receipt_revocations (
+      receipt_id TEXT PRIMARY KEY REFERENCES primary_claim_verifications(receipt_id),
+      revoked_at TEXT NOT NULL,
+      revoked_by TEXT NOT NULL,
+      reason TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS primary_claim_receipt_events (
+      event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      receipt_id TEXT NOT NULL,
+      event TEXT NOT NULL CHECK(event IN ('issued','revoked')),
+      occurred_at TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      payload_sha256 TEXT NOT NULL
+    );
   `);
   // Additive columns for databases created before them. The index is rebuilt
   // at every boot, so a new column needs no backfill beyond existing.
@@ -128,6 +146,34 @@ function migrate(d: Database.Database) {
   addColumn(d, "attachments", "modified", "INTEGER");
   addColumn(d, "notes", "created", "INTEGER");
   addColumn(d, "attachments", "created", "INTEGER");
+  // Additive for staging databases that initialized the draft table before
+  // the signed-issuance extension. Unsigned legacy entries fail closed.
+  addColumn(d, "primary_claim_verifications", "reviewed_at", "TEXT");
+  addColumn(d, "primary_claim_verifications", "reviewer_key_id", "TEXT");
+  addColumn(d, "primary_claim_verifications", "reviewer_signature", "TEXT");
+  addColumn(d, "primary_claim_verifications", "approver_key_id", "TEXT");
+  addColumn(d, "primary_claim_verifications", "approver_signature", "TEXT");
+  addColumn(d, "primary_claim_verifications", "counter_claims_json", "TEXT");
+  d.exec(`
+    CREATE TRIGGER IF NOT EXISTS primary_claim_approved_immutable_update
+      BEFORE UPDATE ON primary_claim_verifications
+      BEGIN SELECT RAISE(ABORT,'primary_claim_receipt_immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS primary_claim_approved_immutable_delete
+      BEFORE DELETE ON primary_claim_verifications
+      BEGIN SELECT RAISE(ABORT,'primary_claim_receipt_immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS primary_claim_revocation_immutable_update
+      BEFORE UPDATE ON primary_claim_receipt_revocations
+      BEGIN SELECT RAISE(ABORT,'primary_claim_revocation_immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS primary_claim_revocation_immutable_delete
+      BEFORE DELETE ON primary_claim_receipt_revocations
+      BEGIN SELECT RAISE(ABORT,'primary_claim_revocation_immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS primary_claim_event_immutable_update
+      BEFORE UPDATE ON primary_claim_receipt_events
+      BEGIN SELECT RAISE(ABORT,'primary_claim_event_immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS primary_claim_event_immutable_delete
+      BEFORE DELETE ON primary_claim_receipt_events
+      BEGIN SELECT RAISE(ABORT,'primary_claim_event_immutable'); END;
+  `);
 }
 
 function addColumn(d: Database.Database, table: string, column: string, type: string) {
