@@ -20,6 +20,7 @@ const canonicalBaseSchema = z.object({
     "user_commentary", "archived_chat", "social_repost", "industry_research", "official_macro", "unknown"]),
   extractedText: nonempty.max(12000),
   sourceChat: nonempty.max(120),
+  existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional(),
   completedAnalysis: nonempty.max(30000).optional(),
   researchReview: z.object({
     headlineTh:nonempty.max(500),translationTh:z.string().max(30000).optional(),
