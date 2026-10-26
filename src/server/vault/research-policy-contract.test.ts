@@ -1,6 +1,7 @@
 import {createHash} from "node:crypto";
 import {readFileSync} from "node:fs";
 import {describe,expect,it} from "vitest";
+import {M2_POLICY} from "./research-decision-v2";
 
 interface PolicyManifest {
   policyId:string;
@@ -26,6 +27,8 @@ describe("M1 version-pinned canonical research policy candidate",()=>{
     const bytes=readFileSync(new URL(manifest.policyFile,dir));
     const digest=createHash("sha256").update(bytes).digest("hex");
     expect(digest).toBe(manifest.policySha256);
+    expect(M2_POLICY.sha256).toBe(manifest.policySha256);
+    expect(M2_POLICY.version).toBe(manifest.policyVersion);
     expect(bytes.toString("utf8")).toContain("Policy status:** CANDIDATE / SHADOW ONLY");
   });
 
