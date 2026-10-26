@@ -73,7 +73,11 @@ The scorer has strict schema and case/room/hash checks and summarizes critical f
 | Trusted M1 policy configured in real three ChatGPT rooms | **PENDING** |
 | Observed ChatGPT-room trials with genuine saved transcripts | **PENDING** |
 | Independent real original-source gold labels | **PENDING** |
-| Read-only production retrieval, live connector schema and synthetic Preview Only | **PENDING** |
+| Read-only Production NoteMesh retrieval in this session | **OBSERVED 2026-10-27**; bounded lexical context only |
+| Live Safe Edit descriptor parity for M5.5.1 `claimAssessments` | **MISMATCH**: field absent; NO-GO |
+| Synthetic Preview Only in Production | **OBSERVED 2026-10-27**: two unsafe fictional Reviews had `qualityIssues:[]`; **no Apply, no writes** |
 | Production Source/Review integrity E2E and authorized merge/deploy | **PENDING** |
 
 **NO-GO:** Neither scripted fixture output nor offline scoring constitutes AI evaluation success or permission to change Production.
+
+Actual connected-tool observations and post-preview Vault path readbacks: [M3b Production Canary — 2026-10-27](./M3b-production-preview-canary-2026-10-27.md).
