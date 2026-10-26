@@ -28,11 +28,14 @@ const canonicalBaseSchema = z.object({
     thesisImplicationTh:nonempty.max(6000),counterEvidenceTh:nonempty.max(6000),
     requiredEvidenceTh:nonempty.max(6000),
     claimAssessments:z.array(z.object({
+      entity:nonempty.max(120).optional(),
       metric:nonempty.max(140),period:nonempty.max(120),unit:nonempty.max(80),
       competingValues:z.array(nonempty.max(150)).min(1).max(8),
       resolution:z.enum(["unresolved","verified_primary"]),
       conclusion:z.enum(["no_change","conditional","confirmed"]),
-      primaryEvidenceReceipt:z.string().max(500).optional()
+      primaryEvidenceReceipt:z.string().max(500).optional(),
+      primarySourceUrl:z.string().url().max(2000).optional(),
+      verifiedValue:nonempty.max(150).optional()
     }).strict()).max(24).optional()
   }).strict().optional(),
   sourceChannel:z.string().max(80).optional(),

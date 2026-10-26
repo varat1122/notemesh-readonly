@@ -42,6 +42,15 @@ describe("M5.5 pre-write research contract",()=>{
     expect(validateResearchM55(input,{...review,claimAssessments:[assessment]})).toEqual([]);
     expect(validateResearchM55(input,review)).toContain("guidance_claim_assessment_missing");
     expect(renderThaiResearchM55({...review,claimAssessments:[assessment]})).toContain("FY2027");
+    expect(validateResearchM55({...input,sourceKind:"issuer_release"},review))
+      .toContain("guidance_claim_assessment_missing");
+  });
+  it("holds an explicit verified-fact assertion without proof even when classified as ordinary reported facts",()=>{
+    const asserted={...review,whatChangedTh:"ยืนยันแล้วว่ารายได้ MU FY2027 โต 20%",
+      thesisImplicationTh:"ต้องปรับเพิ่ม EPS ทันที"};
+    expect(validateResearchM55({...memory,sourceKind:"issuer_release",contentTypes:["reported_fact"]},asserted))
+      .toContain("explicit_verified_claim_requires_assessment");
+    expect(validateResearchM55(memory,review)).toEqual([]);
   });
   it("holds fabricated confirmation of contradictory unverified FY2027 guidance",()=>{
     const input={...memory,domain:"company" as const,subject:"MU",sourceKind:"user_commentary",

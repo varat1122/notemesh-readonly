@@ -23,6 +23,22 @@ function unpack(result:any){const b=JSON.parse(result.content[0].text);return JS
 it("discovers fourteen scoped tools with accurate write annotations",async()=>{
  const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="apply_canonical_writeback"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment");}}finally{await c.close();}
 });
+it("M5.5.1 exposes optional claim assessment and exact primary receipt scope in the live MCP descriptor",async()=>{
+ const c=await connected(access);
+ try{
+  const {tools}=await c.client.listTools();
+  const prepare=tools.find(t=>t.name==="prepare_canonical_writeback");
+  const apply=tools.find(t=>t.name==="apply_canonical_writeback");
+  const nested=(prepare?.inputSchema.properties?.researchReview as any)?.properties?.claimAssessments;
+  expect(nested?.type).toBe("array");
+  for(const field of ["entity","metric","period","unit","competingValues","resolution",
+    "conclusion","primaryEvidenceReceipt","primarySourceUrl","verifiedValue"])
+    expect(nested.items.properties).toHaveProperty(field);
+  const applyNested=(apply?.inputSchema.properties?.input as any)?.properties?.researchReview?.properties?.claimAssessments;
+  expect(applyNested).toEqual(nested);
+  expect((prepare?.inputSchema.required??[])).not.toContain("researchReview");
+ }finally{await c.close();}
+});
 it.each([
  {...access,scopes:["vault:read"]},{...access,scopes:["vault:read","inbox:submit"]},
  {...access,scopes:["vault:write"]},{...access,label:"api-key:general"},{...access,scopes:undefined},

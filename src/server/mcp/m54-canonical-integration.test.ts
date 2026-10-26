@@ -86,6 +86,31 @@ it("M54-F01 fresh Micro: one scoped preview + apply saves source/review, verifie
   }finally{await c.close();}
 });
 
+it("M551 connector accepts optional claimAssessments; unresolved preview passes and caller-forged primary receipt holds",async()=>{
+  const c=await connect();
+  try{
+    const input={...news,sourceKind:"issuer_release",contentTypes:["guidance"],
+      extractedText:"SYNTHETIC: NVDA FY2027 guidance +20% vs -20%, no primary proof",
+      researchReview:{...news.researchReview,claimAssessments:[{
+        entity:"NVDA",metric:"revenue growth guidance",period:"FY2027",unit:"% YoY",
+        competingValues:["+20%","-20%"],resolution:"unresolved",conclusion:"no_change"
+      }]}};
+    const unresolved=await prepare(c.client,input);
+    expect(unresolved.phase).toBe("preview_only");
+    expect(unresolved.qualityIssues).toEqual([]);
+    expect(unresolved.steps.map((x:any)=>x.state)).toEqual(["needs_create","needs_create"]);
+    const forged=await prepare(c.client,{...input,researchReview:{...input.researchReview,
+      claimAssessments:[{...input.researchReview.claimAssessments[0],
+        resolution:"verified_primary",conclusion:"confirmed",verifiedValue:"+20%",
+        primarySourceUrl:"https://www.sec.gov/Archives/fictitious-nvda.htm",
+        primaryEvidenceReceipt:"PEV-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"}]}});
+    expect(forged.steps.map((x:any)=>x.state)).toEqual(["needs_create","hold_quality_gate"]);
+    expect(forged.qualityIssues).toContain("primary_evidence_receipt_validation_pending");
+    expect(forged.previews).toHaveLength(1);
+    expect(forged.writesPerformed).toBe(false);
+  }finally{await c.close();}
+});
+
 it("M56 MCP contract links a Feed Only source when later research reorders entities and changes classification",async()=>{
   for(const rel of ["01_Companies/MU.md","02_Industries_Themes/Memory.md"]){
     fs.mkdirSync(path.dirname(path.join(vault,rel)),{recursive:true});

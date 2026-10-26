@@ -146,7 +146,7 @@ export function buildCanonicalSafeEditWorkflow(
     sourceChannel:input.sourceChannel??"",
     attributedOrigin:input.attributedOrigin,
     originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage,
-    sourceKind:plan.sourceKind
+    sourceKind:plan.sourceKind,entityScope:plan.entityScope
   },input.researchReview):[];
   const broker=input.brokerUpdate;
   const brokerLines=broker?[

@@ -96,6 +96,31 @@ function migrate(d: Database.Database) {
       UNIQUE(source_key,revision)
     );
     CREATE INDEX IF NOT EXISTS idx_source_snapshots_source_rev ON source_snapshots(source_key,revision);
+
+    -- Server-controlled primary CLAIM adjudications, intentionally separate
+    -- from caller-authored Vault notes and Safe Edit source receipts. There is
+    -- no MCP insert/update surface for this table. An independently authorized
+    -- operator workflow must issue an approval before one can be consumed.
+    CREATE TABLE IF NOT EXISTS primary_claim_verifications (
+      receipt_id TEXT PRIMARY KEY,
+      snapshot_id TEXT NOT NULL REFERENCES source_snapshots(snapshot_id),
+      source_sha256 TEXT NOT NULL,
+      original_source TEXT NOT NULL,
+      entity TEXT NOT NULL,
+      metric TEXT NOT NULL,
+      period TEXT NOT NULL,
+      unit TEXT NOT NULL,
+      verified_value TEXT NOT NULL,
+      source_locator TEXT NOT NULL,
+      raw_source_excerpt TEXT NOT NULL,
+      reviewer_id TEXT NOT NULL,
+      approved_at TEXT NOT NULL,
+      primary_origin_adjudicated INTEGER NOT NULL DEFAULT 0 CHECK(primary_origin_adjudicated IN (0,1)),
+      conflicting_values_adjudicated INTEGER NOT NULL DEFAULT 0 CHECK(conflicting_values_adjudicated IN (0,1)),
+      status TEXT NOT NULL CHECK(status IN ('approved','revoked'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_primary_claim_verifications_snapshot
+      ON primary_claim_verifications(snapshot_id);
   `);
   // Additive columns for databases created before them. The index is rebuilt
   // at every boot, so a new column needs no backfill beyond existing.
