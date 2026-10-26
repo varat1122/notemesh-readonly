@@ -91,6 +91,29 @@ describe("M5.5.1 contradiction claim pre-write safety",()=>{
   expect(valid.safeEditWorkflow?.steps[1].state).toBe("needs_create");
   expect(fs.readdirSync(path.join(vault,"00_Inbox/ChatGPT"))).toEqual([]);
  });
+ it("requires an autonomous unresolved decision for guidance even when the caller spoofs reported_fact",async()=>{
+  await seed("01_Companies/MU.md","# MU\n");
+  await seed("02_Industries_Themes/Memory.md","# Memory\n");
+  const base={domain:"company",entities:["MU"],topic:"Synthetic source-text guidance",
+    inputFormat:"text",sourceKind:"issuer_release",sourceChat:"M55 Autonomous Regression",
+    extractedText:"Synthetic only: MU FY2027 revenue guidance +20% according to A, -20% according to B.",
+    sourceLanguage:"en",contentTypes:["reported_fact"],
+    entityRoles:[{entity:"MU",role:"primary_subject"}],themes:["Memory"],
+    sourceChannel:"synthetic_test",originalDocumentAccess:"not_obtained",
+    researchReview:{headlineTh:"ข้อความทดสอบแนวโน้ม MU ขัดแย้งกัน",translationTh:"แหล่ง A อ้าง +20% แต่ B อ้าง -20%",
+      whatChangedTh:"ยังไม่พบเอกสารต้นฉบับของ Guidance",mechanismTh:"ผลต่อรายได้ยังไม่แน่นอน",
+      thesisImplicationTh:"ยังไม่ปรับ Thesis",counterEvidenceTh:"ข้ออ้างสองแหล่งขัดกัน",
+      requiredEvidenceTh:"ตรวจต้นฉบับและวันที่"}};
+  const blocked=await route(base);
+  expect(blocked.safeEditWorkflow?.qualityIssues).toContain("source_text_guidance_assessment_missing");
+  expect(blocked.safeEditWorkflow?.steps.map(s=>s.state)).toEqual(["needs_create","hold_quality_gate"]);
+  const allowed=await route({...base,researchReview:{...base.researchReview,claimAssessments:[{
+    entity:"MU",metric:"revenue guidance",period:"FY2027",unit:"% YoY",
+    competingValues:["+20%","-20%"],resolution:"unresolved",conclusion:"conditional"}]}});
+  expect(allowed.safeEditWorkflow?.qualityIssues).toEqual([]);
+  expect(allowed.safeEditWorkflow?.steps.map(s=>s.state)).toEqual(["needs_create","needs_create"]);
+  expect(fs.readdirSync(path.join(vault,"00_Inbox/ChatGPT"))).toEqual([]);
+ });
 });
 
 describe("M5.6 source identity and immutable legacy receipt linking",()=>{

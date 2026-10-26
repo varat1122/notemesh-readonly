@@ -31,9 +31,12 @@ const canonicalBaseSchema = z.object({
       entity:nonempty.max(120).optional(),
       metric:nonempty.max(140),period:nonempty.max(120),unit:nonempty.max(80),
       competingValues:z.array(nonempty.max(150)).min(1).max(8),
-      resolution:z.enum(["unresolved","verified_primary"]),
-      conclusion:z.enum(["no_change","conditional","confirmed"]),
-      primaryEvidenceReceipt:z.string().max(500).optional(),
+      resolution:z.enum(["unresolved","verified_primary"]).describe(
+        "AI autonomous default: unresolved if publisher provenance, metric scope, vintage or counter-evidence is uncertain. verified_primary needs an independently server-validated claim-scope receipt; AI confidence and user-provided receipt IDs are insufficient."),
+      conclusion:z.enum(["no_change","conditional","confirmed"]).describe(
+        "AI decides independently: no_change or conditional are allowed for unresolved evidence if prose clearly retains uncertainty. confirmed is blocked unless verified_primary passes the server evidence gate. Neither changes Thesis/Portfolio."),
+      primaryEvidenceReceipt:z.string().max(500).optional().describe(
+        "Server-issued claim-scope receipt only. Do not fabricate IDs or use ordinary Source/Vault receipts as proof; omit for unresolved claims."),
       primarySourceUrl:z.string().url().max(2000).optional(),
       verifiedValue:nonempty.max(150).optional()
     }).strict()).max(24).optional()

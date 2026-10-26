@@ -1,5 +1,44 @@
 # M5.5.1 — Primary claim evidence receipt gate (26 Oct 2026)
 
+## Decision owner: autonomous AI research policy (26 Oct 2026)
+
+The owner delegates **routine research judgments** to the Investment OS AI
+framework; the owner is not a per-claim approver or a substitute data source.
+The owner may subsequently challenge the analysis, at which point contradictory
+evidence must be revisited with provenance and chronology. No such discussion
+retroactively changes an immutable historical Source receipt.
+
+The AI independently decides whether a source is new, duplicate, confirmation,
+correction, contradictory or unresolved; the investment mechanism; and whether
+the research conclusion is `no_change`, `conditional`, or eligible for
+`confirmed`. It MUST produce source-attributed, uncertainty-aware analyses even
+if no other human signs off. Ordinary user-supplied Sources and conservative
+Reviews do not wait for dual-human keys. For a contradictory number with no
+independent original, AI chooses `resolution: unresolved` and a non-confirmed
+conclusion, records competing values and what would falsify them, and lets the
+standard Source/Review safe-write process proceed if other quality checks pass.
+
+**Non-delegable epistemic constraint:** AI confidence, repeated LLM votes,
+plausible text, caller-selected `sourceKind`, an uploaded file, and any caller
+typed `PEV-*` are not proof of publisher identity or source-claim truth. The
+server will not promote `verified_primary` or `conclusion: confirmed` without
+an independently verified, exact-scope Primary Evidence Receipt. The current
+Ed25519 reviewer/approver route is an **optional, disabled high-assurance
+channel**, not a required part of routine ingestion. It must NOT be automated
+by the AI holding both signing keys or simulated with two model calls. An
+entirely machine-driven high-assurance path would require a separately built,
+audited authenticated primary fetch and semantic/chronological counter-evidence
+validation; it does **not** exist in this draft.
+
+The gate now also scans the **submitted** text for high-signal numeric guidance
+regardless of caller content-type labels, requiring the AI to record a structured
+claim decision. This is only an omission detector and can yield both false
+positives and false negatives; it does not make submitted text verified.
+Permitted automatic changes remain limited to the separately authorized,
+add-only Source and Canonical Review workflow with actual Safe Edit receipts,
+SHA readback, search-index and wikilink checks. Current Thesis, Evidence
+Register, Evolution Timeline and Portfolio remain protected.
+
 ## Threat model and invariant
 
 The ChatGPT caller can invent `sourceKind`, `originalDocumentAccess`, claims,
@@ -97,10 +136,12 @@ tests are synthetic only. PDF anchors remain unsupported. Production issuance
 must stay disabled by missing signer configuration until the owner authorizes
 operational roles and an audited pilot with real primary evidence.
 
-This costly two-signature process is required only to promote a **confirmed
-primary** claim. Ordinary Source Intake and conservative, uncertainty-labeled
-research Reviews can continue through the existing Safe Edit workflow; do not
-subject every Micro/Macro news item to manual cryptographic attestation.
+This costly two-signature process is an optional high-assurance route for a
+**confirmed primary** claim. Routine AI-owned Source Intake and conservative,
+uncertainty-labeled research Reviews continue through the existing Safe Edit
+workflow without human attestation. With the signer feature disabled, the AI
+must not promote a claim to `verified_primary` merely to avoid an unresolved
+label. Do not subject every Micro/Macro news item to manual attestation.
 
 ## MCP schema and rollout
 
@@ -123,9 +164,10 @@ subject every Micro/Macro news item to manual cryptographic attestation.
 1. Full TypeScript, ESLint, tests and build on the PR head; security review of
    source archive readback and all gate failure states.
 2. Review, refresh and exercise the Safe Edit connector's real tool schema.
-3. Assign and independently verify two real signer/key owners, secure private
-   key custody, review the admin import interface and execute a genuine
-   approval/revocation acceptance pilot before enabling Production issuance.
+3. Keep signed-receipt issuance **disabled** for an AI-only release. If the
+   optional human-signed high-assurance channel is ever chosen separately,
+   independently assign key owners and conduct an approval/revocation pilot
+   before enabling that feature. No AI-created pseudo-independent signatures.
 4. Only after authorized merge, verify Railway successful commit SHA. Run the
    two synthetic cases **Production Preview Only**, no Apply of fictitious
    content; confirm zero synthetic search hits in the Production Vault.

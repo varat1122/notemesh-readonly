@@ -47,7 +47,14 @@ const thai=(s:string)=>/[\u0e00-\u0e7f]/u.test(s);
 const nonblank=(s:string|undefined)=>Boolean(s?.trim());
 const validHub=(path:string,prefix:string)=>path.startsWith(prefix)&&path.endsWith(".md")&&!path.includes("..")&&!path.includes("\\");
 
-export function validateResearchM55(classification:ResearchClassification,review:ThaiResearchReview):string[]{
+/**
+ * Automated adjudication boundary: the AI may choose a conservative
+ * no_change/conditional decision without a human approver. Its own words and
+ * the submitted source text are NEVER authority to mint verified_primary.
+ * sourceText is a sensitivity check only; it is not an authenticated original.
+ */
+export function validateResearchM55(classification:ResearchClassification,review:ThaiResearchReview,
+  sourceText?:string):string[]{
   const issues:string[]=[];
   if(!nonblank(classification.subject)||classification.subject.trim().toLowerCase()==="cross theme")
     issues.push("classification_primary_subject_unresolved");
@@ -80,8 +87,18 @@ export function validateResearchM55(classification:ResearchClassification,review
   // assessment for ALL typed Guidance; a forged "issuer_release" is no bypass.
   if(classification.contentTypes.includes("guidance")&&!review.claimAssessments?.length)
     issues.push("guidance_claim_assessment_missing");
-  const assertedFactText=[review.whatChangedTh,review.mechanismTh,review.thesisImplicationTh].join(" ");
-  const explicitConfirmation=/(?:ยืนยันแล้วว่า|ตรวจสอบกับเอกสารต้นฉบับแล้ว|verified fact|confirmed by (?:issuer|company)|ต้องปรับ(?:เพิ่ม|ลด)(?:ทันที)?\s*(?:EPS|กำไร))/iu.test(assertedFactText);
+  // Content types/sourceKind are caller-selected and may be mislabeled. A
+  // high-signal guidance passage in the received text independently triggers
+  // a structured assessment, even if classified as generic reported_fact.
+  // This detects omission, NOT whether the passage or attribution is true.
+  const guidanceInSubmittedText=Boolean(sourceText&&
+    /(?:\bguidance\b|\bforward[- ]looking\b|\boutlook\b|\bcompany forecasts?\b|แนวโน้ม(?:รายได้|กำไร|ธุรกิจ)|บริษัท(?:ให้|ปรับ)คาดการณ์)/iu.test(sourceText)&&
+    /(?:[+-]?\d+(?:[.,]\d+)?\s*%|\b(?:FY|CY|Q)[ -]?\d{1,4}\b)/iu.test(sourceText));
+  if(guidanceInSubmittedText&&!review.claimAssessments?.length)
+    issues.push("source_text_guidance_assessment_missing");
+  const assertedFactText=[review.headlineTh,review.whatChangedTh,review.mechanismTh,
+    review.thesisImplicationTh].join(" ");
+  const explicitConfirmation=/(?:ยืนยัน(?:แล้ว|ได้)ว่า|พิสูจน์แล้วว่า|ตรวจสอบกับเอกสารต้นฉบับแล้ว|เป็นข้อเท็จจริงว่า|verified fact|(?:officially )?confirmed by (?:issuer|company)|ต้องปรับ(?:เพิ่ม|ลด)(?:ทันที)?\s*(?:EPS|กำไร))/iu.test(assertedFactText);
   if(explicitConfirmation&&!review.claimAssessments?.length)
     issues.push("explicit_verified_claim_requires_assessment");
   for(const claim of review.claimAssessments??[]){
@@ -113,8 +130,7 @@ export function validateResearchM55(classification:ResearchClassification,review
       issues.push("thesis_conclusion_exceeds_evidence");
   }
   if(review.claimAssessments?.some(c=>c.resolution==="unresolved")&&
-     /(?:ยืนยัน(?:แล้วว่า|ได้ว่า)|verified fact|ต้องปรับ(?:เพิ่ม|ลด)(?:ทันที)?)/iu.test(
-       [review.whatChangedTh,review.mechanismTh,review.thesisImplicationTh].join(" ")))
+     /(?:ยืนยัน(?:แล้ว|ได้)ว่า|พิสูจน์แล้วว่า|เป็นข้อเท็จจริงว่า|verified fact|(?:officially )?confirmed by (?:issuer|company)|ต้องปรับ(?:เพิ่ม|ลด)(?:ทันที)?)/iu.test(assertedFactText))
     issues.push("unresolved_claim_asserted_as_verified");
   return [...new Set(issues)];
 }

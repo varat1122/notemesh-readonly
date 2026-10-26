@@ -52,6 +52,24 @@ describe("M5.5 pre-write research contract",()=>{
       .toContain("explicit_verified_claim_requires_assessment");
     expect(validateResearchM55(memory,review)).toEqual([]);
   });
+  it("requires an AI claim decision when submitted guidance is mislabeled as reported_fact",()=>{
+    const renamed={...memory,sourceKind:"issuer_release",contentTypes:["reported_fact"]};
+    const original="MU FY2027 revenue guidance +20% according to source A; source B reports -20%.";
+    expect(validateResearchM55(renamed,review,original))
+      .toContain("source_text_guidance_assessment_missing");
+    const claim={entity:"MU",metric:"revenue guidance",period:"FY2027",unit:"% YoY",
+      competingValues:["+20%","-20%"],resolution:"unresolved" as const,
+      conclusion:"conditional" as const};
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[claim]},original)).toEqual([]);
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[{...claim,
+      conclusion:"confirmed"}]},original)).toContain("thesis_conclusion_exceeds_evidence");
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[claim],
+      whatChangedTh:"พิสูจน์แล้วว่าบริษัท MU เพิ่ม Guidance 20%"},original))
+      .toContain("unresolved_claim_asserted_as_verified");
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[claim],
+      headlineTh:"ยืนยันแล้วว่า MU Guidance +20%"},original))
+      .toContain("unresolved_claim_asserted_as_verified");
+  });
   it("holds fabricated confirmation of contradictory unverified FY2027 guidance",()=>{
     const input={...memory,domain:"company" as const,subject:"MU",sourceKind:"user_commentary",
       contentTypes:["guidance"],originalDocumentAccess:"not_obtained" as const};

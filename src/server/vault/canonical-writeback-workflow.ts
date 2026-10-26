@@ -147,7 +147,7 @@ export function buildCanonicalSafeEditWorkflow(
     attributedOrigin:input.attributedOrigin,
     originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage,
     sourceKind:plan.sourceKind,entityScope:plan.entityScope
-  },input.researchReview):[];
+  },input.researchReview,input.extractedText):[];
   const broker=input.brokerUpdate;
   const brokerLines=broker?[
     "## Attributed broker version (not independently verified)","",
