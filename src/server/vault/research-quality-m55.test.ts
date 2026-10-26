@@ -27,6 +27,8 @@ describe("M5.5 pre-write research contract",()=>{
   });
   it("does not confuse an X repost with the full JPMorgan report",()=>{
     expect(validateResearchM55({...memory,originalDocumentAccess:"full_original"},review)).toContain("repost_cannot_claim_full_original_without_separate_receipt");
+    expect(validateResearchM55({...memory,originalDocumentAccess:undefined,attributedOrigin:undefined},review)).toEqual(expect.arrayContaining([
+      "original_document_access_unresolved","repost_attributed_origin_missing"]));
   });
   it("requires Thai research content and a translation for non-Thai input",()=>{
     expect(validateResearchM55(memory,{...review,translationTh:undefined,headlineTh:"Memory market update"})).toEqual(expect.arrayContaining([
