@@ -18,7 +18,11 @@ const access:McpAccess={read:true,write:false,label:"oauth:m54-edit",scopes:["va
 const news={domain:"company",entities:["NVDA"],topic:"Synthetic NVIDIA supply demand note",
   sourceKind:"archived_chat",inputFormat:"text",sourceChat:"Micro 251026",
   extractedText:"Synthetic test source: Nvidia supply is hypothetical; no real claims or facts.",
-  completedAnalysis:"## สรุป\nข้อมูลสมมติสำหรับระบบทดสอบ ไม่ใช้ปรับ Thesis."};
+  completedAnalysis:"## สรุป\nข้อมูลสมมติสำหรับระบบทดสอบ ไม่ใช้ปรับ Thesis.",
+  contentTypes:["reported_fact"],sourceChannel:"archived_chat",originalDocumentAccess:"not_obtained",
+  researchReview:{headlineTh:"ทดสอบข้อมูล NVIDIA สำหรับระบบ",whatChangedTh:"ข้อมูลสมมติ ไม่มีเหตุการณ์จริง",
+    mechanismTh:"ยังไม่มีหลักฐานด้านรายได้และกำไร",thesisImplicationTh:"ไม่เปลี่ยน Thesis",
+    counterEvidenceTh:"ยังไม่ตรวจหลักฐานต้นฉบับ",requiredEvidenceTh:"ต้องตรวจข้อมูลบริษัทก่อนใช้จริง"}};
 function unpack(result:any){
   expect(result.isError,JSON.stringify(result.content)).not.toBe(true);
   const outer=JSON.parse(result.content[0].text);
@@ -119,6 +123,29 @@ it("M55 API contract holds incomplete Memory review while preserving Source, the
   }finally{await c.close();}
 });
 
+it("M55 legacy freeform cannot obtain a Review authorization, but Source remains recoverable",async()=>{
+  const legacy={...news,researchReview:undefined,sourceChannel:undefined,originalDocumentAccess:undefined,
+    extractedText:"Unique M55 legacy freeform should not bypass typed quality gate"};
+  const c=await connect();
+  try{
+    const p=await prepare(c.client,legacy);
+    expect(p).toMatchObject({workflowStatus:"hold_research_quality"});
+    expect(p.qualityIssues).toContain("typed_research_review_required");
+    expect(p.steps.map((x:any)=>x.state)).toEqual(["needs_create","hold_quality_gate"]);
+    expect(p.previews).toHaveLength(1);
+    const forged=await c.client.callTool({name:"apply_canonical_writeback",arguments:{input:legacy,planId:p.planId,
+      authorizations:[...tokenRows(p),{operationId:"ICW-1234567890",previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}]}});
+    expect(forged.isError).toBe(true);
+    const a=await commit(c.client,legacy,p);
+    expect(a).toMatchObject({status:"hold_research_quality",readyForNextNews:false});
+    expect(a.receipts).toHaveLength(1);
+    const repaired={...legacy,researchReview:news.researchReview,sourceChannel:"archived_chat",originalDocumentAccess:"not_obtained"};
+    const next=await prepare(c.client,repaired);
+    expect(next.steps.map((x:any)=>x.state)).toEqual(["verified_existing","needs_create"]);
+    expect((await commit(c.client,repaired,next)).status).toBe("saved_verified");
+  }finally{await c.close();}
+});
+
 it("M54-F02 lost preview response rotates token; stale token is refused and fresh retry succeeds",async()=>{
   const input={...news,extractedText:"Synthetic unique source for token-retry test"};
   const c=await connect();
@@ -136,14 +163,14 @@ it("M54-F02 lost preview response rotates token; stale token is refused and fres
 });
 
 it("M54-F03 Feed Only saves just source, then reviewed retry adds canonical review without duplicate source",async()=>{
-  const input={...news,extractedText:"Synthetic Feed Only unique source",completedAnalysis:undefined,captureOnly:true};
+  const input={...news,extractedText:"Synthetic Feed Only unique source",completedAnalysis:undefined,researchReview:undefined,captureOnly:true};
   const c=await connect();
   try{
     const p=await prepare(c.client,input);
     expect(p.previews).toHaveLength(1);
     const saved=await commit(c.client,input,p);
     expect(saved).toMatchObject({outcome:"source_saved_analysis_pending",status:"source_saved_analysis_pending"});
-    const full={...input,captureOnly:false,completedAnalysis:"## สรุป\nSynthetic deferred review."};
+    const full={...input,captureOnly:false,completedAnalysis:"## สรุป\nSynthetic deferred review.",researchReview:news.researchReview};
     const next=await prepare(c.client,full);
     expect(next.steps.map((x:any)=>x.state)).toEqual(["verified_existing","needs_create"]);
     expect(next.previews).toHaveLength(1);
@@ -157,7 +184,7 @@ it("M54-F04 conflict blocks overwrite; changed analysis for one original intake 
   try{
     const p=await prepare(c.client,input);
     expect((await commit(c.client,input,p)).outcome).toBe("saved_verified");
-    const changed=await prepare(c.client,{...input,completedAnalysis:"Revised synthetic analysis"});
+    const changed=await prepare(c.client,{...input,researchReview:{...news.researchReview,headlineTh:"แก้ไขผลวิเคราะห์ NVIDIA สมมติ"}});
     expect(changed.previews).toHaveLength(0);
     expect(changed.steps.map((x:any)=>x.state)).toEqual(["verified_existing","hold_conflict"]);
   }finally{await c.close();}
