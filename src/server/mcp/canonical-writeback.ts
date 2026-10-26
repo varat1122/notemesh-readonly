@@ -86,7 +86,11 @@ function planned(input: z.infer<typeof canonicalInputSchema>) {
   // that still submit only completedAnalysis. Preserve Source capture; never
   // issue a review preview for an untyped analysis. M5.3 read-only planning
   // remains available for migration/diagnostics, not as a bypass in M5.4.
-  if(input.captureOnly!==true&&!input.researchReview){
+  // Deploy in compatibility mode first, update the linked caller, then set
+  // M55_REQUIRE_TYPED_REVIEW=1 for a verified production cutover. Typed payloads
+  // are always quality-gated regardless of the flag. Never silently switch an
+  // old active caller to Source-only during the initial code deployment.
+  if(process.env.M55_REQUIRE_TYPED_REVIEW==="1"&&input.captureOnly!==true&&!input.researchReview){
     const review=workflow.steps.find(s=>s.kind==="canonical_review");
     if(review){review.state="hold_quality_gate";review.safeEditRequest=null;}
     workflow.status="hold_research_quality";
