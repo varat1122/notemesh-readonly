@@ -114,6 +114,14 @@ M5.6.2 read-only proposal to link an additional **already saved** Source Intake 
 
 The output contains a deterministic proposed Event Key, current Review SHA-256 as the version boundary, and an **append-only Safe Edit recipe**, never a write. The caller must separately preview the exact diff, obtain authorized `vault:edit` apply permission, and verify CAS/write/readback/reindex receipts. A subsequent plan returns `already_linked` instead of duplicating the reference. A same-event comparison is caller interpretation pending human approval, **not independent confirmation, verified source authenticity, a second economic event, an EPS change, or a new Thesis**. Protected Thesis/Evidence Register/Timeline/Portfolio files are not eligible.
 
+### discover_near_duplicate_sources — read
+
+M5.6.3 bounded read-only search of existing indexed canonical Source Receipts, using exact original-text digest or same explicitly declared event/publication dates plus source URL publisher family. Returns ranked *candidates* and uncertainty signals, including cross-language cases. A same date and publisher does not establish the same event; no Source link, evidence vote, or Vault write occurs. Reports truncation rather than implying complete coverage.
+
+### plan_review_revision — read
+
+M5.6.3 explicit proposal contract for added detail, correction, contradiction or supersession of an existing indexed nonprotected Review. Requires declared Event Anchor, substantive comparison, proposed wording, dated Source Receipts and an existing provenance link. Returns immutable current content SHA-256 as version boundary, proposed Evidence Change Log payload, review lineage and required owner approval/CAS/readback gates. No new Review version is assigned until approval and a separately implemented authorized Safe Edit; no protected Thesis, Evidence Register, Timeline or Portfolio write.
+
 ### review_investment_claim — read
 
 **Evidence Verification Ledger (read-only, same Tool):** The `decisionPacket.evidenceVerificationLedger` field preserves original-source links, fiscal periods, Claim IDs, historical Note status, dates, source-hash metadata, matched/related claim boundaries and unstructured same-source leads. Historical note-declared `verified_against_primary` is not a new verification; `originalVerifiedThisRun=false` for every entry. Multiple URLs are never automatically independent evidence. Numeric differences within the same source/metric/unit are note-index discrepancy candidates, not certified issuer corrections. External source checks, revisions, complete dedup, current pricing and owner approval remain separate gates. This output does not change Vault or Thesis.

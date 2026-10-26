@@ -1,6 +1,6 @@
 # Changelog
 
-Deployment surface: 27 tools covering read-only investment retrieval, M5.6 source/event relation proposals, claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
+Deployment surface: 29 tools covering read-only investment retrieval, M5.6 source/event relation and revision proposals, claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
 Safe Edit offers ten tools on a separate resource (including original-source archive and two user attachment byte-store/inspect actions); see docs/SAFE_EDIT.md.
 Historical upstream release descriptions below are preserved.
 

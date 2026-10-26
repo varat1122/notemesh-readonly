@@ -7,6 +7,7 @@ import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventor
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import {planDuplicateSourceLinkM56} from "../vault/event-review-relation-m56";
+import {discoverNearDuplicateSourcesM56,planReviewRevisionM56} from "../vault/review-discovery-m56";
 import { buildInvestmentDecisionPacket } from "../vault/investment-decision-packet";
 import { assessThesisProposal } from "../vault/thesis-proposal-gate";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
@@ -455,6 +456,26 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     },
     safe((args)=>json(withBoundary(planDuplicateSourceLinkM56(args)))),
   );
+
+  server.registerTool("discover_near_duplicate_sources",{
+    title:"M5.6.3 near-duplicate Source candidate discovery (read-only)",annotations:READ,
+    description:"Bounded indexed Source Receipt scan for exact-text or same dated event and publisher-family candidates. Candidate signals NEVER verify semantic duplication, independent evidence or a review edit. No writes.",
+    inputSchema:{sourcePath:z.string().min(1).max(300).describe("Existing indexed Source Intake path, not a Review or protected note"),
+      eventAnchor:z.string().regex(/^[a-z0-9][a-z0-9-]{7,119}$/).describe("Caller-declared semantic event slug for context only; does not verify candidate equivalence"),
+      maxCandidates:z.number().int().min(1).max(30).optional().describe("Maximum candidates to return; truncated search is explicitly flagged")}
+  },safe((args)=>json(withBoundary(discoverNearDuplicateSourcesM56(args)))));
+
+  server.registerTool("plan_review_revision",{
+    title:"M5.6.3 Review Version / Evidence Change Log proposal (read-only)",annotations:READ,
+    description:"Produce an explicit review version boundary and unapproved Evidence Change Log proposal for added detail, correction, contradiction or supersession. Requires existing indexed Review/Source receipts and evidence comparison. Never writes protected notes or auto-applies revisions.",
+    inputSchema:{reviewPath:z.string().min(1).max(300).describe("Existing nonprotected indexed Canonical Research Review path"),
+      eventAnchor:z.string().regex(/^[a-z0-9][a-z0-9-]{7,119}$/).describe("Explicit caller event slug; not automatically verified"),
+      changeType:z.enum(["added_detail","correction","contradiction","supersession"]).describe("Requested revision type; supersession still requires owner approval"),
+      comparisonBasis:z.string().min(40).max(2000).describe("Substantive existing-versus-new source evidence comparison with attribution"),
+      proposedChange:z.string().min(40).max(4000).describe("Proposed Review change wording; never written automatically"),
+      sourcePaths:z.array(z.string().min(1).max(300)).min(1).max(12).describe("Already indexed Source Intake paths with at least one existing Review provenance relation"),
+      proposalDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Actual proposal date YYYY-MM-DD, separate from event/publication date")}
+  },safe((args)=>json(withBoundary(planReviewRevisionM56(args)))));
 
   server.registerTool(
     "review_investment_claim",
