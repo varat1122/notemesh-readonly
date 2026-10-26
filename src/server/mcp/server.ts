@@ -6,6 +6,7 @@ import { buildInvestmentContextPack, type Focus } from "../vault/investment-cont
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
+import {planDuplicateSourceLinkM56} from "../vault/event-review-relation-m56";
 import { buildInvestmentDecisionPacket } from "../vault/investment-decision-packet";
 import { assessThesisProposal } from "../vault/thesis-proposal-gate";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
@@ -436,6 +437,23 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       }
     },
     safe((args:WritebackInput)=>json(withBoundary(planInvestmentWriteback(args)))),
+  );
+
+  server.registerTool(
+    "plan_duplicate_source_link",
+    {
+      title:"Preview M5.6 source-event relation proposal (read-only)",
+      annotations:READ,
+      description:"M5.6 read-only guarded proposal: compare two existing indexed Source Receipts and an existing non-protected Canonical Review, require same event/publication dates and publisher family plus caller-supplied comparison rationale. Returns only an append-section Safe Edit recipe for human diff review. Never declares semantic duplication independently, never writes or changes Thesis/Evidence/Timeline/Portfolio.",
+      inputSchema:{
+        reviewPath:z.string().min(1).max(300).describe("Existing non-protected Canonical Research Review path; original Source must be linked already"),
+        additionalSourcePath:z.string().min(1).max(300).describe("Existing second attributed Source Intake receipt that may cover the same dated event"),
+        eventAnchor:z.string().regex(/^[a-z0-9][a-z0-9-]{7,119}$/).describe("Caller-declared semantic event slug, such as sk-hynix-solidigm-ipo-cancellation; not independent event verification"),
+        comparisonBasis:z.string().min(40).max(1000).describe("Evidence-based human-readable passage/claim comparison supporting a candidate same-event relation, without inflating independent evidence"),
+        linkedOnDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Append receipt date YYYY-MM-DD; never substitute source event date"),
+      }
+    },
+    safe((args)=>json(withBoundary(planDuplicateSourceLinkM56(args)))),
   );
 
   server.registerTool(
