@@ -180,6 +180,20 @@ export class SyncSupervisor implements SyncBackend {
     });
     this.child = child;
 
+    // Distinguish a live daemon from an exited process whose stdio/cleanup
+    // still holds execa's result promise. These are server-side diagnostics,
+    // never a substitute for the final stop confirmation before a Vault edit.
+    child.nodeChildProcess.once("exit", (code, signal) => {
+      const diagnostic=`[supervisor] sync child exit code=${code ?? "null"} signal=${signal ?? "null"}`;
+      this.note(diagnostic);
+      console.info(diagnostic);
+    });
+    child.nodeChildProcess.once("close", (code, signal) => {
+      const diagnostic=`[supervisor] sync child close code=${code ?? "null"} signal=${signal ?? "null"}`;
+      this.note(diagnostic);
+      console.info(diagnostic);
+    });
+
     child.stdout?.on("data", (d: Buffer) => this.log(d.toString()));
     child.stderr?.on("data", (d: Buffer) => this.log(d.toString()));
 
@@ -288,13 +302,25 @@ export class SyncSupervisor implements SyncBackend {
     if (this.editPaused || this.manualSyncActive || !this.child || this.state !== "running") throw Error("Sync cannot be paused safely now");
     this.editPaused = true;
     const child = this.child;
+    const pauseStartedAt = Date.now();
+    const pauseRequested=`[supervisor] safe-edit pause requested pid=${child.pid ?? "unknown"}`;
+    this.note(pauseRequested);
+    console.info(pauseRequested);
     this.stop();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([child, new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(Error("Sync did not stop; no edit applied")), 10000);
+        timer = setTimeout(() => {
+          const diagnostic=`[supervisor] safe-edit pause timeout elapsedMs=${Date.now()-pauseStartedAt} pid=${child.pid ?? "unknown"} exitCode=${child.nodeChildProcess?.exitCode ?? "null"} signalCode=${child.nodeChildProcess?.signalCode ?? "null"} childTracked=${this.hasChild()} state=${this.state}`;
+          this.note(diagnostic,"error");
+          console.error(diagnostic);
+          reject(Error("Sync did not stop; no edit applied"));
+        }, 10000);
       })]);
       if (this.hasChild() || this.status().state !== "stopped") throw Error("Sync exit was not confirmed");
+      const confirmed=`[supervisor] safe-edit pause confirmed elapsedMs=${Date.now()-pauseStartedAt}`;
+      this.note(confirmed);
+      console.info(confirmed);
       return run();
     } finally {
       if (timer) clearTimeout(timer);
