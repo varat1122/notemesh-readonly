@@ -17,6 +17,14 @@ The model may independently publish an appropriately attributed `unresolved`, `n
 
 This decision is a **semantic ownership proposal**, not permission to bypass established hard gates. The existing M5.5.1 blocking checks remain in force until shadow testing and connector compatibility pass. The proposed policy must be delivered through a trusted application/developer configuration or versioned, hash-verified bootstrap; retrieved external PDFs/notes are lower-trust evidence and cannot supersede it.
 
+### Scope: ChatGPT research now; multi-producer investment intelligence later
+
+The owner's confirmed workflow starts in the **existing ChatGPT Micro/Macro/PDF rooms**: ChatGPT interprets user input, retrieves NoteMesh/Vault history, reasons under a versioned policy, then submits Source and Canonical Review through existing authorized tools. A second separately billed/provider-hosted LLM API is **not a dependency** of that workflow. API/MCP boundaries still exist for retrieval, storage, authorization and eventually external machine integration; "no extra LLM inference API" does **not** mean "no machine interfaces".
+
+This research path must **not** become the complete or exclusive investment decision architecture. The Master Blueprint's eventual Quant/Python jobs, market and portfolio data engines, additional AI/human analysts, Investment Committee and risk engines must be able to contribute distinct, versioned findings. Store or reference each contribution with its producer identity, methodology/code/model version, parameters, dataset/input snapshot, observation/as-of timestamp, horizon, expiry, supporting Source/Run IDs and evidence status. Deterministic Quant computations remain executable, testable calculations; ChatGPT may interpret them but must not replace backtesting or portfolio reconciliation with prose.
+
+The knowledge graph connects Source → Claim → Research Review → Quant Result/Signal → Candidate Decision using **typed relations and provenance**, not AI-authored filename guesses or implicit agreement. Different analysts/models do not independently verify an issuer fact merely by echoing the same Source. Future decision and portfolio interfaces need separate risk, authorization and execution policies; **no current routine ChatGPT Review can automatically edit protected Thesis, Evidence Register, Company Evolution Timeline, Decision Ledger, Portfolio or execute trades**. This ADR only records an interface invariant; it does not build or activate a Quant worker, investment decision engine, or new write permission.
+
 ## Alternatives
 
 | Option | Advantage | Rejection / caveat |

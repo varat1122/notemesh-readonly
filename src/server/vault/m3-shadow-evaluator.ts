@@ -1,6 +1,6 @@
 /**
- * M3a synthetic shadow benchmark: compare unchanged M5.5.1 with externally
- * supplied model judgments. This module does NOT call a provider or Vault,
+ * M3a synthetic shadow benchmark: compare unchanged M5.5.1 with manually
+ * supplied ChatGPT-room judgments. This module does NOT call a model or Vault,
  * write notes, grant authorization, or imply held-out model performance.
  */
 import {z} from "zod";
@@ -62,17 +62,18 @@ type ModelRow={caseId:string;goldReviewSafe:boolean;critical:boolean;
   claimedUnsupportedPrimary:boolean;citationsValid:boolean;missingRequiredCitationIds:string[]};
 /** Test/caller data only. An injected callback is NOT a security sandbox and
  * cannot be used as evidence that an independent provider was invoked. */
-export function scoreM3ShadowJudgments(raw:readonly unknown[]){
+function scoreSelectedM3ShadowJudgments(raw:readonly unknown[],
+  selected:readonly (typeof M3_SHADOW_CASES)[number][]){
   corpusIntegrity();
-  if(!Array.isArray(raw)||raw.length!==M3_SHADOW_CASES.length)
+  if(!Array.isArray(raw)||raw.length!==selected.length)
     throw Error("M3_SHADOW_COMPLETE_FROZEN_SET_REQUIRED");
   const judgments=raw.map(v=>m3ShadowJudgmentSchema.parse(v));
   const ids=new Set(judgments.map(x=>x.caseId));
   if(ids.size!==judgments.length||
-    judgments.some(x=>!M3_SHADOW_CASES.some(c=>c.id===x.caseId)))
+    judgments.some(x=>!selected.some(c=>c.id===x.caseId)))
     throw Error("M3_SHADOW_DUPLICATE_OR_UNKNOWN_CASE_ID");
   const byId=new Map(judgments.map(x=>[x.caseId,x]));
-  const rows:ModelRow[]=M3_SHADOW_CASES.map(c=>{
+  const rows:ModelRow[]=selected.map(c=>{
     const j=byId.get(c.id)!;
     const available=new Set([...c.sources,...c.history].map(x=>x.id));
     const missing=c.gold.requiredCitationIds.filter(id=>!j.citedIds.includes(id));
@@ -106,7 +107,19 @@ export function scoreM3ShadowJudgments(raw:readonly unknown[]){
   };
 }
 
-/** Intended for local synthetic tests and future explicit provider adapter.
+/** Score only one ChatGPT research room. Room-scoped submissions cannot
+ * quietly borrow or omit fixtures from a different room. This is an offline
+ * synthetics scorer, never authentication of the model/session or policy. */
+export function scoreM3ShadowRoomJudgments(room:"micro"|"macro"|"pdf",raw:readonly unknown[]){
+  if(!["micro","macro","pdf"].includes(room))throw Error("M3_SHADOW_UNKNOWN_ROOM");
+  return scoreSelectedM3ShadowJudgments(raw,M3_SHADOW_CASES.filter(c=>c.room===room));
+}
+
+export function scoreM3ShadowJudgments(raw:readonly unknown[]){
+  return scoreSelectedM3ShadowJudgments(raw,M3_SHADOW_CASES);
+}
+
+/** Intended for offline synthetic scorer contract tests only.
  * Exactly one complete fixed corpus per trial; output is aggregated without
  * logging raw model text, proprietary Vault material or user messages.
  */

@@ -28,4 +28,6 @@
 - [ ] M2 decision schema/tool-contract integration and M3 blind shadow Evals.
 - [ ] Production Safe Edit live descriptor fields confirmed against the new contract.
 
+**M3 Chat-Native correction:** policy installation is to be evaluated in the real ChatGPT research rooms using an independently pinned trusted instruction layer. A local synthetic fixture export or a model returning the expected SHA does **not** authenticate that layer. No separate provider LLM API is needed to run ordinary ChatGPT analysis. See `../../M3-chat-native-evaluation-protocol-2026-10-26.md`; the M1 policy bytes and pinned SHA remain unchanged.
+
 **No change to `M55_REQUIRE_TYPED_REVIEW`, active semantic gates, Safe Edit permission scopes, protected notes or Production environment is authorized by this draft.**
