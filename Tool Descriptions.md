@@ -122,6 +122,10 @@ M5.6.3 bounded read-only search of existing indexed canonical Source Receipts, u
 
 M5.6.3 explicit proposal contract for added detail, correction, contradiction or supersession of an existing indexed nonprotected Review. Requires declared Event Anchor, substantive comparison, proposed wording, dated Source Receipts and an existing provenance link. Returns immutable current content SHA-256 as version boundary, proposed Evidence Change Log payload, review lineage and required owner approval/CAS/readback gates. No new Review version is assigned until approval and a separately implemented authorized Safe Edit; no protected Thesis, Evidence Register, Timeline or Portfolio write.
 
+### plan_pdf_extraction_coverage — read
+
+M5.7.1 read-only preflight of an externally supplied, page-numbered PDF extraction. Checks an existing original PDF byte SHA-256 receipt when archived within the supported Safe Edit attachment limit, and reports missing/empty pages plus unextracted tables, figures, and footnotes with explicit page locators. Each supplied page has a text digest. A complete coverage declaration is **not OCR or visual verification**, and does not prove that extracted text matches the original PDF. This does not bypass the current 4 MB attachment archive limit or the 12k-character single-intake limit; no PDF, Source, Review or protected file is written.
+
 ### review_investment_claim — read
 
 **Evidence Verification Ledger (read-only, same Tool):** The `decisionPacket.evidenceVerificationLedger` field preserves original-source links, fiscal periods, Claim IDs, historical Note status, dates, source-hash metadata, matched/related claim boundaries and unstructured same-source leads. Historical note-declared `verified_against_primary` is not a new verification; `originalVerifiedThisRun=false` for every entry. Multiple URLs are never automatically independent evidence. Numeric differences within the same source/metric/unit are note-index discrepancy candidates, not certified issuer corrections. External source checks, revisions, complete dedup, current pricing and owner approval remain separate gates. This output does not change Vault or Thesis.
