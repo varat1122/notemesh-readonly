@@ -13,6 +13,7 @@ process.env.DATA_DIR=root;
 process.env.BASE_URL="https://m54-fixture.test";
 process.env.SAFE_EDIT_ENABLED="1";
 process.env.SAFE_EDIT_SINGLE_WRITER="1";
+process.env.M55_REQUIRE_TYPED_REVIEW="1";
 process.env.ENCRYPTION_KEY??=Buffer.alloc(32,7).toString("base64");
 const access:McpAccess={read:true,write:false,label:"oauth:m54-edit",scopes:["vault:read","vault:edit"]};
 const news={domain:"company",entities:["NVDA"],topic:"Synthetic NVIDIA supply demand note",
@@ -53,7 +54,7 @@ beforeAll(async()=>{
 });
 afterAll(async()=>{
   (await import("../db")).db().close();fs.rmSync(root,{recursive:true,force:true});
-  for(const k of ["DATA_DIR","BASE_URL","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];
+  for(const k of ["DATA_DIR","BASE_URL","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER","M55_REQUIRE_TYPED_REVIEW"])delete process.env[k];
 });
 
 it("M54-F01 fresh Micro: one scoped preview + apply saves source/review, verifies hashes/index and protects governed notes",async()=>{
@@ -144,6 +145,24 @@ it("M55 legacy freeform cannot obtain a Review authorization, but Source remains
     expect(next.steps.map((x:any)=>x.state)).toEqual(["verified_existing","needs_create"]);
     expect((await commit(c.client,repaired,next)).status).toBe("saved_verified");
   }finally{await c.close();}
+});
+
+it("M55 rollout switch preserves old M5.4 freeform behavior until deliberate cutover",async()=>{
+  const original=process.env.M55_REQUIRE_TYPED_REVIEW;
+  process.env.M55_REQUIRE_TYPED_REVIEW="0";
+  const c=await connect();
+  try{
+    const input={...news,researchReview:undefined,extractedText:"M55 transition mode source"};
+    const p=await prepare(c.client,input);
+    expect(p.workflowStatus).toBe("pending_safe_edit");
+    expect(p.steps.map((x:any)=>x.state)).toEqual(["needs_create","needs_create"]);
+    expect(p.previews).toHaveLength(2);
+    // No apply: compatibility test does not create even synthetic Vault notes.
+  }finally{
+    if(original===undefined)delete process.env.M55_REQUIRE_TYPED_REVIEW;
+    else process.env.M55_REQUIRE_TYPED_REVIEW=original;
+    await c.close();
+  }
 });
 
 it("M54-F02 lost preview response rotates token; stale token is refused and fresh retry succeeds",async()=>{
