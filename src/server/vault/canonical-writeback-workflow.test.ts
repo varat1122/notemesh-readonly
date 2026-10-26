@@ -2,6 +2,7 @@ import {beforeEach,afterEach,describe,it,expect,vi} from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {createHash} from "node:crypto";
 
 let root:string,vault:string;
 const actor="oauth:m53-synthetic";
@@ -60,6 +61,85 @@ async function route(input:typeof news|Record<string,unknown>){
   const {planInvestmentWriteback}=await import("./investment-writeback-router");
   return planInvestmentWriteback(input as typeof news);
 }
+
+describe("M5.6 source identity and immutable legacy receipt linking",()=>{
+ const original="Truist: We view the softness in $CRWV and $NBIS shares as a buying opportunity\n\n• Compute supply constrained through 2028\n• $10M/MW on long-term deals";
+ const oldId="IN-1A96025E6CFD35D9";
+ const sha=(s:string)=>createHash("sha256").update(s).digest("hex");
+ const review={headlineTh:"ข้อความที่อ้างถึง Truist กล่าวถึง Pricing Power ของ AI Cloud",
+  translationTh:"Truist มองการอ่อนตัวของหุ้น CRWV และ NBIS เป็นโอกาสซื้อ โดยกล่าวถึงข้อจำกัด Compute ถึงปี 2028 และสัญญายาว $10M/MW",
+  whatChangedTh:"เป็นรายละเอียดต่อ Narrative เดิม แต่ยังไม่ตรวจรายงานต้นฉบับ",
+  mechanismTh:"Demand และ Utilization แปลงเป็น Revenue/MW ก่อนหัก Depreciation และต้นทุนเงินทุน",
+  thesisImplicationTh:"ยังไม่ปรับ Thesis หรือราคาเป้าหมายจนกว่าจะทราบ Realized Pricing และ FCF",
+  counterEvidenceTh:"การขยาย Capacity ต้องใช้ CapEx สูงและต้นทุนดอกเบี้ยอาจกดกำไร",
+  requiredEvidenceTh:"ต้องตรวจรายงาน Truist ต้นฉบับและนิยามสัญญาต่อ MW"};
+ const base={domain:"company" as const,entities:["NBIS","CRWV"],topic:"AI Cloud pricing",
+  inputFormat:"text" as const,sourceKind:"social_repost" as const,sourceLanguage:"en",
+  extractedText:original,sourceChat:"MICRO Test 2",publisher:"Truist attributed",
+  themes:["AI Infrastructure"],entityRoles:[{entity:"NBIS",role:"covered_company" as const},{entity:"CRWV",role:"covered_company" as const}],
+  contentTypes:["analyst_opinion"],sourceChannel:"social_repost",attributedOrigin:"Truist attributed",
+  originalDocumentAccess:"not_obtained" as const,researchReview:review};
+ async function legacy(id=oldId,attachmentPath?:string){
+  const source=["---","type: investment_source_intake","source_type: user_supplied",
+   `intake_id: "${id}"`,`source_chat: "MICRO Test 2"`,"source_kind: \"social_repost\"",
+   `input_format: "${attachmentPath?"screenshot":"text"}"`,"source_url: null","event_date: null","published_at: null",
+   `attachment_status: "${attachmentPath?"hash_readback_verified_user_bytes":"not_verified"}"`,
+   `attachment_path: ${attachmentPath?JSON.stringify(attachmentPath):"null"}`,`source_text_sha256: ${sha(original)}`,"---","",
+   `# Attributed User Source — ${id}`,"",`Source token: InvestmentIntake${id.slice(3)}`,
+   "","## User-supplied original language text","","```text",original,"```",""] .join("\n");
+  await seed(`00_Inbox/ChatGPT/Investment Intake - ${id}.md`,source);
+  return source;
+ }
+ it("links the original Source across company→industry, entity reorder and publisher drift without rewriting Source",async()=>{
+  for(const ticker of ["NBIS","CRWV"])await seed(`01_Companies/${ticker}.md`,`# ${ticker}\n`);
+  await seed("02_Industries_Themes/AI Infrastructure.md","# AI Infrastructure\n");
+  await seed("05_Thesis/NVDA - Current Thesis.md","# Protected thesis\n");
+  const preserved=await legacy();
+  const changed={...base,domain:"industry" as const,entities:["CRWV","NBIS"],
+   entityRoles:[{entity:"CRWV",role:"covered_company" as const},{entity:"NBIS",role:"covered_company" as const}],
+   publisher:"Truist Securities (attributed; unverified)",topic:"Reclassified sector view"};
+  const p=await route(changed);
+  expect(p.planId).toBe(oldId);
+  expect(p.sourceIdentity.mode).toBe("linked_existing");
+  expect(p.safeEditWorkflow?.qualityIssues).toEqual([]);
+  expect(p.safeEditWorkflow?.steps.map(s=>s.state)).toEqual(["verified_existing","needs_create"]);
+  expect(p.safeEditWorkflow?.steps[0].safeEditRequest).toBeNull();
+  await applyRecipe(p);
+  const verified=await route(changed);
+  expect(verified.safeEditWorkflow?.status).toBe("saved_verified");
+  expect(fs.readFileSync(path.join(vault,`00_Inbox/ChatGPT/Investment Intake - ${oldId}.md`),"utf8")).toBe(preserved);
+  expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected thesis\n");
+ });
+ it("makes v3 identity independent of domain, entity order, publisher and analysis",async()=>{
+  const a=await route(base),b=await route({...base,domain:"industry",entities:["CRWV","NBIS"],publisher:"Changed attribution",topic:"Changed topic"});
+  expect(a.planId).toBe(b.planId);
+  expect(a.sourceIdentity.mode).toBe("new_v3");
+  expect((await route({...base,eventDate:"2026-10-15"})).planId).not.toBe(a.planId);
+  expect((await route({...base,sourceUrl:"https://example.org/repost"})).planId).not.toBe(a.planId);
+ });
+ it("rejects forged existingIntakeId and ambiguous duplicate legacy receipts",async()=>{
+  await legacy();
+  await expect(route({...base,existingIntakeId:"IN-FFFFFFFFFFFFFFFF"})).rejects.toThrow("M56_EXISTING_INTAKE_PROVENANCE_MISMATCH");
+  expect((await route({...base,existingIntakeId:oldId})).sourceIdentity.mode).toBe("explicit_existing");
+  await legacy("IN-AAAAAAAAAAAAAAAA");
+  await expect(route(base)).rejects.toThrow("M56_AMBIGUOUS_EXISTING_SOURCE");
+  expect((await route({...base,existingIntakeId:oldId})).planId).toBe(oldId);
+ });
+ it("holds conflicting source type or format instead of double-counting the same text",async()=>{
+  await legacy();
+  await expect(route({...base,sourceKind:"broker_research"})).rejects.toThrow("M56_SOURCE_PROVENANCE_CONFLICT");
+  await expect(route({...base,inputFormat:"pdf"})).rejects.toThrow("M56_SOURCE_PROVENANCE_CONFLICT");
+ });
+ it("reuses an attachment-backed Source only for the same verified attachment path",async()=>{
+  const attachment="00_Inbox/ChatGPT/attachments/sha256-abc123.png";
+  await legacy(oldId,attachment);
+  const {resolveSourceIdentityM56}=await import("./source-identity-m56");
+  const input={extractedText:original,inputFormat:"screenshot",sourceKind:"social_repost",
+    eventDate:null,publicationDate:null,rawAttachmentSha256:"f".repeat(64),verifiedAttachmentPath:attachment};
+  expect(resolveSourceIdentityM56(input)).toMatchObject({planId:oldId,mode:"linked_existing"});
+  expect(()=>resolveSourceIdentityM56({...input,verifiedAttachmentPath:"different-path"})).toThrow("M56_SOURCE_PROVENANCE_CONFLICT");
+ });
+});
 
 describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
  it("M55-JPM real X excerpt: missing structured classification saves Source only, repair yields Thai Memory Review",async()=>{

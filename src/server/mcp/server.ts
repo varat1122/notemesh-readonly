@@ -429,6 +429,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
           })).max(12).optional()
         }).optional().describe("M5.2 caller-declared broker old/new versions; same bank, dated vintages, matching old/new currencies and comparable PT horizons required before candidate PT direction"),
         sourceChat:z.string().min(1).max(120).optional().describe("M5.3 original Micro, Macro or PDF chat identifier. Required with completedAnalysis; source provenance, not necessarily publication date"),
+        existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional().describe("M5.6 optional existing Source receipt ID; accepted only when exact original text, channel, format, URL and chronology match the indexed and readback-verified Source"),
         completedAnalysis:z.string().min(1).max(30000).optional().describe("M5.3 final analyst-reviewed Markdown separated from the exact extractedText. When set with sourceChat, produces source + canonical review Safe Edit recipes without writing anything"),
         captureOnly:z.boolean().optional().describe("M5.3 Feed Only: with sourceChat, prepare a source-only Safe Edit recipe. The Research Review remains pending. Must not be combined with completedAnalysis"),
         focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Historical context relevance; does not verify issuer claims")

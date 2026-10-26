@@ -286,7 +286,7 @@ describe("date-scoped intake identity with v1 source preservation",()=>{
   expect(b.chronology.eventDate).toBe("2026-10-16");
   expect(route(baseRequest).planId).toBe(a.planId);
  });
- it("keeps the original v1 ID for an already indexed matching dated raw note",async()=>{
+ it("does not link an unverifiable legacy note merely because its old filename happens to match",async()=>{
   const {createHash}=await import("node:crypto");
   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
   const legacy=createHash("sha256").update([
@@ -299,8 +299,8 @@ describe("date-scoped intake identity with v1 source preservation",()=>{
     "verification: not_reverified","---","# Previously saved raw source","Synthetic source record"
   ].join("\n"));
   const matched=route(baseRequest);
-  expect(matched.planId).toBe(legacyId);
-  expect(matched.routes.find(x=>x.kind==="raw_input")?.action).toBe("link_existing_or_hold");
+  expect(matched.planId).not.toBe(legacyId);
+  expect(matched.routes.find(x=>x.kind==="raw_input")?.action).toBe("candidate_create");
   expect(route({...baseRequest,eventDate:"2026-10-16"}).planId).not.toBe(legacyId);
   expect(route({...baseRequest,publicationDate:"2026-10-16"}).planId).not.toBe(legacyId);
  });

@@ -104,7 +104,7 @@ export function buildCanonicalSafeEditWorkflow(
   const tag="InvestmentIntake"+plan.planId.slice(3);
   const event=plan.chronology.eventDate,published=plan.chronology.publicationDate;
   const attachment=plan.sourceCapture.attachmentVerified?"hash_readback_verified_user_bytes":"not_verified";
-  const sourceContent=[
+  const proposedSourceContent=[
     "---","type: investment_source_intake","source_type: user_supplied",
     "verification: not_reverified","status: user_input_not_publisher_verified",
     `intake_id: ${yaml(plan.planId)}`,`source_chat: ${yaml(sourceChat)}`,
@@ -121,6 +121,16 @@ export function buildCanonicalSafeEditWorkflow(
     "## Evidence boundary","",
     "The submitted text and attribution are preserved, but issuer/broker authenticity and claim truth were not independently verified by this receipt.",""
   ].join("\n");
+  // M5.6: a proven prior Source receipt is immutable. Do not regenerate it
+  // with today's publisher label, sourceChat or classification and then call
+  // the changed whole-note hash a conflict; link its exact readback bytes.
+  let sourceContent=proposedSourceContent;
+  if(plan.sourceIdentity.existingSourcePath){
+    if(plan.sourceIdentity.existingSourcePath!==rawPath)throw Error("M56_SOURCE_PATH_MISMATCH");
+    sourceContent=readNote(rawPath).content;
+    if(sha(sourceContent)!==plan.sourceIdentity.existingSourceSha256)
+      throw Error("M56_SOURCE_CHANGED_DURING_PLAN");
+  }
   const companyLinks=plan.routingV2.companyHubs.map(x=>`- ${wiki(x.path)} — ${x.role??"mentioned"}, caller-declared`);
   const themeLinks=plan.routingV2.industryHubs.map(x=>`- ${wiki(x.path)} — existing industry context`);
   const qualityIssues=input.researchReview?validateResearchM55({
