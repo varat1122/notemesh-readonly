@@ -44,6 +44,7 @@ async function setDelete(on: boolean) {
 const READ_TOOLS = [
   "assess_thesis_change_proposal",
   "daily_note",
+  "discover_near_duplicate_sources",
   "find_in_note",
   "get_links",
   "get_outline",
@@ -59,6 +60,7 @@ const READ_TOOLS = [
   "notes_by_tag",
   "plan_duplicate_source_link",
   "plan_investment_writeback",
+  "plan_review_revision",
   "preview_edit",
   "random_note",
   "read_attachment",
