@@ -18,7 +18,7 @@ export interface ResearchClassification {
   industryHubPaths:string[];
   sourceChannel:string;
   attributedOrigin?:string;
-  originalDocumentAccess:"full_original"|"excerpt_only"|"not_obtained";
+  originalDocumentAccess?:"full_original"|"excerpt_only"|"not_obtained";
   sourceLanguage?:string|null;
 }
 
@@ -43,6 +43,9 @@ export function validateResearchM55(classification:ResearchClassification,review
     issues.push("primary_theme_not_resolved");
   if(!nonblank(classification.sourceChannel)||classification.sourceChannel==="unknown")
     issues.push("source_channel_unresolved");
+  if(!classification.originalDocumentAccess)issues.push("original_document_access_unresolved");
+  if(classification.sourceChannel==="social_repost"&&!nonblank(classification.attributedOrigin))
+    issues.push("repost_attributed_origin_missing");
   if(classification.sourceChannel==="social_repost"&&classification.originalDocumentAccess==="full_original")
     issues.push("repost_cannot_claim_full_original_without_separate_receipt");
   for(const [field,value] of Object.entries(review)){
