@@ -8,6 +8,7 @@ import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-re
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import {planDuplicateSourceLinkM56} from "../vault/event-review-relation-m56";
 import {discoverNearDuplicateSourcesM56,planReviewRevisionM56} from "../vault/review-discovery-m56";
+import {planPdfCoverageM57} from "../vault/pdf-coverage-m57";
 import { buildInvestmentDecisionPacket } from "../vault/investment-decision-packet";
 import { assessThesisProposal } from "../vault/thesis-proposal-gate";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
@@ -476,6 +477,24 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       sourcePaths:z.array(z.string().min(1).max(300)).min(1).max(12).describe("Already indexed Source Intake paths with at least one existing Review provenance relation"),
       proposalDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Actual proposal date YYYY-MM-DD, separate from event/publication date")}
   },safe((args)=>json(withBoundary(planReviewRevisionM56(args)))));
+
+  server.registerTool("plan_pdf_extraction_coverage",{
+    title:"M5.7 PDF Extraction Coverage preflight (read-only)",annotations:READ,
+    description:"Read-only original-byte SHA readback and per-page text/table/figure/footnote coverage manifest. Flags missing pages and unextracted visuals; never pretends it performed PDF parsing/OCR, validates extracted text against pages, or saves any PDF/Review. Large PDF retention and complete cross-page extraction remain future work.",
+    inputSchema:{
+      attachmentSha256:z.string().regex(/^[a-f0-9]{64}$/).describe("Existing archived original PDF byte digest, never a user-pasted text digest"),
+      pageCount:z.number().int().min(1).max(2000).describe("Actual original PDF page count from a separate inspected PDF source"),
+      pages:z.array(z.object({page:z.number().int().min(1).describe("One-based original PDF page number"),
+        text:z.string().max(12000).describe("Faithful extracted page text, may be empty for image-only page"),
+        tables:z.enum(["extracted","present_unextracted","none_reported","unknown"]).describe("Caller-declared table extraction completeness, not verified"),
+        figures:z.enum(["extracted","present_unextracted","none_reported","unknown"]).describe("Caller-declared figure/chart extraction completeness, not verified"),
+        footnotes:z.enum(["extracted","present_unextracted","none_reported","unknown"]).describe("Caller-declared footnote extraction completeness, not verified")
+      })).max(2000).describe("Supplied per-page extractions; absent page numbers are reported as gaps"),
+      extractionEngine:z.string().min(1).max(120).describe("OCR/extraction engine identifier with version if available"),
+      extractionDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Date extraction was performed, YYYY-MM-DD"),
+      documentLabel:z.string().min(1).max(200).describe("Original broker/report title or non-sensitive identifier")
+    }
+  },safe((args)=>json(withBoundary(planPdfCoverageM57(args)))));
 
   server.registerTool(
     "review_investment_claim",

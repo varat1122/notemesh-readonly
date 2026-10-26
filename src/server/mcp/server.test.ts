@@ -60,6 +60,7 @@ const READ_TOOLS = [
   "notes_by_tag",
   "plan_duplicate_source_link",
   "plan_investment_writeback",
+  "plan_pdf_extraction_coverage",
   "plan_review_revision",
   "preview_edit",
   "random_note",
