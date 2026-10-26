@@ -97,8 +97,12 @@ export function buildCanonicalSafeEditWorkflow(
     plan.domain==="company"&&input.entities.length===1?input.entities[0]:
     plan.domain==="macro"?input.entities[0]:
     plan.domain==="asset"?"Asset Research":"Cross Theme";
+  // M5.5 typed contracts route by the resolved *primary* subject role, not
+  // by the count of incidental company mentions. Preserve the legacy freeform
+  // path algorithm for compatibility with already-issued historical receipts.
   const folder=plan.domain==="macro"?"10_Knowledge/Macro and Markets":
-    plan.domain==="company"&&input.entities.length===1?"10_Knowledge/Company Research":
+    plan.domain==="company"&&(input.researchReview?
+      plan.routingV2.reviewScope==="company":input.entities.length===1)?"10_Knowledge/Company Research":
       "10_Knowledge/Industry and Concepts";
   const reviewPath=`${folder}/Investment Review - ${safeSubject(subject)} - ${plan.planId}.md`;
   const tag="InvestmentIntake"+plan.planId.slice(3);
