@@ -5,7 +5,6 @@
  * the attachment unless a separate archive/write receipt says otherwise.
  * Never edits the vault or upgrades protected investment decisions.
  */
-import { createHash } from "node:crypto";
 import { readNote } from "./notes";
 import { db } from "../db";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
@@ -15,6 +14,7 @@ import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTa
   type BrokerUpdate } from "./investment-routing-v2";
 import { buildCanonicalSafeEditWorkflow, type CanonicalSafeEditWorkflow } from "./canonical-writeback-workflow";
 import type { ThaiResearchReview } from "./research-quality-m55";
+import {resolveSourceIdentityM56, type SourceIdentityResolution} from "./source-identity-m56";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
@@ -49,6 +49,8 @@ export interface WritebackInput {
   sourceChannel?:string;
   attributedOrigin?:string;
   originalDocumentAccess?:"full_original"|"excerpt_only"|"not_obtained";
+  /** M5.6: an existing Source receipt must be proven against original bytes and chronology. */
+  existingIntakeId?:string;
 }
 type Route={kind:"raw_input"|"research_review"|"company_timeline_candidate"|"industry_context_candidate"|"claim_registry_candidate";
   action:"candidate_create"|"candidate_append_after_review"|"link_existing_or_hold";
@@ -61,6 +63,7 @@ export interface WritebackPlan {
   inputFormat:IntakeFormat;
   sourceKind:IntakeSource;
   sourceLanguage:string|null;
+  sourceIdentity:SourceIdentityResolution;
   sourceCapture:{
     textDigest:string;
     extractedTextIsOriginalBinary:false;
@@ -207,33 +210,12 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(input.completedAnalysis!==undefined && (!T(input.completedAnalysis)||input.completedAnalysis.length>30000))
     throw Error("M5.3 completedAnalysis must be 1-30000 characters");
   const routingV2=planCanonicalRoutingV2({...input,entities});
-  const legacyDigest=createHash("sha256").update([
-    "investment_os_intake_v1",input.domain,input.inputFormat,input.sourceKind,
-    ...entities.map(x=>x.toLowerCase()),T(input.sourceUrl||""),T(input.rawAttachmentSha256||""),
-    // Preserve older IDs only for a stored raw intake with matching dates.
-    text
-  ].join("\n")).digest("hex");
-  const legacyPlanId="IN-"+legacyDigest.slice(0,16).toUpperCase();
-  const legacyRawPath="00_Inbox/ChatGPT/Investment Intake - "+legacyPlanId+".md";
-  const old=db().prepare("SELECT frontmatter FROM notes WHERE path=? LIMIT 1").get(legacyRawPath) as
-    {frontmatter:string|null}|undefined;
-  let compatibleLegacy=false;
-  if(old?.frontmatter){
-    try{
-      const fm=JSON.parse(old.frontmatter) as Record<string,unknown>;
-      const recordedEvent=typeof fm.event_date==="string"?fm.event_date:null;
-      const recordedPublished=typeof fm.published_at==="string"?fm.published_at:null;
-      compatibleLegacy=recordedEvent===eventDate&&recordedPublished===publicationDate;
-    }catch{/* Invalid old metadata must not collide with a new dated intake. */}
-  }
-  // v2 includes separate economic event and publication dates so unchanged
-  // extracted text cannot alias two distinct events. An already-saved v1 raw
-  // note keeps its original path if and only if both declared dates match.
-  const digest=compatibleLegacy?legacyDigest:createHash("sha256").update([
-    "investment_os_intake_v2",legacyDigest,eventDate??"unknown_event_date",
-    publicationDate??"unknown_publication_date"
-  ].join("\n")).digest("hex");
-  const planId="IN-"+digest.slice(0,16).toUpperCase();
+  const sourceIdentity=resolveSourceIdentityM56({extractedText:input.extractedText,
+    inputFormat:input.inputFormat,sourceKind:input.sourceKind,sourceUrl:input.sourceUrl,
+    rawAttachmentSha256:input.rawAttachmentSha256,eventDate,publicationDate,
+    verifiedAttachmentPath:verifiedAttachment?actualAttachmentPath:null,
+    existingIntakeId:input.existingIntakeId});
+  const planId=sourceIdentity.planId;
   const rawPath="00_Inbox/ChatGPT/Investment Intake - "+planId+".md";
   // Same digest is a stable idempotency key across repeated routing calls.
   const subject=entities.length===1?safeTicker(entities[0]):null;
@@ -351,8 +333,9 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     status:"read_only_plan_not_written",planId,entityScope:entities,domain:input.domain,
     inputFormat:input.inputFormat,sourceKind:input.sourceKind,
     sourceLanguage:input.sourceLanguage?T(input.sourceLanguage):null,
+    sourceIdentity,
     sourceCapture:{
-      textDigest:digest,extractedTextIsOriginalBinary:false,
+      textDigest:sourceIdentity.textSha256,extractedTextIsOriginalBinary:false,
       rawAttachmentPath:actualAttachmentPath,
       attachmentVerified:verifiedAttachment,originalSourceVerified:false,
       preservation:verifiedAttachment?"stored_original_user_bytes":"needs_safe_edit_raw_capture"
