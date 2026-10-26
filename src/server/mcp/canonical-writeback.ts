@@ -21,6 +21,15 @@ const canonicalBaseSchema = z.object({
   extractedText: nonempty.max(12000),
   sourceChat: nonempty.max(120),
   completedAnalysis: nonempty.max(30000).optional(),
+  researchReview: z.object({
+    headlineTh:nonempty.max(500),translationTh:z.string().max(30000).optional(),
+    whatChangedTh:nonempty.max(6000),mechanismTh:nonempty.max(6000),
+    thesisImplicationTh:nonempty.max(6000),counterEvidenceTh:nonempty.max(6000),
+    requiredEvidenceTh:nonempty.max(6000)
+  }).strict().optional(),
+  sourceChannel:z.string().max(80).optional(),
+  attributedOrigin:z.string().max(160).optional(),
+  originalDocumentAccess:z.enum(["full_original","excerpt_only","not_obtained"]).optional(),
   captureOnly: z.boolean().optional(),
   sourceLanguage: z.string().max(35).nullable().optional(),
   sourceUrl: z.string().max(1000).nullable().optional(),
@@ -52,10 +61,10 @@ const canonicalBaseSchema = z.object({
 }).strict();
 export const canonicalInputShape = canonicalBaseSchema.shape;
 export const canonicalInputSchema = canonicalBaseSchema.superRefine((v,ctx)=>{
-  if(v.captureOnly===true && v.completedAnalysis!==undefined)
-    ctx.addIssue({code:"custom",message:"Feed Only cannot include completedAnalysis"});
-  if(v.captureOnly!==true && !v.completedAnalysis)
-    ctx.addIssue({code:"custom",message:"Completed analysis is required outside Feed Only"});
+  if(v.captureOnly===true && (v.completedAnalysis!==undefined||v.researchReview!==undefined))
+    ctx.addIssue({code:"custom",message:"Feed Only cannot include analysis or researchReview"});
+  if(v.captureOnly!==true && !v.completedAnalysis&&!v.researchReview)
+    ctx.addIssue({code:"custom",message:"Completed analysis or typed researchReview is required outside Feed Only"});
 });
 
 export const canonicalAuthorizationSchema = z.object({
@@ -95,6 +104,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
     previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p});
   }
   return {phase:"preview_only",planId:plan.planId,workflowStatus:workflow.status,
+    qualityIssues:workflow.qualityIssues,
     steps:workflow.steps.map(({kind,path,state,expectedSha256,receiptKey})=>({kind,path,state,expectedSha256,receiptKey})),
     previews,protectedNotesTouched:false,perDeviceSync:"unverified",writesPerformed:false,
     next:"Review exact diffs and authorize apply_canonical_writeback with these tokens; no Vault notes have been written."};
@@ -135,6 +145,7 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   const after=planned(args.input).workflow;
   return {phase:"apply_verified_or_pending",planId:plan.planId,
     status:after.status,readyForNextNews:after.readyForNextNews,
+    qualityIssues:after.qualityIssues,
     steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable})=>
       ({kind,path,state,receiptKey,readbackVerified,indexed,searchable})),
     receipts,interrupted,protectedNotesTouched:false,perDeviceSync:"unverified",
