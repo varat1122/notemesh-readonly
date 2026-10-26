@@ -81,6 +81,44 @@ it("M54-F01 fresh Micro: one scoped preview + apply saves source/review, verifie
   }finally{await c.close();}
 });
 
+it("M55 API contract holds incomplete Memory review while preserving Source, then verifies repaired Thai Review",async()=>{
+  for(const rel of ["01_Companies/MU.md","01_Companies/SK hynix.md","01_Companies/Samsung.md","02_Industries_Themes/Memory.md"]){
+    fs.mkdirSync(path.dirname(path.join(vault,rel)),{recursive:true});
+    fs.writeFileSync(path.join(vault,rel),"# Fixture\n");
+    (await import("../vault/indexer")).reindexPath(rel);
+  }
+  const thai={headlineTh:"ข้อความ X อ้าง JPMorgan เกี่ยวกับหุ้น Memory",
+    translationTh:"ผู้โพสต์กล่าวว่าหุ้น MU, SK hynix และ Samsung ปรับตัวลง แต่ยังไม่พบรายงานต้นฉบับ",
+    whatChangedTh:"ยังไม่ยืนยันว่าเป็นข้อมูลใหม่",mechanismTh:"ราคาหน่วยความจำอาจกระทบกำไร",
+    thesisImplicationTh:"ยังไม่เปลี่ยน Thesis",counterEvidenceTh:"ยังไม่มีอนุกรมราคาต้นฉบับ",
+    requiredEvidenceTh:"ต้องตรวจรายงานธนาคารต้นฉบับ"};
+  const base={domain:"industry",entities:["MU","SK hynix","Samsung"],topic:"Memory X repost",inputFormat:"text",
+    sourceKind:"social_repost",sourceLanguage:"en",sourceChat:"MICRO 261026",sourceChannel:"social_repost",
+    attributedOrigin:"J.P. Morgan",originalDocumentAccess:"excerpt_only",
+    publisher:"RealNickMugalli repost",extractedText:"JPMorgan-attributed historical Memory boom/bust social repost M55 integration",
+    researchReview:thai};
+  const c=await connect();
+  try{
+    const held=await prepare(c.client,base);
+    expect(held).toMatchObject({workflowStatus:"hold_research_quality"});
+    expect(held.qualityIssues).toContain("content_types_missing");
+    expect(held.steps.map((x:any)=>x.state)).toEqual(["needs_create","hold_quality_gate"]);
+    expect(held.previews).toHaveLength(1);
+    const source=await commit(c.client,base,held);
+    expect(source.receipts).toHaveLength(1);
+    expect(source).toMatchObject({status:"hold_research_quality",readyForNextNews:false});
+    const enriched={...base,themes:["Memory"],contentTypes:["analyst_opinion","market_commentary"],
+      entityRoles:base.entities.map(entity=>({entity,role:"covered_company"}))};
+    const valid=await prepare(c.client,enriched);
+    expect(valid.qualityIssues).toEqual([]);
+    expect(valid.steps.map((x:any)=>x.state)).toEqual(["verified_existing","needs_create"]);
+    expect(valid.previews[0].path).toContain("Investment Review - Memory - ");
+    const applied=await commit(c.client,enriched,valid);
+    expect(applied).toMatchObject({status:"saved_verified",readyForNextNews:true,protectedNotesTouched:false});
+    expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected thesis fixture\n");
+  }finally{await c.close();}
+});
+
 it("M54-F02 lost preview response rotates token; stale token is refused and fresh retry succeeds",async()=>{
   const input={...news,extractedText:"Synthetic unique source for token-retry test"};
   const c=await connect();
