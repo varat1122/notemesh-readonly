@@ -141,6 +141,55 @@ describe("M5.6 source identity and immutable legacy receipt linking",()=>{
  });
 });
 
+describe("M5.6.2 Solidigm Thai/English same-event Source Receipt relation (synthetic Vault fixture)",()=>{
+ const thai="00_Inbox/ChatGPT/Investment Intake - IN-4AF8FD0215D3A798.md";
+ const english="00_Inbox/ChatGPT/Investment Intake - IN-B637DC6926EBA011.md";
+ const review="10_Knowledge/Industry and Concepts/Investment Review - Cross Theme - IN-4AF8FD0215D3A798.md";
+ const source=(id:string,url:string,lang:string)=>[
+  "---","type: investment_source_intake",`intake_id: "${id}"`,
+  "source_kind: \"news_media\"",`source_language: "${lang}"`,
+  `source_url: "${url}"`,`event_date: "2026-10-23"`,`published_at: "2026-10-23"`,
+  "---","# Original user-supplied source receipt",""] .join("\n");
+ const request={reviewPath:review,additionalSourcePath:english,
+  eventAnchor:"sk-hynix-solidigm-ipo-cancellation",
+  comparisonBasis:"Both user-supplied Investing.com language editions describe the Oct. 23 Solidigm IPO decision and the same LYNX NAND-capacity scenario; not a second economic event.",
+  linkedOnDate:"2026-10-26"};
+ it("previews an append-only related Source receipt, CAS-applies once and never edits protected notes",async()=>{
+  await seed(thai,source("IN-4AF8FD0215D3A798","https://th.investing.com/news/stock-market-news/article-810087","th"));
+  await seed(english,source("IN-B637DC6926EBA011","https://www.investing.com/news/stock-market-news/micron-sandisk-gain-as-sk-hynix-scraps-solidigm-ipo-lynx-says-4970053","en"));
+  await seed(review,["---","type: investment_research_review",`intake_id: "IN-4AF8FD0215D3A798"`,
+   `original_source_path: "${thai}"`,"---","# Solidigm annotated historical review", "## Source provenance",
+   `- Exact Source: [[${thai.slice(0,-3)}]]`,"","## Research analysis","Unchanged synthetic review content.",""] .join("\n"));
+  await seed("05_Thesis/NVDA - Current Thesis.md","# Protected thesis fixture\n");
+  const {planDuplicateSourceLinkM56}=await import("./event-review-relation-m56");
+  const plan=planDuplicateSourceLinkM56(request);
+  expect(plan).toMatchObject({status:"requires_safe_edit_preview",writePerformed:false});
+  expect(plan.safeEditRequest?.change.kind).toBe("append");
+  expect(plan.safeEditRequest?.change.content).toContain("not independent confirmation");
+  const {preview,apply}=await import("../safe-edit/engine");
+  const prepared=preview(plan.safeEditRequest!,actor);
+  expect(prepared.beforeHash).toBe(plan.reviewVersionSha256);
+  const applied=apply({operationId:prepared.operationId,previewToken:prepared.previewToken,
+   expectedHash:prepared.beforeHash},actor);
+  expect(applied.receipt).toMatchObject({write:"written",readback:"verified",reindex:"verified"});
+  const later=planDuplicateSourceLinkM56(request);
+  expect(later.status).toBe("already_linked");
+  expect(later.safeEditRequest).toBeNull();
+  const content=fs.readFileSync(path.join(vault,review),"utf8");
+  expect(content).toContain(`[[${english.slice(0,-3)}]]`);
+  expect(content).toContain("Unchanged synthetic review content.");
+  expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected thesis fixture\n");
+ });
+ it("rejects a date mismatch or unrelated publisher without inventing event equivalence",async()=>{
+  await seed(thai,source("IN-4AF8FD0215D3A798","https://th.investing.com/news/stock-market-news/article-810087","th"));
+  await seed(english,source("IN-B637DC6926EBA011","https://www.investing.com/news/stock-market-news/item-123","en").replaceAll("2026-10-23","2026-10-24"));
+  await seed(review,["---","type: investment_research_review",`intake_id: "IN-4AF8FD0215D3A798"`,
+   `original_source_path: "${thai}"`,"---","## Source provenance",`- [[${thai.slice(0,-3)}]]`,""] .join("\n"));
+  const {planDuplicateSourceLinkM56}=await import("./event-review-relation-m56");
+  expect(()=>planDuplicateSourceLinkM56(request)).toThrow("M56_RELATION_CHRONOLOGY_MISMATCH");
+ });
+});
+
 describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
  it("M55-JPM real X excerpt: missing structured classification saves Source only, repair yields Thai Memory Review",async()=>{
   for(const company of ["MU","SK hynix","Samsung"])await seed(`01_Companies/${company}.md`,`# ${company}\n`);
