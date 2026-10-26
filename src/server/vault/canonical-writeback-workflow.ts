@@ -8,6 +8,7 @@ import { db } from "../db";
 import { readNote } from "./notes";
 import { searchVault } from "./queries";
 import type { WritebackInput, WritebackPlan } from "./investment-writeback-router";
+import {renderThaiResearchM55,validateResearchM55} from "./research-quality-m55";
 
 const sha=(s:string)=>createHash("sha256").update(s,"utf8").digest("hex");
 const yaml=(s:string|null|undefined)=>s==null?"null":JSON.stringify(s);
@@ -27,7 +28,7 @@ export interface CanonicalSafeEditStep {
   path:string;
   expectedSha256:string;
   receiptKey:string;
-  state:"needs_create"|"verified_existing"|"hold_conflict"|"hold_event_review"|"hold_index_repair";
+  state:"needs_create"|"verified_existing"|"hold_conflict"|"hold_event_review"|"hold_index_repair"|"hold_quality_gate";
   readbackVerified:boolean;
   indexed:boolean;
   searchable:boolean;
@@ -40,7 +41,7 @@ export interface CanonicalSafeEditWorkflow {
   version:"M5.3-recipe";
   status:"pending_safe_edit"|"saved_verified"|"pending_source_capture"|
     "source_saved_analysis_pending"|"hold_source_event_review"|
-    "hold_conflict_or_index";
+    "hold_conflict_or_index"|"hold_research_quality";
   sourceChat:string;
   steps:CanonicalSafeEditStep[];
   readyForNextNews:boolean;
@@ -50,6 +51,7 @@ export interface CanonicalSafeEditWorkflow {
   sourcePreservation:"text_input"|"text_only_binary_not_verified"|"text_plus_verified_user_attachment";
   perDeviceSync:"unverified";
   instructions:string[];
+  qualityIssues:string[];
 }
 
 function inspect(path:string,content:string,tag:string){
@@ -86,12 +88,12 @@ export function buildCanonicalSafeEditWorkflow(
   const analysis=input.completedAnalysis?.trim();
   const sourceChat=input.sourceChat?.trim();
   const captureOnly=input.captureOnly===true;
-  if((!analysis&&!captureOnly)||(analysis&&analysis.length>30000)||!sourceChat||sourceChat.length>120)
+  if((!analysis&&!input.researchReview&&!captureOnly)||(analysis&&analysis.length>30000)||!sourceChat||sourceChat.length>120)
     throw Error("M5.3 requires sourceChat and either captureOnly or completedAnalysis before a Safe Edit recipe");
   const rawPath=plan.routes.find(x=>x.kind==="raw_input")?.path;
   if(!rawPath)throw Error("A deterministic source path is required");
   // Stable from explicit caller scope, not from mutable index/search results.
-  const subject=plan.domain==="industry"?input.themes?.[0]??"Cross Theme":
+  const subject=input.researchReview?plan.routingV2.preferredReviewSubject:plan.domain==="industry"?input.themes?.[0]??"Cross Theme":
     plan.domain==="company"&&input.entities.length===1?input.entities[0]:
     plan.domain==="macro"?input.entities[0]:
     plan.domain==="asset"?"Asset Research":"Cross Theme";
@@ -121,6 +123,16 @@ export function buildCanonicalSafeEditWorkflow(
   ].join("\n");
   const companyLinks=plan.routingV2.companyHubs.map(x=>`- ${wiki(x.path)} — ${x.role??"mentioned"}, caller-declared`);
   const themeLinks=plan.routingV2.industryHubs.map(x=>`- ${wiki(x.path)} — existing industry context`);
+  const qualityIssues=input.researchReview?validateResearchM55({
+    domain:plan.domain,subject,contentTypes:input.contentTypes??[],
+    resolvedSubjectPath:plan.routingV2.reviewScope==="industry"?plan.routingV2.industryHubs[0]?.path:
+      plan.routingV2.reviewScope==="company"?plan.routingV2.companyHubs[0]?.path:undefined,
+    companyHubPaths:plan.routingV2.companyHubs.map(x=>x.path),
+    industryHubPaths:plan.routingV2.industryHubs.map(x=>x.path),
+    sourceChannel:input.sourceChannel??"",
+    attributedOrigin:input.attributedOrigin,
+    originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage
+  },input.researchReview):[];
   const broker=input.brokerUpdate;
   const brokerLines=broker?[
     "## Attributed broker version (not independently verified)","",
@@ -136,9 +148,18 @@ export function buildCanonicalSafeEditWorkflow(
     "verification: not_reverified","status: analyst_review_not_user_endorsed",
     `intake_id: ${yaml(plan.planId)}`,`source_chat: ${yaml(sourceChat)}`,
     `source_kind: ${yaml(plan.sourceKind)}`,`attributed_publisher: ${yaml(input.publisher)}`,
+    ...(input.researchReview?[
+      `source_channel: ${yaml(input.sourceChannel??plan.sourceKind)}`,
+      `attributed_origin: ${yaml(input.attributedOrigin??input.publisher)}`,
+      `original_document_access: ${yaml(input.originalDocumentAccess??"not_obtained")}`
+    ]:[]),
     `event_date: ${yaml(event)}`,`published_at: ${yaml(published)}`,
     `review_scope: ${yaml(plan.routingV2.reviewScope)}`,
     `content_types: ${JSON.stringify(unique(input.contentTypes??[]))}`,
+    ...(input.researchReview?[
+      `company_hubs: ${JSON.stringify(plan.routingV2.companyHubs.map(x=>x.path))}`,
+      `industry_hubs: ${JSON.stringify(plan.routingV2.industryHubs.map(x=>x.path))}`
+    ]:[]),
     `original_source_path: ${yaml(rawPath)}`,"---","",
     `# Investment Review — ${safeSubject(subject)} — ${plan.planId}`,"",
     `Source token: ${tag}`,"",
@@ -147,7 +168,7 @@ export function buildCanonicalSafeEditWorkflow(
     `- Original publication/source authentication: not verified by this workflow`,
     `- Event date: ${event??"unknown"}; publication date: ${published??"unknown"}`,
     "","## Research analysis (AI interpretation; not approved Thesis)","",
-    analysis??"Analysis pending.","",
+    input.researchReview?renderThaiResearchM55(input.researchReview):analysis??"Analysis pending.","",
     ...brokerLines,
     "## Canonical knowledge links","",
     ...companyLinks,...themeLinks,
@@ -169,16 +190,23 @@ export function buildCanonicalSafeEditWorkflow(
     db().prepare("SELECT 1 FROM notes WHERE path=? LIMIT 1").get(legacy))||Boolean(otherCanonical);
   const sourceStep=toStep("source_intake",rawPath,sourceContent,tag,false);
   const reviewStep=captureOnly?null:toStep("canonical_review",reviewPath,reviewContent,tag,hasSourceMatch||legacyConflict);
+  if(reviewStep&&qualityIssues.length){
+    reviewStep.state="hold_quality_gate";
+    reviewStep.safeEditRequest=null;
+  }
   const steps=reviewStep?[sourceStep,reviewStep]:[sourceStep];
   const saved=steps.every(x=>x.state==="verified_existing");
   const blocked=steps.some(x=>x.state==="hold_conflict"||x.state==="hold_index_repair");
   const reviewHeld=reviewStep?.state==="hold_event_review";
+  const qualityHeld=reviewStep?.state==="hold_quality_gate";
   return {
     version:"M5.3-recipe",status:blocked?"hold_conflict_or_index":
       captureOnly?(saved?"source_saved_analysis_pending":"pending_source_capture"):
+      qualityHeld?"hold_research_quality":
       saved?"saved_verified":
       reviewHeld?"hold_source_event_review":"pending_safe_edit",
-    sourceChat,steps,readyForNextNews:saved,analysisComplete:!captureOnly&&saved,writesPerformedByPlanner:false,
+    sourceChat,steps,readyForNextNews:saved&&!qualityHeld,analysisComplete:!captureOnly&&saved&&!qualityHeld,writesPerformedByPlanner:false,
+    qualityIssues,
     protectedNotesTouched:false,
     sourcePreservation:plan.inputFormat==="text"?"text_input":
       plan.sourceCapture.attachmentVerified?"text_plus_verified_user_attachment":"text_only_binary_not_verified",

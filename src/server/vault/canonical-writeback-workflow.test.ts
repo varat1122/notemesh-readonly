@@ -62,6 +62,46 @@ async function route(input:typeof news|Record<string,unknown>){
 }
 
 describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
+ it("M55-JPM real X excerpt: missing structured classification saves Source only, repair yields Thai Memory Review",async()=>{
+  for(const company of ["MU","SK hynix","Samsung"])await seed(`01_Companies/${company}.md`,`# ${company}\n`);
+  await seed("02_Industries_Themes/Memory.md","# Memory\n");
+  const excerpt="JP Morgan on historical memory boom/bust cycles for $MU -25% $SKHY - 59% and Samsung -42% which is historically the bottom. \n\nThese companies have returned 1361% in the past year on average.\n";
+  const review={headlineTh:"ข้อความ X ที่อ้าง JPMorgan กล่าวถึงรอบลงของหุ้น Memory",
+    translationTh:"ผู้โพสต์อ้างว่าหุ้น MU ลดลง 25%, SK hynix 59%, Samsung 42% และอ้างว่าผลตอบแทนเฉลี่ยในปีที่ผ่านมาเท่ากับ 1,361% โดยยังไม่พบรายงานต้นฉบับ",
+    whatChangedTh:"เป็นข้อความอ้างอิงจาก X ยังไม่ยืนยันว่าเป็นเหตุการณ์ใหม่",
+    mechanismTh:"หาก ASP ของหน่วยความจำเปลี่ยน อาจมีผลต่อรายได้และกำไร แต่ไม่มีข้อมูลประมาณการยืนยัน",
+    thesisImplicationTh:"ยังไม่ปรับ Thesis หรือสรุปว่าราคาถึงจุดต่ำสุด",
+    counterEvidenceTh:"ช่วงเวลาของผลตอบแทนและสถิติรอบลงยังไม่ได้ตรวจจากต้นทาง",
+    requiredEvidenceTh:"ต้องตรวจรายงาน JPMorgan ต้นฉบับและชุดราคาที่ปรับ Corporate Action แล้ว"};
+  const base={domain:"industry" as const,entities:["MU","SK hynix","Samsung"],topic:"Memory boom bust X repost",
+    inputFormat:"text" as const,sourceKind:"social_repost" as const,sourceLanguage:"en",sourceChat:"MICRO 261026",
+    publisher:"RealNickMugalli X repost attributing J.P. Morgan",sourceChannel:"social_repost",
+    attributedOrigin:"J.P. Morgan",originalDocumentAccess:"excerpt_only" as const,
+    sourceUrl:"https://x.com/RealNickMugalli/status/2114375124875141299",
+    extractedText:excerpt,researchReview:review};
+  const held=await route(base);
+  expect(held.safeEditWorkflow?.status).toBe("hold_research_quality");
+  expect(held.safeEditWorkflow?.steps.map(x=>x.state)).toEqual(["needs_create","hold_quality_gate"]);
+  expect(held.safeEditWorkflow?.steps[1].safeEditRequest).toBeNull();
+  expect(held.safeEditWorkflow?.qualityIssues).toContain("content_types_missing");
+  const captured=await applyRecipe(held);
+  expect(captured).toHaveLength(1);
+  const enriched={...base,themes:["Memory"],entityRoles:base.entities.map(entity=>({entity,role:"covered_company" as const})),
+    contentTypes:["analyst_opinion","market_commentary"] as const};
+  const ready=await route(enriched);
+  expect(ready.planId).toBe(held.planId);
+  expect(ready.safeEditWorkflow?.steps.map(x=>x.state)).toEqual(["verified_existing","needs_create"]);
+  expect(ready.safeEditWorkflow?.steps[1].path).toContain("Investment Review - Memory - ");
+  const content=ready.safeEditWorkflow?.steps[1].safeEditRequest?.change.content??"";
+  expect(content).toContain("## คำแปลจากต้นฉบับ");
+  expect(content).toContain("source_channel: \"social_repost\"");
+  expect(content).toContain("original_document_access: \"excerpt_only\"");
+  expect(content).toContain("[[01_Companies/MU]]");
+  expect(content).toContain("[[02_Industries_Themes/Memory]]");
+  await applyRecipe(ready);
+  const verified=await route(enriched);
+  expect(verified.safeEditWorkflow).toMatchObject({status:"saved_verified",readyForNextNews:true,qualityIssues:[]});
+ });
  it("M53-F01 synthetic Memory: raw source → canonical review with four company backlinks → SHA readback and FTS → ready",async()=>{
   for(const company of ["SK hynix","Samsung","MU","Kioxia"])await seed(`01_Companies/${company}.md`,`# ${company} fixture\n`);
   await seed("02_Industries_Themes/Memory.md","# Memory industry fixture\n");

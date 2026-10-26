@@ -14,6 +14,7 @@ import { inspectUserAttachment, type AttachmentType } from "../user-attachment-v
 import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTag,
   type BrokerUpdate } from "./investment-routing-v2";
 import { buildCanonicalSafeEditWorkflow, type CanonicalSafeEditWorkflow } from "./canonical-writeback-workflow";
+import type { ThaiResearchReview } from "./research-quality-m55";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
@@ -43,6 +44,11 @@ export interface WritebackInput {
   sourceChat?:string;
   completedAnalysis?:string;
   captureOnly?:boolean;
+  /** M5.5 opt-in typed review; validation failure holds Review, not Source. */
+  researchReview?:ThaiResearchReview;
+  sourceChannel?:string;
+  attributedOrigin?:string;
+  originalDocumentAccess?:"full_original"|"excerpt_only"|"not_obtained";
 }
 type Route={kind:"raw_input"|"research_review"|"company_timeline_candidate"|"industry_context_candidate"|"claim_registry_candidate";
   action:"candidate_create"|"candidate_append_after_review"|"link_existing_or_hold";
@@ -194,9 +200,9 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     throw Error("Entity roles must refer to explicitly declared entities (maximum 12)");
   if(input.brokerUpdate?.estimateChanges && input.brokerUpdate.estimateChanges.length>12)
     throw Error("At most 12 attributed broker estimate changes per plan");
-  if((input.completedAnalysis!==undefined||input.captureOnly===true) && (!input.sourceChat?.trim()||input.sourceChat.length>120))
+  if((input.completedAnalysis!==undefined||input.researchReview!==undefined||input.captureOnly===true) && (!input.sourceChat?.trim()||input.sourceChat.length>120))
     throw Error("M5.3 captureOnly/completedAnalysis requires sourceChat (1-120)");
-  if(input.captureOnly===true&&input.completedAnalysis!==undefined)
+  if(input.captureOnly===true&&(input.completedAnalysis!==undefined||input.researchReview!==undefined))
     throw Error("captureOnly and completedAnalysis are mutually exclusive");
   if(input.completedAnalysis!==undefined && (!T(input.completedAnalysis)||input.completedAnalysis.length>30000))
     throw Error("M5.3 completedAnalysis must be 1-30000 characters");
@@ -375,7 +381,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       protectedThesisApprovalRequired:true,canAutoWrite:false},
     warnings,nextActions:needed
   };
-  if(input.completedAnalysis!==undefined||input.captureOnly===true)
+  if(input.completedAnalysis!==undefined||input.researchReview!==undefined||input.captureOnly===true)
     plan.safeEditWorkflow=buildCanonicalSafeEditWorkflow(input,plan);
   return plan;
 }
