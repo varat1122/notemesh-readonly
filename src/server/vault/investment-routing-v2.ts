@@ -149,11 +149,18 @@ export function planCanonicalRoutingV2(input:RoutingV2Input):RoutingV2{
     if(hub){if(!industryHubs.some(x=>x.path===hub.path))industryHubs.push({label,...hub});}
     else unresolvedThemes.push(label);
   }
+  // The number of mentioned companies is NOT the number of principal
+  // subjects. A single declared primary company keeps a company Review even
+  // when competitors/suppliers are linked as context. If multiple declared
+  // primary subjects conflict, hold the review as Cross Theme rather than
+  // silently choosing the first ticker.
+  const primaryHubs=companyHubs.filter(x=>x.role==="primary_subject");
+  const singlePrimary=input.domain==="company"&&primaryHubs.length===1;
   const reviewScope:RoutingV2["reviewScope"]=input.domain==="macro"?"macro":
     input.domain==="asset"?"asset":input.domain==="industry"||
-    (input.domain==="company"&&companyHubs.length>1)?"industry":"company";
+    (input.domain==="company"&&companyHubs.length>1&&!singlePrimary)?"industry":"company";
   const preferredReviewSubject=reviewScope==="industry"&&industryHubs.length?industryHubs[0].path.slice("02_Industries_Themes/".length,-3):
-    reviewScope==="company"&&companyHubs.length?companyHubs[0].path.slice("01_Companies/".length,-3):
+    reviewScope==="company"&&companyHubs.length?(singlePrimary?primaryHubs[0]:companyHubs[0]).path.slice("01_Companies/".length,-3):
     reviewScope==="macro"?input.entities.join(" / "):reviewScope==="asset"?"Asset / Portfolio":"Cross Theme";
   const onePrimary=companyHubs.length===1&&companyHubs[0].role==="primary_subject"&&input.domain==="company";
   return {
