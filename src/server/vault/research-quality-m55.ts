@@ -47,6 +47,51 @@ const thai=(s:string)=>/[\u0e00-\u0e7f]/u.test(s);
 const nonblank=(s:string|undefined)=>Boolean(s?.trim());
 const validHub=(path:string,prefix:string)=>path.startsWith(prefix)&&path.endsWith(".md")&&!path.includes("..")&&!path.includes("\\");
 
+// These bounded checks are a *secondary* semantic tripwire, not a proof that
+// all prose claims have been discovered. Assertions without percentages,
+// paraphrases, wrong scope and fabricated attributions still need adversarial
+// evaluation. Do not apply to translations, which must preserve the source.
+const materialMetric=/(?:รายได้|ยอดขาย|กำไร|กำไรต่อหุ้น|ราคาเป้าหมาย|อัตรากำไร|คำสั่งซื้อ|แนวโน้ม|revenue|sales|earnings|profit|\bEPS\b|margin|guidance|outlook|forecast|target price|shipments?|inflation|\bGDP\b|\bCPI\b)/iu;
+const numericPercent=/[+\-\u2212]?\s*\d+(?:[,.]\d+)?\s*[%％]/gu;
+const explicitlyQualified=/(?:ข่าวลือ|ข่าวอ้าง|แหล่ง.{0,30}อ้าง|อ้าง(?:ว่า)?|รายงาน(?:ว่า)?|ตาม(?:ข่าว|รายงาน|แหล่ง)|ยังไม่|ไม่ยืนยัน|ไม่ชัด|ไม่แน่|อาจ|หาก|สมมติ|กรณี|เป็นไปได้|ขัดแย้ง|สวนทาง|รอตรวจ|ต้องตรวจ|คาดว่า|\breported\b|according to|unverified|rumou?r|disputed|alleged|\bif\b|scenario|conditional|uncertain)/iu;
+const metricCategories={
+  eps:/(?:กำไรต่อหุ้น|\bEPS\b)/iu,
+  margin:/(?:อัตรากำไร|\bmargin\b)/iu,
+  revenue:/(?:รายได้|ยอดขาย|\brevenue\b|\bsales\b)/iu,
+  profit:/(?:กำไร|\bprofit\b|\bearnings\b)/iu,
+  orders:/(?:คำสั่งซื้อ|\borders?\b|\bshipments?\b)/iu,
+  target:/(?:ราคาเป้าหมาย|target price)/iu,
+  inflation:/(?:เงินเฟ้อ|\binflation\b|\bCPI\b)/iu,
+  gdp:/(?:\bGDP\b|เศรษฐกิจเติบโต)/iu,
+  guidance:/(?:แนวโน้ม|\bguidance\b|\bforecast\b|\boutlook\b)/iu
+};
+function metricCategory(s:string):string|null {
+  const hits=Object.entries(metricCategories).filter(([,p])=>p.test(s)).map(([key])=>key);
+  if(hits.includes("profit")&&(hits.includes("eps")||hits.includes("margin")))
+    hits.splice(hits.indexOf("profit"),1);
+  if(hits.includes("guidance")&&hits.some(x=>x!=="guidance"))
+    hits.splice(hits.indexOf("guidance"),1);
+  return hits.length===1?hits[0]:null;
+}
+const normalizedPercent=(s:string):string|null=>{
+  const ascii=s.normalize("NFKC").replace(/\u2212/g,"-").replace(/\s/g,"").replace(/,/g,"");
+  const m=/^([+-]?)(\d+(?:\.\d+)?)%$/.exec(ascii);
+  return m?(m[1]==="-"?"-":"+")+String(Number(m[2]))+"%":null;
+};
+const canonicalPeriod=(s:string)=>s.toUpperCase().replace(/[\s-]/g,"");
+function numericMaterialClauses(review:ThaiResearchReview):Array<{
+  text:string;values:string[];metric:string|null;periods:string[]}>{
+  return [review.headlineTh,review.whatChangedTh,review.mechanismTh,review.thesisImplicationTh]
+    .flatMap(section=>section.split(/(?:[.!?](?=\s|$)|[;\n])/u))
+    .filter(text=>materialMetric.test(text))
+    .map(text=>({text,metric:metricCategory(text),
+      periods:[...text.matchAll(/\b(?:FY|CY)[\s-]?(?:20\d{2}|\d{2})\b/giu)]
+        .map(m=>canonicalPeriod(m[0])),
+      values:[...text.matchAll(numericPercent)]
+      .map(m=>normalizedPercent(m[0])).filter((v):v is string=>Boolean(v))}))
+    .filter(clause=>clause.values.length>0);
+}
+
 /**
  * Automated adjudication boundary: the AI may choose a conservative
  * no_change/conditional decision without a human approver. Its own words and
@@ -92,12 +137,37 @@ export function validateResearchM55(classification:ResearchClassification,review
   // a structured assessment, even if classified as generic reported_fact.
   // This detects omission, NOT whether the passage or attribution is true.
   const guidanceInSubmittedText=Boolean(sourceText&&
-    /(?:\bguidance\b|\bforward[- ]looking\b|\boutlook\b|\bcompany forecasts?\b|แนวโน้ม(?:รายได้|กำไร|ธุรกิจ)|บริษัท(?:ให้|ปรับ)คาดการณ์)/iu.test(sourceText)&&
+    /(?:\bguidance\b|\bforward[- ]looking\b|\boutlook\b|\bforecasts?\b|แนวโน้ม(?:รายได้|กำไร|ธุรกิจ)|บริษัท(?:ให้|ปรับ)คาดการณ์)/iu.test(sourceText)&&
     /(?:[+-]?\d+(?:[.,]\d+)?\s*%|\b(?:FY|CY|Q)[ -]?\d{1,4}\b)/iu.test(sourceText));
   if(guidanceInSubmittedText&&!review.claimAssessments?.length)
     issues.push("source_text_guidance_assessment_missing");
   const assertedFactText=[review.headlineTh,review.whatChangedTh,review.mechanismTh,
     review.thesisImplicationTh].join(" ");
+  const quantified=numericMaterialClauses(review);
+  if(quantified.length&&!review.claimAssessments?.length)
+    issues.push("material_numeric_claim_assessment_missing");
+  if(quantified.length&&review.claimAssessments?.length){
+    const declared=new Set(review.claimAssessments.flatMap(c=>c.competingValues)
+      .map(normalizedPercent).filter((v):v is string=>Boolean(v)));
+    if(quantified.some(c=>c.values.some(value=>!declared.has(value))))
+      issues.push("material_numeric_value_unassessed");
+    const declaredScopes=review.claimAssessments.map(c=>({metric:metricCategory(c.metric),
+      period:canonicalPeriod(c.period),
+      values:new Set(c.competingValues.map(normalizedPercent))}));
+    if(quantified.some(c=>c.metric!==null&&c.values.some(v=>
+      !declaredScopes.some(a=>a.metric===c.metric&&a.values.has(v)))))
+      issues.push("material_numeric_metric_unassessed");
+    if(quantified.some(c=>c.metric!==null&&c.periods.length>0&&c.values.some(v=>
+      !declaredScopes.some(a=>a.metric===c.metric&&a.values.has(v)&&
+        c.periods.includes(a.period)))))
+      issues.push("material_numeric_period_unassessed");
+    const unresolvedValues=new Set(review.claimAssessments.filter(c=>c.resolution==="unresolved")
+      .flatMap(c=>c.competingValues).map(normalizedPercent)
+      .filter((v):v is string=>Boolean(v)));
+    if(quantified.some(c=>c.values.some(v=>unresolvedValues.has(v))&&
+      !explicitlyQualified.test(c.text)))
+      issues.push("unresolved_numeric_claim_lacks_attribution");
+  }
   const explicitConfirmation=/(?:ยืนยัน(?:แล้ว|ได้)ว่า|พิสูจน์แล้วว่า|ตรวจสอบกับเอกสารต้นฉบับแล้ว|เป็นข้อเท็จจริงว่า|verified fact|(?:officially )?confirmed by (?:issuer|company)|ต้องปรับ(?:เพิ่ม|ลด)(?:ทันที)?\s*(?:EPS|กำไร))/iu.test(assertedFactText);
   if(explicitConfirmation&&!review.claimAssessments?.length)
     issues.push("explicit_verified_claim_requires_assessment");

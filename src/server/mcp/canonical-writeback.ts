@@ -39,7 +39,8 @@ const canonicalBaseSchema = z.object({
         "Server-issued claim-scope receipt only. Do not fabricate IDs or use ordinary Source/Vault receipts as proof; omit for unresolved claims."),
       primarySourceUrl:z.string().url().max(2000).optional(),
       verifiedValue:nonempty.max(150).optional()
-    }).strict()).max(24).optional()
+    }).strict()).max(24).optional().describe(
+      "Autonomous AI evidence decisions. Supply when Source text contains numeric guidance OR review prose/headline asserts material financial percentages (revenue, EPS, profit, margin, orders, targets, macro figures), regardless of caller-selected contentTypes/sourceKind. Record EACH material metric/period/unit/value and conflicting sources; unresolved + conditional/no_change is normal without trusted primary proof. Prose must not assert an unresolved number as fact. Never invent a primary Receipt ID.")
   }).strict().optional(),
   sourceChannel:z.string().max(80).optional(),
   attributedOrigin:z.string().max(160).optional(),

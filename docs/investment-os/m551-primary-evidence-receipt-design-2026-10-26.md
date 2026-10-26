@@ -34,6 +34,29 @@ The gate now also scans the **submitted** text for high-signal numeric guidance
 regardless of caller content-type labels, requiring the AI to record a structured
 claim decision. This is only an omission detector and can yield both false
 positives and false negatives; it does not make submitted text verified.
+The 26 Oct adversarial matrix first demonstrated eight previously passing
+false-positive acceptance paths out of ten examples, including unqualified
+percentage-based revenue/EPS assertions, wrong percentage scopes and an
+unresolved Guidance headline presented as a declarative fact. The draft now
+additionally requires a structured decision when financial/macro metric words
+appear with percentage values in AI-authored headline or analytical sections;
+checks the stated percentage against `competingValues`; checks basic metric
+families (e.g. Revenue is not Gross Margin) and explicit fiscal-year vintage;
+and requires uncertainty or attribution in a clause repeating an unresolved
+percentage. The preserved
+translation is deliberately exempt, as faithful translations can contain
+unverified numbers without adopting them as AI facts.
+
+**Residual gap:** These regex/metric-family checks cover a bounded class of
+English/Thai percentage claims. They do not prove semantic entailment or catch
+all absolute currency amounts, basis-point values, misattributed quotes,
+unstated vintages, per-share denominators, mixed-metric sentences, or claims
+expressed without explicit numbers. A motivated/mistaken caller can still
+misclassify news or write unsupported non-percentage conclusions. Passing the
+regression tests is therefore necessary but not sufficient for a Production
+AI-autonomous `verified_primary` release. Future semantic evaluation must be
+tested against independent originals and blinded counterexamples, not simply
+ask the same model to confirm its own work.
 Permitted automatic changes remain limited to the separately authorized,
 add-only Source and Canonical Review workflow with actual Safe Edit receipts,
 SHA readback, search-index and wikilink checks. Current Thesis, Evidence
