@@ -263,6 +263,43 @@ describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
   expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected synthetic thesis\n");
   expect(fs.readFileSync(path.join(vault,"06_Portfolio/Team.md"),"utf8")).toBe("# Protected synthetic portfolio\n");
  });
+ it("P0 Fresh Micro company: primary MU stays Company Review while SK hynix mention remains linked; source/review CAS and FTS verified",async()=>{
+  await seed("01_Companies/SK hynix.md","# SK hynix\n");
+  await seed("01_Companies/MU.md","# MU\n");
+  await seed("02_Industries_Themes/Memory.md","# Memory\n");
+  await seed("05_Thesis/MU - Current Thesis.md","# User-protected MU thesis\n");
+  const input={...news,domain:"company" as const,entities:["SK hynix","MU"],
+    entityRoles:[{entity:"SK hynix",role:"mentioned" as const},{entity:"MU",role:"primary_subject" as const}],
+    topic:"Micron HBM4 research update with SK hynix mentioned",sourceChannel:"broker_excerpt",
+    originalDocumentAccess:"excerpt_only" as const,completedAnalysis:undefined,
+    researchReview:{headlineTh:"ข่าวไมครอนกล่าวถึงแนวโน้ม HBM4 และ SK hynix ในฐานะบริษัทที่ถูกอ้างถึง",
+      translationTh:"รายงานที่ผู้ใช้อ้างถึงกล่าวถึงราคาหน่วยความจำและการแข่งขันด้าน HBM4 ของผู้ผลิตหลายราย",
+      whatChangedTh:"ข้อความนี้เป็นข้อมูลเพิ่มเติมที่ยังไม่ได้ตรวจต้นฉบับของรายงาน",
+      mechanismTh:"ความต้องการ HBM4 อาจกระทบยอดขายและกำไรขั้นต้น ขึ้นกับการส่งมอบจริง",
+      thesisImplicationTh:"ยังไม่ปรับ Thesis หรือมูลค่าเหมาะสมจากข้อความที่ไม่ได้ตรวจยืนยัน",
+      counterEvidenceTh:"การแข่งขันและต้นทุนอาจชะลอการเพิ่มขึ้นของกำไร",
+      requiredEvidenceTh:"ต้องตรวจรายงานต้นฉบับ วันที่และตัวเลขประมาณการให้ตรงกัน"}};
+  const first=await route(input);
+  expect(first.routingV2.reviewScope).toBe("company");
+  expect(first.routingV2.preferredReviewSubject).toBe("MU");
+  expect(first.safeEditWorkflow?.qualityIssues).toEqual([]);
+  expect(first.safeEditWorkflow?.steps[1].path).toContain("10_Knowledge/Company Research/Investment Review - MU - IN-");
+  const reviewBody=first.safeEditWorkflow?.steps[1].safeEditRequest?.change.content??"";
+  expect(reviewBody).toContain("[[01_Companies/MU]]");
+  expect(reviewBody).toContain("[[01_Companies/SK hynix]]");
+  expect(reviewBody).toContain("[[02_Industries_Themes/Memory]]");
+  const written=await applyRecipe(first);
+  const repeat=await route(input);
+  expect(repeat.safeEditWorkflow).toMatchObject({status:"saved_verified",readyForNextNews:true,protectedNotesTouched:false});
+  expect(repeat.safeEditWorkflow?.steps.map(x=>x.state)).toEqual(["verified_existing","verified_existing"]);
+  const {outgoingLinks,searchVault}=await import("./queries");
+  const targets=outgoingLinks(written[1]).map(x=>x.resolved);
+  expect(targets).toContain("01_Companies/MU.md");
+  expect(targets).toContain("01_Companies/SK hynix.md");
+  expect(targets).toContain("02_Industries_Themes/Memory.md");
+  expect(searchVault("InvestmentIntake"+first.planId.slice(3),{limit:20}).hits.map(x=>x.path)).toEqual(expect.arrayContaining(written));
+  expect(fs.readFileSync(path.join(vault,"05_Thesis/MU - Current Thesis.md"),"utf8")).toBe("# User-protected MU thesis\n");
+ });
  it("M53-F02 incomplete input stays a read-only analysis plan and cannot fabricate successful write",async()=>{
   const p=await route({...news,completedAnalysis:undefined});
   expect(p.safeEditWorkflow).toBeUndefined();
