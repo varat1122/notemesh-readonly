@@ -30,4 +30,6 @@
 
 **M3 Chat-Native correction:** policy installation is to be evaluated in the real ChatGPT research rooms using an independently pinned trusted instruction layer. A local synthetic fixture export or a model returning the expected SHA does **not** authenticate that layer. No separate provider LLM API is needed to run ordinary ChatGPT analysis. See `../../M3-chat-native-evaluation-protocol-2026-10-26.md`; the M1 policy bytes and pinned SHA remain unchanged.
 
+**2026-10-27 operator-ready installation addendum:** [M1 ChatGPT Project Instructions Patch](./M1-CHATGPT-PROJECT-INSTRUCTIONS-PATCH-2026-10-27.md) is an **append-only concise summary** for existing Project Instructions v2.3, not a replacement or full-policy-byte installation. Its creation does **not** mean it has been installed. The connected local Browser extension was unavailable without an originating ChatGPT browser context; Project Settings and room-by-room observed E2E remain **PENDING**.
+
 **No change to `M55_REQUIRE_TYPED_REVIEW`, active semantic gates, Safe Edit permission scopes, protected notes or Production environment is authorized by this draft.**
