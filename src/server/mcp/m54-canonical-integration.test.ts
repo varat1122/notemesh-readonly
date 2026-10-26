@@ -86,6 +86,42 @@ it("M54-F01 fresh Micro: one scoped preview + apply saves source/review, verifie
   }finally{await c.close();}
 });
 
+it("M56 MCP contract links a Feed Only source when later research reorders entities and changes classification",async()=>{
+  for(const rel of ["01_Companies/MU.md","02_Industries_Themes/Memory.md"]){
+    fs.mkdirSync(path.dirname(path.join(vault,rel)),{recursive:true});
+    fs.writeFileSync(path.join(vault,rel),"# Fixture\n");
+    (await import("../vault/indexer")).reindexPath(rel);
+  }
+  const raw={domain:"company",entities:["NVDA","MU"],topic:"Synthetic cross-issuer",inputFormat:"text",
+    sourceKind:"social_repost",sourceChat:"Micro source",sourceLanguage:"en",publisher:"Original attribution",
+    extractedText:"M56 synthetic multi-issuer news excerpt with unverified pricing claim",captureOnly:true};
+  const reviewed={...raw,captureOnly:undefined,sourceChat:"Micro research",publisher:"Revised attribution",
+    domain:"industry",entities:["MU","NVDA"],themes:["Memory"],
+    entityRoles:[{entity:"MU",role:"covered_company"},{entity:"NVDA",role:"covered_company"}],
+    contentTypes:["analyst_opinion"],sourceChannel:"social_repost",attributedOrigin:"Unverified origin",
+    originalDocumentAccess:"not_obtained",researchReview:{headlineTh:"ข่าวจำลองหลายบริษัทสำหรับตรวจ Source Identity",
+      translationTh:"เนื้อหาจำลองกล่าวถึงบริษัทสองรายและราคาโดยไม่มีหลักฐานยืนยัน",
+      whatChangedTh:"เป็นข้อมูลทดสอบ ไม่ใช่เหตุการณ์เศรษฐกิจจริง",
+      mechanismTh:"Pricing และ Utilization อาจกระทบ Revenue แต่ยังไม่มีหลักฐาน",
+      thesisImplicationTh:"ไม่ปรับ Thesis หรือราคาเป้าหมาย",
+      counterEvidenceTh:"ต้นฉบับและประมาณการยังไม่ได้ตรวจสอบ",
+      requiredEvidenceTh:"ต้องตรวจ Original Source และงวดข้อมูลก่อนใช้"}};
+  const c=await connect();
+  try {
+    const tools=await c.client.listTools(),schema=tools.tools.find(t=>t.name==="prepare_canonical_writeback")?.inputSchema;
+    expect(schema?.properties).toHaveProperty("existingIntakeId");
+    const first=await prepare(c.client,raw);
+    expect(first.previews).toHaveLength(1);
+    expect((await commit(c.client,raw,first)).status).toBe("source_saved_analysis_pending");
+    const subsequent=await prepare(c.client,{...reviewed,existingIntakeId:first.planId});
+    expect(subsequent.planId).toBe(first.planId);
+    expect(subsequent.qualityIssues).toEqual([]);
+    expect(subsequent.steps.map((x:any)=>x.state)).toEqual(["verified_existing","needs_create"]);
+    expect(subsequent.previews.map((x:any)=>x.kind)).toEqual(["canonical_review"]);
+    expect((await commit(c.client,{...reviewed,existingIntakeId:first.planId},subsequent)).status).toBe("saved_verified");
+  }finally{await c.close();}
+});
+
 it("M55 API contract holds incomplete Memory review while preserving Source, then verifies repaired Thai Review",async()=>{
   for(const rel of ["01_Companies/MU.md","01_Companies/SK hynix.md","01_Companies/Samsung.md","02_Industries_Themes/Memory.md"]){
     fs.mkdirSync(path.dirname(path.join(vault,rel)),{recursive:true});
