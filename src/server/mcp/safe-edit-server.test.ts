@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, expect, it, vi } from "vitest";
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -12,17 +13,80 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),"safe-edit-mcp-"));
 process.env.DATA_DIR=root;process.env.BASE_URL="https://safe-fixture.test";
 process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
 const access:McpAccess={read:true,write:false,label:"oauth:edit-fixture",scopes:["vault:read","vault:edit"]};
-const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","prepare_canonical_writeback","apply_canonical_writeback","get_edit_status","rollback_edit","archive_original_source","inspect_original_source_archive","get_sync_delivery_evidence","store_user_attachment","inspect_user_attachment"];
+const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","prepare_canonical_writeback","apply_canonical_writeback","preflight_research_decision_v2","get_edit_status","rollback_edit","archive_original_source","inspect_original_source_archive","get_sync_delivery_evidence","store_user_attachment","inspect_user_attachment"];
 const args={operationId:"mcp-synthetic-01",path:"Synthetic.md",reason:"Synthetic MCP test",change:{kind:"replace",oldText:"Old data",newText:"New data"}};
+
+const digest=(value:string)=>createHash("sha256").update(value,"utf8").digest("hex");
+const m2Intake="IN-AABBCCDDEEFF0011";
+const m2Path=`00_Inbox/ChatGPT/Investment Intake - ${m2Intake}.md`;
+const m2Original="Fictional MU FY2027 revenue guidance +20% is an unverified user claim.";
+function m2Fixture(sourceNoteSha256="0".repeat(64)){
+ return {schemaVersion:"2.0.0-shadow",policyVersion:"1.0.0",
+   policySha256:"1abcc97f74181398deb0772c6ddee65a8f46d8ed6dd4bc15f1568bfce9c5b3c0",
+   intakeId:m2Intake,domain:"company",subject:"MU",
+   event:{classification:"unresolved",eventDate:null,publicationDate:null,
+     relatedNotes:[],comparisonBasis:"Fictional user excerpt has no primary original."},
+   claims:[{localClaimKey:"claim_a",entity:"MU",metric:"revenue guidance",period:"FY2027",
+     unit:"% YoY",denominator:null,forecastVintage:null,value:"+20%",
+     sourceRefs:[{intakeId:m2Intake,sourcePath:m2Path,sourceNoteSha256,
+       quote:"MU FY2027 revenue guidance +20%"}],competingEvidence:[],
+     epistemicStatus:"unresolved",conclusion:"conditional",primaryEvidence:null,
+     reasoningSummary:"User claim remains unverified and conditional.",
+     requiredEvidence:"Official issuer release with matching period and metric."}],
+   synthesis:{headlineTh:"ข่าวสมมติรายได้ MU ยังไม่ยืนยัน",
+     whatChangedTh:"ผู้ใช้ส่งข้ออ้างที่ยังไม่มีเอกสารทางการ",
+     mechanismTh:"ยังไม่สามารถเชื่อมไป EPS หรือ FCF ได้",
+     thesisImplicationTh:"ไม่เปลี่ยน Thesis จากข่าวสมมติ",
+     counterEvidenceTh:"ยังไม่พบต้นฉบับที่ตรวจได้",
+     requiredEvidenceTh:"ต้องตรวจเอกสารบริษัทและงวดที่ตรงกัน"}};
+}
+
 beforeEach(()=>{fs.mkdirSync(path.join(root,"vault"),{recursive:true});fs.writeFileSync(path.join(root,"vault","Synthetic.md"),"# Synthetic\nOld data\n");});
 afterAll(async()=>{(await import("../db")).db().close();fs.rmSync(root,{recursive:true,force:true});for(const k of ["DATA_DIR","BASE_URL","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];});
 async function connected(a:McpAccess) {
  const {createSafeEditMcpServer}=await import("./safe-edit-server");const server=createSafeEditMcpServer(a),client=new Client({name:"test",version:"1"});const [l,r]=InMemoryTransport.createLinkedPair();await server.connect(r);await client.connect(l);return {client,close:async()=>{await client.close();await server.close();}};
 }
 function unpack(result:any){const b=JSON.parse(result.content[0].text);return JSON.parse(b.result.split("\n").slice(1,-1).join("\n"));}
-it("discovers fourteen scoped tools with accurate write annotations",async()=>{
+it("discovers fifteen scoped tools with accurate write annotations",async()=>{
  const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="apply_canonical_writeback"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment");}}finally{await c.close();}
 });
+it("M3d MCP preflight binds existing indexed original quotes but neither verifies issuer truth nor writes notes",async()=>{
+ const rel=m2Path,original=m2Original;
+ const source=["---","type: investment_source_intake",`intake_id: ${m2Intake}`,
+   `source_text_sha256: ${digest(original)}`,"input_format: text",
+   "verification: not_reverified","---","",`# Fixture Source — ${m2Intake}`,"",
+   "## User-supplied original language text","","```text",original,"```",
+   "## Evidence boundary","","No publisher verification.",""].join("\n");
+ const full=path.join(root,"vault",rel);
+ fs.mkdirSync(path.dirname(full),{recursive:true});fs.writeFileSync(full,source,"utf8");
+ (await import("../vault/indexer")).reindexPath(rel);
+ const c=await connected(access);
+ try{
+   const {tools}=await c.client.listTools(),descriptor=tools.find(t=>t.name==="preflight_research_decision_v2");
+   expect(descriptor?.annotations?.readOnlyHint).toBe(true);
+   expect(descriptor?.inputSchema.properties).toHaveProperty("claims");
+   expect(descriptor?.inputSchema.properties).toHaveProperty("policySha256");
+   const valid=await c.client.callTool({name:"preflight_research_decision_v2",arguments:m2Fixture(digest(source))});
+   expect(valid.isError,JSON.stringify(valid.content)).not.toBe(true);
+   expect(unpack(valid)).toMatchObject({status:"structurally_grounded_shadow_only",
+     policyStampMatched:true,sourceAuthenticityVerified:false,investmentTruthVerified:false,
+     canWriteProtectedNotes:false,writesPerformed:false,serverVerifiedClaimKeys:[]});
+   const stale=await c.client.callTool({name:"preflight_research_decision_v2",arguments:m2Fixture()});
+   expect(unpack(stale).errors).toContain("claim_a:source_note_sha256_mismatch");
+   expect(unpack(stale).status).toBe("hold_references_or_authority");
+   const baseDecision=m2Fixture(digest(source));
+   const forged={...baseDecision,claims:[{...baseDecision.claims[0],
+     epistemicStatus:"attributed",conclusion:"confirmed",
+     primaryEvidence:{receiptId:"PEV-"+"F".repeat(32),
+       primarySourceUrl:"https://www.sec.gov/Archives/fictional-mu-source.htm",
+       verifiedValue:"+20%"}}]};
+   const forgedResult=await c.client.callTool({name:"preflight_research_decision_v2",arguments:forged});
+   expect(unpack(forgedResult).status).toBe("hold_references_or_authority");
+   expect(unpack(forgedResult).errors).toContain("claim_a:primary_receipt_not_server_validated");
+   expect(fs.readFileSync(full,"utf8")).toBe(source);
+ }finally{await c.close();}
+});
+
 it("M5.5.1 exposes optional claim assessment and exact primary receipt scope in the live MCP descriptor",async()=>{
  const c=await connected(access);
  try{
@@ -45,7 +109,7 @@ it.each([
 ])("enforces OAuth scopes again inside handlers: %j",async a=>{
  const c=await connected(a);try{for(const name of toolsList){
  const canonical={domain:"company",entities:["NVDA"],topic:"Synthetic",inputFormat:"text",sourceKind:"archived_chat",extractedText:"Synthetic",sourceChat:"test",completedAnalysis:"Synthetic analysis"};
- const params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="prepare_canonical_writeback"?canonical:name==="apply_canonical_writeback"?{input:canonical,planId:"IN-0000000000000000",authorizations:[]}:name==="get_edit_status"?{operationId:args.operationId}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="inspect_original_source_archive"?{url:"https://www.sec.gov/Archives/sample"}:name==="get_sync_delivery_evidence"?{}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
+ const params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="prepare_canonical_writeback"?canonical:name==="preflight_research_decision_v2"?m2Fixture():name==="apply_canonical_writeback"?{input:canonical,planId:"IN-0000000000000000",authorizations:[]}:name==="get_edit_status"?{operationId:args.operationId}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="inspect_original_source_archive"?{url:"https://www.sec.gov/Archives/sample"}:name==="get_sync_delivery_evidence"?{}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
  if(name==="preview_edit")params.change=args.change;
  const result=await c.client.callTool({name,arguments:params});expect(result.isError,name).toBe(true);expect(JSON.stringify(result._meta),name).toContain("insufficient_scope");
  }expect(fs.readFileSync(path.join(root,"vault","Synthetic.md"),"utf8")).toContain("Old data");}finally{await c.close();}

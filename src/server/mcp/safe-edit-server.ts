@@ -11,6 +11,7 @@ import { inspectOriginalSourceHistory } from "../research-source-archive";
 import { syncBackend } from "../sync";
 import { storeUserAttachment, inspectUserAttachment, MAX_USER_ATTACHMENT_BYTES } from "../user-attachment-vault";
 import { canonicalInputShape, canonicalApplySchema, prepareCanonicalWriteback, applyCanonicalWriteback } from "./canonical-writeback";
+import { researchDecisionV2Schema, preflightResearchDecisionV2 } from "../vault/research-decision-v2";
 const securitySchemes=[{type:"oauth2",scopes:["vault:read","vault:edit"]}];
 const base=previewSchema.omit({change:true}).shape;
 export function createSafeEditMcpServer(access:McpAccess) {
@@ -30,6 +31,14 @@ export function createSafeEditMcpServer(access:McpAccess) {
   server.registerTool("append_section",{description:"PREVIEW ONLY: prepare a dated append to one exact Markdown section. Apply via apply_edit after reviewing diff. Operation ID prevents double append.",inputSchema:{...base,heading:z.string().min(1).max(200),content:z.string().min(1).max(100000),date:z.string().regex(/^\d{4}-\d{2}-\d{2}$/)},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({heading,content,date,...input})=>invoke(()=>preview({...input,change:{kind:"append",heading,content,date}},access.label)));
   server.registerTool("update_frontmatter",{description:"PREVIEW ONLY: update allowlisted metadata keys, preserving other keys/comments. Never promote archived AI or not_reverified to verified without primary evidence. Review then use apply_edit.",inputSchema:{...base,properties},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({properties,...input})=>invoke(()=>preview({...input,change:{kind:"frontmatter",properties}},access.label)));
   server.registerTool("create_note",{description:"PREVIEW ONLY: prepare a new Markdown note after duplicate checks. Existing paths are never overwritten. Parent folder must exist. Review then apply_edit.",inputSchema:{...base,content:z.string().min(1).max(100000)},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({content,...input})=>invoke(()=>preview({...input,change:{kind:"create",content}},access.label)));
+  // M3d: explicitly read-only M2 claim/reference preflight. This does not
+  // supply semantic judgment, valid issuer facts, write authority or receipts.
+  // The connected client must refresh its descriptor before it can call this.
+  server.registerTool("preflight_research_decision_v2",{
+    description:"M3d SHADOW ONLY: preflight a version-stamped structured Research Decision against current, indexed Source notes, full note SHA-256, preserved original-language quotes, historical note digests and independently verified exact-scope Primary Evidence Receipts. Requires preexisting Source Intake; unavailable Sources HOLD. This checks reference integrity, not whether claims economically follow from sources. NO preview tokens, Source/Review Apply, issuer verification, protected edits or Vault writes. All outcomes writesPerformed:false; always conduct separate LLM semantic evaluation and authorized Safe Edit before a real Review.",
+    inputSchema:researchDecisionV2Schema.shape,
+    annotations:{readOnlyHint:true,openWorldHint:false},...meta
+  },async input=>invoke(()=>preflightResearchDecisionV2(input)));
   server.registerTool("prepare_canonical_writeback",{
     description:"M5.4 canonical Micro/Macro/PDF intake: validate the complete sourceChat + original extractedText + completedAnalysis (or Feed Only captureOnly), route in the EXISTING Investment_OS, and PREVIEW add-only Source and Company/Industry/Macro Review with per-step hashes and OAuth-bound tokens. No Vault notes are written. If metadata is missing, stop rather than falling back to legacy Inbox submission. Protected Thesis/Evidence Register/Timeline/Portfolio are never modified.",
     inputSchema:canonicalInputShape,
