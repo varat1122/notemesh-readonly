@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { PriceStore } from "./store.ts";
 import { PRICE_POLICY, PriceError, instrument, type InstrumentInput } from "./model.ts";
-import { collectIntoPriceStore, priceWatchlistFrom, scheduledCutoff, type RefreshOptions } from "./collector.ts";
+import { collectIntoPriceStore, priceWatchlistFrom, scheduledCutoff, pendingPriceListings, type RefreshOptions } from "./collector.ts";
 import { GoogleDriveArchives, packDriveArchive, unpackDriveArchive, DRIVE_DB_LIMIT, type ArchiveRepository } from "./drive-archive.ts";
 import { emptyCatalogue, packPriceCatalogue, unpackPriceCatalogue, type CatalogueEntry, type PriceCatalogue } from "./drive-catalogue.ts";
 import { fetchIncremental } from "./incremental.ts";
@@ -28,6 +28,8 @@ export class DrivePriceCache {
   private catalogueId: string | null = null;
   private verifiedAt: string | null = null;
   private loaded = false;
+  private catalogueCheckedAt = 0;
+  private catalogueRevision = 0;
   private busy = false;
   private retryAfter = 0;
   private providerRetryUntil = 0;
@@ -48,17 +50,23 @@ export class DrivePriceCache {
   private acceptCatalogue(bytes: Buffer, id: string) {
     const next = unpackPriceCatalogue(bytes), ids = new Map(next.entries.map(e => [instrument(e.instrument).id, e.archiveId]));
     for (const [key, cached] of this.cache) if (ids.get(key) !== cached.archiveId) { cached.store.close(); this.cache.delete(key); }
-    this.catalogue = next; this.catalogueId = id; this.verifiedAt = new Date().toISOString(); this.loaded = true;
+    this.catalogue = next; this.catalogueId = id; this.verifiedAt = new Date().toISOString(); this.loaded = true; this.catalogueCheckedAt = Date.now(); this.catalogueRevision++;
   }
-  async loadVerified() {
-    if (this.loaded) return;
+  async loadVerified(force = false) {
+    if (this.loaded && !force && Date.now() - this.catalogueCheckedAt < 60000) return;
     if (Date.now() < this.retryAfter) throw new PriceError("drive_retry_backoff");
     try {
+      const revision = this.catalogueRevision;
       const prior = await this.catalogues.latest();
+      // A delayed read must not replace a catalogue published while it waited.
+      if (revision !== this.catalogueRevision) return;
       if (prior) {
         this.acceptCatalogue(prior.bytes, prior.id);
         console.log("[market-prices] drive_catalogue_loaded", JSON.stringify({ catalogueId: this.catalogueId, instruments: this.catalogue.entries.length, verifiedAt: this.verifiedAt }));
-      } else this.loaded = true;
+      } else {
+        if (this.catalogueId) throw new PriceError("drive_catalogue_missing");
+        this.loaded = true; this.catalogueCheckedAt = Date.now();
+      }
     } catch (error) { throw this.failed(error); }
   }
   private openPartition(bytes: Buffer, entry: CatalogueEntry, writable = false): PriceStore {
@@ -139,7 +147,7 @@ export class DrivePriceCache {
     this.busy = true;
     const results: Awaited<ReturnType<typeof collectIntoPriceStore>>["results"] = [];
     try {
-      await this.loadVerified();
+      await this.loadVerified(true);
       if (Math.max(this.providerRetryUntil, this.catalogue.providerRetryAfter ? Date.parse(this.catalogue.providerRetryAfter) : 0) > now.getTime()) return { status: "provider_cooldown", results };
       const allowed = new Set(watchlist.map(i => instrument(i).id));
       const next: PriceCatalogue = { ...this.catalogue, updatedAt: now.toISOString(), providerRetryAfter: null,
@@ -187,8 +195,10 @@ export class DrivePriceCache {
         this.acceptCatalogue(published.bytes, published.id);
       }
       this.lastError = null; this.retryAfter = 0;
-      const remainingDue = watchlist.filter(i => due(entries.get(instrument(i).id), now)).length;
-      return { status: results.some(r => r.status === "failed") ? "partial_failure" : remainingDue ? "batch_complete" : "complete",
+      const dueNow = watchlist.filter(i => due(entries.get(instrument(i).id), now)).length;
+      const remainingDue = pendingPriceListings(next.entries.map(e => ({ id: instrument(e.instrument).id, barCount: e.barCount,
+        lastSuccessfulRefresh: e.lastSuccessfulRefresh, lastError: e.lastError })), watchlist, now);
+      return { status: results.some(r => r.status === "failed") ? "partial_failure" : dueNow ? "batch_complete" : remainingDue ? "pending_retry_or_coverage" : "complete",
         scope: "bounded_batch", universeSize: watchlist.length, remainingDue, results,
         storage: { backend: "google-drive", catalogueId: this.catalogueId, verifiedAt: this.verifiedAt, readBackVerified: !!this.catalogueId } };
     } catch (error) { throw this.failed(error); } finally { this.busy = false; }

@@ -698,3 +698,14 @@ test.describe("signing out", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 });
+
+test("price setup is discoverable but manual refresh remains closed without activation", async ({page}) => {
+  const anonymous = await page.request.get("/api/market-prices-drive"); expect(anonymous.status()).toBe(401);
+  await seedSession(page); await page.goto("/settings");
+  await expect(page.getByRole("link",{name:"ราคา / Price data, daily updates and Google Drive"})).toHaveAttribute("href","/api/market-prices-drive");
+  await page.goto("/api/market-prices-drive");
+  await expect(page.getByRole("heading",{name:"Daily price update"})).toBeVisible();
+  await expect(page.getByRole("button",{name:"อัปเดตราคา / Update prices"})).toHaveCount(0);
+  const refused = await page.request.post("/api/market-prices-drive",{headers:{Origin:BASE_URL},form:{action:"refresh"}});
+  expect(refused.status()).toBe(403);
+});

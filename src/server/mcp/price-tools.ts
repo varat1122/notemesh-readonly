@@ -3,6 +3,7 @@ import { z } from "zod";
 import { marketSchema, isoDate, PriceError, BENCHMARKS } from "../market-prices/model.ts";
 import { readCachedPrices } from "../market-prices/backend.ts";
 import { eventAnalysisSchema, analyzePriceEvent } from "../market-prices/event-analysis.ts";
+import { priceDataStatus } from "../market-prices/status.ts";
 
 export function registerPriceTools(server: McpServer): void {
   if (process.env.MARKET_PRICES_ENABLED !== "1") return;
@@ -28,7 +29,7 @@ export function registerPriceTools(server: McpServer): void {
     title: "Price data coverage and freshness", annotations,
     description: "Read cached market-price coverage, source policy, refresh receipts, revisions and storage budget. Does not prove exchange-certified correctness or Obsidian device sync. No writes or quote-provider requests; Drive mode may read its catalogue.",
     inputSchema: {},
-  }, () => reply(() => readCachedPrices(store => store.status())));
+  }, () => reply(() => priceDataStatus()));
   server.registerTool("analyze_price_event", {
     title: "Compare returns around an event", annotations,
     description: "Compare cached stock and same-market benchmark returns over 1–60 observed benchmark sessions. Requires a caller-verified first affected session and publication timing. Unknown timing refuses calculation. Reports missing/quarantined data, sample hash and ETF proxy identity. Association only; not causal attribution, CAR, a point-in-time backtest or a trade execution estimate. Read the source/thesis in Obsidian first; this tool never writes notes or fetches live/provider data; Drive mode may read the requested stored partitions.",

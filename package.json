@@ -8,7 +8,7 @@
   "scripts": {
     "postinstall": "node scripts/patch-oauth-refresh-scopes.mjs",
     "dev": "vinxi dev",
-    "build": "vinxi build && node scripts/check-client-bundle.mjs && node scripts/check-runtime-exclusions.mjs",
+    "build": "vinxi build && node scripts/build-price-job.mjs && node scripts/check-client-bundle.mjs && node scripts/check-runtime-exclusions.mjs",
     "check:client": "node scripts/check-client-bundle.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "test:e2e": "playwright test",
@@ -39,7 +39,7 @@
     "solid-js": "^1.9.7",
     "vinxi": "^0.5.11",
     "yaml": "2.9.0",
-    "zod": "^3.25.0"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
