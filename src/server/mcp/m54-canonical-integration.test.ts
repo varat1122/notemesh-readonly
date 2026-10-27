@@ -154,7 +154,8 @@ it("M4 staging-only Source-first → indexed quote preflight → unresolved Revi
     const tampered=await preflight(decision("a".repeat(64)));
     expect(tampered.errors).toContain("guidance_a:source_note_sha256_mismatch");
     const review={...raw,captureOnly:undefined,existingIntakeId:id,
-      contentTypes:["guidance"],sourceChannel:"social_repost",originalDocumentAccess:"not_obtained",
+      contentTypes:["guidance"],sourceChannel:"social_repost",
+      attributedOrigin:"Fictional social repost; publisher identity unverified",originalDocumentAccess:"not_obtained",
       researchReview:{headlineTh:"ข่าวสมมติ NVDA อ้าง Guidance FY2027 สวนทางและยังไม่ยืนยัน",
         translationTh:"แหล่งสมมติ A อ้าง FY2027 revenue guidance +20% ส่วนเพจสมมติ B อ้าง -20% โดยทั้งสองไม่มีหลักฐานบริษัท",
         whatChangedTh:"โพสต์สมมติอ้าง FY2027 revenue guidance +20% และ -20% โดยไม่มีเอกสารบริษัท จึงยัง unresolved",
