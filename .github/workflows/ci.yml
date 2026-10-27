@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/m551-security-probe-20261027, feat/m551-zod4-compat-probe-20261027]
+    branches: [main]
   pull_request:
   # A branch can be run by hand: gh workflow run ci.yml --ref <branch>.
   workflow_dispatch:
