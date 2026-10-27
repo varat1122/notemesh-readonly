@@ -176,7 +176,7 @@ it("M4 staging-only Source-first → indexed quote preflight → unresolved Revi
     expect(saved.steps.every((x:any)=>x.readbackVerified&&x.indexed&&x.searchable)).toBe(true);
     expect(fs.readFileSync(path.join(vault,rel),"utf8")).toBe(sourceBytes);
     const reviewPath=saved.steps.find((x:any)=>x.kind==="canonical_review")?.path;
-    expect(reviewPath).toMatch(/^10_Knowledge\\/Company Research\\/Investment Review - /);
+    expect(reviewPath).toMatch(/^10_Knowledge\/Company Research\/Investment Review - /);
     const reviewNote=fs.readFileSync(path.join(vault,reviewPath),"utf8");
     expect(reviewNote).toContain("[[00_Inbox/ChatGPT/Investment Intake - "+id+"]]");
     expect(reviewNote).toContain("[[01_Companies/NVDA]]");
@@ -184,9 +184,9 @@ it("M4 staging-only Source-first → indexed quote preflight → unresolved Revi
     const retry=await prepare(c.client,review);
     expect(retry.previews).toHaveLength(0);
     expect(retry.steps.map((x:any)=>x.state)).toEqual(["verified_existing","verified_existing"]);
-    expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected thesis fixture\\n".replace(/\\n/g,"\n"));
-    expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Evidence Register.md"),"utf8")).toBe("# Protected evidence fixture\\n".replace(/\\n/g,"\n"));
-    expect(fs.readFileSync(path.join(vault,"06_Portfolio/Team.md"),"utf8")).toBe("# Protected portfolio fixture\\n".replace(/\\n/g,"\n"));
+    expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected thesis fixture\n");
+    expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Evidence Register.md"),"utf8")).toBe("# Protected evidence fixture\n");
+    expect(fs.readFileSync(path.join(vault,"06_Portfolio/Team.md"),"utf8")).toBe("# Protected portfolio fixture\n");
   }finally{await c.close();}
 });
 
