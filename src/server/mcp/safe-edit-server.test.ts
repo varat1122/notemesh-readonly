@@ -55,7 +55,7 @@ it("M3d MCP preflight binds existing indexed original quotes but neither verifie
  const source=["---","type: investment_source_intake",`intake_id: ${m2Intake}`,
    `source_text_sha256: ${digest(original)}`,"input_format: text",
    "verification: not_reverified","---","",`# Fixture Source — ${m2Intake}`,"",
-   "## User-supplied original language text","","\`\`\`text",original,"\`\`\`",
+   "## User-supplied original language text","","```text",original,"```",
    "## Evidence boundary","","No publisher verification.",""].join("\n");
  const full=path.join(root,"vault",rel);
  fs.mkdirSync(path.dirname(full),{recursive:true});fs.writeFileSync(full,source,"utf8");
@@ -74,12 +74,12 @@ it("M3d MCP preflight binds existing indexed original quotes but neither verifie
    const stale=await c.client.callTool({name:"preflight_research_decision_v2",arguments:m2Fixture()});
    expect(unpack(stale).errors).toContain("claim_a:source_note_sha256_mismatch");
    expect(unpack(stale).status).toBe("hold_references_or_authority");
-   const forged=m2Fixture(digest(source));
-   forged.claims[0].epistemicStatus="attributed";
-   forged.claims[0].conclusion="confirmed";
-   forged.claims[0].primaryEvidence={receiptId:"PEV-"+"F".repeat(32),
-     primarySourceUrl:"https://www.sec.gov/Archives/fictional-mu-source.htm",
-     verifiedValue:"+20%"};
+   const baseDecision=m2Fixture(digest(source));
+   const forged={...baseDecision,claims:[{...baseDecision.claims[0],
+     epistemicStatus:"attributed",conclusion:"confirmed",
+     primaryEvidence:{receiptId:"PEV-"+"F".repeat(32),
+       primarySourceUrl:"https://www.sec.gov/Archives/fictional-mu-source.htm",
+       verifiedValue:"+20%"}}]};
    const forgedResult=await c.client.callTool({name:"preflight_research_decision_v2",arguments:forged});
    expect(unpack(forgedResult).status).toBe("hold_references_or_authority");
    expect(unpack(forgedResult).errors).toContain("claim_a:primary_receipt_not_server_validated");
