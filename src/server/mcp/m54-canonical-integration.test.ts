@@ -1,5 +1,6 @@
 import {afterAll,beforeAll,expect,it,vi} from "vitest";
 import fs from "node:fs";
+import {createHash} from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import {Client} from "@modelcontextprotocol/sdk/client/index.js";
@@ -83,6 +84,135 @@ it("M54-F01 fresh Micro: one scoped preview + apply saves source/review, verifie
     expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected thesis fixture\n");
     expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Evidence Register.md"),"utf8")).toBe("# Protected evidence fixture\n");
     expect(fs.readFileSync(path.join(vault,"06_Portfolio/Team.md"),"utf8")).toBe("# Protected portfolio fixture\n");
+  }finally{await c.close();}
+});
+
+it("M4 staging-only Source-first → indexed quote preflight → unresolved Review, immutable protected notes and idempotent retry",async()=>{
+  // THIS TEST WRITES ONLY TO THE DISPOSABLE mkdtemp Vault. Never run against /data/vault.
+  const sourceText="SYNTHETIC: NVDA FY2027 revenue guidance +20% is a fictional unverified social claim; another fictional repost claims -20%. Neither has an issuer original.";
+  const raw={domain:"company",entities:["NVDA"],topic:"M4 isolated Source-first evidence fixture",
+    sourceKind:"social_repost",inputFormat:"text",sourceChat:"M4 staging-only fixture",
+    extractedText:sourceText,sourceLanguage:"en",captureOnly:true};
+  const c=await connect();
+  try{
+    const sourcePreview=await prepare(c.client,raw);
+    expect(sourcePreview).toMatchObject({phase:"preview_only",workflowStatus:"pending_source_capture",
+      writesPerformed:false,protectedNotesTouched:false});
+    expect(sourcePreview.previews).toHaveLength(1);
+    const id=sourcePreview.planId;
+    const rel=`00_Inbox/ChatGPT/Investment Intake - ${id}.md`;
+    const sha=(value:string)=>createHash("sha256").update(value,"utf8").digest("hex");
+    const sourceRef=(noteHash:string)=>({intakeId:id,sourcePath:rel,sourceNoteSha256:noteHash,
+      quote:"NVDA FY2027 revenue guidance +20%"});
+    const {M2_POLICY}=await import("../vault/research-decision-v2");
+    const decision=(noteHash:string,confirmation=false)=>({
+      schemaVersion:"2.0.0-shadow",policyVersion:M2_POLICY.version,policySha256:M2_POLICY.sha256,
+      intakeId:id,domain:"company",subject:"NVDA",
+      event:{classification:"unresolved",eventDate:null,publicationDate:null,relatedNotes:[],
+        comparisonBasis:"Both fictional reports are unverified and contradict each other."},
+      claims:[{localClaimKey:"guidance_a",entity:"NVDA",metric:"revenue guidance",
+        period:"FY2027",unit:"% YoY",denominator:null,forecastVintage:null,
+        value:"+20%",sourceRefs:[sourceRef(noteHash)],
+        competingEvidence:[{value:"-20%",attributedTo:"fictional repost",publicationDate:null,
+          sourceRef:null,independence:"unknown"}],
+        epistemicStatus:confirmation?"attributed":"unresolved",
+        conclusion:confirmation?"confirmed":"no_change",
+        primaryEvidence:confirmation?{receiptId:"PEV-"+"F".repeat(32),
+          primarySourceUrl:"https://www.sec.gov/Archives/fictional-m4-only.htm",
+          verifiedValue:"+20%"}:null,
+        reasoningSummary:"Fictional claims only; no official issuer guidance.",requiredEvidence:"Issuer source and matching metric/period."}],
+      synthesis:{headlineTh:"ข่าวสมมติ NVDA อ้าง Guidance สวนทางกัน",
+        whatChangedTh:"ข้ออ้าง +20% และ -20% ยังไม่มีเอกสารต้นฉบับ",
+        mechanismTh:"ผลต่อ Earnings และ FCF ยังประเมินไม่ได้",
+        thesisImplicationTh:"ไม่ปรับ Thesis หรือ Earnings",
+        counterEvidenceTh:"ข้ออ้างทั้งสองไม่ใช่ Primary Evidence",
+        requiredEvidenceTh:"ต้องตรวจเอกสารบริษัทและ Fiscal Period"}});
+    const preflight=async(d:unknown)=>unpack(await c.client.callTool({
+      name:"preflight_research_decision_v2",arguments:d as Record<string,unknown>}));
+    // A preview token/expected hash is NOT a persisted Source.
+    const pre=await preflight(decision(sourcePreview.steps[0].expectedSha256));
+    expect(pre.status).toBe("hold_references_or_authority");
+    expect(pre.errors).toContain("guidance_a:source_missing_or_not_searchable");
+    expect(fs.existsSync(path.join(vault,rel))).toBe(false);
+    const captured=await commit(c.client,raw,sourcePreview);
+    expect(captured).toMatchObject({status:"source_saved_analysis_pending",
+      protectedNotesTouched:false,perDeviceSync:"unverified"});
+    expect(captured.receipts).toHaveLength(1);
+    expect(captured.receipts[0].receipt).toMatchObject({
+      write:"written",readback:"verified",reindex:"verified"});
+    const sourceBytes=fs.readFileSync(path.join(vault,rel),"utf8");
+    expect(sha(sourceBytes)).toBe(sourcePreview.steps[0].expectedSha256);
+    const quote=await preflight(decision(sha(sourceBytes)));
+    expect(quote).toMatchObject({status:"structurally_grounded_shadow_only",
+      writesPerformed:false,sourceAuthenticityVerified:false,investmentTruthVerified:false,
+      canWriteProtectedNotes:false,serverVerifiedClaimKeys:[]});
+    expect(quote.sourceQuoteBindings[0].status).toBe("source_quote_bound_not_primary");
+    expect(quote.warnings).toContain("competing_value_without_preserved_source");
+    const forged=await preflight(decision(sha(sourceBytes),true));
+    expect(forged.status).toBe("hold_references_or_authority");
+    expect(forged.errors).toContain("guidance_a:primary_receipt_not_server_validated");
+    const tampered=await preflight(decision("a".repeat(64)));
+    expect(tampered.errors).toContain("guidance_a:source_note_sha256_mismatch");
+    const review={...raw,captureOnly:undefined,existingIntakeId:id,
+      contentTypes:["guidance"],sourceChannel:"social_repost",
+      attributedOrigin:"Fictional social repost; publisher identity unverified",originalDocumentAccess:"not_obtained",
+      researchReview:{headlineTh:"ข่าวสมมติ NVDA อ้าง Guidance FY2027 สวนทางและยังไม่ยืนยัน",
+        translationTh:"แหล่งสมมติ A อ้าง FY2027 revenue guidance +20% ส่วนเพจสมมติ B อ้าง -20% โดยทั้งสองไม่มีหลักฐานบริษัท",
+        whatChangedTh:"โพสต์สมมติอ้าง FY2027 revenue guidance +20% และ -20% โดยไม่มีเอกสารบริษัท จึงยัง unresolved",
+        mechanismTh:"ต้องมีหลักฐานคำสั่งซื้อและยอดส่งมอบก่อนเชื่อมไป Revenue, EPS หรือ FCF",
+        thesisImplicationTh:"ยังไม่ปรับ Earnings หรือ Thesis เพราะข้ออ้างยังยืนยันไม่ได้",
+        counterEvidenceTh:"โพสต์ +20% ขัดกับโพสต์ -20% และไม่มี Primary Evidence",
+        requiredEvidenceTh:"ต้องตรวจ Company IR/SEC และ Fiscal Period ให้ตรงกัน",
+        claimAssessments:[{entity:"NVDA",metric:"revenue guidance",period:"FY2027",unit:"% YoY",
+          competingValues:["+20%","-20%"],resolution:"unresolved",conclusion:"no_change"}]}};
+    const reviewPreview=await prepare(c.client,review);
+    expect(reviewPreview.planId).toBe(id);
+    expect(reviewPreview.qualityIssues).toEqual([]);
+    expect(reviewPreview.steps.map((x:any)=>x.state)).toEqual(["verified_existing","needs_create"]);
+    expect(reviewPreview.previews).toHaveLength(1);
+    const saved=await commit(c.client,review,reviewPreview);
+    expect(saved).toMatchObject({status:"saved_verified",readyForNextNews:true,
+      protectedNotesTouched:false,perDeviceSync:"unverified"});
+    expect(saved.receipts).toHaveLength(1);
+    expect(saved.steps.every((x:any)=>x.readbackVerified&&x.indexed&&x.searchable)).toBe(true);
+    expect(fs.readFileSync(path.join(vault,rel),"utf8")).toBe(sourceBytes);
+    const reviewPath=saved.steps.find((x:any)=>x.kind==="canonical_review")?.path;
+    expect(reviewPath).toMatch(/^10_Knowledge\/Company Research\/Investment Review - /);
+    const reviewNote=fs.readFileSync(path.join(vault,reviewPath),"utf8");
+    expect(reviewNote).toContain("[[00_Inbox/ChatGPT/Investment Intake - "+id+"]]");
+    expect(reviewNote).toContain("[[01_Companies/NVDA]]");
+    expect((await preflight(decision(sha(sourceBytes)))).status).toBe("structurally_grounded_shadow_only");
+    const retry=await prepare(c.client,review);
+    expect(retry.previews).toHaveLength(0);
+    expect(retry.steps.map((x:any)=>x.state)).toEqual(["verified_existing","verified_existing"]);
+    expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected thesis fixture\n");
+    expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Evidence Register.md"),"utf8")).toBe("# Protected evidence fixture\n");
+    expect(fs.readFileSync(path.join(vault,"06_Portfolio/Team.md"),"utf8")).toBe("# Protected portfolio fixture\n");
+  }finally{await c.close();}
+});
+
+it("M551 connector accepts optional claimAssessments; unresolved preview passes and caller-forged primary receipt holds",async()=>{
+  const c=await connect();
+  try{
+    const input={...news,sourceKind:"issuer_release",contentTypes:["guidance"],
+      extractedText:"SYNTHETIC: NVDA FY2027 guidance +20% vs -20%, no primary proof",
+      researchReview:{...news.researchReview,claimAssessments:[{
+        entity:"NVDA",metric:"revenue growth guidance",period:"FY2027",unit:"% YoY",
+        competingValues:["+20%","-20%"],resolution:"unresolved",conclusion:"no_change"
+      }]}};
+    const unresolved=await prepare(c.client,input);
+    expect(unresolved.phase).toBe("preview_only");
+    expect(unresolved.qualityIssues).toEqual([]);
+    expect(unresolved.steps.map((x:any)=>x.state)).toEqual(["needs_create","needs_create"]);
+    const forged=await prepare(c.client,{...input,researchReview:{...input.researchReview,
+      claimAssessments:[{...input.researchReview.claimAssessments[0],
+        resolution:"verified_primary",conclusion:"confirmed",verifiedValue:"+20%",
+        primarySourceUrl:"https://www.sec.gov/Archives/fictitious-nvda.htm",
+        primaryEvidenceReceipt:"PEV-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"}]}});
+    expect(forged.steps.map((x:any)=>x.state)).toEqual(["needs_create","hold_quality_gate"]);
+    expect(forged.qualityIssues).toContain("primary_evidence_receipt_validation_pending");
+    expect(forged.previews).toHaveLength(1);
+    expect(forged.writesPerformed).toBe(false);
   }finally{await c.close();}
 });
 

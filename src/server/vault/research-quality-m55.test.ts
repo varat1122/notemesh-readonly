@@ -34,4 +34,56 @@ describe("M5.5 pre-write research contract",()=>{
     expect(validateResearchM55(memory,{...review,translationTh:undefined,headlineTh:"Memory market update"})).toEqual(expect.arrayContaining([
       "headlineTh_thai_required","foreign_source_translation_missing"]));
   });
+  it("accepts an explicitly unresolved secondary-source guidance contradiction",()=>{
+    const input={...memory,domain:"company" as const,subject:"MU",sourceKind:"user_commentary",
+      contentTypes:["guidance","market_commentary"],originalDocumentAccess:"not_obtained" as const};
+    const assessment={metric:"revenue growth guidance",period:"FY2027",unit:"% YoY",
+      competingValues:["+20%","-20%"],resolution:"unresolved" as const,conclusion:"no_change" as const};
+    expect(validateResearchM55(input,{...review,claimAssessments:[assessment]})).toEqual([]);
+    expect(validateResearchM55(input,review)).toContain("guidance_claim_assessment_missing");
+    expect(renderThaiResearchM55({...review,claimAssessments:[assessment]})).toContain("FY2027");
+    expect(validateResearchM55({...input,sourceKind:"issuer_release"},review))
+      .toContain("guidance_claim_assessment_missing");
+  });
+  it("holds an explicit verified-fact assertion without proof even when classified as ordinary reported facts",()=>{
+    const asserted={...review,whatChangedTh:"ยืนยันแล้วว่ารายได้ MU FY2027 โต 20%",
+      thesisImplicationTh:"ต้องปรับเพิ่ม EPS ทันที"};
+    expect(validateResearchM55({...memory,sourceKind:"issuer_release",contentTypes:["reported_fact"]},asserted))
+      .toContain("explicit_verified_claim_requires_assessment");
+    expect(validateResearchM55(memory,review)).toEqual([]);
+  });
+  it("requires an AI claim decision when submitted guidance is mislabeled as reported_fact",()=>{
+    const renamed={...memory,sourceKind:"issuer_release",contentTypes:["reported_fact"]};
+    const original="MU FY2027 revenue guidance +20% according to source A; source B reports -20%.";
+    expect(validateResearchM55(renamed,review,original))
+      .toContain("source_text_guidance_assessment_missing");
+    const claim={entity:"MU",metric:"revenue guidance",period:"FY2027",unit:"% YoY",
+      competingValues:["+20%","-20%"],resolution:"unresolved" as const,
+      conclusion:"conditional" as const};
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[claim]},original)).toEqual([]);
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[{...claim,
+      conclusion:"confirmed"}]},original)).toContain("thesis_conclusion_exceeds_evidence");
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[claim],
+      whatChangedTh:"พิสูจน์แล้วว่าบริษัท MU เพิ่ม Guidance 20%"},original))
+      .toContain("unresolved_claim_asserted_as_verified");
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[claim],
+      headlineTh:"ยืนยันแล้วว่า MU Guidance +20%"},original))
+      .toContain("unresolved_claim_asserted_as_verified");
+  });
+  it("holds fabricated confirmation of contradictory unverified FY2027 guidance",()=>{
+    const input={...memory,domain:"company" as const,subject:"MU",sourceKind:"user_commentary",
+      contentTypes:["guidance"],originalDocumentAccess:"not_obtained" as const};
+    const claim={metric:"revenue guidance",period:"FY2027",unit:"% YoY",competingValues:["+20%","-20%"],
+      resolution:"verified_primary" as const,conclusion:"confirmed" as const};
+    expect(validateResearchM55(input,{...review,claimAssessments:[claim]})).toEqual(expect.arrayContaining([
+      "conflicting_claims_unresolved","verified_claim_without_primary_evidence",
+      "primary_evidence_receipt_validation_pending"]));
+    expect(validateResearchM55({...input,originalDocumentAccess:"full_original"},
+      {...review,claimAssessments:[{...claim,primaryEvidenceReceipt:"caller-invented-receipt"}]}))
+      .toContain("primary_evidence_receipt_validation_pending");
+    const unresolved={...claim,resolution:"unresolved" as const};
+    expect(validateResearchM55(input,{...review,claimAssessments:[unresolved]})).toContain("thesis_conclusion_exceeds_evidence");
+    expect(validateResearchM55(input,{...review,claimAssessments:[{...unresolved,conclusion:"no_change"}],
+      thesisImplicationTh:"ยืนยันแล้วว่าต้องปรับเพิ่ม EPS ทันที"})).toContain("unresolved_claim_asserted_as_verified");
+  });
 });

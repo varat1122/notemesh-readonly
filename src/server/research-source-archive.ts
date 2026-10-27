@@ -163,6 +163,36 @@ export function inspectOriginalSourceHistory(originalSource:string,validateBytes
     snapshots,changesObserved:snapshots.length>1,limitReached:truncated,publisherAuthenticityVerified:false};
 }
 
+/** Exact readback of one server-recorded byte snapshot. A digest/ID alone
+ * never certifies that the publisher authored the bytes or a claim is true. */
+export function inspectOriginalSourceSnapshot(snapshotId:string):DocumentSnapshot|null {
+  if(!/^[a-f0-9]{64}$/.test(snapshotId))return null;
+  const row=db().prepare("SELECT * FROM source_snapshots WHERE snapshot_id = ?")
+    .get(snapshotId) as Row|undefined;
+  if(!row)return null;
+  try{return getRow(row,true);}catch{return null;}
+}
+
+/** A bounded literal anchor check on the same stored, SHA-verified bytes.
+ * For now PDF/other opaque formats fail closed; page/text extraction needs
+ * its own audited locator protocol, not a text search over compressed bytes. */
+export function archivedSourceContainsLiteral(snapshotId:string,literal:string):boolean {
+  if(!/^[a-f0-9]{64}$/.test(snapshotId)||literal.length<12||literal.length>2000)return false;
+  const row=db().prepare("SELECT * FROM source_snapshots WHERE snapshot_id = ?")
+    .get(snapshotId) as Row|undefined;
+  if(!row||!["text/html","text/plain","application/xml","text/xml","application/json"].includes(row.content_type))return false;
+  try{
+    if(getRow(row,true).archiveStatus!=="intact_stored_bytes")return false;
+    const fd=fs.openSync(blobPath(row.sha256),fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
+    try {
+      const st=fs.fstatSync(fd);
+      if(!st.isFile()||st.nlink!==1||st.size!==row.byte_length)return false;
+      const bytes=fs.readFileSync(fd);
+      return sha256(bytes)===row.sha256&&bytes.includes(Buffer.from(literal,"utf8"));
+    }finally{fs.closeSync(fd);}
+  }catch{return false;}
+}
+
 
 /**
  * Low-cost operational health summary for the existing get_vault_info read

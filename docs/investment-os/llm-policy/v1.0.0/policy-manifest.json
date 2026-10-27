@@ -1,0 +1,13 @@
+{
+  "policyId": "investment-os-canonical-research-decision",
+  "policyVersion": "1.0.0",
+  "status": "candidate_shadow_only",
+  "policyFile": "research-decision-policy.md",
+  "policySha256": "1abcc97f74181398deb0772c6ddee65a8f46d8ed6dd4bc15f1568bfce9c5b3c0",
+  "appliesTo": ["micro", "macro", "pdf"],
+  "decisionSchemaTarget": "M2-proposed-not-implemented",
+  "minimumOutcomeEnums": ["no_change", "conditional", "confirmed"],
+  "minimumEventEnums": ["new_event", "added_detail", "confirmation", "duplicate", "correction", "contradiction", "unresolved"],
+  "primaryEvidenceAuthority": "independently_server_validated_exact_claim_receipt_only",
+  "productionActivated": false
+}
