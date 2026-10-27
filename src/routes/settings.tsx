@@ -37,6 +37,13 @@ export default function Settings() {
             </Show>
             <article>
               <header>
+                <strong>Daily Market Prices</strong>
+              </header>
+              <p><a href="/api/market-prices-drive" target="_blank" rel="noopener noreferrer">ราคา / Price data, daily updates and Google Drive</a></p>
+              <small class="muted">View coverage and freshness. Updating prices requires administrator authorization and activation; it does not write Vault notes.</small>
+            </article>
+            <article>
+              <header>
                 <strong>Vault Writes</strong>
               </header>
               <label>

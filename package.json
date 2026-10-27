@@ -8,7 +8,7 @@
   "scripts": {
     "postinstall": "node scripts/patch-oauth-refresh-scopes.mjs",
     "dev": "vinxi dev",
-    "build": "vinxi build && node scripts/check-client-bundle.mjs && node scripts/check-runtime-exclusions.mjs",
+    "build": "vinxi build && node scripts/build-price-job.mjs && node scripts/check-client-bundle.mjs && node scripts/check-runtime-exclusions.mjs",
     "check:client": "node scripts/check-client-bundle.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "test:e2e": "playwright test",
