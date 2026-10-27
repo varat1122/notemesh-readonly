@@ -69,9 +69,24 @@ describe("upgrading a claimed 1.6 database", () => {
     await auth.api.signUpEmail({
       body: { email: "admin@example.com", password: "the-original-password", name: "Admin" },
     });
+    // 1.7.7 no longer creates issuer on a fresh account table. Explicitly
+    // reproduce the legacy backfilled column this regression is about.
+    const { db } = await import("./db");
+    const d = db();
+    const columns = d.prepare("PRAGMA table_info(account)").all() as { name: string }[];
+    if (!columns.some(c => c.name === "issuer")) {
+      d.exec("ALTER TABLE account ADD COLUMN issuer TEXT NOT NULL DEFAULT 'local:credential'");
+    }
+    const accountBefore = d.prepare("SELECT id, password, issuer FROM account").get();
+    expect(accountBefore).toMatchObject({ issuer: "local:credential" });
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await boot();
+    const upgraded = await boot();
     expect(log).not.toHaveBeenCalledWith(expect.stringMatching(/added issuer/));
+    expect(d.prepare("SELECT id, password, issuer FROM account").get()).toEqual(accountBefore);
+    const signedIn = await upgraded.api.signInEmail({
+      body: { email: "admin@example.com", password: "the-original-password" },
+    });
+    expect(signedIn.user.email).toBe("admin@example.com");
   });
 });
 

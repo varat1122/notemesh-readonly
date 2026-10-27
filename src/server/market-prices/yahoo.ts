@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { priceRequestSignal } from "./request-budget.ts";
 import { instrument, localDate, isoDate, PriceError, type InstrumentInput, type PriceSnapshot } from "./model.ts";
 
 const optionalNumber = z.number().finite().nullable();
@@ -83,7 +84,7 @@ export async function fetchYahooDaily(input: InstrumentInput, options: { now?: D
     period2: String(Math.floor(now.getTime() / 1000)), interval: "1d", events: "div,splits", includePrePost: "false" }).toString();
   try {
     const response = await (options.fetcher ?? fetch)(url, { headers: { "User-Agent": "InvestmentOS-PersonalResearch/0.1", Accept: "application/json" },
-      signal: AbortSignal.timeout(25_000), redirect: "error" });
+      signal: priceRequestSignal(), redirect: "error" });
     if (response.status === 429) throw new PriceError("provider_rate_limited");
     if (!response.ok) throw new PriceError(`provider_http_${response.status}`);
     if (!response.body) throw new PriceError("empty_provider_response");

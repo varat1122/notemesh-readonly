@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import Database from "better-sqlite3";
-import { inProcessDrWriterFence } from "../backup/writer-fence";
+import { inProcessDrWriterFence } from "../backup/writer-fence.ts";
 import { instrument, isoDate, PRICE_POLICY, PriceError, type InstrumentInput, type PriceBar, type PriceSnapshot } from "./model.ts";
 
 export function priceDatabaseLimit(): number {

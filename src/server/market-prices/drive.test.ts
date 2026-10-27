@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { PriceStore } from "./store";
+import { PriceStore, priceDbPath } from "./store";
 import { PriceError, instrument, type PriceBar, type InstrumentInput } from "./model";
 import { DrivePriceCache } from "./drive-backend";
 import { inProcessDrWriterFence } from "../backup/writer-fence";
@@ -13,6 +13,7 @@ import { packPriceCatalogue, unpackPriceCatalogue } from "./drive-catalogue";
 import { googleBytes } from "./drive-http";
 import { parseYahooChart } from "./yahoo";
 import { chartFixture, TEST_NOW } from "./fixtures";
+import { runPriceRefresh } from "./collector";
 
 let root: string;
 beforeEach(() => {
@@ -78,6 +79,51 @@ it("DR freeze waits for direct async Drive cache refresh before allowing snapsho
     expect(snapshotStarted).toBe(true);
     expect(inProcessDrWriterFence.status).toEqual({frozen:false,activeWriters:0});
   }finally{unpause();cache.close();}
+});
+
+it("drains multiple signed Drive batches in one run, reads back after restart and does not duplicate a day", async () => {
+  vi.stubEnv("MARKET_PRICES_ENABLED", "1"); vi.stubEnv("MARKET_PRICES_REFRESH_ENABLED", "1"); vi.stubEnv("MARKET_PRICES_SCHEDULE", "external");
+  const files = new MemoryRepository(), catalogues = new MemoryRepository();
+  let cache = new DrivePriceCache(files, catalogues);
+  const batch = (o: Parameters<typeof cache.refresh>[0]) => cache.refresh(o);
+  const result = await runPriceRefresh({ ...options, trigger: "job", batch });
+  expect(result).toMatchObject({ status: "complete", batches: 2, remainingDue: 0, universeSize: 8 });
+  expect(files.writes).toBe(8); expect(catalogues.writes).toBe(2); cache.close();
+  cache = new DrivePriceCache(files, catalogues);
+  const same = await runPriceRefresh({ ...options, trigger: "admin", batch });
+  expect(same).toMatchObject({ status: "complete", batches: 1 }); expect(files.writes).toBe(8);
+  expect(await cache.read(s => s.read({ market: "US", symbol: "NVDA" }), [{ market: "US", symbol: "NVDA" }])).toMatchObject({ total: 2 });
+  cache.close(); expect(fs.existsSync(priceDbPath())).toBe(false);
+});
+
+it("drains all bounded Drive batches and removes the lock before a DR snapshot can start", async () => {
+  vi.stubEnv("MARKET_PRICES_ENABLED", "1"); vi.stubEnv("MARKET_PRICES_REFRESH_ENABLED", "1");
+  vi.stubEnv("MARKET_PRICES_SCHEDULE", "external");
+  const files = new MemoryRepository(), catalogues = new MemoryRepository();
+  const cache = new DrivePriceCache(files, catalogues);
+  let release!: () => void, entered = false;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const batch = (o: Parameters<typeof cache.refresh>[0]) => cache.refresh(o);
+  const run = runPriceRefresh({ ...options, trigger: "job", batch, fetcher: async input => {
+    entered = true; await held; return parseYahooChart(chartFixture(input), input, TEST_NOW);
+  } });
+  let snapshot: Promise<void> | undefined;
+  try {
+    await vi.waitFor(() => expect(entered).toBe(true));
+    let captured = false;
+    snapshot = inProcessDrWriterFence.withFrozenWriters(() => {
+      captured = true;
+      expect(catalogues.writes).toBe(2); expect(files.writes).toBe(8);
+      expect(fs.existsSync(path.join(path.dirname(priceDbPath()), "refresh-run.lock"))).toBe(false);
+    });
+    expect(captured).toBe(false);
+    await expect(runPriceRefresh({ ...options, trigger: "admin", batch })).rejects.toThrow("backup_writer_freeze_active");
+    release();
+    expect(await run).toMatchObject({ status: "complete", batches: 2, remainingDue: 0 });
+    await snapshot;
+    expect(captured).toBe(true);
+    expect(inProcessDrWriterFence.status).toEqual({ frozen: false, activeWriters: 0 });
+  } finally { release(); await run; await snapshot; cache.close(); }
 });
 
 it("opens a bounded memory DB without touching a filesystem and authenticates a closed archive", () => {
@@ -252,4 +298,32 @@ it("uses private multipart creates and exact readback; never deletes, patches or
   expect((await repository.publish(packed)).bytes).toEqual(packed);
   expect(network.mock.calls.every(([, init]) => [undefined, "POST"].includes(init?.method))).toBe(true);
   expect(network.mock.calls.every(([url]) => !String(url).includes("permissions"))).toBe(true);
+});
+
+it("a long-lived read server sees another authorized run's new signed catalogue without restart", async () => {
+  const files = new MemoryRepository(), catalogues = new MemoryRepository();
+  const writer = new DrivePriceCache(files, catalogues), reader = new DrivePriceCache(files, catalogues);
+  await writer.refresh(options);
+  const before = await reader.read(s => s.status()) as { archive: { catalogueId: string } };
+  await writer.refresh(options);
+  const clock = Date.now(); vi.spyOn(Date,"now").mockReturnValue(clock + 61000);
+  const after = await reader.read(s => s.status()) as { archive: { catalogueId: string }; instruments: unknown[] };
+  expect(after.archive.catalogueId).not.toBe(before.archive.catalogueId); expect(after.instruments).toHaveLength(8);
+  reader.close(); writer.close();
+});
+
+it("a delayed catalogue read cannot replace a newer generation published by the running collector", async () => {
+  const files = new MemoryRepository(), catalogues = new MemoryRepository(), cache = new DrivePriceCache(files,catalogues);
+  await cache.refresh(options); const old = await catalogues.latest();
+  const original = catalogues.latest.bind(catalogues);
+  let release!: (value: typeof old) => void, entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  vi.spyOn(Date,"now").mockReturnValue(Date.now()+61000);
+  vi.spyOn(catalogues,"latest").mockImplementationOnce(() => { entered(); return new Promise(resolve => { release=resolve; }); }).mockImplementation(original);
+  const delayed = cache.read(s=>({instruments:s.instruments()})); await started;
+  await cache.refresh(options); release(old);
+  const result = await delayed as { instruments: unknown[]; archive: { catalogueId: string } };
+  expect(result.archive.catalogueId).toBe((await catalogues.latest())!.id);
+  expect(result.instruments).toHaveLength(8);
+  cache.close();
 });
