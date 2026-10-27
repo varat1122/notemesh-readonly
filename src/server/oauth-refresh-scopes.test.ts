@@ -67,6 +67,16 @@ it("never gives a read-only grant the submission scope", async () => {
   expect(escalation.status).toBe(400);
   expect(escalation.body.error).toBe("invalid_scope");
 });
+it("rejects replay of the original refresh token after scope-preserving rotation", async () => {
+  const c = await connect("openid offline_access vault:read inbox:submit");
+  const rotated = await refresh(c.clientId, c.refreshToken, "vault:read");
+  expect(rotated.status).toBe(200);
+  expect(rotated.body.refresh_token).not.toBe(c.refreshToken);
+  expect(decodeJwt(rotated.body.access_token).scope).not.toContain("inbox:submit");
+  const replay = await refresh(c.clientId, c.refreshToken, "vault:read inbox:submit");
+  expect(replay.status).toBe(400);
+  expect(replay.body.error).toBe("invalid_grant");
+});
 it("issues an explicitly approved grant for the dedicated save resource", async () => {
   const resource = `${origin}/api/save-analysis`;
   const connection = await connect("openid email offline_access vault:read inbox:submit", resource);

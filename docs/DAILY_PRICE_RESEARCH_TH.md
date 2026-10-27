@@ -155,3 +155,34 @@ PR #129 CI; the new integrated candidate must pass its own required checks.
 
 Remote CI must be read on the submitted exact SHA, including its image job and
 all existing M3 Git/recovery steps. Do not deploy on local focused tests alone.
+
+## PR #130 security follow-up
+
+The initial integrated commit `7ae97b5` passed full CI #500 (and final local
+2024/2024 tests). After Draft PR #130 was created, CI #501 failed its fresh audit:
+Better Auth 1.7.2 is covered by GHSA-965c-763c-88jm (critical OAuth-state login)
+and GHSA-r4xp-prcw-77qf (high OAuth-proxy login). Prior green CI is historical.
+
+Pin better-auth, @better-auth/api-key and @better-auth/oauth-provider together to
+1.7.7, the advisory's patched version. Only their required dependency graph is
+updated; no audit exceptions are added. The existing refresh-scope patch is
+reviewed against 1.7.7 and remains version/layout guarded. It changes only stored
+grant scopes; upstream rotation CAS/replay checks and access-token narrowing stay
+intact. Existing consent, scope/resource, session and Safe Edit tests are reused;
+one real synthetic OAuth regression rejects reuse of a rotated refresh token.
+Better Auth 1.7.7 no longer creates the legacy account.issuer column. The existing
+upgrade regression now explicitly seeds that legacy backfilled column, verifies
+the account ID/password hash/issuer remain unchanged, and signs the same owner in
+after reboot. The application migration and single-owner guards remain unchanged.
+
+Local targeted auth tests: 69 PASS; legacy upgrade/rotation checks: 11 PASS.
+Final local full suite: 2025/2025 PASS in 171 files; dashboard E2E: 33/33 PASS.
+Frozen install, lint, typecheck and rebuilt server/runtime exclusions PASS.
+Audit passes the high threshold with 3 low,
+17 moderate and one previously ignored build-only high; no critical finding remains
+in this audit. Exact-commit CI evidence is reported for the new SHA separately.
+This is source development only. No live auth database, OAuth clients, secret,
+consent, deployed instance or credentials were changed. Before a future approved
+deployment, review the library's auth-schema migrations against the isolated
+Staging database and its recovery evidence; do not assume image rollback reverses
+database migrations or restores refresh-token state.
