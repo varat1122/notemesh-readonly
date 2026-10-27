@@ -64,7 +64,9 @@ describe("M3e historical source-anchored calibration — developer labels, NO mo
   });
   it("detects critical false acceptance, unnecessary hold, invented citations and forged primary",()=>{
     const wrong=submission("macro");
-    const mutable=wrong.judgments.map(x=>({...x,\n      evidenceState:x.evidenceState as "unresolved"|"attributed"|"verified_primary",\n      conclusion:x.conclusion as "no_change"|"conditional"|"confirmed"}));
+    const mutable=wrong.judgments.map(x=>({...x,
+      evidenceState:x.evidenceState as "unresolved"|"attributed"|"verified_primary",
+      conclusion:x.conclusion as "no_change"|"conditional"|"confirmed"}));
     const unsafe=mutable.find(x=>x.caseId==="real_fomc_dissent_as_vote")!;
     unsafe.disposition="accept_qualified";
     unsafe.evidenceState="verified_primary";
