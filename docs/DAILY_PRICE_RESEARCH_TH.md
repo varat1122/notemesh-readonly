@@ -163,7 +163,7 @@ set schedule manual (or MARKET_PRICES_ENABLED=0 to disable price tools too),
 stop the approved scheduler, preserve archives/keys/receipts. Never change
 Production/Sync flags or restore/delete data to make this pilot pass.
 
-## Security release gate — FAIL on unchanged baseline dependencies
+## Historical security release gate — initial price candidate 548b5f6
 
 `pnpm audit --prod --audit-level=high` reports 29 advisories: 4 low, 19 moderate,
 6 high (1 high covered by the pre-existing build-only exception). The five
@@ -175,7 +175,7 @@ security patches/compatibility review pass; a Zod-major migration is not silentl
 folded into this independent price task. Audit failure is a release blocker, not
 a successful security result. Exact remote CI status is recorded separately.
 
-## Local candidate evidence — 27 October 2026
+## Initial price candidate 548b5f6 evidence — 27 October 2026
 
 - Frozen pnpm install, lint, typecheck and build PASS; client/server import boundary
   and runtime exclusion scans PASS. No dependency/lockfile/ignore changes.
@@ -206,3 +206,48 @@ a successful security result. Exact remote CI status is recorded separately.
 Exact source SHA, remote CI and Draft PR status are reported from actual GitHub
 readback. Local logs: `/tmp/prices-daily-*.log`; original worktrees, P0 staged
 files and paused evaluation ledger/identity are preserved.
+
+## Security follow-up — dependency alignment with PR #128
+
+Owner authorized continuing the security remediation after the initial price
+candidate. The dependency graph is reused byte-for-byte from PR #128 at
+`1713d14b7e9553c5b37a10d20c5eb18aa29abdbf`: pnpm-lock.yaml and
+pnpm-workspace.yaml match that commit. Resolved fixes are Zod 4.6.7,
+follow-redirects 1.16.2, Vite 6.4.5 and body-parser 2.4.0. The only runtime source
+adaptation is the existing PR #128 Yahoo dividend/split record key schema,
+retaining this branch's request-budget handling. No M3 quality-gate/policy,
+corpus, judgment, source receipt, permission or actor changes are imported.
+
+Production audit now PASSES the existing threshold: 3 low, 16 moderate and
+1 high (the same previously ignored build-only finding). No audit exceptions
+are added or expanded. Runtime-exclusion scans still enforce absence of the
+excepted build packages. This supersedes the initial candidate's audit HOLD;
+it is not a zero-advisory or Production acceptance claim.
+
+Compatibility verification reuses six existing M3/Research Policy schema,
+reference and scorer unit-test files from the frozen PR #128 in a detached
+inspection worktree: **35 tests PASS** with this exact dependency graph. These
+are offline software regressions over controlled fixtures, NOT new blind model
+trials, NOT independent economic adjudication and NOT scoring the operator's
+actual submissions. No paid provider call, evaluation record or production
+Vault write is performed; M3 trial counts and policy hashes are not changed.
+
+The final candidate's complete tests/build/browser/Docker and exact GitHub CI
+results are reported in the accompanying acceptance evidence. Deployment,
+Drive/Scheduler activation and live write permissions remain separate approvals.
+
+Docker build regressions use at most two workers after a local default-parallel
+run timed out while loading modules under concurrent build load. All tests and
+their original timeouts/assertions remain unchanged; no test is skipped. This
+keeps the image check reproducible on small runners.
+
+Security follow-up local verification: audit/lint/typecheck/build PASS, complete
+1482-test / 107-file suite PASS, browser E2E 32 PASS, frozen M3 compatibility
+35 PASS. A subsequent local image assembly exhausted the managed 32 GiB root
+filesystem after its regression tests passed. Only disposable build cache and
+this task's superseded local test image were cleared; source, staged P0 files
+and ledger/identity were preserved. This failed local image is NOT a PASS.
+Final image acceptance is delegated to the existing exact-commit GitHub image
+job, now also checking the actual packaged price command refuses refresh while
+disabled without creating an auth database or requiring a model/API secret.
+No image is published or deployed by these tests.

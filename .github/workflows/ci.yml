@@ -102,6 +102,21 @@ jobs:
       - name: Build the image
         run: docker build -t notemesh:ci .
 
+      - name: Packaged price job stays disabled without activation
+        run: |
+          docker run --rm --tmpfs /data \
+            -e CLOUD_INTAKE=0 -e MARKET_PRICES_ENABLED=0 \
+            notemesh:ci sh -c '
+              set -e
+              if node .output/server/price-job.mjs refresh 2>/tmp/price-job-error; then
+                echo "unexpected price refresh success"; exit 1
+              else
+                test "$?" -eq 1 || exit 1
+              fi
+              grep -q "price_refresh_disabled" /tmp/price-job-error
+              test ! -f /data/app.sqlite
+            '
+
       # A named volume, root-owned and already holding a vault written by root:
       # what a deployment upgraded from an image that ran as root looks like.
       # The entrypoint has to make it the node user's before the server can
