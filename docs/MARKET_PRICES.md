@@ -7,11 +7,11 @@ Personal-use Yahoo chart data for US / Thailand / Hong Kong / Japan, implemented
 Node 24 can run the collector directly:
 
 ```sh
-DATA_DIR=./data pnpm prices:refresh
+MARKET_PRICES_ENABLED=1 MARKET_PRICES_REFRESH_ENABLED=1 MARKET_PRICES_SCHEDULE=external DATA_DIR=./data pnpm prices:refresh
 DATA_DIR=./data pnpm prices:status
 ```
 
-For a deliberate diagnostic refresh: `pnpm prices:refresh --force`. Force does not bypass a one-hour provider cooldown after HTTP 401/403/429. The file is `DATA_DIR/market-prices/prices.sqlite`; `MARKET_PRICES_DIR` can move this directory outside the Obsidian vault. Never put a live SQLite database in Obsidian Sync or Git. Local shells behind a configured proxy may need Node's `NODE_USE_ENV_PROXY=1`.
+The CLI is now a bounded one-shot job: enable `MARKET_PRICES_ENABLED=1`, `MARKET_PRICES_REFRESH_ENABLED=1` and `MARKET_PRICES_SCHEDULE=external` only after owner approval. `prices:refresh` drains due batches and exits nonzero unless the whole collection is complete. It does not accept `--force` or override a provider cooldown. See [daily operations and research integration](DAILY_PRICE_RESEARCH_TH.md). The file is `DATA_DIR/market-prices/prices.sqlite`; `MARKET_PRICES_DIR` can move this directory outside the Obsidian vault. Never put a live SQLite database in Obsidian Sync or Git. Local shells behind a configured proxy may need Node's `NODE_USE_ENV_PROXY=1`.
 
 The default pilot has NVDA, PTT, 9988 and 7203 plus the explicit comparator ETFs SPY, TDEX, 2800 and 1306. These are source-connectivity examples, not user holdings or an investment recommendation. Optional `MARKET_PRICES_WATCHLIST` is a JSON array, maximum 204 unique listings (200 research listings plus up to four explicit comparator ETFs):
 

@@ -18,6 +18,8 @@ export default defineConfig({
   reporter: process.env.CI ? "list" : "line",
   use: {
     baseURL: BASE_URL,
+    // Managed cloud can use its installed browser; CI retains the pinned one.
+    launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH },
     // Kept for the first failure only: enough to diagnose, not enough to fill
     // the runner with artefacts.
     trace: "retain-on-failure",

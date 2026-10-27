@@ -97,3 +97,31 @@ it("reads only a requested Drive partition on a cold MCP cache without quote req
     expect(network).not.toHaveBeenCalled(); expect(fs.readdirSync(root)).toEqual([]);
   } finally { await c.close(); network.mockRestore(); drivePriceCache().close(); }
 });
+
+it("retrieves historical Vault context and price bars through the same read-only MCP connection", async () => {
+  vi.stubEnv("MARKET_PRICES_ENABLED", "1"); vi.stubEnv("ENCRYPTION_KEY", "12".repeat(32));
+  const { reindexPath } = await import("../vault/indexer");
+  const notes = {
+    "01_Companies/NVDA.md": "# NVDA\nSynthetic company context.\n",
+    "05_Thesis/NVDA - Current Thesis.md": "---\nverification: not_reverified\nstatus: draft_from_archived_evidence\n---\n# NVDA thesis\nSynthetic historical margin uncertainty.\n",
+    "10_Knowledge/Research Review - NVDA fixture.md": "---\nsource_type: archived_ai\nentity: NVDA\n---\n# NVDA archived analysis\nSynthetic prior interpretation, not independent evidence.\n",
+  };
+  for (const [p, text] of Object.entries(notes)) {
+    fs.mkdirSync(path.dirname(path.join(root,"vault",p)), { recursive: true });
+    fs.writeFileSync(path.join(root,"vault",p),text); reindexPath(p);
+  }
+  const store = new PriceStore(priceDbPath(),true);
+  store.save(parseYahooChart(chartFixture(), { market:"US",symbol:"NVDA" }, TEST_NOW)); store.close();
+  const network = vi.spyOn(globalThis,"fetch"), c = await connect();
+  try {
+    const history = await c.client.callTool({ name:"investment_context_pack",arguments:{ question:"NVDA historical thesis and earnings risk",issuers:["NVDA"] } });
+    const text = (history.content as {text:string}[]).map(c=>c.text).join("");
+    expect(text).toContain("05_Thesis/NVDA - Current Thesis.md"); expect(text).toContain("not_reverified");
+    const prices = await c.client.callTool({ name:"read_price_bars",arguments:{ market:"US",symbol:"NVDA",limit:2 } });
+    expect(JSON.parse((prices.content as {text:string}[])[0].text)).toMatchObject({ total:2,count:2 });
+    const status = await c.client.callTool({ name:"get_price_data_status",arguments:{} });
+    expect(JSON.parse((status.content as {text:string}[])[0].text).freshness.listings[0]).toMatchObject({ instrumentId:"US:NVDA",lastPriceDate:"2026-10-15" });
+    expect(network).not.toHaveBeenCalled();
+    for (const [p,bytes] of Object.entries(notes)) expect(fs.readFileSync(path.join(root,"vault",p),"utf8")).toBe(bytes);
+  } finally { await c.close(); network.mockRestore(); }
+});
