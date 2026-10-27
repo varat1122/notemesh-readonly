@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/m4-source-first-staging-integrity-20261027]
   pull_request:
   # A branch can be run by hand: gh workflow run ci.yml --ref <branch>.
   workflow_dispatch:
@@ -10,6 +10,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -56,7 +57,7 @@ jobs:
       # Only chromium: these check that pages render and forms work, which is
       # not a cross-browser question, and the download dominates the job time.
       - name: Install the browser for the end-to-end tests
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
 
       - name: End-to-end tests
         run: pnpm test:e2e
