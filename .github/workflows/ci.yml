@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/m4-source-first-staging-integrity-20261027]
+    branches: [main]
   pull_request:
   # A branch can be run by hand: gh workflow run ci.yml --ref <branch>.
   workflow_dispatch:
@@ -10,7 +10,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
