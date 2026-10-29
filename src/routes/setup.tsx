@@ -501,6 +501,22 @@ function ObsidianStep(props: { onDone: () => void }) {
     const [mfa, setMfa] = createSignal("");
     const [error, setError] = createSignal<string | null>(null);
     const [busy, setBusy] = createSignal(false);
+    const [switching, setSwitching] = createSignal(false);
+
+    async function useGitInstead() {
+        setError(null);
+        setSwitching(true);
+        try {
+            // This setup stage is only shown before a vault is linked. The
+            // existing admin-protected action updates the backend choice.
+            await api.setupChooseBackend("git");
+            props.onDone();
+        } catch (e) {
+            setError(String((e as { message?: string })?.message ?? e));
+        } finally {
+            setSwitching(false);
+        }
+    }
 
     async function submit(e: Event) {
         e.preventDefault();
@@ -552,10 +568,20 @@ function ObsidianStep(props: { onDone: () => void }) {
                 <Show when={error()}>
                     <p class="error">{error()}</p>
                 </Show>
-                <button type="submit" aria-busy={busy()} disabled={busy()}>
+                <button type="submit" aria-busy={busy()} disabled={busy() || switching()}>
                     Sign In to Obsidian
                 </button>
             </form>
+            <p class="muted">Selected Obsidian Sync by mistake?</p>
+            <button
+                type="button"
+                class="secondary"
+                aria-busy={switching()}
+                disabled={busy() || switching()}
+                onClick={useGitInstead}
+            >
+                {switching() ? "Switching…" : "Use a Git Repo instead"}
+            </button>
         </article>
     );
 }
