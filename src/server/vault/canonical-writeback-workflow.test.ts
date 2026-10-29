@@ -62,6 +62,60 @@ async function route(input:typeof news|Record<string,unknown>){
   return planInvestmentWriteback(input as typeof news);
 }
 
+describe("M5.5.1 contradiction claim pre-write safety",()=>{
+ it("preserves Source preview but holds an unsupported confirmed Guidance Review",async()=>{
+  await seed("01_Companies/MU.md","# MU\n");
+  await seed("02_Industries_Themes/Memory.md","# Memory\n");
+  const r={headlineTh:"ข่าวสมมติ MU มีข้ออ้าง Guidance สวนทางกัน",
+    translationTh:"ข่าวทดสอบเท่านั้น แหล่ง A อ้าง +20% แหล่ง B อ้าง -20%",
+    whatChangedTh:"ข่าว A และ B อ้างการเปลี่ยน Guidance ในงวดเดียวกัน",
+    mechanismTh:"ผลต่อรายได้และกำไรจะขึ้นกับ Guidance จริง",
+    thesisImplicationTh:"ไม่มีผลต่อ Thesis ที่ยืนยันแล้ว",
+    counterEvidenceTh:"คำกล่าวสองแหล่งขัดแย้งกันและยังไม่มีเอกสารต้นฉบับ",
+    requiredEvidenceTh:"ต้องตรวจเอกสารบริษัทและวันที่ประกาศ",
+    claimAssessments:[{metric:"revenue guidance",period:"FY2027",unit:"% YoY",
+      competingValues:["+20%","-20%"],resolution:"verified_primary",conclusion:"confirmed"}]};
+  const input={domain:"company",entities:["MU"],topic:"Synthetic contradictory Guidance",
+    inputFormat:"text",sourceKind:"user_commentary",sourceChat:"M55 P0 Synthetic Regression",
+    extractedText:"SYNTHETIC ONLY: MU FY2027 +20% vs -20% guidance; neither verified.",
+    sourceLanguage:"en",contentTypes:["guidance"],entityRoles:[{entity:"MU",role:"primary_subject"}],
+    themes:["Memory"],sourceChannel:"synthetic_test",originalDocumentAccess:"not_obtained",researchReview:r};
+  const held=await route(input);
+  expect(held.safeEditWorkflow?.status).toBe("hold_research_quality");
+  expect(held.safeEditWorkflow?.steps.map(s=>s.state)).toEqual(["needs_create","hold_quality_gate"]);
+  expect(held.safeEditWorkflow?.steps[1].safeEditRequest).toBeNull();
+  expect(held.safeEditWorkflow?.qualityIssues).toContain("conflicting_claims_unresolved");
+  const valid=await route({...input,researchReview:{...r,claimAssessments:[{
+    ...r.claimAssessments[0],resolution:"unresolved",conclusion:"no_change"}]}});
+  expect(valid.safeEditWorkflow?.qualityIssues).toEqual([]);
+  expect(valid.safeEditWorkflow?.steps[1].state).toBe("needs_create");
+  expect(fs.readdirSync(path.join(vault,"00_Inbox/ChatGPT"))).toEqual([]);
+ });
+ it("requires an autonomous unresolved decision for guidance even when the caller spoofs reported_fact",async()=>{
+  await seed("01_Companies/MU.md","# MU\n");
+  await seed("02_Industries_Themes/Memory.md","# Memory\n");
+  const base={domain:"company",entities:["MU"],topic:"Synthetic source-text guidance",
+    inputFormat:"text",sourceKind:"issuer_release",sourceChat:"M55 Autonomous Regression",
+    extractedText:"Synthetic only: MU FY2027 revenue guidance +20% according to A, -20% according to B.",
+    sourceLanguage:"en",contentTypes:["reported_fact"],
+    entityRoles:[{entity:"MU",role:"primary_subject"}],themes:["Memory"],
+    sourceChannel:"synthetic_test",originalDocumentAccess:"not_obtained",
+    researchReview:{headlineTh:"ข้อความทดสอบแนวโน้ม MU ขัดแย้งกัน",translationTh:"แหล่ง A อ้าง +20% แต่ B อ้าง -20%",
+      whatChangedTh:"ยังไม่พบเอกสารต้นฉบับของ Guidance",mechanismTh:"ผลต่อรายได้ยังไม่แน่นอน",
+      thesisImplicationTh:"ยังไม่ปรับ Thesis",counterEvidenceTh:"ข้ออ้างสองแหล่งขัดกัน",
+      requiredEvidenceTh:"ตรวจต้นฉบับและวันที่"}};
+  const blocked=await route(base);
+  expect(blocked.safeEditWorkflow?.qualityIssues).toContain("source_text_guidance_assessment_missing");
+  expect(blocked.safeEditWorkflow?.steps.map(s=>s.state)).toEqual(["needs_create","hold_quality_gate"]);
+  const allowed=await route({...base,researchReview:{...base.researchReview,claimAssessments:[{
+    entity:"MU",metric:"revenue guidance",period:"FY2027",unit:"% YoY",
+    competingValues:["+20%","-20%"],resolution:"unresolved",conclusion:"conditional"}]}});
+  expect(allowed.safeEditWorkflow?.qualityIssues).toEqual([]);
+  expect(allowed.safeEditWorkflow?.steps.map(s=>s.state)).toEqual(["needs_create","needs_create"]);
+  expect(fs.readdirSync(path.join(vault,"00_Inbox/ChatGPT"))).toEqual([]);
+ });
+});
+
 describe("M5.6 source identity and immutable legacy receipt linking",()=>{
  const original="Truist: We view the softness in $CRWV and $NBIS shares as a buying opportunity\n\n• Compute supply constrained through 2028\n• $10M/MW on long-term deals";
  const oldId="IN-1A96025E6CFD35D9";

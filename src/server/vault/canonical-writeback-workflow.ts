@@ -145,8 +145,9 @@ export function buildCanonicalSafeEditWorkflow(
     industryHubPaths:plan.routingV2.industryHubs.map(x=>x.path),
     sourceChannel:input.sourceChannel??"",
     attributedOrigin:input.attributedOrigin,
-    originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage
-  },input.researchReview):[];
+    originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage,
+    sourceKind:plan.sourceKind,entityScope:plan.entityScope
+  },input.researchReview,input.extractedText):[];
   const broker=input.brokerUpdate;
   const brokerLines=broker?[
     "## Attributed broker version (not independently verified)","",

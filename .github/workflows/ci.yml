@@ -56,7 +56,7 @@ jobs:
       # Only chromium: these check that pages render and forms work, which is
       # not a cross-browser question, and the download dominates the job time.
       - name: Install the browser for the end-to-end tests
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
 
       - name: End-to-end tests
         run: pnpm test:e2e
