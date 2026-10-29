@@ -255,30 +255,33 @@ export const auth = betterAuth({
 
 let migrated = false;
 
-// Creates/updates Better Auth's own tables (user, session, account,
-// apikey, OAuth client/token tables) inside app.sqlite. Runs once per boot.
-// Better Auth 1.7 added `issuer` to the account table: NOT NULL, no default.
-// Its migrator refuses to add such a column to a populated table rather than
-// invent a value, so a deployment upgraded from 1.6 — one admin row — would
-// throw here on every boot and never sign in again. This server knows the
-// value: every account it creates is an email-and-password one, which 1.7
-// records as "local:credential". Added with that backfill before the
-// migrator runs, so it finds the column present and only adds its index.
-// Reproduced and pinned against a 1.6-shaped populated table in
-// auth-upgrade.test.ts.
-function backfillAccountIssuer(): void {
+// Creates/updates Better Auth tables on demand. Better Auth >=1.7.3
+// reverted the mandatory account.issuer schema added in 1.7.0-1.7.2.
+// A claimed older database requires a separate, checksum-backed cleanup.
+// Fail closed here instead of silently changing an authenticated live DB.
+function assertLegacyAccountSchemaCleared(): void {
+  // Better Auth >=1.7.3 removed the account.issuer column. Existing 1.7.0-1.7.2
+  // databases may still have a NOT NULL issuer and composite unique index.
+  // A package-only upgrade can break sign-ins/account creation. Do not mutate
+  // a live SQLite auth database without an independently verified backup.
   const d = db();
-  const table = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'account'").get();
-  if (!table) return;
+  const hasAccount = d.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'account'",
+  ).get();
+  if (!hasAccount) return;
   const columns = d.prepare("PRAGMA table_info(account)").all() as { name: string }[];
-  if (columns.some((c) => c.name === "issuer")) return;
-  d.exec("ALTER TABLE account ADD COLUMN issuer TEXT NOT NULL DEFAULT 'local:credential'");
-  console.log("[auth] account table: added issuer for the Better Auth 1.7 upgrade");
+  if (columns.some(c => c.name === "issuer")) {
+    throw new Error(
+      "Legacy Better Auth 1.7.0-1.7.2 account.issuer column detected. " +
+      "Stop before enabling the patched build; back up app.sqlite, verify a restored copy, " +
+      "and apply the reviewed SQLite issuer-index/column cleanup in docs/SECURITY_BETTER_AUTH_177_STAGING.md.",
+    );
+  }
 }
 
 export async function runAuthMigrations() {
   if (migrated) return;
-  backfillAccountIssuer();
+  assertLegacyAccountSchemaCleared();
   const { runMigrations } = await getMigrations(auth.options);
   await runMigrations();
   // The guard on the user table can only be created once Better Auth has
