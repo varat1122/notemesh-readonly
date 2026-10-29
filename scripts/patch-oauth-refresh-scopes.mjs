@@ -2,14 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Better Auth 1.7.2 rotates a refresh token with the *access token's* requested
+// Better Auth OAuth provider 1.7.7 needs an explicit refresh-token scope check: it rotates a refresh token with the *access token's* requested
 // scopes. A read tool therefore discards a previously granted inbox:submit.
 // RFC 6749 section 6 requires a replacement refresh token to retain the
 // original refresh token's scope. Access-token narrowing remains unchanged.
 // https://www.rfc-editor.org/rfc/rfc6749.html#section-6
 const directory = path.dirname(fileURLToPath(import.meta.resolve("@better-auth/oauth-provider")));
 const pkg = JSON.parse(fs.readFileSync(path.join(directory, "..", "package.json"), "utf8"));
-if (pkg.version !== "1.7.2") throw new Error("Review the refresh-scope patch before changing the pinned OAuth provider version.");
+if (pkg.version !== "1.7.7") throw new Error("Review the refresh-scope patch against the installed OAuth provider version before deployment.");
 const candidates = fs.readdirSync(directory).filter(f => f.endsWith(".mjs") && fs.readFileSync(path.join(directory, f), "utf8").includes("async function createRefreshToken("));
 if (candidates.length !== 1) throw new Error("OAuth provider source layout changed; refusing to patch.");
 const target = path.join(directory, candidates[0]);
