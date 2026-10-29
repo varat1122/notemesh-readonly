@@ -68,7 +68,7 @@ describe("Better Auth 1.7.7 account compatibility", () => {
     const d = db();
     d.exec("ALTER TABLE account ADD COLUMN issuer TEXT NOT NULL DEFAULT 'local:credential'");
     d.exec("CREATE UNIQUE INDEX account_issuer_accountId_uidx ON account (issuer, accountId)");
-    await expect(boot()).rejects.toThrow(/Legacy Better Auth 1\\.7\\.0-1\\.7\\.2 account\\.issuer/);
+    await expect(boot()).rejects.toThrow("Legacy Better Auth 1.7.0-1.7.2 account.issuer");
     const cols = (d.prepare("PRAGMA table_info(account)").all() as { name: string }[]).map(c => c.name);
     expect(cols).toContain("issuer");
     const idx = d.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='account_issuer_accountId_uidx'").get();
