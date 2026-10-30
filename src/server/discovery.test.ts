@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { discoveryEndpoint } from "./discovery";
-import { protectedResourceMetadata } from "./mcp/endpoint";
+import { oauthChallenge, protectedResourceMetadata } from "./mcp/endpoint";
 
 // These paths are how an MCP client finds the authorization server. When one is
 // missing the client gets SolidStart's SPA shell — HTML with a 200 — and the
@@ -33,6 +33,21 @@ describe("openid configuration", () => {
 });
 
 describe("protected resource metadata", () => {
+  it("advertises only read scope for the research MCP endpoint (including its OAuth challenge)", () => {
+    const metadata = protectedResourceMetadata("research");
+    expect(metadata.resource).toMatch(/\\/api\\/mcp$/);
+    expect(metadata.scopes_supported).toEqual(["vault:read"]);
+    expect(metadata.scopes_supported).not.toContain("inbox:submit");
+    const challenge = oauthChallenge("research");
+    expect(challenge).toContain('scope="vault:read"');
+    expect(challenge).not.toContain("inbox:submit");
+  });
+  it("preserves explicit submission and Safe Edit scopes on dedicated endpoints", () => {
+    expect(oauthChallenge("save-analysis")).toContain('scope="vault:read inbox:submit"');
+    expect(oauthChallenge("safe-edit")).toContain('scope="vault:read vault:edit"');
+    expect(protectedResourceMetadata("save-analysis").scopes_supported).toEqual(["vault:read", "inbox:submit"]);
+    expect(protectedResourceMetadata("safe-edit").scopes_supported).toEqual(["vault:read", "vault:edit"]);
+  });
   it("serves exact metadata for the dedicated save resource", () => {
     expect(discoveryEndpoint("/.well-known/oauth-protected-resource/api/save-analysis")).toBe("save-protected-resource");
     const metadata = protectedResourceMetadata("save-analysis");
