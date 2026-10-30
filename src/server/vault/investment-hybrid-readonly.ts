@@ -87,9 +87,9 @@ export function hybridClaimPreview(input:HybridInput){
   // are literal, bounded, and not treated as evidence of a same economic event.
   // Retrieval aliases are discovery aids ONLY: never rewrite the period in
   // structured identity or infer that separate fiscal vintages are equal.
-  const compactPeriod=input.period.trim().replace(/\\s+/g,"");
-  const fyFull=compactPeriod.match(/^FY20(\\d{2})Q([1-4])$/i);
-  const fyShort=compactPeriod.match(/^FY(\\d{2})Q([1-4])$/i);
+  const compactPeriod=input.period.trim().replace(/\s+/g,"");
+  const fyFull=compactPeriod.match(/^FY20(\d{2})Q([1-4])$/i);
+  const fyShort=compactPeriod.match(/^FY(\d{2})Q([1-4])$/i);
   const periodAliases=[...(fyFull?[`FY${fyFull[1]}Q${fyFull[2]}`]:[]),
     ...(fyShort?[`FY20${fyShort[1]}Q${fyShort[2]}`]:[])];
   const queries=[...new Set((input.searchQueries??[]).concat([
