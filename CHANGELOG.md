@@ -1,10 +1,10 @@
 # Changelog
 
-Deployment surface: 30 tools covering read-only investment retrieval, M5.6 source/event relation and revision proposals, M5.7 PDF extraction coverage preflight, claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
+Candidate RI-011 deployment surface (not merged or deployed): 31 tools covering read-only investment retrieval, M5.6 source/event relation and revision proposals, M5.7 PDF extraction coverage preflight, claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
 Safe Edit offers ten tools on a separate resource (including original-source archive and two user attachment byte-store/inspect actions); see docs/SAFE_EDIT.md.
 Historical upstream release descriptions below are preserved.
 
-## How updates reach you
+## Unreleased — RI-011 research preview (Draft PR, not deployed)\n\nRead-only `preview_hybrid_claim_reconciliation` exposes bounded Structured Claim + FTS candidate discovery and exact unit-equivalence comparison. No Vault mutation, semantic dedup assertion, external source verification, or protected note update. Requires CI/security audit, review, source validation, and separate staging acceptance before release.\n\n## How updates reach you
 
 Railway template updates are **opt-in**. When a change lands on this repo's root
 branch, Railway detects it and notifies everyone running the template; each
