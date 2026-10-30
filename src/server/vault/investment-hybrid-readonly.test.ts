@@ -33,7 +33,7 @@ describe("RI-011 read-only hybrid adapter",()=>{
   it("flags true numeric discrepancy for manual source review, not automatically corrections",async()=>{
     await add("10_Knowledge/Company Research/AMD Claim.md",record());
     const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
-    expect(hybridClaimPreview({...Q,value:"11400"}).classification).toBe("POSSIBLE_CORRECTION_OR_CONTRADICTION");
+    expect(hybridClaimPreview({...Q,value:"11400"}).classification).toBe("HOLD_CONFLICTING_CANDIDATES");
   });
   it("cannot collapse fiscal Q1 into Q2",async()=>{
     await add("10_Knowledge/Company Research/AMD Claim.md",record());
