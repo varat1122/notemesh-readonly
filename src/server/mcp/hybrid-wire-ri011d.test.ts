@@ -74,7 +74,7 @@ function parseResponse(response: unknown) {
     status: string;
     classification: string;
     indexed: { exactMatches: number };
-    historical: { candidates: Array<{ path: string; snippet: string }>; notExhaustive: boolean };
+    historical: { candidates: Array<{ path: string; title: string; snippet: string }>; notExhaustive: boolean };
     gates: {
       sourceAuthenticated: boolean; canAutoWrite: boolean;
       canEditThesis: boolean; canEditPortfolio: boolean;
@@ -138,6 +138,7 @@ describe("RI-011D hybrid reconciliation over real MCP read-only transport", () =
       expect(out.classification).toBe("HISTORICAL_NOTE_CANDIDATE");
       expect(out.historical.candidates.length).toBeGreaterThan(0);
       expect(out.historical.notExhaustive).toBe(true);
+      expect(out.historical.candidates.every(x => /^%[0-9a-f]{8}%/.test(x.title))).toBe(true);
       expect(out.gates.canAutoWrite).toBe(false);
       expect(out.gates.canEditPortfolio).toBe(false);
     } finally { await client.close(); await server.close(); }
@@ -167,4 +168,23 @@ describe("RI-011D hybrid reconciliation over real MCP read-only transport", () =
       await expect(client.listTools()).rejects.toThrow("Method not found");
     } finally { await client.close(); await server.close(); }
   });
+  it("uses the MCP route to retrieve a precise historical exception despite a broad first query", async () => {
+    for(let i=0;i<6;i++)await add(`07_Sources/ChatGPT/Entries/MSFT broad ${i}.md`,
+      "# MSFT general cloud research archive");
+    await add("07_Sources/ChatGPT/Entries/MSFT distinct exception.md",
+      "# MSFT precise_ri011_wire_exception archive with no original-source check");
+    const prior=digest();
+    const {client,server}=await connect(true);
+    try{
+      const out=parseResponse(await client.callTool({
+        name:"preview_hybrid_claim_reconciliation",
+        arguments:{...baseArgs,searchQueries:["MSFT","MSFT precise_ri011_wire_exception"],maxFtsHits:3},
+      }));
+      expect(out.historical.candidates.some(x=>x.path.includes("MSFT distinct exception"))).toBe(true);
+      expect(out.historical.candidates.every(x=>/^%[0-9a-f]{8}%/.test(x.title))).toBe(true);
+      expect(out.gates.canAutoWrite).toBe(false);
+    }finally{await client.close();await server.close();}
+    expect(digest()).toBe(prior);
+  });
+
 });
