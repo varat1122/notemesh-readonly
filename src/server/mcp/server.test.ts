@@ -59,7 +59,7 @@ const READ_TOOLS = [
   "list_tasks",
   "notes_by_tag",
   "plan_duplicate_source_link",
-  "plan_investment_writeback",
+  "plan_investment_writeback",\n  "preview_hybrid_claim_reconciliation",
   "plan_pdf_extraction_coverage",
   "plan_review_revision",
   "preview_edit",
