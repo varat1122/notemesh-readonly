@@ -74,4 +74,69 @@ describe("RI-011 read-only hybrid adapter",()=>{
     expect(normalizedAmount("11.536","JPY billion")).toBeNull();
     expect(normalizedAmount("11.536","USD billions")?.amount).toBe(normalizedAmount("11536","USD millions")?.amount);
   });
+  it("HOLDs conflicting structured claims when the ninth matching row is omitted by an eight-row default",async()=>{
+    for(let i=0;i<9;i++)await add(`10_Knowledge/Company Research/AMD Unit Set ${i}.md`,
+      record(i===8?"11400":"11536"));
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview(Q);
+    expect(r.classification).toBe("HOLD_CONFLICTING_CANDIDATES");
+    expect(r.rawStructuredClassification).toBe("possible_correction_or_contradiction");
+    expect(r.gates.canAutoWrite).toBe(false);
+  });
+  it("HOLDs on candidate count cap even when a later mixed-unit conflict is hidden",async()=>{
+    for(let i=0;i<13;i++)await add(`10_Knowledge/Company Research/AMD Overflow ${String(i).padStart(2,"0")}.md`,
+      record(i===12?"11.500":"11536",i===12?"USD billions":"USD millions"));
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview(Q);
+    expect(r.indexed.candidateCapReached).toBe(true);
+    expect(r.classification).toBe("HOLD_CANDIDATE_COVERAGE");
+    expect(r.indexed.totalSameDocument).toBe(12);
+    expect(r.gates.semanticDuplicateAdjudicated).toBe(false);
+  });
+  it("uses FY2027 Q1 to FY27Q1 only for historical discovery, never as a structured identity conversion",async()=>{
+    await add("07_Sources/ChatGPT/Entries/AMD Historical FY27Q1.md",
+      "# AMD FY27Q1 historical investor discussion\\nReport not independently verified.\\n".replaceAll("\\\\n","\\n"));
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,period:"FY2027 Q1"});
+    expect(r.classification).toBe("HISTORICAL_NOTE_CANDIDATE");
+    expect(r.historical.periodAliasesUsed).toContain("FY27Q1");
+    expect(r.query.period).toBe("FY2027 Q1");
+    expect(r.gates.claimVerifiedAgainstOriginal).toBe(false);
+  });
+  it("anchors readback excerpt to a fiscal token beyond the old first-75-lines window",async()=>{
+    const content=["# AMD historical note",...Array.from({length:135},()=> "old archive filler unrelated to this fiscal record"),
+      "AMD FY27Q1 special fiscal-period observation no issuer verification"].join("\\n");
+    await add("07_Sources/ChatGPT/Entries/AMD Historical Deep.md",content);
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,period:"FY2027Q1",maxFtsHits:5});
+    const item=r.historical.candidates.find(x=>x.path.includes("AMD Historical Deep"));
+    expect(item).toBeDefined();
+    expect(item?.readbackMatchFound).toBe(true);
+    expect(item?.readExcerpt).toContain("FY27Q1");
+    expect(item?.readbackTruncated).toBe(false);
+  });
+  it("keeps truncated full-text search explicitly incomplete rather than proving missing evidence",async()=>{
+    await add("07_Sources/ChatGPT/Entries/AMD Set A.md","# AMD 2026Q2_ended_2026-06-27\\nFirst historical mention");
+    await add("07_Sources/ChatGPT/Entries/AMD Set B.md","# AMD 2026Q2_ended_2026-06-27\\nSecond historical mention");
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,maxFtsHits:1});
+    expect(r.historical.searchTruncated).toBe(true);
+    expect(r.historical.notExhaustive).toBe(true);
+    expect(r.historical.candidates).toHaveLength(1);
+    expect(r.gates.canAutoWrite).toBe(false);
+  });
+  it("retains note-search snippet when candidate readback is capped before a late body match",async()=>{
+    const filler="filler text without fiscal token ".repeat(5000);
+    await add("07_Sources/ChatGPT/Entries/AMD Extremely Long.md","# AMD research\\n"+filler+
+      "\\nFY27Q1 archival claim only no primary proof\\n");
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,period:"FY2027Q1"});
+    const item=r.historical.candidates.find(x=>x.path.includes("AMD Extremely Long"));
+    expect(item).toBeDefined();
+    expect(item?.readbackTruncated).toBe(true);
+    expect(item?.readbackMatchFound).toBe(false);
+    expect(item?.readExcerpt.length).toBeGreaterThan(0);
+    expect(r.gates.canEditThesis).toBe(false);
+  });
+
 });
