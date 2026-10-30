@@ -35,7 +35,7 @@ describe("openid configuration", () => {
 describe("protected resource metadata", () => {
   it("advertises only read scope for the research MCP endpoint (including its OAuth challenge)", () => {
     const metadata = protectedResourceMetadata("research");
-    expect(metadata.resource).toMatch(/\\/api\\/mcp$/);
+    expect(metadata.resource.endsWith("/api/mcp")).toBe(true);
     expect(metadata.scopes_supported).toEqual(["vault:read"]);
     expect(metadata.scopes_supported).not.toContain("inbox:submit");
     const challenge = oauthChallenge("research");
