@@ -118,9 +118,11 @@ export function hybridClaimPreview(input:HybridInput){
           readbackTruncated=chunk.hasMore||!!chunk.truncatedForSize;
           const lower=chunk.content.toLowerCase();
           const scoped=[compactPeriod,...periodAliases].map(x=>x.toLowerCase());
-          const preferred=hit.matches.filter(t=>scoped.includes(t.toLowerCase()));
-          const found=(preferred.length?preferred:hit.matches.slice().reverse())
-            .map(term=>({term,index:lower.indexOf(term.toLowerCase())}))
+          // A search scoped to a fiscal token must find *that token* in the
+          // readback, not just the issuer in a title 100 KB earlier.
+          const demanded=scoped.find(term=>term.length>0&&query.toLowerCase().includes(term));
+          const terms=demanded?[demanded]:hit.matches.slice().reverse();
+          const found=terms.map(term=>({term,index:lower.indexOf(term.toLowerCase())}))
             .find(x=>x.index>=0);
           if(found){const start=Math.max(0,found.index-240);
             readExcerpt=chunk.content.slice(start,start+800);readbackMatchFound=true;}
