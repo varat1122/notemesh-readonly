@@ -117,7 +117,10 @@ export function hybridClaimPreview(input:HybridInput){
           const chunk=readNoteRange(hit.path,{limit:2000});
           readbackTruncated=chunk.hasMore||!!chunk.truncatedForSize;
           const lower=chunk.content.toLowerCase();
-          const found=hit.matches.slice().reverse().map(term=>({term,index:lower.indexOf(term.toLowerCase())}))
+          const scoped=[compactPeriod,...periodAliases].map(x=>x.toLowerCase());
+          const preferred=hit.matches.filter(t=>scoped.includes(t.toLowerCase()));
+          const found=(preferred.length?preferred:hit.matches.slice().reverse())
+            .map(term=>({term,index:lower.indexOf(term.toLowerCase())}))
             .find(x=>x.index>=0);
           if(found){const start=Math.max(0,found.index-240);
             readExcerpt=chunk.content.slice(start,start+800);readbackMatchFound=true;}
