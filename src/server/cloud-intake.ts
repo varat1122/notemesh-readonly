@@ -26,7 +26,10 @@ export function processCloudIntake() {
   if (!cloudIntakeEnabled() || busy || getSetting("vault_configured") !== "true" || syncKind() !== "obsidian") return;
   const sync = syncBackend();
   const status = sync.status();
-  if (status.state !== "running") return;
+  // Do not dequeue or acknowledge while a guarded mutation is admitted.
+  // This consumer is synchronous: an active import finishes before another
+  // request can admit an edit. Git intake remains unsupported/queued above.
+  if (status.state !== "running" || sync.isEditPaused?.()) return;
   if (sync.getLogs().some(l => l.line === "[sync-policy] Verified bidirectional sync." && (!status.startedAt || l.ts >= status.startedAt))) verifiedStart = status.startedAt;
   if (verifiedStart !== status.startedAt) return;
   busy = true;
