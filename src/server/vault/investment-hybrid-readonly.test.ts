@@ -95,7 +95,7 @@ describe("RI-011 read-only hybrid adapter",()=>{
   });
   it("uses FY2027 Q1 to FY27Q1 only for historical discovery, never as a structured identity conversion",async()=>{
     await add("07_Sources/ChatGPT/Entries/AMD Historical FY27Q1.md",
-      "# AMD FY27Q1 historical investor discussion\\nReport not independently verified.\\n".replaceAll("\\\\n","\\n"));
+      "# AMD FY27Q1 historical investor discussion\nReport not independently verified.\n");
     const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
     const r=hybridClaimPreview({...Q,period:"FY2027 Q1"});
     expect(r.classification).toBe("HISTORICAL_NOTE_CANDIDATE");
@@ -105,7 +105,7 @@ describe("RI-011 read-only hybrid adapter",()=>{
   });
   it("anchors readback excerpt to a fiscal token beyond the old first-75-lines window",async()=>{
     const content=["# AMD historical note",...Array.from({length:135},()=> "old archive filler unrelated to this fiscal record"),
-      "AMD FY27Q1 special fiscal-period observation no issuer verification"].join("\\n");
+      "AMD FY27Q1 special fiscal-period observation no issuer verification"].join("\n");
     await add("07_Sources/ChatGPT/Entries/AMD Historical Deep.md",content);
     const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
     const r=hybridClaimPreview({...Q,period:"FY2027Q1",maxFtsHits:5});
@@ -116,8 +116,8 @@ describe("RI-011 read-only hybrid adapter",()=>{
     expect(item?.readbackTruncated).toBe(false);
   });
   it("keeps truncated full-text search explicitly incomplete rather than proving missing evidence",async()=>{
-    await add("07_Sources/ChatGPT/Entries/AMD Set A.md","# AMD 2026Q2_ended_2026-06-27\\nFirst historical mention");
-    await add("07_Sources/ChatGPT/Entries/AMD Set B.md","# AMD 2026Q2_ended_2026-06-27\\nSecond historical mention");
+    await add("07_Sources/ChatGPT/Entries/AMD Set A.md","# AMD 2026Q2_ended_2026-06-27\nFirst historical mention");
+    await add("07_Sources/ChatGPT/Entries/AMD Set B.md","# AMD 2026Q2_ended_2026-06-27\nSecond historical mention");
     const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
     const r=hybridClaimPreview({...Q,maxFtsHits:1});
     expect(r.historical.searchTruncated).toBe(true);
@@ -127,8 +127,8 @@ describe("RI-011 read-only hybrid adapter",()=>{
   });
   it("retains note-search snippet when candidate readback is capped before a late body match",async()=>{
     const filler="filler text without fiscal token ".repeat(5000);
-    await add("07_Sources/ChatGPT/Entries/AMD Extremely Long.md","# AMD research\\n"+filler+
-      "\\nFY27Q1 archival claim only no primary proof\\n");
+    await add("07_Sources/ChatGPT/Entries/AMD Extremely Long.md","# AMD research\n"+filler+
+      "\nFY27Q1 archival claim only no primary proof\n");
     const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
     const r=hybridClaimPreview({...Q,period:"FY2027Q1"});
     const item=r.historical.candidates.find(x=>x.path.includes("AMD Extremely Long"));
