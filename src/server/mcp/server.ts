@@ -405,7 +405,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     safe((args:HybridInput)=>{
       const preview=hybridClaimPreview(args);
       return json(withBoundary({...preview,historical:{...preview.historical,
-        candidates:fenceEach(preview.historical.candidates,"snippet","readExcerpt")}}));
+        candidates:fenceEach(preview.historical.candidates,"title","snippet","readExcerpt")}}));
     }),
   );
   server.registerTool(

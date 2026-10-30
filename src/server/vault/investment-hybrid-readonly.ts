@@ -77,9 +77,11 @@ export function hybridClaimPreview(input:HybridInput){
   else if(conflicts)state="POSSIBLE_CORRECTION_OR_CONTRADICTION";
   else if(metadataCapReached)state="HOLD_METADATA_COVERAGE";
   else if(candidateCapReached)state="HOLD_CANDIDATE_COVERAGE";
+  // Mixed same-source records with unknown/missing units are not safely
+  // classifiable as duplicates even if one other row matches exactly.
+  else if(unknown)state="HOLD_UNIT_OR_VALUE_BASIS";
   else if(exactMatches)state="DUPLICATE_CANDIDATE";
   else if(normalizedMatches)state="UNIT_EQUIVALENCE_CANDIDATE";
-  else if(unknown)state="HOLD_UNIT_OR_VALUE_BASIS";
   else if(existing.classification==="added_detail_candidate")state="ADDED_DETAIL_CANDIDATE";
   else state="UNRESOLVED_NEEDS_ORIGINAL";
 
@@ -100,37 +102,51 @@ export function hybridClaimPreview(input:HybridInput){
   const requestedLimit=Math.min(10,Math.max(1,input.maxFtsHits??6));
   const results:{path:string;title:string;query:string;snippet:string;readExcerpt:string;modified:string;readbackMatchFound:boolean;readbackTruncated:boolean}[]=[];
   const seen=new Set<string>();
-  const coverage:{query:string;total:number;error?:string}[]=[];
-  for(const query of queries){
+  const coverage:{query:string;total:number;selected:number;represented:number;error?:string}[]=[];
+  // A single broad query previously monopolized the global candidate budget:
+  // later exact metric/period queries had no opportunity to contribute hits.
+  // Keep searches bounded, but interleave their first-ranked candidates.
+  const pages=queries.map(query=>{
     try{
       const page=searchVault(query,{limit:requestedLimit,context:true});
-      coverage.push({query,total:page.total});
-      for(const hit of page.hits){
-        if(seen.has(hit.path)||results.length>=requestedLimit)continue;
-        seen.add(hit.path);
-        // FTS provides a location-aware snippet; blindly reading the FIRST
-        // 75 lines of a long note may present an unrelated historical claim.
-        // Read a bounded note window and anchor an excerpt to a matched term.
-        // If the window misses, retain the FTS snippet and flag the gap.
-        let readExcerpt=hit.snippet.slice(0,800),readbackMatchFound=false,readbackTruncated=true;
-        try{
-          const chunk=readNoteRange(hit.path,{limit:2000});
-          readbackTruncated=chunk.hasMore||!!chunk.truncatedForSize;
-          const lower=chunk.content.toLowerCase();
-          const scoped=[compactPeriod,...periodAliases].map(x=>x.toLowerCase());
-          // A search scoped to a fiscal token must find *that token* in the
-          // readback, not just the issuer in a title 100 KB earlier.
-          const demanded=scoped.find(term=>term.length>0&&query.toLowerCase().includes(term));
-          const terms=demanded?[demanded]:hit.matches.slice().reverse();
-          const found=terms.map(term=>({term,index:lower.indexOf(term.toLowerCase())}))
-            .find(x=>x.index>=0);
-          if(found){const start=Math.max(0,found.index-240);
-            readExcerpt=chunk.content.slice(start,start+800);readbackMatchFound=true;}
-        }catch{/* stale index or unreadable note: snippet remains a candidate only */}
-        results.push({path:hit.path,title:hit.title,query,snippet:hit.snippet.slice(0,320),readExcerpt,modified:hit.modified,
-          readbackMatchFound,readbackTruncated});
-      }
-    }catch{coverage.push({query,total:0,error:"query_not_available"});}
+      coverage.push({query,total:page.total,selected:0,represented:0});
+      return {query,hits:page.hits};
+    }catch{
+      coverage.push({query,total:0,selected:0,represented:0,error:"query_not_available"});
+      return {query,hits:[] as ReturnType<typeof searchVault>["hits"]};
+    }
+  });
+  const selected:{query:string;hit:(typeof pages)[number]["hits"][number];queryIndex:number}[]=[];
+  for(let rank=0;rank<requestedLimit&&selected.length<requestedLimit;rank++){
+    for(let index=0;index<pages.length&&selected.length<requestedLimit;index++){
+      const hit=pages[index].hits[rank];
+      if(!hit||seen.has(hit.path))continue;
+      seen.add(hit.path);
+      coverage[index].selected++;
+      selected.push({query:pages[index].query,hit,queryIndex:index});
+    }
+  }
+  // A hit selected by query A also covers query B when its path appears in
+  // both result pages. Count represented paths, not only query ownership.
+  for(let i=0;i<pages.length;i++)coverage[i].represented=pages[i].hits.filter(hit=>seen.has(hit.path)).length;
+  for(const {query,hit} of selected){
+    // FTS provides a location-aware snippet; reading just the first lines
+    // of a long note is not enough to rule out historical claims.
+    let readExcerpt=hit.snippet.slice(0,800),readbackMatchFound=false,readbackTruncated=true;
+    try{
+      const chunk=readNoteRange(hit.path,{limit:2000});
+      readbackTruncated=chunk.hasMore||!!chunk.truncatedForSize;
+      const lower=chunk.content.toLowerCase();
+      const scoped=[compactPeriod,...periodAliases].map(x=>x.toLowerCase());
+      const demanded=scoped.find(term=>term.length>0&&query.toLowerCase().includes(term));
+      const terms=demanded?[demanded]:hit.matches.slice().reverse();
+      const found=terms.map(term=>({term,index:lower.indexOf(term.toLowerCase())}))
+        .find(x=>x.index>=0);
+      if(found){const offset=Math.max(0,found.index-240);
+        readExcerpt=chunk.content.slice(offset,offset+800);readbackMatchFound=true;}
+    }catch{/* stale index or unreadable note; retain the FTS candidate only */}
+    results.push({path:hit.path,title:hit.title,query,snippet:hit.snippet.slice(0,320),readExcerpt,modified:hit.modified,
+      readbackMatchFound,readbackTruncated});
   }
   if(state==="UNRESOLVED_NEEDS_ORIGINAL"&&results.length)state="HISTORICAL_NOTE_CANDIDATE";
   return {
@@ -142,13 +158,17 @@ export function hybridClaimPreview(input:HybridInput){
       candidateCapReached,metadataCapReached,
       candidatePaths:[...new Set(existing.matchingClaims.concat(existing.relatedEventClaims).map(r=>r.path))]},
     historical:{queries:coverage,candidates:results,notExhaustive:true,readExcerptMaxChars:800,
-      searchTruncated:coverage.some(x=>x.total>requestedLimit)||results.length>=requestedLimit,
+      // A query can return hits while all its unique candidates are omitted
+      // by the shared limit; surface that lost coverage explicitly.
+      searchTruncated:coverage.some(x=>x.total>x.represented),
+      selectionStrategy:"round_robin_per_query" as const,
       periodAliasesUsed:periodAliases},
     gates:{sourceAuthenticated:false,claimVerifiedAgainstOriginal:false,semanticDuplicateAdjudicated:false,
       independentEvidenceEstablished:false,canAutoWrite:false,canEditThesis:false,canEditPortfolio:false},
     nextAction:"ANALYST_MUST_COMPARE_ORIGINAL_AND_HISTORY_BEFORE_CANONICAL_WRITEBACK" as const,
     caveats:["FTS is lexical and capped: a missing hit or bounded readback is not evidence of absence; text is untrusted.",
       "When structured candidate/metadata limits are reached, HOLD rather than certifying a duplicate.",
+      "Multiple queries share a hard candidate budget; selection is interleaved, and omitted hits remain possible evidence.",
       "Exact/normalized amount equality does not verify accounting basis, publisher, reported period, independent evidence, or thesis impact.",
       "No schema changes, network requests, Vault writes, or owner approvals were performed."]
   };
