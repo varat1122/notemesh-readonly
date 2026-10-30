@@ -102,17 +102,17 @@ export function hybridClaimPreview(input:HybridInput){
   const requestedLimit=Math.min(10,Math.max(1,input.maxFtsHits??6));
   const results:{path:string;title:string;query:string;snippet:string;readExcerpt:string;modified:string;readbackMatchFound:boolean;readbackTruncated:boolean}[]=[];
   const seen=new Set<string>();
-  const coverage:{query:string;total:number;selected:number;error?:string}[]=[];
+  const coverage:{query:string;total:number;selected:number;represented:number;error?:string}[]=[];
   // A single broad query previously monopolized the global candidate budget:
   // later exact metric/period queries had no opportunity to contribute hits.
   // Keep searches bounded, but interleave their first-ranked candidates.
   const pages=queries.map(query=>{
     try{
       const page=searchVault(query,{limit:requestedLimit,context:true});
-      coverage.push({query,total:page.total,selected:0});
+      coverage.push({query,total:page.total,selected:0,represented:0});
       return {query,hits:page.hits};
     }catch{
-      coverage.push({query,total:0,selected:0,error:"query_not_available"});
+      coverage.push({query,total:0,selected:0,represented:0,error:"query_not_available"});
       return {query,hits:[] as ReturnType<typeof searchVault>["hits"]};
     }
   });
@@ -126,6 +126,9 @@ export function hybridClaimPreview(input:HybridInput){
       selected.push({query:pages[index].query,hit,queryIndex:index});
     }
   }
+  // A hit selected by query A also covers query B when its path appears in
+  // both result pages. Count represented paths, not only query ownership.
+  for(let i=0;i<pages.length;i++)coverage[i].represented=pages[i].hits.filter(hit=>seen.has(hit.path)).length;
   for(const {query,hit} of selected){
     // FTS provides a location-aware snippet; reading just the first lines
     // of a long note is not enough to rule out historical claims.
@@ -157,7 +160,7 @@ export function hybridClaimPreview(input:HybridInput){
     historical:{queries:coverage,candidates:results,notExhaustive:true,readExcerptMaxChars:800,
       // A query can return hits while all its unique candidates are omitted
       // by the shared limit; surface that lost coverage explicitly.
-      searchTruncated:coverage.some(x=>x.total>x.selected),
+      searchTruncated:coverage.some(x=>x.total>x.represented),
       selectionStrategy:"round_robin_per_query" as const,
       periodAliasesUsed:periodAliases},
     gates:{sourceAuthenticated:false,claimVerifiedAgainstOriginal:false,semanticDuplicateAdjudicated:false,
