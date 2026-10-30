@@ -19,6 +19,10 @@ overrides:
   seroval: ^1.6.9 # unsafe JSON deserialization and unchecked TypedArray sizes
   source-map-js: ^1.2.2 # indexed source-map section offset DoS
   proxy-addr: ^2.0.8 # IPv4-mapped IPv6 trust-subnet spoofing
+  follow-redirects: ^1.16.1 # GHSA-q3jh-wrc6-jgq8 and GHSA-8r9p-f939-6h3c
+  body-parser: ^2.4.0 # GHSA-27r3-jxmh-p828
+  vite: ^6.4.4 # GHSA-587h-7wmj-h5pm; preserve the framework Vite major
+  zod: ^4.6.6 # GHSA-mrhx-c7xc-m3w5; compatibility verified by regression suite
 
 # CI fails on a high or critical advisory in a production dependency. An
 # advisory that has been reviewed and found not to apply goes here, with

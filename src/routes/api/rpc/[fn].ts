@@ -190,9 +190,11 @@ export async function POST(event: APIEvent) {
   // server buffer and parse anything at all.
   //
   // Resolved for every procedure, not only the protected ones, because the
-  // answer also decides whether this request is throttled. A request with no
-  // cookie never reaches the database for it.
-  const { auth } = await import("~/server/auth");
+  // answer also decides whether this request is throttled.
+  const { auth, runAuthMigrations } = await import("~/server/auth");
+  // Better Auth 1.7.7 checks its schema before resolving a session. Initialize
+  // fresh databases first, and fail closed on an unresolved legacy schema.
+  await runAuthMigrations();
   const session = await auth.api.getSession({ headers: event.request.headers });
 
   if (!session) {

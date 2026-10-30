@@ -50,6 +50,18 @@ async function move(from: string, to: string) {
 }
 
 describe("rewriteLinksForMove", () => {
+  it("rewrites escaped-pipe table aliases without corrupting link targets", async () => {
+    put("Notes/Old.md", "x\n");
+    put("Src.md", String.raw`| [[Notes/Old\|Table Alias]] | note |` + "\n");
+    await indexed("Notes/Old.md", "Src.md");
+    const { unresolvedLinks } = await import("./queries");
+    expect(unresolvedLinks()).toEqual([]);
+    const result = await move("Notes/Old.md", "Notes/New.md");
+    expect(result).toEqual({ notes: ["Src.md"], links: 1 });
+    expect(get("Src.md")).toBe(String.raw`| [[Notes/New\|Table Alias]] | note |` + "\n");
+    expect(unresolvedLinks()).toEqual([]);
+  });
+
   it("rewrites every form of link to a renamed note, keeping suffixes and form", async () => {
     put("Notes/Old.md", "# Old\n");
     put(

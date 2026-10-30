@@ -177,6 +177,16 @@ export function joinFrontmatter(body: string, data: Record<string, unknown>): st
   return `---\n${stringifyYaml(normalized, { lineWidth: 0 })}---\n${body}`;
 }
 
+/**
+ * Obsidian requires \| for a wikilink alias in a Markdown table.
+ * The pipe is still the alias separator, not part of the link target.
+ * Normalize only the masked scan copy: two characters become two characters,
+ * preserving indices for callers that splice edits into the original text.
+ */
+export function maskEscapedAliasPipes(maskedLine: string): string {
+  return maskedLine.replace(/\\\|/g, "| ");
+}
+
 // The extraction patterns. Unchanged on purpose — see the header comment.
 const ATX_HEADING = /^#{1,6}\s+(.+)$/;
 const WIKILINK = /\[\[([^\]|#^]+)(?:[#^][^\]|]*)?(?:\|[^\]]*)?\]\]/g;
@@ -355,7 +365,7 @@ export function extractStructure(body: string): NoteStructure {
     // Links and tags never come from inside inline code; a note about
     // Obsidian syntax must not invent them.
     const masked = maskCodeSpans(line);
-    for (const m of masked.matchAll(WIKILINK)) {
+    for (const m of maskEscapedAliasPipes(masked).matchAll(WIKILINK)) {
       const target = m[1].trim();
       if (target && links.length < MAX_PER_KIND) links.push(target);
     }

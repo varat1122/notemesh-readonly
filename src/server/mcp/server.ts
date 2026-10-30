@@ -2,9 +2,19 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
+import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
+import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
+import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
+import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
+import {planDuplicateSourceLinkM56} from "../vault/event-review-relation-m56";
+import {discoverNearDuplicateSourcesM56,planReviewRevisionM56} from "../vault/review-discovery-m56";
+import {planPdfCoverageM57} from "../vault/pdf-coverage-m57";
+import { buildInvestmentDecisionPacket } from "../vault/investment-decision-packet";
+import { assessThesisProposal } from "../vault/thesis-proposal-gate";
 import { oauthScopeDiagnostics } from "../oauth-diagnostics";
 import { getSetting } from "../db";
 import { cloudIntakeStatus } from "../cloud-intake";
+import { sourceArchiveHealth } from "../research-source-archive";
 import { withBoundary, fenceEach, fenceDeep } from "./boundary";
 import { signAttachmentUrl } from "../vault/attachment-url";
 import { syncBackend } from "../sync";
@@ -287,6 +297,243 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
   // read tool below registered for any credential at all.
   if (!access.read) return server;
   registerPriceTools(server);
+  server.registerTool(
+    "assess_thesis_change_proposal",
+    {
+      title: "Assess an analyst-authored investment thesis change proposal (read-only)",
+      annotations: READ,
+      description: "Validate whether a Company, Macro, Industry or Asset thesis proposal has traceable Claim IDs, analyst-attested original-source citations, counter-evidence, causal transmission and invalidation. Returns only blocked or structurally ready for owner review; NEVER verifies sources on its own, grants owner approval, updates Thesis or recommends trades.",
+      inputSchema: {
+        domain:z.enum(["company","industry","macro","asset"]).describe("Investment domain"),
+        entity:z.string().min(1).max(140).describe("Canonical ticker, geography, industry or asset identifier"),
+        metric:z.string().min(1).max(140).describe("Primary claim metric"),
+        period:z.string().min(1).max(120).describe("Exact fiscal/reporting period"),
+        originalSource:z.string().url().max(1000).describe("Original source URL; caller must have verified separately"),
+        statement:z.string().min(8).max(2500).describe("Source-derived claim text, not an AI guess"),
+        value:z.string().max(150).optional().describe("Literal original number, if applicable"),
+        unit:z.string().max(80).optional().describe("Literal numeric unit, if applicable"),
+        eventDate:z.string().nullable().optional().describe("Actual source event date YYYY-MM-DD, null if unknown"),
+        publishedAt:z.string().nullable().optional().describe("Original publication date YYYY-MM-DD, null if unknown"),
+        proposedDecision:z.enum(["maintain","strengthen","weaken","revise","undetermined"]).describe("Analyst PROPOSED conclusion, not owner-endorsed"),
+        historicalContextPath:z.string().min(1).max(600).describe("Existing Vault path analyst says they read in full"),
+        historicalContextReadByAnalyst:z.boolean().describe("Analyst assertion; server does not certify reading"),
+        existingThesisStatus:z.enum(["owner_approved","draft_or_unverified","not_applicable","unknown"]).describe("Historical thesis authorization, not inferred from excerpts"),
+        evidence:z.array(z.object({
+          claimId:z.string().min(1).max(160),entity:z.string().min(1).max(140),
+          metric:z.string().min(1).max(140),period:z.string().min(1).max(120),
+          sourceUrl:z.string().url().max(1000),sourceSection:z.string().min(1).max(350),
+          finding:z.string().min(1).max(1500),
+          sourceType:z.enum(["primary","regulatory","transcript","secondary","analyst","archived_ai"]),
+          checkedAgainstOriginalByAnalyst:z.boolean(),checkedAt:z.string().nullable().optional(),
+          value:z.string().nullable().optional(),unit:z.string().nullable().optional()
+        })).max(12).describe("Source-specific cited Claim ID rows and analyst verification declarations"),
+        counterEvidence:z.array(z.object({
+          finding:z.string().min(1).max(1800),sourceUrl:z.string().url().max(1000),
+          sourceSection:z.string().min(1).max(350),reviewedByAnalyst:z.boolean()
+        })).max(8).describe("Actual alternative or disconfirming evidence, with original source citations"),
+        transmission:z.array(z.object({
+          stage:z.string().min(1).max(80),direction:z.enum(["positive","negative","mixed","unchanged","unknown"]),
+          explanation:z.string().min(1).max(1600),
+          supportingClaimIds:z.array(z.string().min(1).max(160)).max(12)
+        })).max(12).describe("Evidence-backed causal stage impact; no fabricated effects"),
+        thesisDelta:z.string().max(2500).describe("What the new evidence changes versus historical thesis"),
+        alternatives:z.string().max(2500).describe("Counter-explanations and uncertainty"),
+        invalidation:z.string().max(2500).describe("Falsifiable signal that would invalidate proposed conclusion"),
+        confidence:z.enum(["low","medium","high","unassessed"]).describe("Analyst confidence, never automatic probability"),
+        confidenceRationale:z.string().max(1200).describe("Grounded confidence justification"),
+        catalyst:z.string().nullable().optional().describe("Dated future catalyst when supported"),
+        marketExpectations:z.object({
+          status:z.enum(["not_assessed","assessed"]),
+          asOf:z.string().nullable().optional(),sourceUrl:z.string().nullable().optional(),
+          comparatorDescription:z.string().nullable().optional()
+        }).describe("Dated market expectation source, or honest not_assessed"),
+        portfolio:z.object({
+          status:z.enum(["not_assessed","assessed"]),asOf:z.string().nullable().optional(),
+          authorizedHoldingsReference:z.string().nullable().optional()
+        }).describe("Dated authorized holdings reference, or honest not_assessed")
+      }
+    },
+    safe((args)=>json(withBoundary(assessThesisProposal(args)))),
+  );
+
+  server.registerTool(
+    "investment_context_pack",
+    {
+      title: "Build investment research context pack",
+      annotations: READ,
+      description: "Read-only bounded investment retrieval across Obsidian. Prioritizes Current Thesis, Evidence Register, Company Evolution, issuer evidence, industry TAM and counter-evidence over repeated ChatGPT archives. Returns short path/line excerpts, missing evidence and honest coverage limits. Lexical only, not a semantic/full-vault guarantee. Never edits the Vault.",
+      inputSchema: {
+        question: z.string().min(3).max(1200).describe("Investment question to retrieve bounded, dated historical evidence for"),
+        issuers: z.array(z.string().min(1).max(12)).max(6).optional().describe("Up to six company tickers or issuer identifiers; omit for industry or macro questions"),
+        industry: z.string().max(140).optional().describe("Industry or thematic context, such as optical networking or banking"),
+        focus: z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Prioritize sources for earnings, broker research, TAM, macro, thesis, or general review"),
+        maxNotes: z.number().int().min(5).max(16).optional().describe("Maximum retrieved notes in this context pack, from 5 to 16"),
+        maxChars: z.number().int().min(4500).max(18000).optional().describe("Maximum excerpt characters returned, from 4500 to 18000"),
+      },
+    },
+    safe(({question,issuers,industry,focus,maxNotes,maxChars}: {
+      question:string;issuers?:string[];industry?:string;focus?:Focus;maxNotes?:number;maxChars?:number
+    }) => {
+      const pack = buildInvestmentContextPack({question,issuers,industry,focus,maxNotes,maxChars});
+      return json(withBoundary({...pack,items:fenceEach(pack.items,"excerpt")}));
+    }),
+  );
+  server.registerTool(
+    "plan_investment_writeback",
+    {
+      title: "Plan multilingual investment intake and evidence-safe Vault writeback",
+      annotations: READ,
+      description: "PREFERRED for newly supplied Micro/Macro/PDF/Stock investment news when a canonical Company/Industry/Macro Research Review must be saved. Read-only M5.2/M5.3 plan resolves existing Company/Industry Hubs, broker vintage and duplicate candidates; sourceChat + completedAnalysis emit exact add-only Safe Edit Source and canonical Review recipes, with SHA readback and search-index verification on retries. Use separately authorized Investment OS — Safe Edit Chat preview/apply to write; NEVER substitute the legacy submit_investment_notes Inbox importer for canonical research. This planner NEVER writes or automatically changes Thesis/Evidence Register, Portfolio or Company Evolution Timeline.",
+      inputSchema: {
+        domain:z.enum(["company","industry","macro","asset"]).describe("Claim/knowledge domain; not an inferred company ticker"),
+        entities:z.array(z.string().min(1).max(120)).min(1).max(6).describe("Explicit issuer ticker(s), macro geography, or industry topics. Do not include inferred suppliers as confirmed issuers."),
+        topic:z.string().min(1).max(250).describe("Short source topic; may be in Thai, English, or any language"),
+        inputFormat:z.enum(["text","screenshot","pdf","mixed"]).describe("User material actually received; screenshot/PDF binary is NOT automatically preserved"),
+        sourceKind:z.enum(["broker_research","issuer_release","regulatory_filing","news_media","user_commentary","archived_chat","social_repost","industry_research","official_macro","unknown"]).describe("Attributed genre, not independent primary verification; social repost is not original broker/issuer research"),
+        extractedText:z.string().min(1).max(12000).describe("Faithful model-extracted/user-supplied text; preserve original language, mark illegible or omitted parts rather than invent"),
+        sourceLanguage:z.string().max(35).nullable().optional().describe("Language declared by the caller, not automatically detected or translated"),
+        sourceUrl:z.string().max(1000).nullable().optional().describe("Actual cited source page URL if supplied; never fabricate an original broker PDF"),
+        publisher:z.string().max(160).nullable().optional().describe("Attributed source/publisher as reported, not proven"),
+        eventDate:z.string().nullable().optional().describe("Explicit event date YYYY-MM-DD or null; not chat import date"),
+        publicationDate:z.string().nullable().optional().describe("Original source publication date YYYY-MM-DD or null"),
+        rawAttachmentPath:z.string().max(600).nullable().optional().describe("Existing Vault file path if known; unverified until attachment read/archive receipt"),
+        rawAttachmentSha256:z.string().regex(/^[a-f0-9]{64}$/).nullable().optional().describe("Full-byte SHA-256 from store_user_attachment receipt; only verified by re-reading the matching Vault attachment"),
+        rawAttachmentContentType:z.enum(["image/jpeg","image/png","image/webp","application/pdf"]).nullable().optional().describe("Content type paired with original user attachment SHA; must match stored content-addressed file"),
+        claim:z.object({
+          metric:z.string().min(1).max(140),
+          period:z.string().min(1).max(120),
+          statement:z.string().min(8).max(2500),
+          value:z.string().max(150).optional(),
+          unit:z.string().max(80).optional(),
+        }).optional().describe("OPTIONAL exact dated metric; incomplete or absent values never establish a numeric duplicate"),
+        contentTypes:z.array(z.enum(["reported_fact","earnings","guidance","industry_data","macro_data","policy","broker_rating","broker_price_target","broker_estimate","analyst_opinion","market_commentary","portfolio_snapshot","other"]))
+          .max(12).optional().describe("M5.2 multi-label content classification declared from actual read text; not independently verified"),
+        entityRoles:z.array(z.object({
+          entity:z.string().min(1).max(120),
+          role:z.enum(["primary_subject","covered_company","supplier","customer","competitor","mentioned"])
+        })).max(12).optional().describe("M5.2 explicit roles for entities listed above; do not promote a casual mention to a confirmed supplier or customer"),
+        themes:z.array(z.string().min(1).max(120)).max(12).optional().describe("M5.2 explicit industry/theme subjects, e.g. Memory; links only to already indexed existing hub paths"),
+        brokerUpdate:z.object({
+          bank:z.string().min(1).max(120),
+          reportDate:z.string().max(10).optional(),
+          priorBank:z.string().max(120).optional(),
+          priorReportDate:z.string().max(10).optional(),
+          rating:z.string().max(80).optional(),
+          priorRating:z.string().max(80).optional(),
+          targetPrice:z.string().max(80).optional(),
+          priorTargetPrice:z.string().max(80).optional(),
+          currency:z.string().max(20).optional(),
+          priorCurrency:z.string().max(20).optional(),
+          targetHorizon:z.string().max(80).optional(),
+          priorTargetHorizon:z.string().max(80).optional(),
+          estimateChanges:z.array(z.object({
+            metric:z.string().min(1).max(120),period:z.string().min(1).max(120),
+            oldValue:z.string().max(80),newValue:z.string().max(80),unit:z.string().max(60)
+          })).max(12).optional()
+        }).optional().describe("M5.2 caller-declared broker old/new versions; same bank, dated vintages, matching old/new currencies and comparable PT horizons required before candidate PT direction"),
+        sourceChat:z.string().min(1).max(120).optional().describe("M5.3 original Micro, Macro or PDF chat identifier. Required with completedAnalysis; source provenance, not necessarily publication date"),
+        existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional().describe("M5.6 optional existing Source receipt ID; accepted only when exact original text, channel, format, URL and chronology match the indexed and readback-verified Source"),
+        completedAnalysis:z.string().min(1).max(30000).optional().describe("M5.3 final analyst-reviewed Markdown separated from the exact extractedText. When set with sourceChat, produces source + canonical review Safe Edit recipes without writing anything"),
+        captureOnly:z.boolean().optional().describe("M5.3 Feed Only: with sourceChat, prepare a source-only Safe Edit recipe. The Research Review remains pending. Must not be combined with completedAnalysis"),
+        focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Historical context relevance; does not verify issuer claims")
+      }
+    },
+    safe((args:WritebackInput)=>json(withBoundary(planInvestmentWriteback(args)))),
+  );
+
+  server.registerTool(
+    "plan_duplicate_source_link",
+    {
+      title:"Preview M5.6 source-event relation proposal (read-only)",
+      annotations:READ,
+      description:"M5.6 read-only guarded proposal: compare two existing indexed Source Receipts and an existing non-protected Canonical Review, require same event/publication dates and publisher family plus caller-supplied comparison rationale. Returns only an append-section Safe Edit recipe for human diff review. Never declares semantic duplication independently, never writes or changes Thesis/Evidence/Timeline/Portfolio.",
+      inputSchema:{
+        reviewPath:z.string().min(1).max(300).describe("Existing non-protected Canonical Research Review path; original Source must be linked already"),
+        additionalSourcePath:z.string().min(1).max(300).describe("Existing second attributed Source Intake receipt that may cover the same dated event"),
+        eventAnchor:z.string().regex(/^[a-z0-9][a-z0-9-]{7,119}$/).describe("Caller-declared semantic event slug, such as sk-hynix-solidigm-ipo-cancellation; not independent event verification"),
+        comparisonBasis:z.string().min(40).max(1000).describe("Evidence-based human-readable passage/claim comparison supporting a candidate same-event relation, without inflating independent evidence"),
+        linkedOnDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Append receipt date YYYY-MM-DD; never substitute source event date"),
+      }
+    },
+    safe((args)=>json(withBoundary(planDuplicateSourceLinkM56(args)))),
+  );
+
+  server.registerTool("discover_near_duplicate_sources",{
+    title:"M5.6.3 near-duplicate Source candidate discovery (read-only)",annotations:READ,
+    description:"Bounded indexed Source Receipt scan for exact-text or same dated event and publisher-family candidates. Candidate signals NEVER verify semantic duplication, independent evidence or a review edit. No writes.",
+    inputSchema:{sourcePath:z.string().min(1).max(300).describe("Existing indexed Source Intake path, not a Review or protected note"),
+      eventAnchor:z.string().regex(/^[a-z0-9][a-z0-9-]{7,119}$/).describe("Caller-declared semantic event slug for context only; does not verify candidate equivalence"),
+      maxCandidates:z.number().int().min(1).max(30).optional().describe("Maximum candidates to return; truncated search is explicitly flagged")}
+  },safe((args)=>json(withBoundary(discoverNearDuplicateSourcesM56(args)))));
+
+  server.registerTool("plan_review_revision",{
+    title:"M5.6.3 Review Version / Evidence Change Log proposal (read-only)",annotations:READ,
+    description:"Produce an explicit review version boundary and unapproved Evidence Change Log proposal for added detail, correction, contradiction or supersession. Requires existing indexed Review/Source receipts and evidence comparison. Never writes protected notes or auto-applies revisions.",
+    inputSchema:{reviewPath:z.string().min(1).max(300).describe("Existing nonprotected indexed Canonical Research Review path"),
+      eventAnchor:z.string().regex(/^[a-z0-9][a-z0-9-]{7,119}$/).describe("Explicit caller event slug; not automatically verified"),
+      changeType:z.enum(["added_detail","correction","contradiction","supersession"]).describe("Requested revision type; supersession still requires owner approval"),
+      comparisonBasis:z.string().min(40).max(2000).describe("Substantive existing-versus-new source evidence comparison with attribution"),
+      proposedChange:z.string().min(40).max(4000).describe("Proposed Review change wording; never written automatically"),
+      sourcePaths:z.array(z.string().min(1).max(300)).min(1).max(12).describe("Already indexed Source Intake paths with at least one existing Review provenance relation"),
+      proposalDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Actual proposal date YYYY-MM-DD, separate from event/publication date")}
+  },safe((args)=>json(withBoundary(planReviewRevisionM56(args)))));
+
+  server.registerTool("plan_pdf_extraction_coverage",{
+    title:"M5.7 PDF Extraction Coverage preflight (read-only)",annotations:READ,
+    description:"Read-only original-byte SHA readback and per-page text/table/figure/footnote coverage manifest. Flags missing pages and unextracted visuals; never pretends it performed PDF parsing/OCR, validates extracted text against pages, or saves any PDF/Review. Large PDF retention and complete cross-page extraction remain future work.",
+    inputSchema:{
+      attachmentSha256:z.string().regex(/^[a-f0-9]{64}$/).describe("Existing archived original PDF byte digest, never a user-pasted text digest"),
+      pageCount:z.number().int().min(1).max(2000).describe("Actual original PDF page count from a separate inspected PDF source"),
+      pages:z.array(z.object({page:z.number().int().min(1).describe("One-based original PDF page number"),
+        text:z.string().max(12000).describe("Faithful extracted page text, may be empty for image-only page"),
+        tables:z.enum(["extracted","present_unextracted","none_reported","unknown"]).describe("Caller-declared table extraction completeness, not verified"),
+        figures:z.enum(["extracted","present_unextracted","none_reported","unknown"]).describe("Caller-declared figure/chart extraction completeness, not verified"),
+        footnotes:z.enum(["extracted","present_unextracted","none_reported","unknown"]).describe("Caller-declared footnote extraction completeness, not verified")
+      })).max(2000).describe("Supplied per-page extractions; absent page numbers are reported as gaps"),
+      extractionEngine:z.string().min(1).max(120).describe("OCR/extraction engine identifier with version if available"),
+      extractionDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Date extraction was performed, YYYY-MM-DD"),
+      documentLabel:z.string().min(1).max(200).describe("Original broker/report title or non-sensitive identifier")
+    }
+  },safe((args)=>json(withBoundary(planPdfCoverageM57(args)))));
+
+  server.registerTool(
+    "review_investment_claim",
+    {
+      title: "Review incoming investment claim against historical metadata",
+      annotations: READ,
+      description: "Read-only cross-domain historical claim matching plus an unapproved analyst Decision Packet: staged Demand/Revenue/Margin/Earnings/Cash/ROIC or Macro/Asset/Portfolio checklist, source/thesis pointers, counter-evidence gaps and human approval gate. All causal impacts and Thesis choices remain undetermined until original-source verification; never edits Vault or Current Thesis.",
+      inputSchema: {
+        domain: z.enum(["company","industry","macro","asset"]).describe("Investment evidence domain, distinct from a company ticker"),
+        entity: z.string().min(1).max(140).describe("Company ticker, macro geography, industry name or asset identifier (e.g. NVDA, Vietnam, Optical)"),
+        metric: z.string().min(1).max(140).describe("Canonical claim metric, such as revenue or operating_cash_flow"),
+        period: z.string().min(1).max(120).describe("Explicit source reporting period or event period, never a chat import date"),
+        originalSource: z.string().min(1).max(1000).describe("Canonical primary/original source URL or archival identifier; do not invent"),
+        statement: z.string().min(8).max(2500).describe("Incoming factual claim text to compare, with definition and period"),
+        value: z.string().max(150).optional().describe("Optional original-source numerical value as a literal string, no unit conversion"),
+        unit: z.string().max(80).optional().describe("Optional unit/currency for safe like-for-like comparison"),
+        eventDate: z.string().nullable().optional().describe("ISO source event date, or null if unknown"),
+        publishedAt: z.string().nullable().optional().describe("ISO original source publication date, or null if unknown"),
+        focus: z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Historical note source priority"),
+        maxCandidates: z.number().int().min(1).max(12).optional().describe("Maximum historical matched claim/related note candidates, 1 to 12"),
+      },
+    },
+    safe((args:{
+      domain:Domain;entity:string;metric:string;period:string;originalSource:string;
+      statement:string;value?:string;unit?:string;eventDate?:string|null;publishedAt?:string|null;
+      focus?:Focus;maxCandidates?:number;
+    })=>{
+      const reviewed=reviewInvestmentClaim(args);
+      // Backward-compatible addition to the already deployed claim tool:
+      // no new Tool Action discovery required for existing OAuth clients.
+      const packet=buildInvestmentDecisionPacket(args,reviewed);
+      return json(withBoundary({
+        ...reviewed,
+        matchingClaims:fenceEach(reviewed.matchingClaims,"claimId","value","unit","metric","period"),
+        relatedEventClaims:fenceEach(reviewed.relatedEventClaims,"claimId","value","unit","metric","period"),
+        decisionPacket:packet
+      }));
+    }),
+  );
   // OAuth clients must be able to discover the scoped tool before approving
   // its scope. The handlers enforce the grant on every invocation.
   if (access.intake === true || access.label.startsWith("oauth:")) {
@@ -310,9 +557,13 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         limit: z.number().int().min(1).max(20000).optional().describe("Max lines (default 2000)"),
       },
     },
-    safe(({ path, offset, limit }: { path: string; offset?: number; limit?: number }) =>
-      json(withBoundary(readNoteRange(path, { offset, limit }), "content")),
-    ),
+    safe(({ path, offset, limit }: { path: string; offset?: number; limit?: number }) => {
+      // Supply the typed MCP payload as well as the original text JSON.
+      // Some clients lose the text-only result when normalizing note reads.
+      // Keeping the text block preserves existing callers and older clients.
+      const payload = withBoundary(readNoteRange(path, { offset, limit }), "content");
+      return { ...json(payload), structuredContent: Object.fromEntries(Object.entries(payload)) };
+    }),
   );
 
   server.registerTool(
@@ -971,10 +1222,12 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       description:
         "Vault name, note count, word totals, how many notes are too large to be searchable " +
         "(unindexedNotes), sync daemon status, and disk headroom: disk.availableBytes with disk.level ok, " +
-        "warn (under 100 MB free) or critical (under 50 MB; writes that would not leave the reserve are refused).",
+        "warn (under 100 MB free) or critical (under 50 MB; writes that would not leave the reserve are refused). " +
+        "Also includes a bounded, read-only whole-index knowledgeAudit of metadata, claim identity candidates and link health, not source verification. " +
+        "sourceArchive is a capped SHA-256 byte-integrity sample of stored external source blobs, explicitly NOT remote device Sync or off-server backup proof.",
       inputSchema: {},
     },
-    safe(() => json({ ...vaultInfo(), sync: syncBackend().status(), connection: {
+    safe(() => json({ ...vaultInfo(), knowledgeAudit: withBoundary(auditVaultKnowledgeIndex()), sourceArchive: sourceArchiveHealth(), sync: syncBackend().status(), connection: {
       build: "intake-cloud-receiver-20261015",
       saving: cloudIntakeStatus(),
       credentialType: access.label.startsWith("oauth:") ? "oauth" : access.label.startsWith("api-key:") ? "api-key" : "other",

@@ -75,6 +75,85 @@ read below, plus `preview_edit`, which writes nothing.
 
 ## Files
 
+
+### User attachment capture via separate Safe Edit OAuth MCP
+
+`store_user_attachment(base64, contentType)` is write-scoped and accepts actual accessible user-provided JPEG/PNG/WebP/PDF file bytes up to 4 MiB. It validates magic bytes and stores an immutable content-addressed file in `07_Sources/ChatGPT/Attachments/`, returning SHA-256, bytes, path and actual readback status. Repeated bytes are idempotent; no arbitrary path input, original-file overwrite or unapproved protected Thesis edit is allowed. `inspect_user_attachment(sha256, contentType)` is read-only and recomputes the SHA-256 of the stored Vault file.
+
+The tools require new Safe Edit OAuth `vault:read vault:edit` consent and tool refresh; they do not OCR, assert publisher authenticity, prove user-supplied figures, read/extract previous chats automatically or certify phone/desktop Sync. The existing read-only `plan_investment_writeback` may read a previously stored SHA/MIME receipt to distinguish actual user screenshot bytes from a text transcription.
+
+## Safe Edit write-scoped Source Archive ingestion (separate OAuth endpoint)
+
+`archive_original_source(url)` is registered only with Investment OS — Safe Edit (requires `vault:read vault:edit` OAuth). It uses an **admin-controlled exact-host HTTPS allowlist** (defaults: `www.sec.gov`, `ir.amd.com`, `www.nso.gov.vn`), denies any redirect, blocks unsupported MIME/oversized (>8 MiB) responses, requires `SOURCE_ARCHIVE_USER_AGENT` with a **real operator-owned contact** configured on Railway, and uses the actual Safe Edit OAuth identity as the archive operator label. No user-supplied alternate host or unsafe file path is honored. The action writes ONLY the separate, content-addressed source-byte archive outside Vault, not any Markdown/Thesis/Portfolio note.
+
+The result returns full returned HTTP-response byte `sha256`, `byteLength`, revision, captured timestamp and snapshot ID. HTTP 200 and a matching hash establish preservation of **received bytes**, *not* publisher authenticity, independent verification, analyst fact-checking, or a signed/complete revision chain. Old data and original bytes are retained, and repeated identical bytes do not add versions. The read-only `assess_thesis_change_proposal` reports archival status when called afterwards. The separate MCP app must Refresh Tools to discover this new write action. Configuring an actual operator contact and a real authorized fetch remain separate acceptance steps.
+
+### assess_thesis_change_proposal — read
+
+**Full source-byte archive inspection (internal archive engine):** `assess_thesis_change_proposal.sourceByteArchive` now returns the stored raw-document SHA-256 history for the proposal's exact original-source URL, including byte-integrity result and revision count. Storage is content-addressed outside Obsidian Vault in `DATA_DIR/source-archive` (not Obsidian-synced); changed bytes create a new version, identical bytes are idempotent. **No externally fetched source bytes are imported automatically by this read-only tool.** `sourcePublisherAuthenticated=false`, `sourceWasRetrievedThisCall=false`, and full source-revision completeness is never assumed. A separately authorized ingestion process is needed to populate the archive; do not confuse real byte hashes with the prior short-excerpt hash or a verified issuer signature. If missing, a warning is surfaced and the original excerpt-only receipt is still distinguished from a full-source archive. Back-end cap is 8 MiB per source and 256 MiB for this pilot archive; expanding to 200+ symbols needs external storage/retention capacity planning.
+
+
+
+**Primary source receipt gate (v2):** For any reviewable proposal containing a dated analyst claim to have checked the original, the backend now requires an indexed `primary_source_verification_receipt` note with the same Claim ID, domain, issuer/country, metric, exact reporting period, URL, literal value and unit, observation date, source locator, supported observation method and **SHA-256 of the stored short UTF-8 source excerpt**. The hash is recomputed against the excerpt in the Vault: tampering, missing receipts or vintage mismatches cause `blocked_missing_evidence`. The response's `sourceReceiptGate` distinguishes accepted/rejected receipts and reports `externalSourceFetchedThisCall=false`, `sourceDocumentBytesArchivedAndVerified=false` and `receiptReviewerIdentityCryptographicallyVerified=false`. This protects a *review trail*, not a signed SEC document, source-truth proof or owner authorization. Historical notes or AI attestations alone no longer suffice for readiness.
+
+
+
+Validate a separately **analyst-authored** proposed Maintain / Strengthen / Weaken / Revise decision for Company, Macro, Industry, or Asset without changing anything in the Vault. The tool checks real-path historical context existence, claim IDs, matching entity/metric/fiscal period, analyst-attested original-source and date/section, counter-evidence, causal transmission claim linkage, alternative explanations, invalidation, confidence reasoning, and optionally dated market expectations/authorized portfolio references.
+
+The result is **blocked_missing_evidence** or **ready_for_owner_review_not_approved**. Ready means only that the payload has been structured for review, **not** that claims are correct or independently verified, that the owner approved the Thesis change, or that a portfolio trade is authorized. The tool DOES NOT fetch the external URLs; analyst attestations are **not certified**. A separate source-verification process and owner-approved Safe Edit preview and readback are required before changes. `canAutoUpdateThesis=false`, `canRecommendTrade=false`, `canClaimPricedIn=false` always. Read-only MCP scope.
+
+### plan_investment_writeback — read
+
+Read-only multilingual Investment OS intake planner for source text or ChatGPT-extracted screenshot/PDF content. Accepts domain, up to six explicit entity/topic labels, language label, source genre, faithful extracted original-language text, source URL/date when actually supplied, optional existing attachment path and optional exact period/metric/unit claim. Returns deterministic plan ID and candidate nonprotected raw-input/research-review/timeline destinations, bounded historical context paths, indexed numeric duplicate candidates, provenance warnings and requirements for separate Safe Edit writes.
+
+This planner **does not store input**, fetch original broker or issuer source, OCR binary PDFs, upload screenshots, independently verify exact original bytes, decide thesis changes, or certify mobile Sync. A screenshot transcription is **not the screenshot binary**. Reported PT reiterations are not automatic target upgrades; planned investment is not completed CapEx. It never performs protected Current Thesis/Evidence Register/Portfolio edits. A separately authorized write, source capture, readback, and approval are needed to close the full loop. The client may need to refresh its MCP tool list to discover it.
+
+### plan_duplicate_source_link — read
+
+M5.6.2 read-only proposal to link an additional **already saved** Source Intake receipt to an existing non-protected Canonical Research Review. Requires `reviewPath`, `additionalSourcePath`, a caller-declared `eventAnchor`, a substantive `comparisonBasis`, and `linkedOnDate`. The tool checks indexed Source/Review paths, original Source provenance, matching explicit event/publication dates, publisher URL family, and an existing `Source provenance` section. Source language can differ, as for the Solidigm Investing.com Thai and English reports.
+
+The output contains a deterministic proposed Event Key, current Review SHA-256 as the version boundary, and an **append-only Safe Edit recipe**, never a write. The caller must separately preview the exact diff, obtain authorized `vault:edit` apply permission, and verify CAS/write/readback/reindex receipts. A subsequent plan returns `already_linked` instead of duplicating the reference. A same-event comparison is caller interpretation pending human approval, **not independent confirmation, verified source authenticity, a second economic event, an EPS change, or a new Thesis**. Protected Thesis/Evidence Register/Timeline/Portfolio files are not eligible.
+
+### discover_near_duplicate_sources — read
+
+M5.6.3 bounded read-only search of existing indexed canonical Source Receipts, using exact original-text digest or same explicitly declared event/publication dates plus source URL publisher family. Returns ranked *candidates* and uncertainty signals, including cross-language cases. A same date and publisher does not establish the same event; no Source link, evidence vote, or Vault write occurs. Reports truncation rather than implying complete coverage.
+
+### plan_review_revision — read
+
+M5.6.3 explicit proposal contract for added detail, correction, contradiction or supersession of an existing indexed nonprotected Review. Requires declared Event Anchor, substantive comparison, proposed wording, dated Source Receipts and an existing provenance link. Returns immutable current content SHA-256 as version boundary, proposed Evidence Change Log payload, review lineage and required owner approval/CAS/readback gates. No new Review version is assigned until approval and a separately implemented authorized Safe Edit; no protected Thesis, Evidence Register, Timeline or Portfolio write.
+
+### plan_pdf_extraction_coverage — read
+
+M5.7.1 read-only preflight of an externally supplied, page-numbered PDF extraction. Checks an existing original PDF byte SHA-256 receipt when archived within the supported Safe Edit attachment limit, and reports missing/empty pages plus unextracted tables, figures, and footnotes with explicit page locators. Each supplied page has a text digest. A complete coverage declaration is **not OCR or visual verification**, and does not prove that extracted text matches the original PDF. This does not bypass the current 4 MB attachment archive limit or the 12k-character single-intake limit; no PDF, Source, Review or protected file is written.
+
+### review_investment_claim — read
+
+**Evidence Verification Ledger (read-only, same Tool):** The `decisionPacket.evidenceVerificationLedger` field preserves original-source links, fiscal periods, Claim IDs, historical Note status, dates, source-hash metadata, matched/related claim boundaries and unstructured same-source leads. Historical note-declared `verified_against_primary` is not a new verification; `originalVerifiedThisRun=false` for every entry. Multiple URLs are never automatically independent evidence. Numeric differences within the same source/metric/unit are note-index discrepancy candidates, not certified issuer corrections. External source checks, revisions, complete dedup, current pricing and owner approval remain separate gates. This output does not change Vault or Thesis.
+
+**Investment Decision Packet (same action; no plugin rescan for a new tool):** After structured claim matching, `review_investment_claim` also returns a `decisionPacket` containing bounded historical source pointers, Owner Thesis availability, primary/counter-evidence gaps, a domain-specific *not-yet-assessed* causal research chain, unassessed consensus/market pricing/portfolio exposure, and a dated unapproved Change Log draft. For a company it follows Demand → Revenue Conversion → Gross Profit → Operating Profit → Earnings → Cash Flow → Return on Capital → Valuation → Portfolio. For Macro, Industry and Asset it uses appropriate transmission checkpoints and makes no issuer-specific assumptions. The output is an **analyst evidence checklist, not an AI-determined Strengthen/Weaken/Revise judgment**: `thesisDecision.selected=null`, `canAutoUpdateThesis=false`, and primary source and owner approval remain separate requirements. The packet never writes or upgrades Vault metadata. Read cited originals and seek counter-evidence, then make a separate human-reviewable proposed decision.
+
+
+
+Review one incoming company, industry, macro, or asset claim against **explicit, structured** historical claim metadata (entity, metric, reporting period, original source, value and unit). The tool is read-only and conservative: it outputs `duplicate_candidate`, `possible_correction_or_contradiction`, `confirmation_candidate_not_independent`, `added_detail_candidate`, or `unresolved`. These are **candidates for human/source review**, not verified investment conclusions.
+
+Required fields: `domain`, `entity`, `metric`, `period`, `originalSource`, and `statement`; optional `value`, `unit`, `eventDate`, `publishedAt`, `focus` and `maxCandidates`. Missing dates must stay null; a different source URL never counts as independent confirmation without actual provenance checks. Exact numerical comparisons require compatible units and periods.
+
+The response distinguishes **`matchingClaims` (same metric + period)** from **`relatedEventClaims` (different metrics within the same original source/period; not corroboration of the requested metric)**, then includes source-linked unstructured notes (`sourceLinkedUnstructuredPaths`), metadata-scan coverage (`indexedNotesWithMetadata`, `notesScanned`, `truncated`, `eligibleEntityNotes`), related historical candidates, required verification and an explicit `canAutoUpdateThesis:false`. The server scans up to 25,000 metadata-bearing notes and **reports truncation rather than implying full Vault coverage**. A note with a matching source URL but no comparable structured metric is a manual review lead, not an automatic duplicate. When comparing numerical claim values, **both values and explicitly matching unit labels are required**; source URL paths remain case-sensitive, and conflicting same-source claims take priority over a matching duplicate. This tool does not open current financial filings or amend the Vault or any Thesis. It requires only existing `vault:read` permission. A client may need to rescan its MCP tool list after deployment to discover a newly registered tool.
+
+### investment_context_pack — read
+
+Constructs a bounded, **read-only** research context from the Investment_OS Vault for a question, one or more companies, or an industry/macro theme. It prioritizes Current Thesis, Evidence Register, Company Evolution, source evidence, industry context, and contrary evidence over repeated archived ChatGPT discussions. It is **lexical retrieval**, not guaranteed semantic recall or a complete proof of all evidence. The server reports coverage limits and missing evidence; check original sources before treating a claim as verified.
+
+Parameters:
+- `question` (required): investment question, 3–1,200 characters.
+- `issuers` (optional): up to six company tickers or issuer identifiers; omit for broad macro/theme retrieval.
+- `industry` (optional): relevant industry/theme, up to 140 characters.
+- `focus` (optional): `earnings`, `broker`, `tam`, `macro`, `thesis`, or `general`.
+- `maxNotes` (optional): 5–16, bounds the number of returned notes.
+- `maxChars` (optional): 4,500–18,000, bounds returned excerpt characters.
+
+Outputs include selected note paths, source-line excerpts, verification labels as declared by source notes, and coverage limitations. An archived, `not_reverified` thesis remains unverified. This tool never edits notes and requires the existing `vault:read` scope. A newly deployed MCP tool may require ChatGPT App/Connector tool-catalogue refresh; server registration alone does not confirm that a particular ChatGPT app can invoke it.
+
 ### read_note — read
 
 Returns a note's content, fenced, up to 2,000 lines or 100 KB per call with

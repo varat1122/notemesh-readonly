@@ -75,6 +75,27 @@ function migrate(d: Database.Database) {
       done INTEGER NOT NULL,
       PRIMARY KEY (path, line)
     );
+    -- Original source bytes are stored separately outside Obsidian Vault.
+    -- This is an additive index/lineage registry; no historical Vault
+    -- original source or protected Thesis is rewritten by the archive.
+    CREATE TABLE IF NOT EXISTS source_snapshots (
+      snapshot_id TEXT PRIMARY KEY,
+      original_source TEXT NOT NULL,
+      source_key TEXT NOT NULL,
+      sha256 TEXT NOT NULL CHECK(length(sha256)=64),
+      byte_length INTEGER NOT NULL CHECK(byte_length > 0),
+      revision INTEGER NOT NULL CHECK(revision > 0),
+      captured_at TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      capture_method TEXT NOT NULL,
+      retrieved_from TEXT NOT NULL,
+      operator_label TEXT NOT NULL,
+      response_etag TEXT,
+      response_last_modified TEXT,
+      UNIQUE(source_key,sha256),
+      UNIQUE(source_key,revision)
+    );
+    CREATE INDEX IF NOT EXISTS idx_source_snapshots_source_rev ON source_snapshots(source_key,revision);
   `);
   // Additive columns for databases created before them. The index is rebuilt
   // at every boot, so a new column needs no backfill beyond existing.

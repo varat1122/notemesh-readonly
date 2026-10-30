@@ -208,7 +208,19 @@ export function preview(input:unknown,actor:string) {
   const existing=store().prepare("SELECT * FROM safe_edit_operations WHERE id=?").get(p.operationId) as RecordRow|undefined;
   if(existing) {
     if(existing.actor!==actor||existing.payload!==JSON.stringify(p)) throw Error("Operation ID reused for different input or actor");
-    return {...publicPreview(existing),previewToken:null,retry:"Use original preview token; it is never stored in plaintext"};
+    if(existing.status==="preview") {
+      // A lost response must not strand a canonical source forever. Rotate the
+      // one-use token for the SAME actor and payload; invalidate prior tokens
+      // and any approval so the exact diff must be reviewed again. Never
+      // refresh a written/interrupted operation or a changed on-disk target.
+      if(sha256(before??"")!==existing.before_hash) throw Error("Preview version changed; operator reconciliation required");
+      const nextToken=crypto.randomBytes(32).toString("hex");
+      store().prepare("UPDATE safe_edit_operations SET token_hash=?,expires=?,approval=NULL WHERE id=? AND status='preview'")
+        .run(sha256(nextToken),Date.now()+TTL,existing.id);
+      log(existing.id,actor,"preview_token_rotated",{path:p.path});
+      return {...publicPreview(row(existing.id)),previewToken:nextToken,retry:"token_rotated_previous_token_invalid"};
+    }
+    return {...publicPreview(existing),previewToken:null,retry:"Operation is no longer in preview; inspect durable status"};
   }
   const size=store().prepare("SELECT count(*) AS n,coalesce(sum(length(CAST(before_text||after_text AS BLOB))),0) AS bytes FROM safe_edit_operations").get() as {n:number;bytes:number};
   if(size.n>=1000||size.bytes+200_000>20_000_000) throw Error("Safe Edit journal quota reached; administrator archival required");
