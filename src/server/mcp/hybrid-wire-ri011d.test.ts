@@ -162,8 +162,9 @@ describe("RI-011D hybrid reconciliation over real MCP read-only transport", () =
   it("does not register any research preview when the caller lacks vault:read scope", async () => {
     const { client, server } = await connect(false);
     try {
-      expect((await client.listTools()).tools.map(t => t.name))
-        .not.toContain("preview_hybrid_claim_reconciliation");
+      // With no vault:read scope this server advertises no tools/list
+      // capability at all; MCP rejects the method instead of returning [].
+      await expect(client.listTools()).rejects.toThrow("Method not found");
     } finally { await client.close(); await server.close(); }
   });
 });
