@@ -139,4 +139,39 @@ describe("RI-011 read-only hybrid adapter",()=>{
     expect(r.gates.canEditThesis).toBe(false);
   });
 
+  it("does not let a broad first search monopolize all historical candidate slots", async()=>{
+    for(let i=0;i<7;i++)await add(`07_Sources/ChatGPT/Entries/AMD general ${i}.md`,
+      "# AMD report historical reference general information");
+    await add("07_Sources/ChatGPT/Entries/AMD precise exception.md",
+      "# AMD precise_fiscal_exception_ri011 evidence in a separate archived note");
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,
+      searchQueries:["AMD","AMD precise_fiscal_exception_ri011"],maxFtsHits:3});
+    expect(r.historical.selectionStrategy).toBe("round_robin_per_query");
+    expect(r.historical.candidates.some(x=>x.path.includes("AMD precise exception"))).toBe(true);
+    expect(r.historical.searchTruncated).toBe(true);
+    expect(r.historical.queries.find(x=>x.query==="AMD precise_fiscal_exception_ri011")?.represented).toBe(1);
+    expect(r.gates.canAutoWrite).toBe(false);
+  });
+  it("holds unknown same-source accounting units even if another row is an exact numeric match", async()=>{
+    await add("10_Knowledge/Company Research/AMD exact 01.md",record());
+    await add("10_Knowledge/Company Research/AMD unclear 02.md",record("11536","unit_not_declared"));
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview(Q);
+    expect(r.indexed.exactMatches).toBeGreaterThan(0);
+    expect(r.indexed.unknown).toBeGreaterThan(0);
+    expect(r.classification).toBe("HOLD_UNIT_OR_VALUE_BASIS");
+    expect(r.gates.claimVerifiedAgainstOriginal).toBe(false);
+  });
+  it("does not falsely mark overlapping searches as truncated when every unique match is returned", async()=>{
+    await add("07_Sources/ChatGPT/Entries/AMD single.md",
+      "# AMD unique_overlap_ri011 note");
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,searchQueries:["AMD","AMD unique_overlap_ri011"],maxFtsHits:6});
+    expect(r.historical.candidates).toHaveLength(1);
+    expect(r.historical.searchTruncated).toBe(false);
+    expect(r.historical.queries[0].represented).toBe(1);
+    expect(r.historical.queries[1].represented).toBe(1);
+  });
+
 });
