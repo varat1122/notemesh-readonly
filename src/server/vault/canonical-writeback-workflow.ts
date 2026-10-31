@@ -192,7 +192,17 @@ export function buildCanonicalSafeEditWorkflow(
     "- This note does not change Current Thesis, Evidence Register, Portfolio or Company Evolution Timeline.",
     "- Duplicate, pricing, market expectation and broker versions still require original-source adjudication.",""
   ].join("\n");
-  const hasSourceMatch=plan.sourceEventReview.status==="possible_same_source_event_candidates"||
+  const sourceStep=toStep("source_intake",rawPath,sourceContent,tag,false);
+  // After Source-only capture the original Source receipt itself appears in
+  // exact URL/date discovery. Never hold its first linked Research Review merely
+  // because it found its own immutable, independently re-read Source. Another
+  // Source path, an incomplete candidate scan, or an independent claim duplicate
+  // must still be reviewed. No semantic duplicate is auto-adjudicated here.
+  const ownSourceReceipt=plan.sourceIdentity.existingSourcePath===rawPath&&
+    sourceStep.state==="verified_existing";
+  const otherSourceCandidate=plan.sourceEventReview.candidatePaths.some(p=>p!==rawPath);
+  const hasSourceMatch=(plan.sourceEventReview.status==="possible_same_source_event_candidates"&&
+      (!ownSourceReceipt||otherSourceCandidate||plan.sourceEventReview.scanTruncated))||
     plan.exactClaimReview.classification==="duplicate_candidate";
   // A previously imported generic review with the same intake ID must be
   // reconciled before adding a second canonically located review.
@@ -202,7 +212,6 @@ export function buildCanonicalSafeEditWorkflow(
     .get(plan.planId,rawPath,reviewPath) as {path:string}|undefined;
   const legacyConflict=Boolean(legacy&&legacy!==reviewPath&&
     db().prepare("SELECT 1 FROM notes WHERE path=? LIMIT 1").get(legacy))||Boolean(otherCanonical);
-  const sourceStep=toStep("source_intake",rawPath,sourceContent,tag,false);
   const reviewStep=captureOnly?null:toStep("canonical_review",reviewPath,reviewContent,tag,hasSourceMatch||legacyConflict);
   // Whole-note SHA and FTS prove bytes/indexing, but NOT Obsidian graph integrity.
   // A canonical Review must have a real resolved backlink to its immutable
