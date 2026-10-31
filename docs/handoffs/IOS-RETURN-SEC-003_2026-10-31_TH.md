@@ -2,7 +2,7 @@
 task_id: IOS-RETURN-SEC-003
 executor: Claude Code (แทน Codex ระหว่าง token หมด; Owner อนุมัติในแชต 2026-10-31)
 as_of: 2026-10-31
-outcome: PENDING_CI
+outcome: COMPLETED (CI_PASSED on d355d90)
 execution_target: PR #135 branch fix/ios-oauth-readonly-resource-scopes-20261030
 ---
 # IOS Return — ยกการแก้ node-forge เข้า PR #135
@@ -21,7 +21,7 @@ execution_target: PR #135 branch fix/ios-oauth-readonly-resource-scopes-20261030
 4. Push → CI run ใหม่บน `d355d90`
 
 ## ยังไม่ได้ทำ / ไม่ได้แตะ
-- E2E + image: รอ CI
+- CI run 41168580979 บน d355d90: audit ✅ test ✅ (unit + E2E) image ✅
 - ไม่ merge, ไม่ deploy, ไม่แตะ Production/M4/variables
 - Production deploy ของ #135 ยัง HOLD ตามเดิม (legacy `account.issuer` schema)
 
