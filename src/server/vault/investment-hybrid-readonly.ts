@@ -208,8 +208,8 @@ export function hybridClaimPreview(input:HybridInput){
         .find(x=>x.index>=0);
       if(found){const offset=Math.max(0,found.index-240);
         readExcerpt=chunk.content.slice(offset,offset+800);readbackMatchFound=true;
-        readbackStartLine=chunk.offset+1+chunk.content.slice(0,offset).split("\\n").length-1;
-        readbackEndLine=readbackStartLine+readExcerpt.split("\\n").length-1;
+        readbackStartLine=chunk.offset+1+chunk.content.slice(0,offset).split("\n").length-1;
+        readbackEndLine=readbackStartLine+readExcerpt.split("\n").length-1;
       }
     }catch{/* stale index or unreadable note; retain the FTS candidate only */}
     results.push({path:hit.path,title:hit.title,query,snippet:hit.snippet.slice(0,320),readExcerpt,modified:hit.modified,
