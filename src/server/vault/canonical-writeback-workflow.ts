@@ -226,7 +226,11 @@ export function buildCanonicalSafeEditWorkflow(
     }
   }
   if(reviewStep&&qualityIssues.length){
-    reviewStep.state="hold_quality_gate";
+    // Keep an existing conflict, index-repair or event-review hold visible.
+    // qualityIssues carries the additional quality blocker without erasing
+    // the repair action already established by byte/link inspection.
+    if(reviewStep.state==="needs_create"||reviewStep.state==="verified_existing")
+      reviewStep.state="hold_quality_gate";
     reviewStep.safeEditRequest=null;
   }
   const steps=reviewStep?[sourceStep,reviewStep]:[sourceStep];

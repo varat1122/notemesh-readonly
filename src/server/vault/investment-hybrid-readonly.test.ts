@@ -125,6 +125,40 @@ describe("RI-011 read-only hybrid adapter",()=>{
     expect(r.historical.candidates).toHaveLength(1);
     expect(r.gates.canAutoWrite).toBe(false);
   });
+  it("maps a fiscal match after expanding lowercase characters back to original excerpt offsets",async()=>{
+    const rel="07_Sources/ChatGPT/Entries/AMD Unicode Expansion.md";
+    const lines=["# AMD historical Unicode note","İ".repeat(500),
+      "AMD FY2027Q1 net revenue claim, not verified against the issuer."];
+    await add(rel,lines.join("\n"));
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,period:"FY2027Q1"});
+    const item=r.historical.candidates.find(x=>x.path===rel);
+    expect(item).toBeDefined();
+    expect(item?.readbackMatchFound).toBe(true);
+    expect(item?.readExcerpt).toContain(lines[2]);
+    expect(item?.readExcerpt.startsWith("İ")).toBe(true);
+    expect(item?.readbackStartLine).toBe(2);
+    expect(item?.readbackEndLine).toBe(3);
+    expect(item?.readExcerpt.length).toBeLessThanOrEqual(800);
+    expect(r.gates.claimVerifiedAgainstOriginal).toBe(false);
+  });
+  it("keeps Thai line locators and both excerpt boundaries intact around emoji",async()=>{
+    const rel="07_Sources/ChatGPT/Entries/AMD Thai Emoji.md";
+    // The old 240/800 UTF-16 cuts bisected the leading and trailing emoji.
+    const excerpt="🙂"+"x".repeat(238)+" FY2027Q1 "+"y".repeat(549);
+    const lines=["# AMD ภาษาไทย","เอกสารอ้างอิง",excerpt+"🙂","ข้อความท้าย"];
+    await add(rel,lines.join("\n"));
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,period:"FY2027Q1"});
+    const item=r.historical.candidates.find(x=>x.path===rel);
+    expect(item).toBeDefined();
+    expect(item?.readbackMatchFound).toBe(true);
+    expect(item?.readExcerpt).toBe(excerpt);
+    expect(item?.readbackStartLine).toBe(3);
+    expect(item?.readbackEndLine).toBe(3);
+    expect(item?.readExcerpt.length).toBeLessThanOrEqual(800);
+    expect(item?.readbackTruncated).toBe(false);
+  });
   it("retains note-search snippet when candidate readback is capped before a late body match",async()=>{
     const filler="filler text without fiscal token ".repeat(5000);
     await add("07_Sources/ChatGPT/Entries/AMD Extremely Long.md","# AMD research\n"+filler+

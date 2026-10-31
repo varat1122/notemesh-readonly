@@ -25,7 +25,7 @@ beforeEach(()=>{
 });
 afterEach(()=>{
   fs.rmSync(root,{recursive:true,force:true});
-  for(const key of ["DATA_DIR","BASE_URL","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])
+  for(const key of ["DATA_DIR","BASE_URL","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER","M55_REQUIRE_TYPED_REVIEW"])
     delete process.env[key];
 });
 async function seed(rel:string,body:string){
@@ -210,6 +210,65 @@ describe("RI-011 E2E Research + Safe Edit real MCP on isolated temporary Vault",
       expect(done.steps.map(x=>x.state)).toEqual(["verified_existing","verified_existing"]);
     }finally{await close();}
   });
+  it("retains missing-backlink repair when a corrected source language also requires translation",async()=>{
+    await seed("01_Companies/MU.md","# MU synthetic company hub\n");
+    const {safeClient,close}=await connect();
+    try{
+      const original={...input,sourceLanguage:"th",researchReview:{...review,translationTh:undefined}};
+      const prepared=await prepare(safeClient,original);
+      expect(prepared.qualityIssues).toEqual([]);
+      const saved=await apply(safeClient,original,prepared);
+      expect(saved.status).toBe("saved_verified");
+      const sourcePath=saved.steps[0].path,reviewPath=saved.steps[1].path;
+      const bytesBefore=fs.readFileSync(path.join(vault,reviewPath),"utf8");
+      const {db}=await import("../db");
+      db().prepare("DELETE FROM links WHERE source_path=? AND resolved_path=?").run(reviewPath,sourcePath);
+      const corrected={...original,sourceLanguage:"en"};
+      const held=await prepare(safeClient,corrected);
+      expect(held.workflowStatus).toBe("hold_conflict_or_index");
+      expect(held.steps.map(x=>x.state)).toEqual(["verified_existing","hold_index_repair"]);
+      expect(held.qualityIssues).toContain("foreign_source_translation_missing");
+      expect(held.previews).toHaveLength(0);
+      const checked=await apply(safeClient,corrected,held);
+      expect(checked.status).toBe("hold_conflict_or_index");
+      expect(checked.readyForNextNews).toBe(false);
+      expect(checked.receipts).toHaveLength(0);
+      expect(fs.readFileSync(path.join(vault,reviewPath),"utf8")).toBe(bytesBefore);
+    }finally{await close();}
+  });
+  it.each(["missing_backlink","changed_review"] as const)(
+    "strict typed-review enforcement preserves an existing %s blocker",async(fault)=>{
+    await seed("01_Companies/MU.md","# MU synthetic company hub\n");
+    const {safeClient,close}=await connect();
+    try{
+      process.env.M55_REQUIRE_TYPED_REVIEW="0";
+      const legacy={...input,researchReview:undefined,
+        completedAnalysis:"Synthetic legacy analysis: no source authentication or protected-note change."};
+      const prepared=await prepare(safeClient,legacy);
+      const saved=await apply(safeClient,legacy,prepared);
+      expect(saved.status).toBe("saved_verified");
+      const sourcePath=saved.steps[0].path,reviewPath=saved.steps[1].path;
+      if(fault==="missing_backlink"){
+        const {db}=await import("../db");
+        db().prepare("DELETE FROM links WHERE source_path=? AND resolved_path=?").run(reviewPath,sourcePath);
+      }else{
+        await seed(reviewPath,fs.readFileSync(path.join(vault,reviewPath),"utf8")+"\nExternal review change.\n");
+      }
+      const bytesBefore=fs.readFileSync(path.join(vault,reviewPath),"utf8");
+      process.env.M55_REQUIRE_TYPED_REVIEW="1";
+      const held=await prepare(safeClient,legacy);
+      expect(held.workflowStatus).toBe("hold_conflict_or_index");
+      expect(held.steps.map(x=>x.state)).toEqual(["verified_existing",
+        fault==="missing_backlink"?"hold_index_repair":"hold_conflict"]);
+      expect(held.qualityIssues).toContain("typed_research_review_required");
+      expect(held.previews).toHaveLength(0);
+      const checked=await apply(safeClient,legacy,held);
+      expect(checked.status).toBe("hold_conflict_or_index");
+      expect(checked.readyForNextNews).toBe(false);
+      expect(checked.receipts).toHaveLength(0);
+      expect(fs.readFileSync(path.join(vault,reviewPath),"utf8")).toBe(bytesBefore);
+    }finally{await close();}
+  });
   it("a separate URL/date-matched Source still HOLDs a Review even if its own Source receipt is valid",async()=>{
     await seed("01_Companies/MU.md","# MU synthetic company hub\n");
     const {safeClient,close}=await connect();
@@ -229,6 +288,11 @@ describe("RI-011 E2E Research + Safe Edit real MCP on isolated temporary Vault",
       expect(held.steps.map(x=>x.state)).toEqual(["verified_existing","hold_event_review"]);
       expect(held.previews).toHaveLength(0);
       expect(held.workflowStatus).toBe("hold_source_event_review");
+      const combined=await prepare(safeClient,invalid);
+      expect(combined.workflowStatus).toBe("hold_source_event_review");
+      expect(combined.steps[1].state).toBe("hold_event_review");
+      expect(combined.qualityIssues).toContain("counterEvidenceTh_thai_required");
+      expect(combined.previews).toHaveLength(0);
       expect(fs.existsSync(path.join(vault,held.steps[1].path))).toBe(false);
       expect(fs.existsSync(path.join(vault,other))).toBe(true);
     }finally{await close();}

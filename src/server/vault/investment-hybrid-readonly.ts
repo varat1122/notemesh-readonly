@@ -130,6 +130,26 @@ function labeledSourceUrls(body:string):string[]{
   return urls;
 }
 
+/** Lowercasing can expand a character (for example, İ -> i + combining dot).
+ * Locate against the complete lowercase text, then map back to original UTF-16
+ * offsets before slicing or computing line locators. Contextual lowercase forms
+ * such as final sigma retain their length, so they keep the original match semantics. */
+function originalOffsetForLowercaseIndex(text:string,index:number):number{
+  let originalOffset=0,lowerOffset=0;
+  for(const point of text){
+    const nextLowerOffset=lowerOffset+point.toLowerCase().length;
+    if(index<nextLowerOffset)return originalOffset;
+    lowerOffset=nextLowerOffset;
+    originalOffset+=point.length;
+  }
+  return text.length;
+}
+
+function insideSurrogatePair(text:string,offset:number):boolean{
+  const before=text.charCodeAt(offset-1),after=text.charCodeAt(offset);
+  return before>=0xd800&&before<=0xdbff&&after>=0xdc00&&after<=0xdfff;
+}
+
 export interface HybridInput extends IncomingClaim { searchQueries?:string[]; maxFtsHits?:number }
 export type HybridState = "HOLD_ORIGINAL_SOURCE_IDENTITY"|"HOLD_CONFLICTING_CANDIDATES"|"HOLD_CANDIDATE_COVERAGE"|"HOLD_METADATA_COVERAGE"|
   "POSSIBLE_CORRECTION_OR_CONTRADICTION"|"DUPLICATE_CANDIDATE"|
@@ -229,8 +249,13 @@ export function hybridClaimPreview(input:HybridInput){
       const terms=demanded?[demanded]:hit.matches.slice().reverse();
       const found=terms.map(term=>({term,index:lower.indexOf(term.toLowerCase())}))
         .find(x=>x.index>=0);
-      if(found){const offset=Math.max(0,found.index-240);
-        readExcerpt=chunk.content.slice(offset,offset+800);readbackMatchFound=true;
+      if(found){
+        const matchOffset=originalOffsetForLowercaseIndex(chunk.content,found.index);
+        let offset=Math.max(0,matchOffset-240);
+        if(insideSurrogatePair(chunk.content,offset))offset--;
+        let end=Math.min(chunk.content.length,offset+800);
+        if(insideSurrogatePair(chunk.content,end))end--;
+        readExcerpt=chunk.content.slice(offset,end);readbackMatchFound=true;
         readbackStartLine=chunk.offset+1+chunk.content.slice(0,offset).split("\n").length-1;
         readbackEndLine=readbackStartLine+readExcerpt.split("\n").length-1;
       }
