@@ -215,6 +215,13 @@ export function hybridClaimPreview(input:HybridInput){
     results.push({path:hit.path,title:hit.title,query,snippet:hit.snippet.slice(0,320),readExcerpt,modified:hit.modified,
       readbackMatchFound,readbackTruncated,readbackStartLine,readbackEndLine,provenance:provenanceFor(hit.path)});
   }
+  // These are deterministic integrity warnings, not a broker/issuer truth verdict.
+  const lineageWarnings=results.flatMap(x=>{
+    const p=x.provenance;
+    if(p.linkedIntakeIdMatches===false)return [{path:x.path,reason:"linked_intake_id_mismatch" as const}];
+    if(p.linkedSourcePath&&!p.linkedSourceIndexed)return [{path:x.path,reason:"linked_source_not_indexed" as const}];
+    return [];
+  });
   if(state==="UNRESOLVED_NEEDS_ORIGINAL"&&results.length)state="HISTORICAL_NOTE_CANDIDATE";
   return {
     status:"READ_ONLY_RESEARCH_PREVIEW_NOT_VERIFIED_NOT_SAVED" as const,
@@ -229,7 +236,7 @@ export function hybridClaimPreview(input:HybridInput){
       // by the shared limit; surface that lost coverage explicitly.
       searchTruncated:coverage.some(x=>x.total>x.represented),
       selectionStrategy:"round_robin_per_query" as const,
-      periodAliasesUsed:periodAliases},
+      periodAliasesUsed:periodAliases,lineageWarnings},
     gates:{sourceAuthenticated:false,claimVerifiedAgainstOriginal:false,semanticDuplicateAdjudicated:false,
       independentEvidenceEstablished:false,canAutoWrite:false,canEditThesis:false,canEditPortfolio:false},
     nextAction:"ANALYST_MUST_COMPARE_ORIGINAL_AND_HISTORY_BEFORE_CANONICAL_WRITEBACK" as const,
