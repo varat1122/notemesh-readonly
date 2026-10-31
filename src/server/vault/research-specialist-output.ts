@@ -56,7 +56,7 @@ const nonblank=(s:unknown)=>typeof s==="string"&&s.trim().length>0;
 const ids=(xs:unknown)=>Array.isArray(xs)&&xs.every(nonblank);
 // A date or a timezone-qualified timestamp; a naive local time is ambiguous (§05.4).
 // Date.parse rolls 2026-02-30 over to March, so the calendar day is round-tripped.
-const isAsOf=(s:string)=>/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(s)&&
+export const isAsOf=(s:string)=>/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(s)&&
   !Number.isNaN(Date.parse(s.length===10?`${s}T00:00:00Z`:s))&&
   new Date(`${s.slice(0,10)}T00:00:00Z`).toISOString().slice(0,10)===s.slice(0,10);
 
