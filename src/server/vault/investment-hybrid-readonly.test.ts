@@ -231,6 +231,7 @@ describe("RI-011 read-only hybrid adapter",()=>{
     const item=r.historical.candidates.find(x=>x.path===reviewPath);
     expect(item?.provenance.linkedSourceIndexed).toBe(true);
     expect(item?.provenance.linkedIntakeIdMatches).toBe(false);
+    expect(r.historical.lineageWarnings).toContainEqual({path:reviewPath,reason:"linked_intake_id_mismatch"});
     expect(item?.provenance.originalDocumentVerifiedThisRun).toBe(false);
     expect(r.gates.semanticDuplicateAdjudicated).toBe(false);
   });
@@ -248,6 +249,7 @@ describe("RI-011 read-only hybrid adapter",()=>{
     const item=r.historical.candidates.find(x=>x.path===reviewPath);
     const archive=r.historical.candidates.find(x=>x.path.includes("no frontmatter"));
     expect(item?.provenance.linkedSourceIndexed).toBe(false);
+    expect(r.historical.lineageWarnings).toContainEqual({path:reviewPath,reason:"linked_source_not_indexed"});
     expect(item?.provenance.linkedIntakeIdMatches).toBeNull();
     expect(item?.provenance.publicationDate).toBeNull();
     expect(archive?.provenance.metadataState).toBe("indexed_no_frontmatter");
