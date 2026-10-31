@@ -5,7 +5,7 @@ origin: Investment OS / Claude Code (prepared for Chat acceptance)
 primary_executor: Work
 coordinator: Chat
 mode: READ_ONLY on Production + ENGINEERING_ISOLATED restore copy
-status: WAITING_OWNER_APPROVAL
+status: WAITING_OWNER_APPROVAL — Work ไม่มี token; Owner ทำเองได้ตาม IOS-RUNBOOK-OPS-005
 predecessor: IOS-VERIFY-OPS-001, IOS-RETURN-SEC-003, IOS-RETURN-SEC-004
 ---
 # Task: ทำ Production backup ที่สอดคล้องกัน + restore แยก + ซ้อม schema cleanup บนสำเนา (Gate 1–3 ของ PR #135)
@@ -29,7 +29,7 @@ Tool gap ที่ทำให้ต้องเป็น Work: ต้องเ�
 | Live deployment | `b8a2b39a-b737-4ae8-b5f2-a4cee6048e2d`, commit `71cc4178607d717b403ffd143d3a01bff7c94758` |
 | Source config | repo `varat1122/notemesh-readonly`, branch `main`, desired pin `a34b34c` (เก่ากว่าตัวที่รันจริง) |
 | Variable names | DATA_DIR, ENCRYPTION_KEY, M55_REQUIRE_TYPED_REVIEW, MARKET_PRICES_ENABLED, PORT, SAFE_EDIT_ENABLED, SAFE_EDIT_SINGLE_WRITER, SOURCE_ARCHIVE_USER_AGENT |
-| Candidate SHA (สำหรับทดสอบบนสำเนา) | PR #135 head `d355d901c7818a83efe58446f67d3bc73f0c879c` |
+| Candidate SHA (สำหรับทดสอบบนสำเนา) | PR #135 head `e9b467e` (ก่อนหน้า `d355d90`) |
 
 **ก่อนเริ่มต้องตรวจซ้ำ (fresh preflight):** deployment ID, commit, volume ID, replica = 1, ไม่มี staged change — ถ้าไม่ตรงตารางนี้ ให้ STOP
 
@@ -46,7 +46,7 @@ Tool gap ที่ทำให้ต้องเป็น Work: ต้องเ�
 4. **Encrypt + off-volume:** เข้ารหัสด้วยกุญแจที่ Owner ถือผ่านช่องทาง secure, เก็บนอก volume (เช่น private Drive/Object store ที่ Owner อนุมัติ); บันทึก ciphertext SHA-256 + storage receipt
 5. **Resume:** เปิด sync/writer กลับสถานะเดิม; ตรวจ `/api/health`, deployment ID เดิม, sync running
 6. **Isolated restore:** decrypt + restore ลงสภาพแวดล้อมแยก (ไม่ใช่ M4, ไม่ใช่ Production volume); รัน `PRAGMA integrity_check`, `PRAGMA foreign_key_check`, นับ row ตารางหลัก, ยืนยัน schema `account.issuer` + index ตรงกับที่ระบุ
-7. **ซ้อม schema cleanup บนสำเนา:** เขียน procedure ที่ (ก) เก็บ account identity, password hash, OAuth clients/consents/tokens และตาราง/index อื่นทั้งหมด (ข) จัดการ `account.issuer` NOT NULL + `account_issuer_accountId_uidx` (ค) มี rollback procedure; รันบนสำเนา แล้วบูต candidate `d355d90` บนสำเนาเพื่อตรวจ admin sign-in + OAuth metadata
+7. **ซ้อม schema cleanup บนสำเนา** ด้วย `scripts/account-issuer-cleanup.mjs` (PR #135 `e9b467e`, CI run `41172276011` ผ่าน; อยู่ใน image ที่ `/app/account-issuer-cleanup.mjs`) — procedure ที่ (ก) เก็บ account identity, password hash, OAuth clients/consents/tokens และตาราง/index อื่นทั้งหมด (ข) จัดการ `account.issuer` NOT NULL + `account_issuer_accountId_uidx` (ค) มี rollback procedure; รันบนสำเนา แล้วบูต candidate `d355d90` บนสำเนาเพื่อตรวจ admin sign-in + OAuth metadata
 8. ส่ง procedure + ผล diff schema ก่อน/หลัง เป็น artifact (ไม่มีข้อมูลผู้ใช้/secret)
 
 ## 5. Permissions and hard stops
