@@ -2,7 +2,7 @@
 task_id: IOS-RETURN-SEC-004
 executor: Claude Code (แทน Codex; Owner อนุมัติ 2026-10-31)
 as_of: 2026-10-31
-outcome: PENDING_CI
+outcome: COMPLETED (CI_PASSED on f07d037)
 execution_target: PR #136 branch feat/ri011-readonly-hybrid-reconcile-20261031
 ---
 # IOS Return — Rebase PR #136 บน PR #135
@@ -26,5 +26,5 @@ Force push ใช้ `--force-with-lease` ผูกกับ head เดิม `
 ไม่ merge, ไม่ deploy, ไม่แตะ Railway/Vault/variables
 
 ## Next
-- CI บน `f07d037`
+- CI run 41169324203 บน `f07d037`: audit ✅ test ✅ image ✅
 - หลัง #135 squash-merge → retarget #136 เป็น `main` และ rebase อีกครั้ง (squash ตัด ancestry)
