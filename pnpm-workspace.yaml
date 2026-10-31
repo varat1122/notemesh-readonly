@@ -23,18 +23,14 @@ overrides:
   body-parser: ^2.4.0 # GHSA-27r3-jxmh-p828
   vite: ^6.4.4 # GHSA-587h-7wmj-h5pm; preserve the framework Vite major
   zod: ^4.6.6 # GHSA-mrhx-c7xc-m3w5; compatibility verified by regression suite
+  node-forge: 1.4.2 # Fix 2026 high advisories; pinned patch for Vinxi/listhen transitive TLS helper
 
 # CI fails on a high or critical advisory in a production dependency. An
 # advisory that has been reviewed and found not to apply goes here, with
 # the reason, and comes out when the fix lands.
 audit:
-  # Reviewed 2026-10-16: only Vinxi/listhen's development TLS helper uses
-  # node-forge; only build-time glob tooling uses braces. Production starts
-  # .output/server/index.mjs directly. The build and Docker runtime scans fail
-  # if either package/import enters .output or the installed ob CLI tree.
-  # No server request or vault pattern reaches these build tools. Remove these
-  # entries when upstream fixes publish; do not run vinxi dev/start in production.
-  # Details and limits: docs/SAFE_EDIT_TEST_REPORT.md.
+  # The former node-forge advisory exception is removed because the
+  # transitive package is now pinned to patched 1.4.2. The remaining braces
+  # exception is separately reviewed under docs/SAFE_EDIT_TEST_REPORT.md.
   ignore:
-    - GHSA-86w9-cpqp-85rv # node-forge / CVE-2026-85393
     - GHSA-vfj7-8cjw-p6xm # braces / CVE-2026-93687
