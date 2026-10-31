@@ -210,4 +210,28 @@ describe("RI-011 E2E Research + Safe Edit real MCP on isolated temporary Vault",
       expect(done.steps.map(x=>x.state)).toEqual(["verified_existing","verified_existing"]);
     }finally{await close();}
   });
+  it("a separate URL/date-matched Source still HOLDs a Review even if its own Source receipt is valid",async()=>{
+    await seed("01_Companies/MU.md","# MU synthetic company hub\n");
+    const {safeClient,close}=await connect();
+    try{
+      const invalid={...input,researchReview:{...review,counterEvidenceTh:"not Thai"}};
+      const before=await prepare(safeClient,invalid);
+      expect(before.previews).toHaveLength(1);
+      const capture=await apply(safeClient,invalid,before);
+      expect(capture.steps[0].state).toBe("verified_existing");
+      const other="00_Inbox/ChatGPT/Investment Intake - IN-1111111111111111.md";
+      await seed(other,[
+        "---","type: investment_source_intake","intake_id: IN-1111111111111111",
+        "company: MU","source_url: "+sourceUrl,"event_date: 2026-10-22",
+        "verification: not_reverified","---","# MU alternative source event"
+      ].join("\n"));
+      const held=await prepare(safeClient,input);
+      expect(held.steps.map(x=>x.state)).toEqual(["verified_existing","hold_event_review"]);
+      expect(held.previews).toHaveLength(0);
+      expect(held.workflowStatus).toBe("hold_source_event_review");
+      expect(fs.existsSync(path.join(vault,held.steps[1].path))).toBe(false);
+      expect(fs.existsSync(path.join(vault,other))).toBe(true);
+    }finally{await close();}
+  });
+
 });
