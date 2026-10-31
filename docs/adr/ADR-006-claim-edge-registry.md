@@ -1,7 +1,8 @@
 ---
 adr: 006
 title: Claim and typed-edge registry
-status: PROPOSED
+status: ACCEPTED
+accepted: 2026-10-31 (Owner, in chat)
 date: 2026-10-31
 relates_to: Blueprint v1.0 §05.3, §08
 ---
@@ -28,4 +29,4 @@ relates_to: Blueprint v1.0 §05.3, §08
 - − ขั้น B ต้องมี rebuild job + test ว่า table ตรงกับ Note
 
 ## Owner approval
-ยังไม่อนุมัติ
+ACCEPTED โดย Owner 2026-10-31 (อนุมัติ ADR ทั้งชุดในแชต) — การอนุมัติ ADR ไม่เปิดสิทธิ์ deploy, ค่าใช้จ่าย หรือ provider ใหม่

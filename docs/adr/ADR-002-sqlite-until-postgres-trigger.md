@@ -1,7 +1,8 @@
 ---
 adr: 002
 title: SQLite until a PostgreSQL trigger is met
-status: PROPOSED
+status: ACCEPTED
+accepted: 2026-10-31 (Owner, in chat)
 date: 2026-10-31
 deviates_from: Blueprint v1.0 §05.1 (PostgreSQL as canonical relational store)
 ---
@@ -34,4 +35,4 @@ deviates_from: Blueprint v1.0 §05.1 (PostgreSQL as canonical relational store)
 `src/server/db.ts`, `docs/INVESTMENT_DATA_ARCHITECTURE.md` (ย่อหน้า SQLite/PostgreSQL)
 
 ## Owner approval
-ยังไม่อนุมัติ
+ACCEPTED โดย Owner 2026-10-31 (อนุมัติ ADR ทั้งชุดในแชต) — การอนุมัติ ADR ไม่เปิดสิทธิ์ deploy, ค่าใช้จ่าย หรือ provider ใหม่

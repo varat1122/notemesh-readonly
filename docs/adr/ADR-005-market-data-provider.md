@@ -1,7 +1,8 @@
 ---
 adr: 005
 title: Market data provider policy
-status: PROPOSED
+status: ACCEPTED
+accepted: 2026-10-31 (Owner, in chat)
 date: 2026-10-31
 relates_to: Blueprint v1.0 §04, §21.4
 ---
@@ -24,4 +25,4 @@ relates_to: Blueprint v1.0 §04, §21.4
 - งาน Quant production ถูก block จนกว่า provider ผ่าน checklist + Owner อนุมัติ
 
 ## Owner approval
-ยังไม่อนุมัติ (ต้องอนุมัติ provider + budget แยกต่างหาก)
+ACCEPTED โดย Owner 2026-10-31 (อนุมัติ ADR ทั้งชุดในแชต) — การอนุมัติ ADR ไม่เปิดสิทธิ์ deploy, ค่าใช้จ่าย หรือ provider ใหม่

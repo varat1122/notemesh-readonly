@@ -1,7 +1,8 @@
 ---
 adr: 001
 title: Core runtime — TypeScript + MCP server
-status: PROPOSED
+status: ACCEPTED
+accepted: 2026-10-31 (Owner, in chat)
 date: 2026-10-31
 deviates_from: Blueprint v1.0 §02.2 (Python + FastAPI)
 ---
@@ -30,4 +31,4 @@ Blueprint เสนอ Python/FastAPI แต่ระบบที่ทำงา
 ไม่มีแผนย้าย จะทบทวนเมื่อ MCP SDK/Vinxi หยุดดูแล หรือมีข้อจำกัดที่ทำให้ gate ผ่านไม่ได้
 
 ## Owner approval
-ยังไม่อนุมัติ
+ACCEPTED โดย Owner 2026-10-31 (อนุมัติ ADR ทั้งชุดในแชต) — การอนุมัติ ADR ไม่เปิดสิทธิ์ deploy, ค่าใช้จ่าย หรือ provider ใหม่
