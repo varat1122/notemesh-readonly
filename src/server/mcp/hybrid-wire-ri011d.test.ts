@@ -74,7 +74,7 @@ function parseResponse(response: unknown) {
     status: string;
     classification: string;
     indexed: { exactMatches: number };
-    historical: { candidates: Array<{ path: string; title: string; snippet: string }>; notExhaustive: boolean };
+    historical: { candidates: Array<{ path: string; title: string; snippet: string; readbackStartLine:number|null; provenance:{declaredVerification:string|null;linkedSourceIndexed:boolean;linkedIntakeIdMatches:boolean|null;originalDocumentVerifiedThisRun:false} }>; notExhaustive: boolean };
     gates: {
       sourceAuthenticated: boolean; canAutoWrite: boolean;
       canEditThesis: boolean; canEditPortfolio: boolean;
@@ -185,6 +185,34 @@ describe("RI-011D hybrid reconciliation over real MCP read-only transport", () =
       expect(out.gates.canAutoWrite).toBe(false);
     }finally{await client.close();await server.close();}
     expect(digest()).toBe(prior);
+  });
+
+  it("preserves Review-to-Source chain through MCP without promoting a declared Verified label", async()=>{
+    const sourcePath="00_Inbox/ChatGPT/Investment Intake - IN-WIRE-001.md";
+    const reviewPath="10_Knowledge/Company Research/MSFT wire provenance.md";
+    await add(sourcePath,["---","type: investment_source_intake","intake_id: IN-WIRE-001",
+      "source_text_sha256: "+"b".repeat(64),"verification: not_reverified","---",
+      "# MSFT FY26Q4 original source excerpt"].join("\n"));
+    await add(reviewPath,["---","type: investment_research_review","intake_id: IN-WIRE-001",
+      "verification: verified_against_primary","original_source_path: "+sourcePath,
+      "published_at: 2026-07-29","original_document_access: excerpt_only",
+      "---","# MSFT FY26Q4 Research Review",
+      "The commercial RPO value 678 is quoted from the historical archive, not independently checked by this tool."].join("\n"));
+    const before=digest();
+    const {client,server}=await connect(true);
+    try{
+      const result=parseResponse(await client.callTool({name:"preview_hybrid_claim_reconciliation",arguments:baseArgs}));
+      const item=result.historical.candidates.find(x=>x.path===reviewPath);
+      expect(item).toBeDefined();
+      expect(item?.provenance.declaredVerification).toBe("verified_against_primary");
+      expect(item?.provenance.linkedSourceIndexed).toBe(true);
+      expect(item?.provenance.linkedIntakeIdMatches).toBe(true);
+      expect(item?.provenance.originalDocumentVerifiedThisRun).toBe(false);
+      expect(item?.readbackStartLine).toBeGreaterThan(0);
+      expect(result.gates.sourceAuthenticated).toBe(false);
+      expect(result.gates.canEditPortfolio).toBe(false);
+    }finally{await client.close();await server.close();}
+    expect(digest()).toBe(before);
   });
 
 });

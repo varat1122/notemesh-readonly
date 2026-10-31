@@ -174,4 +174,110 @@ describe("RI-011 read-only hybrid adapter",()=>{
     expect(r.historical.queries[1].represented).toBe(1);
   });
 
+  it("returns indexed Source→Review lineage, dates and cited text lines without verifying original bytes",async()=>{
+    const sourcePath="00_Inbox/ChatGPT/Investment Intake - IN-RI011-001.md";
+    const reviewPath="10_Knowledge/Company Research/Investment Review - AMD - IN-RI011-001.md";
+    await add(sourcePath,[
+      "---","type: investment_source_intake","intake_id: IN-RI011-001",
+      "verification: not_reverified","source_type: user_supplied",
+      "source_kind: news_media","event_date: 2026-06-27",
+      "published_at: 2026-07-01","source_text_sha256: "+"a".repeat(64),
+      "---","# AMD original-language excerpt","AMD source document is attributed, not authenticated."].join("\n"));
+    await add(reviewPath,[
+      "---","type: investment_research_review","intake_id: IN-RI011-001",
+      "verification: verified_against_primary","source_type: chatgpt_analysis",
+      "source_kind: news_media","event_date: 2026-06-27",
+      "published_at: 2026-07-01","received_at: 2026-07-02",
+      "original_document_access: excerpt_only",
+      "original_source_path: "+sourcePath,
+      "---","# AMD audit-trail provenance_ri011",
+      ...Array.from({length:35},()=>"Historical context about supply chain without original receipt"),
+      "AMD provenance_ri011 late supporting context without publisher authentication"
+    ].join("\n"));
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const result=hybridClaimPreview({...Q,searchQueries:["AMD provenance_ri011"],maxFtsHits:6});
+    const item=result.historical.candidates.find(x=>x.path===reviewPath);
+    expect(item).toBeDefined();
+    expect(item?.provenance.recordType).toBe("investment_research_review");
+    expect(item?.provenance.declaredVerification).toBe("verified_against_primary");
+    expect(item?.provenance.originalDocumentAccess).toBe("excerpt_only");
+    expect(item?.provenance.eventDate).toBe("2026-06-27");
+    expect(item?.provenance.publicationDate).toBe("2026-07-01");
+    expect(item?.provenance.receivedDate).toBe("2026-07-02");
+    expect(item?.provenance.linkedSourcePath).toBe(sourcePath);
+    expect(item?.provenance.linkedSourceIndexed).toBe(true);
+    expect(item?.provenance.linkedIntakeIdMatches).toBe(true);
+    expect(item?.provenance.linkedSourceTextSha256Present).toBe(true);
+    expect(item?.provenance.originalDocumentVerifiedThisRun).toBe(false);
+    expect(item?.readbackStartLine).toBeGreaterThan(1);
+    expect(item?.readbackEndLine).toBeGreaterThanOrEqual(item?.readbackStartLine??0);
+    expect(result.gates.sourceAuthenticated).toBe(false);
+  });
+  it("discloses an intake-ID lineage contradiction without pretending source linkage proves a duplicate",async()=>{
+    const sourcePath="00_Inbox/ChatGPT/Investment Intake - IN-RI011-XYZ.md";
+    await add(sourcePath,[
+      "---","type: investment_source_intake","intake_id: IN-RI011-ORIGINAL",
+      "verification: not_reverified","---","# AMD source lineage conflict"
+    ].join("\n"));
+    const reviewPath="10_Knowledge/Company Research/Investment Review - AMD - IN-RI011-MISMATCH.md";
+    await add(reviewPath,[
+      "---","type: investment_research_review","intake_id: IN-RI011-DIFFERENT",
+      "verification: not_reverified",
+      "original_source_path: "+sourcePath,"---","# AMD provenance_conflict_ri011",
+      "AMD provenance_conflict_ri011 review linking the wrong intake identifier"
+    ].join("\n"));
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,searchQueries:["AMD provenance_conflict_ri011"]});
+    const item=r.historical.candidates.find(x=>x.path===reviewPath);
+    expect(item?.provenance.linkedSourceIndexed).toBe(true);
+    expect(item?.provenance.linkedIntakeIdMatches).toBe(false);
+    expect(r.historical.lineageWarnings).toContainEqual({path:reviewPath,reason:"linked_intake_id_mismatch"});
+    expect(item?.provenance.originalDocumentVerifiedThisRun).toBe(false);
+    expect(r.gates.semanticDuplicateAdjudicated).toBe(false);
+  });
+  it("reports missing Source record and absent note frontmatter without inventing lineage or dates",async()=>{
+    await add("07_Sources/ChatGPT/Entries/AMD no frontmatter.md",
+      "# AMD provenance_missing_ri011 archive historical information");
+    const reviewPath="10_Knowledge/Company Research/AMD missing source.md";
+    await add(reviewPath,[
+      "---","type: investment_research_review","intake_id: RI011-555",
+      "original_source_path: 00_Inbox/ChatGPT/not-written-ri011.md","---",
+      "# AMD provenance_missing_ri011 secondary analysis"
+    ].join("\n"));
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,searchQueries:["AMD provenance_missing_ri011"]});
+    const item=r.historical.candidates.find(x=>x.path===reviewPath);
+    const archive=r.historical.candidates.find(x=>x.path.includes("no frontmatter"));
+    expect(item?.provenance.linkedSourceIndexed).toBe(false);
+    expect(r.historical.lineageWarnings).toContainEqual({path:reviewPath,reason:"linked_source_not_indexed"});
+    expect(item?.provenance.linkedIntakeIdMatches).toBeNull();
+    expect(item?.provenance.publicationDate).toBeNull();
+    expect(archive?.provenance.metadataState).toBe("indexed_no_frontmatter");
+    expect(archive?.readbackStartLine).toBeGreaterThan(0);
+    expect(r.gates.canEditThesis).toBe(false);
+  });
+
+  it("finds explicitly labeled primary URLs in an old evidence note only as unverified locators",async()=>{
+    const path="08_Daily_Weekly/Research Indexes/Primary Evidence - AMD historical.md";
+    await add(path,[
+      "---","type: primary_ir_evidence_review","company: AMD",
+      "verification: verified_against_primary","published_at: 2026-07-29",
+      "---","# AMD 2026Q2 provenance_labeled_ri011",
+      "**Issuer primary URL:** https://investor.example.org/quarterly-results/2026/q2",
+      "Secondary background link: https://unrelated.example.org/another-company",
+      "**Source:** https://investor.example.org/quarterly-results/2026/q2",
+      "Historical headline only; original URL was not fetched by this tool"
+    ].join("\n"));
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,searchQueries:["AMD provenance_labeled_ri011"]});
+    const c=r.historical.candidates.find(x=>x.path===path);
+    expect(c?.provenance.sourceUrl).toBeNull();
+    expect(c?.provenance.bodyLabeledSourceUrls).toEqual([
+      "https://investor.example.org/quarterly-results/2026/q2"
+    ]);
+    expect(c?.provenance.bodyUrlLookupTruncated).toBe(false);
+    expect(c?.provenance.originalDocumentVerifiedThisRun).toBe(false);
+    expect(r.gates.claimVerifiedAgainstOriginal).toBe(false);
+  });
+
 });

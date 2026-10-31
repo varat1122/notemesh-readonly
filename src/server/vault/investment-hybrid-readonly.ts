@@ -6,6 +6,7 @@
 import { reviewInvestmentClaim, type IncomingClaim } from "./investment-claim-review";
 import { searchVault } from "./queries";
 import { readNoteRange } from "./notes";
+import { db } from "../db";
 
 type Unit = { kind:string; scale:bigint };
 const UNITS:Readonly<Record<string,Unit>> = {
@@ -45,6 +46,88 @@ export function comparableSource(s:unknown):string|null{
     u.searchParams.sort();
     return u.toString();
   }catch{return null;}
+}
+
+
+/** Untrusted indexed frontmatter: provenance hints, NOT source authentication. */
+type Provenance = {
+  metadataState:"indexed"|"indexed_no_frontmatter"|"invalid_metadata"|"not_indexed";
+  recordType:string|null; declaredVerification:string|null;
+  declaredSourceType:string|null; declaredSourceKind:string|null;
+  eventDate:string|null; publicationDate:string|null; receivedDate:string|null;
+  originalDocumentAccess:string|null; sourceUrl:string|null;
+  linkedSourcePath:string|null; linkedSourceIndexed:boolean;
+  linkedIntakeIdMatches:boolean|null; linkedSourceTextSha256Present:boolean;
+  originalDocumentVerifiedThisRun:false; linkedSourceReadThisRun:false;
+  bodyLabeledSourceUrls:string[]; bodyUrlLookupTruncated:boolean;
+};
+function provenanceFor(notePath:string):Provenance{
+  const q=db().prepare("SELECT frontmatter FROM notes WHERE path=?");
+  const row=q.get(notePath) as {frontmatter:string|null}|undefined;
+  const result:Provenance={
+    metadataState:!row?"not_indexed":"indexed_no_frontmatter",
+    recordType:null,declaredVerification:null,declaredSourceType:null,declaredSourceKind:null,
+    eventDate:null,publicationDate:null,receivedDate:null,originalDocumentAccess:null,
+    sourceUrl:null,linkedSourcePath:null,linkedSourceIndexed:false,linkedIntakeIdMatches:null,
+    linkedSourceTextSha256Present:false,originalDocumentVerifiedThisRun:false,linkedSourceReadThisRun:false,
+    bodyLabeledSourceUrls:[],bodyUrlLookupTruncated:true
+  };
+  if(!row?.frontmatter)return result;
+  let fm:Record<string,unknown>;
+  try{
+    const data=JSON.parse(row.frontmatter) as unknown;
+    if(!data||typeof data!=="object"||Array.isArray(data))throw Error("invalid");
+    fm=data as Record<string,unknown>;
+  }catch{return {...result,metadataState:"invalid_metadata"};}
+  // Preserve declared text exactly (bounded); never treat labels as verified.
+  const val=(x:unknown,max=300)=>typeof x==="string"&&x.trim()&&x.length<=max?x.trim():null;
+  result.metadataState="indexed";
+  result.recordType=val(fm.type);
+  result.declaredVerification=val(fm.verification);
+  result.declaredSourceType=val(fm.source_type);
+  result.declaredSourceKind=val(fm.source_kind);
+  result.eventDate=val(fm.event_date,70);
+  result.publicationDate=val(fm.published_at,70);
+  result.receivedDate=val(fm.received_at,70);
+  result.originalDocumentAccess=val(fm.original_document_access);
+  result.sourceUrl=val(fm.source_url,1000)??val(fm.original_source,1000)??val(fm.primary_url,1000);
+  const sourcePath=val(fm.original_source_path,600);
+  if(sourcePath){
+    result.linkedSourcePath=sourcePath;
+    const linked=q.get(sourcePath) as {frontmatter:string|null}|undefined;
+    result.linkedSourceIndexed=!!linked;
+    if(linked?.frontmatter){
+      try{
+        const parsed=JSON.parse(linked.frontmatter) as unknown;
+        if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed)){
+          const linkedFm=parsed as Record<string,unknown>;
+          const reviewId=val(fm.intake_id,140),sourceId=val(linkedFm.intake_id,140);
+          if(reviewId&&sourceId)result.linkedIntakeIdMatches=reviewId===sourceId;
+          result.linkedSourceTextSha256Present=typeof linkedFm.source_text_sha256==="string"&&
+            /^[a-f0-9]{64}$/i.test(linkedFm.source_text_sha256);
+        }
+      }catch{/* invalid linked metadata is not a verified provenance chain */}
+    }
+  }
+  return result;
+}
+
+
+/** Attributed Source URLs explicitly labelled *inside* old note text.
+ * No fetch and no authority assertion: these are follow-up locators only. */
+function labeledSourceUrls(body:string):string[]{
+  const urls:string[]=[];
+  const pattern=/(?:Issuer primary URL|Original company IR source|Original source|Source)\s*\*{0,2}\s*[:：]\s*\*{0,2}\s*(https:\/\/[^\s<>)]+)/gi;
+  for(const match of body.slice(0,12000).matchAll(pattern)){
+    const candidate=match[1].replace(/[.,;]+$/,"");
+    try{
+      const url=new URL(candidate);
+      if(url.protocol!=="https:"||url.username||url.password||!url.hostname||candidate.length>1000)continue;
+      if(!urls.includes(candidate))urls.push(candidate);
+      if(urls.length===3)break;
+    }catch{/* untrusted malformed locator: leave absent */}
+  }
+  return urls;
 }
 
 export interface HybridInput extends IncomingClaim { searchQueries?:string[]; maxFtsHits?:number }
@@ -100,7 +183,7 @@ export function hybridClaimPreview(input:HybridInput){
     `${input.entity} ${input.metric}`
   ]).map(q=>q.trim()).filter(q=>q.length>=3&&q.length<=120))].slice(0,5);
   const requestedLimit=Math.min(10,Math.max(1,input.maxFtsHits??6));
-  const results:{path:string;title:string;query:string;snippet:string;readExcerpt:string;modified:string;readbackMatchFound:boolean;readbackTruncated:boolean}[]=[];
+  const results:{path:string;title:string;query:string;snippet:string;readExcerpt:string;modified:string;readbackMatchFound:boolean;readbackTruncated:boolean;readbackStartLine:number|null;readbackEndLine:number|null;provenance:Provenance}[]=[];
   const seen=new Set<string>();
   const coverage:{query:string;total:number;selected:number;represented:number;error?:string}[]=[];
   // A single broad query previously monopolized the global candidate budget:
@@ -133,9 +216,13 @@ export function hybridClaimPreview(input:HybridInput){
     // FTS provides a location-aware snippet; reading just the first lines
     // of a long note is not enough to rule out historical claims.
     let readExcerpt=hit.snippet.slice(0,800),readbackMatchFound=false,readbackTruncated=true;
+    let readbackStartLine:number|null=null,readbackEndLine:number|null=null;
+    let bodyLabeledSourceUrls:string[]=[],bodyUrlLookupTruncated=true;
     try{
       const chunk=readNoteRange(hit.path,{limit:2000});
       readbackTruncated=chunk.hasMore||!!chunk.truncatedForSize;
+      bodyUrlLookupTruncated=readbackTruncated||chunk.content.length>12000;
+      bodyLabeledSourceUrls=labeledSourceUrls(chunk.content);
       const lower=chunk.content.toLowerCase();
       const scoped=[compactPeriod,...periodAliases].map(x=>x.toLowerCase());
       const demanded=scoped.find(term=>term.length>0&&query.toLowerCase().includes(term));
@@ -143,11 +230,23 @@ export function hybridClaimPreview(input:HybridInput){
       const found=terms.map(term=>({term,index:lower.indexOf(term.toLowerCase())}))
         .find(x=>x.index>=0);
       if(found){const offset=Math.max(0,found.index-240);
-        readExcerpt=chunk.content.slice(offset,offset+800);readbackMatchFound=true;}
+        readExcerpt=chunk.content.slice(offset,offset+800);readbackMatchFound=true;
+        readbackStartLine=chunk.offset+1+chunk.content.slice(0,offset).split("\n").length-1;
+        readbackEndLine=readbackStartLine+readExcerpt.split("\n").length-1;
+      }
     }catch{/* stale index or unreadable note; retain the FTS candidate only */}
     results.push({path:hit.path,title:hit.title,query,snippet:hit.snippet.slice(0,320),readExcerpt,modified:hit.modified,
-      readbackMatchFound,readbackTruncated});
+      readbackMatchFound,readbackTruncated,readbackStartLine,readbackEndLine,
+      provenance:{...provenanceFor(hit.path),bodyLabeledSourceUrls,bodyUrlLookupTruncated}});
   }
+  // These are deterministic integrity warnings, not a broker/issuer truth verdict.
+  type LineageWarning={path:string;reason:"linked_intake_id_mismatch"|"linked_source_not_indexed"};
+  const lineageWarnings=results.flatMap<LineageWarning>(x=>{
+    const p=x.provenance;
+    if(p.linkedIntakeIdMatches===false)return [{path:x.path,reason:"linked_intake_id_mismatch" as const}];
+    if(p.linkedSourcePath&&!p.linkedSourceIndexed)return [{path:x.path,reason:"linked_source_not_indexed" as const}];
+    return [];
+  });
   if(state==="UNRESOLVED_NEEDS_ORIGINAL"&&results.length)state="HISTORICAL_NOTE_CANDIDATE";
   return {
     status:"READ_ONLY_RESEARCH_PREVIEW_NOT_VERIFIED_NOT_SAVED" as const,
@@ -162,7 +261,7 @@ export function hybridClaimPreview(input:HybridInput){
       // by the shared limit; surface that lost coverage explicitly.
       searchTruncated:coverage.some(x=>x.total>x.represented),
       selectionStrategy:"round_robin_per_query" as const,
-      periodAliasesUsed:periodAliases},
+      periodAliasesUsed:periodAliases,lineageWarnings},
     gates:{sourceAuthenticated:false,claimVerifiedAgainstOriginal:false,semanticDuplicateAdjudicated:false,
       independentEvidenceEstablished:false,canAutoWrite:false,canEditThesis:false,canEditPortfolio:false},
     nextAction:"ANALYST_MUST_COMPARE_ORIGINAL_AND_HISTORY_BEFORE_CANONICAL_WRITEBACK" as const,
@@ -170,6 +269,8 @@ export function hybridClaimPreview(input:HybridInput){
       "When structured candidate/metadata limits are reached, HOLD rather than certifying a duplicate.",
       "Multiple queries share a hard candidate budget; selection is interleaved, and omitted hits remain possible evidence.",
       "Exact/normalized amount equality does not verify accounting basis, publisher, reported period, independent evidence, or thesis impact.",
+      "Provenance fields are declared in indexed frontmatter; a linked Source path or hash-like field does not prove original bytes, independent evidence, or remote authenticity.",
+      "A URL extracted from a source-labelled line in an old note is only an unverified locator; it is never fetched or independently authenticated.",
       "No schema changes, network requests, Vault writes, or owner approvals were performed."]
   };
 }
