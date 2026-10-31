@@ -257,4 +257,27 @@ describe("RI-011 read-only hybrid adapter",()=>{
     expect(r.gates.canEditThesis).toBe(false);
   });
 
+  it("finds explicitly labeled primary URLs in an old evidence note only as unverified locators",async()=>{
+    const path="08_Daily_Weekly/Research Indexes/Primary Evidence - AMD historical.md";
+    await add(path,[
+      "---","type: primary_ir_evidence_review","company: AMD",
+      "verification: verified_against_primary","published_at: 2026-07-29",
+      "---","# AMD 2026Q2 provenance_labeled_ri011",
+      "**Issuer primary URL:** https://investor.example.org/quarterly-results/2026/q2",
+      "Secondary background link: https://unrelated.example.org/another-company",
+      "**Source:** https://investor.example.org/quarterly-results/2026/q2",
+      "Historical headline only; original URL was not fetched by this tool"
+    ].join("\n"));
+    const {hybridClaimPreview}=await import("./investment-hybrid-readonly");
+    const r=hybridClaimPreview({...Q,searchQueries:["AMD provenance_labeled_ri011"]});
+    const c=r.historical.candidates.find(x=>x.path===path);
+    expect(c?.provenance.sourceUrl).toBeNull();
+    expect(c?.provenance.bodyLabeledSourceUrls).toEqual([
+      "https://investor.example.org/quarterly-results/2026/q2"
+    ]);
+    expect(c?.provenance.bodyUrlLookupTruncated).toBe(false);
+    expect(c?.provenance.originalDocumentVerifiedThisRun).toBe(false);
+    expect(r.gates.claimVerifiedAgainstOriginal).toBe(false);
+  });
+
 });
