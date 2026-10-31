@@ -23,7 +23,6 @@ overrides:
   body-parser: ^2.4.0 # GHSA-27r3-jxmh-p828
   vite: ^6.4.4 # GHSA-587h-7wmj-h5pm; preserve the framework Vite major
   zod: ^4.6.6 # GHSA-mrhx-c7xc-m3w5; compatibility verified by regression suite
-  node-forge: 1.4.2 # new high-severity Forge advisories; transitive Vinxi/listhen only; verify via fresh audit
   node-forge: 1.4.2 # Fix 2026 high advisories; pinned patch for Vinxi/listhen transitive TLS helper
 
 # CI fails on a high or critical advisory in a production dependency. An
