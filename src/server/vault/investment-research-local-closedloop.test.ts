@@ -139,4 +139,32 @@ describe("RI-011 evidence discovery -> M5.3 safe edit -> readback",()=>{
   expect(after.safeEditWorkflow?.readyForNextNews).toBe(false);
   expect(fs.readFileSync(path.join(vault,prior),"utf8")).toContain("not_reverified");
  });
+ it("does not report saved_verified if the Review-to-Source indexed backlink disappears despite matching file SHA and FTS",async()=>{
+  await seed("01_Companies/TSMC.md","# TSMC company hub");
+  const first=await plan();
+  expect(first.safeEditWorkflow?.steps.map(s=>s.state)).toEqual(["needs_create","needs_create"]);
+  const paths=await replay(first.safeEditWorkflow!.steps);
+  const good=await plan();
+  expect(good.safeEditWorkflow?.status).toBe("saved_verified");
+  const {db}=await import("../db");
+  const before=db().prepare("SELECT COUNT(*) AS n FROM links WHERE source_path=? AND resolved_path=?")
+    .get(paths[1],paths[0]) as {n:number};
+  expect(before.n).toBeGreaterThan(0);
+  // Simulate a stale or broken Obsidian graph index without modifying any note.
+  db().prepare("DELETE FROM links WHERE source_path=? AND resolved_path=?").run(paths[1],paths[0]);
+  const broken=await plan();
+  expect(broken.safeEditWorkflow?.status).toBe("hold_conflict_or_index");
+  expect(broken.safeEditWorkflow?.steps[0].state).toBe("verified_existing");
+  expect(broken.safeEditWorkflow?.steps[1].state).toBe("hold_index_repair");
+  expect(broken.safeEditWorkflow?.steps[1].readbackVerified).toBe(true);
+  expect(broken.safeEditWorkflow?.steps[1].searchable).toBe(true);
+  expect(broken.safeEditWorkflow?.readyForNextNews).toBe(false);
+  expect(broken.safeEditWorkflow?.steps[1].safeEditRequest).toBeNull();
+  const {reindexPath}=await import("./indexer");
+  reindexPath(paths[1]);
+  const repaired=await plan();
+  expect(repaired.safeEditWorkflow).toMatchObject({
+    status:"saved_verified",readyForNextNews:true});
+ });
+
 });
