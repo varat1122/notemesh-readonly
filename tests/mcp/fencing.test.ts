@@ -192,7 +192,10 @@ describe("RI-011 declared provenance", () => {
       expect(value.token).toBe(json.boundary);
       expect(value.inner).toBe(declarations[sourceField]);
     }
-    expect(unfence(item.title).inner).toContain("AMD FY2027Q1");
+    const title = unfence(item.title);
+    expect(title.token).toBe(json.boundary);
+    // The indexer's title is the file stem, not the first Markdown heading.
+    expect(title.inner).toBe("AMD RI011 Hostile Metadata");
     expect(unfence(item.readExcerpt).inner).toContain("net revenue claim");
     expect(item.provenance.metadataState).toBe("indexed");
     expect(item.provenance.linkedSourceIndexed).toBe(true);

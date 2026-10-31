@@ -71,10 +71,12 @@ function parseResponse(response: unknown) {
   const body = result.content?.find(x => x.type === "text")?.text;
   expect(body).toBeTruthy();
   return JSON.parse(body!) as {
+    boundary: string;
+    boundaryNote: string;
     status: string;
     classification: string;
     indexed: { exactMatches: number };
-    historical: { candidates: Array<{ path: string; title: string; snippet: string; readbackStartLine:number|null; provenance:{declaredVerification:string|null;linkedSourceIndexed:boolean;linkedIntakeIdMatches:boolean|null;originalDocumentVerifiedThisRun:false} }>; notExhaustive: boolean };
+    historical: { candidates: Array<{ path: string; title: string; snippet: string; readbackStartLine:number|null; provenance:{declaredVerification:string|null;linkedSourcePath:string|null;linkedSourceIndexed:boolean;linkedIntakeIdMatches:boolean|null;originalDocumentVerifiedThisRun:false} }>; notExhaustive: boolean };
     gates: {
       sourceAuthenticated: boolean; canAutoWrite: boolean;
       canEditThesis: boolean; canEditPortfolio: boolean;
@@ -204,12 +206,19 @@ describe("RI-011D hybrid reconciliation over real MCP read-only transport", () =
       const result=parseResponse(await client.callTool({name:"preview_hybrid_claim_reconciliation",arguments:baseArgs}));
       const item=result.historical.candidates.find(x=>x.path===reviewPath);
       expect(item).toBeDefined();
-      expect(item?.provenance.declaredVerification).toBe("verified_against_primary");
+      expect(result.boundary).toMatch(/^%[0-9a-f]{8}%$/);
+      expect(result.boundaryNote).toContain(result.boundary);
+      expect(item?.provenance.declaredVerification).toBe(
+        `${result.boundary}\nverified_against_primary\n${result.boundary}`,
+      );
+      expect(item?.provenance.linkedSourcePath).toBe(sourcePath);
       expect(item?.provenance.linkedSourceIndexed).toBe(true);
       expect(item?.provenance.linkedIntakeIdMatches).toBe(true);
       expect(item?.provenance.originalDocumentVerifiedThisRun).toBe(false);
       expect(item?.readbackStartLine).toBeGreaterThan(0);
       expect(result.gates.sourceAuthenticated).toBe(false);
+      expect(result.gates.claimVerifiedAgainstOriginal).toBe(false);
+      expect(result.gates.canAutoWrite).toBe(false);
       expect(result.gates.canEditPortfolio).toBe(false);
     }finally{await client.close();await server.close();}
     expect(digest()).toBe(before);
