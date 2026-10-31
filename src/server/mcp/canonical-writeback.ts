@@ -93,8 +93,13 @@ function planned(input: z.infer<typeof canonicalInputSchema>) {
   // old active caller to Source-only during the initial code deployment.
   if(process.env.M55_REQUIRE_TYPED_REVIEW==="1"&&input.captureOnly!==true&&!input.researchReview){
     const review=workflow.steps.find(s=>s.kind==="canonical_review");
-    if(review){review.state="hold_quality_gate";review.safeEditRequest=null;}
-    workflow.status="hold_research_quality";
+    if(review){
+      if(review.state==="needs_create"||review.state==="verified_existing")
+        review.state="hold_quality_gate";
+      review.safeEditRequest=null;
+    }
+    if(workflow.status!=="hold_conflict_or_index"&&workflow.status!=="hold_source_event_review")
+      workflow.status="hold_research_quality";
     workflow.qualityIssues=[...new Set([...workflow.qualityIssues,"typed_research_review_required"])];
     workflow.readyForNextNews=false;
     workflow.analysisComplete=false;
