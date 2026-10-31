@@ -59,6 +59,7 @@ type Provenance = {
   linkedSourcePath:string|null; linkedSourceIndexed:boolean;
   linkedIntakeIdMatches:boolean|null; linkedSourceTextSha256Present:boolean;
   originalDocumentVerifiedThisRun:false; linkedSourceReadThisRun:false;
+  bodyLabeledSourceUrls:string[]; bodyUrlLookupTruncated:boolean;
 };
 function provenanceFor(notePath:string):Provenance{
   const q=db().prepare("SELECT frontmatter FROM notes WHERE path=?");
@@ -68,7 +69,8 @@ function provenanceFor(notePath:string):Provenance{
     recordType:null,declaredVerification:null,declaredSourceType:null,declaredSourceKind:null,
     eventDate:null,publicationDate:null,receivedDate:null,originalDocumentAccess:null,
     sourceUrl:null,linkedSourcePath:null,linkedSourceIndexed:false,linkedIntakeIdMatches:null,
-    linkedSourceTextSha256Present:false,originalDocumentVerifiedThisRun:false,linkedSourceReadThisRun:false
+    linkedSourceTextSha256Present:false,originalDocumentVerifiedThisRun:false,linkedSourceReadThisRun:false,
+    bodyLabeledSourceUrls:[],bodyUrlLookupTruncated:true
   };
   if(!row?.frontmatter)return result;
   let fm:Record<string,unknown>;
@@ -108,6 +110,24 @@ function provenanceFor(notePath:string):Provenance{
     }
   }
   return result;
+}
+
+
+/** Attributed Source URLs explicitly labelled *inside* old note text.
+ * No fetch and no authority assertion: these are follow-up locators only. */
+function labeledSourceUrls(body:string):string[]{
+  const urls:string[]=[];
+  const pattern=/(?:Issuer primary URL|Original company IR source|Original source|Source)\s*\*{0,2}\s*[:：]\s*\*{0,2}\s*(https:\/\/[^\s<>)]+)/gi;
+  for(const match of body.slice(0,12000).matchAll(pattern)){
+    let candidate=match[1].replace(/[.,;]+$/,"");
+    try{
+      const url=new URL(candidate);
+      if(url.protocol!=="https:"||url.username||url.password||!url.hostname||candidate.length>1000)continue;
+      if(!urls.includes(candidate))urls.push(candidate);
+      if(urls.length===3)break;
+    }catch{/* untrusted malformed locator: leave absent */}
+  }
+  return urls;
 }
 
 export interface HybridInput extends IncomingClaim { searchQueries?:string[]; maxFtsHits?:number }
@@ -197,9 +217,12 @@ export function hybridClaimPreview(input:HybridInput){
     // of a long note is not enough to rule out historical claims.
     let readExcerpt=hit.snippet.slice(0,800),readbackMatchFound=false,readbackTruncated=true;
     let readbackStartLine:number|null=null,readbackEndLine:number|null=null;
+    let bodyLabeledSourceUrls:string[]=[],bodyUrlLookupTruncated=true;
     try{
       const chunk=readNoteRange(hit.path,{limit:2000});
       readbackTruncated=chunk.hasMore||!!chunk.truncatedForSize;
+      bodyUrlLookupTruncated=readbackTruncated||chunk.content.length>12000;
+      bodyLabeledSourceUrls=labeledSourceUrls(chunk.content);
       const lower=chunk.content.toLowerCase();
       const scoped=[compactPeriod,...periodAliases].map(x=>x.toLowerCase());
       const demanded=scoped.find(term=>term.length>0&&query.toLowerCase().includes(term));
@@ -213,7 +236,8 @@ export function hybridClaimPreview(input:HybridInput){
       }
     }catch{/* stale index or unreadable note; retain the FTS candidate only */}
     results.push({path:hit.path,title:hit.title,query,snippet:hit.snippet.slice(0,320),readExcerpt,modified:hit.modified,
-      readbackMatchFound,readbackTruncated,readbackStartLine,readbackEndLine,provenance:provenanceFor(hit.path)});
+      readbackMatchFound,readbackTruncated,readbackStartLine,readbackEndLine,
+      provenance:{...provenanceFor(hit.path),bodyLabeledSourceUrls,bodyUrlLookupTruncated}});
   }
   // These are deterministic integrity warnings, not a broker/issuer truth verdict.
   type LineageWarning={path:string;reason:"linked_intake_id_mismatch"|"linked_source_not_indexed"};
@@ -246,6 +270,7 @@ export function hybridClaimPreview(input:HybridInput){
       "Multiple queries share a hard candidate budget; selection is interleaved, and omitted hits remain possible evidence.",
       "Exact/normalized amount equality does not verify accounting basis, publisher, reported period, independent evidence, or thesis impact.",
       "Provenance fields are declared in indexed frontmatter; a linked Source path or hash-like field does not prove original bytes, independent evidence, or remote authenticity.",
+      "A URL extracted from a source-labelled line in an old note is only an unverified locator; it is never fetched or independently authenticated.",
       "No schema changes, network requests, Vault writes, or owner approvals were performed."]
   };
 }
