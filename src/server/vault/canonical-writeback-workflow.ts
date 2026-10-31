@@ -204,6 +204,18 @@ export function buildCanonicalSafeEditWorkflow(
     db().prepare("SELECT 1 FROM notes WHERE path=? LIMIT 1").get(legacy))||Boolean(otherCanonical);
   const sourceStep=toStep("source_intake",rawPath,sourceContent,tag,false);
   const reviewStep=captureOnly?null:toStep("canonical_review",reviewPath,reviewContent,tag,hasSourceMatch||legacyConflict);
+  // Whole-note SHA and FTS prove bytes/indexing, but NOT Obsidian graph integrity.
+  // A canonical Review must have a real resolved backlink to its immutable
+  // Source. An FTS-fresh note with a stale/missing link index is not ready.
+  if(reviewStep?.state==="verified_existing"){
+    const hasResolvedSourceLink=Boolean(db().prepare(
+      "SELECT 1 FROM links WHERE source_path=? AND resolved_path=? LIMIT 1"
+    ).get(reviewPath,rawPath));
+    if(!hasResolvedSourceLink){
+      reviewStep.state="hold_index_repair";
+      reviewStep.safeEditRequest=null;
+    }
+  }
   if(reviewStep&&qualityIssues.length){
     reviewStep.state="hold_quality_gate";
     reviewStep.safeEditRequest=null;
@@ -228,7 +240,7 @@ export function buildCanonicalSafeEditWorkflow(
     instructions:[
       "For each needs_create step, call the existing Safe Edit preview_edit tool with the exact safeEditRequest, then apply_edit using its token and beforeHash, in source-then-review order; never assume this read-only recipe wrote anything.",
       "For captureOnly, save and verify just the attributed raw Source. Return source_saved_analysis_pending, not a completed Research Review. Later retry the SAME source with completedAnalysis to create the linked review without duplicating the Source.",
-      "After each apply, require receipt.write/readback/reindex all verified. Retry by re-running this planner and checking hashes; never overwrite a changed note.",
+      "After each apply, require receipt.write/readback/reindex all verified, plus the indexed canonical Review→Source Obsidian link. Retry by re-running this planner and checking hashes; never overwrite a changed note.",
       "If hold_event_review, reconcile original economic event/source and old broker vintage before a new canonical review. Preserve the raw source independently.",
       "Run this planner again after writes: only saved_verified and readyForNextNews=true prove server file/readback/search index for both required notes. For screenshot/PDF without a hash-verified attachment this is TEXT-ONLY preservation; per-device Obsidian Sync still unverified.",
       "Existing Company/Industry Hub links are bidirectional Obsidian backlinks; this workflow does not imply a material Company Timeline update or revise protected files."
