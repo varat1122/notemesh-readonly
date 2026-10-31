@@ -11,3 +11,9 @@
 - ทุก Return ต้องมี SHA, CI run ID, สิ่งที่ไม่ได้แตะ
 - ไม่มี secret, ไม่มี vendor data, ไม่ merge/deploy จากไฟล์ในโฟลเดอร์นี้
 - ไฟล์ `.md` เป็นหลักฐานการส่งต่อ ไม่ใช่ server receipt
+
+## บทบาท (Owner กำหนด 2026-10-31)
+- **Codex** = ผู้พัฒนาหลัก (Primary Engineer) ของทุก workstream
+- **Claude Code** = ส่วนเสริม + **Independent Verifier**: ตรวจ PR/CI/diff ของ Codex, ตรวจสถานะจริงบน GitHub/Railway แบบ read-only, รายงาน `IOS-VERIFY-<AREA>-<NNN>`; เขียนโค้ดเฉพาะเมื่อได้รับมอบหมาย
+- Claude Code ไม่ push ไป branch ของ Codex, ไม่ comment บน PR โดยไม่ได้สั่ง, ไม่ merge/deploy/แก้ Railway
+- งานที่ Claude ทำไปแล้วบน `ccr-7f1243c0-c9cv8x` (ADR, specialist schema, typed edge) เป็นข้อเสนอให้ Codex รับไปใช้หรือปฏิเสธ
