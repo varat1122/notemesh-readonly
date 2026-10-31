@@ -5,7 +5,7 @@ origin: Investment OS / Claude Code
 primary_executor: Codex
 coordinator: Chat
 mode: ENGINEERING_ISOLATED
-status: WAITING_OWNER_DECISION
+status: OWNER_DECIDED_A_WAITING_PR135
 ---
 # Task: ทำให้ PR #136 ผ่าน audit gate โดยไม่ข้าม audit
 
@@ -15,6 +15,8 @@ PR #136 audit fail เพราะฐาน `main` ขาด security fixes ข�
 - **A.** รอ #135 เข้า main แล้ว rebase #136 (ไม่มีงานซ้ำ)
 - **B.** retarget/rebase #136 บน branch ของ #135 (ผูก #136 กับ #135)
 - **C.** แยก PR เฉพาะ dependency overrides ที่ไม่เกี่ยว better-auth เข้า main ก่อน (better-auth critical ยังต้องรอ #135)
+
+**Owner decision 2026-10-31: A** — รอ PR #135 เข้า main ผ่าน gate ของตัวเอง แล้ว rebase #136; ไม่ทำ B/C
 
 ## 2. Scope
 Repo `varat1122/notemesh-readonly`, PR #136 head `6598e33`. ห้ามแตะ Production/staging/writer flags
