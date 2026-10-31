@@ -119,7 +119,7 @@ function labeledSourceUrls(body:string):string[]{
   const urls:string[]=[];
   const pattern=/(?:Issuer primary URL|Original company IR source|Original source|Source)\s*\*{0,2}\s*[:：]\s*\*{0,2}\s*(https:\/\/[^\s<>)]+)/gi;
   for(const match of body.slice(0,12000).matchAll(pattern)){
-    let candidate=match[1].replace(/[.,;]+$/,"");
+    const candidate=match[1].replace(/[.,;]+$/,"");
     try{
       const url=new URL(candidate);
       if(url.protocol!=="https:"||url.username||url.password||!url.hostname||candidate.length>1000)continue;
