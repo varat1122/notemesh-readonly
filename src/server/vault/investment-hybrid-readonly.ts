@@ -216,7 +216,8 @@ export function hybridClaimPreview(input:HybridInput){
       readbackMatchFound,readbackTruncated,readbackStartLine,readbackEndLine,provenance:provenanceFor(hit.path)});
   }
   // These are deterministic integrity warnings, not a broker/issuer truth verdict.
-  const lineageWarnings=results.flatMap(x=>{
+  type LineageWarning={path:string;reason:"linked_intake_id_mismatch"|"linked_source_not_indexed"};
+  const lineageWarnings=results.flatMap<LineageWarning>(x=>{
     const p=x.provenance;
     if(p.linkedIntakeIdMatches===false)return [{path:x.path,reason:"linked_intake_id_mismatch" as const}];
     if(p.linkedSourcePath&&!p.linkedSourceIndexed)return [{path:x.path,reason:"linked_source_not_indexed" as const}];
