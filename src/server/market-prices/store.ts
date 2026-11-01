@@ -219,11 +219,13 @@ export class PriceStore {
   }
 
   instruments() {
-    return this.db.prepare(`SELECT i.id,i.market,i.symbol,i.yahoo_symbol AS yahooSymbol,i.currency,i.time_zone AS timeZone,
+    const rows=this.db.prepare(`SELECT i.id,i.market,i.symbol,i.yahoo_symbol AS yahooSymbol,i.currency,i.time_zone AS timeZone,
       COUNT(b.date) AS barCount,MIN(b.date) AS firstDate,MAX(b.date) AS lastDate,MAX(b.fetched_at) AS lastFetchedAt,
       (SELECT attempted_at FROM refreshes r WHERE r.instrument_id=i.id AND success=1 ORDER BY id DESC LIMIT 1) AS lastSuccessfulRefresh,
       (SELECT error_code FROM refreshes r WHERE r.instrument_id=i.id ORDER BY id DESC LIMIT 1) AS lastError
-      FROM instruments i LEFT JOIN bars b ON b.instrument_id=i.id GROUP BY i.id ORDER BY i.id`).all();
+      FROM instruments i LEFT JOIN bars b ON b.instrument_id=i.id GROUP BY i.id ORDER BY i.id`).all() as Record<string,unknown>[];
+    return rows.map(row=>({...row,identityStatus:"legacy_price_cache_reference_only",
+      canonicalListingId:null,crossListingConversionAllowed:false}));
   }
 
   read(input: InstrumentInput, start?: string, end?: string, limit = 100) {
@@ -241,11 +243,16 @@ export class PriceStore {
     const qualityIssues = this.db.prepare(`SELECT date,reason,last_seen_at AS lastSeenAt FROM quality_issues
       WHERE instrument_id=? AND date BETWEEN ? AND ? AND resolved_at IS NULL ORDER BY date LIMIT 100`).all(...dates);
     const issueCount = (this.db.prepare(`SELECT COUNT(*) AS n FROM quality_issues WHERE instrument_id=? AND date BETWEEN ? AND ? AND resolved_at IS NULL`).get(...dates) as { n: number }).n;
-    return { instrument: target, policy: PRICE_POLICY, total: count, count: bars.length, truncated: count > bars.length, qualityIssues,
+    return { instrument: target,
+      identity:{status:"legacy_price_cache_reference_only" as const,canonicalListingId:null,
+        crossListingConversionAllowed:false,
+        rule:"Resolve this market:symbol through the dated Instrument Identity Registry before linking issuer/share class or comparing ADR/DR/underlying units."},
+      policy: PRICE_POLICY, total: count, count: bars.length, truncated: count > bars.length, qualityIssues,
       qualityIssueCount: issueCount, qualityIssuesTruncated: issueCount > qualityIssues.length,
       selection: "Latest bars in the inclusive requested range, returned oldest first. Narrow start/end to retrieve earlier history.", bars, actions,
       latestRefresh: this.lastAttempt(input) ?? null,
       warnings: ["No live prices. Do not substitute another listing, ADR or DR.",
+        "market:symbol is not a canonical listing identity; cross-listing conversion is disabled without an explicit dated registry mapping.",
         "Missing trading dates are not filled. Retained rows can have older fetchedAt values; inspect freshness before analysis."] };
   }
 
