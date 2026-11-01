@@ -32,6 +32,11 @@ describe("multilingual read-only writeback router",()=>{
   expect(p.warnings.some(x=>x.includes("'reiterates'"))).toBe(true);
   expect(p.gates.canAutoUpdateThesis).toBe(false);
   expect(p.gates.canAutoWrite).toBe(false);
+  expect(p.canonicalPersistenceAuthority).toMatchObject({
+    status:"diagnostic_planner_not_apply_authority",
+    prepareTool:"prepare_canonical_writeback",
+    applyTool:"apply_canonical_writeback"
+  });
   expect(fs.readdirSync(vault)).toHaveLength(0);
  });
  it("Citi AI connectivity/HDD/NAND multi-issuer preview goes to research without inferred company guidance",async()=>{
