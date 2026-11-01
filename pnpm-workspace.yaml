@@ -19,6 +19,7 @@ overrides:
   seroval: ^1.6.9 # unsafe JSON deserialization and unchecked TypedArray sizes
   source-map-js: ^1.2.2 # indexed source-map section offset DoS
   proxy-addr: ^2.0.8 # IPv4-mapped IPv6 trust-subnet spoofing
+  node-forge: 1.4.2 # patched Vinxi/listhen transitive TLS helper
 
 # CI fails on a high or critical advisory in a production dependency. An
 # advisory that has been reviewed and found not to apply goes here, with
@@ -32,5 +33,4 @@ audit:
   # entries when upstream fixes publish; do not run vinxi dev/start in production.
   # Details and limits: docs/SAFE_EDIT_TEST_REPORT.md.
   ignore:
-    - GHSA-86w9-cpqp-85rv # node-forge / CVE-2026-85393
     - GHSA-vfj7-8cjw-p6xm # braces / CVE-2026-93687
