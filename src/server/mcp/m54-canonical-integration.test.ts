@@ -35,7 +35,7 @@ async function connect(){
   const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(b);await client.connect(a);
   return {client,close:async()=>{await client.close();await server.close();}};
 }
-const tokenRows=(p:any)=>p.previews.map((x:any)=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}));
+const tokenRows=(p:any)=>p.previews.map((x:any)=>x.authorization??({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}));
 async function prepare(c:any,input:any){return unpack(await c.callTool({name:"prepare_canonical_writeback",arguments:input}));}
 async function commit(c:any,input:any,p:any){return unpack(await c.callTool({name:"apply_canonical_writeback",arguments:{input,planId:p.planId,authorizations:tokenRows(p)}}));}
 
@@ -199,6 +199,33 @@ it("M55 rollout switch preserves old M5.4 freeform behavior until deliberate cut
     else process.env.M55_REQUIRE_TYPED_REVIEW=original;
     await c.close();
   }
+});
+
+it("M54-H01 prepare emits the exact beforeHash authorization and rejects afterHash as a CAS precondition",async()=>{
+  const input={...news,extractedText:"Synthetic unique source for expectedHash contract regression"};
+  const c=await connect();
+  try{
+    const tools=await c.client.listTools();
+    const applyTool=tools.tools.find(t=>t.name==="apply_canonical_writeback");
+    const expectedDescription=(applyTool?.inputSchema.properties as any)?.authorizations?.items?.properties?.expectedHash?.description;
+    expect(String(expectedDescription)).toMatch(/beforeHash/);
+    const p=await prepare(c.client,input);
+    expect(p.previews.length).toBeGreaterThan(0);
+    for(const row of p.previews){
+      expect(row.authorization).toEqual({
+        operationId:row.operationId,previewToken:row.previewToken,expectedHash:row.beforeHash
+      });
+      expect(row.authorization.expectedHash).not.toBe(row.afterHash);
+    }
+    const wrong=p.previews.map((row:any)=>({
+      operationId:row.operationId,previewToken:row.previewToken,expectedHash:row.afterHash
+    }));
+    const refused=unpack(await c.client.callTool({name:"apply_canonical_writeback",
+      arguments:{input,planId:p.planId,authorizations:wrong}}));
+    expect(refused.outcome).toBe("pending_or_blocked");
+    expect(refused.interrupted).toMatch(/Invalid preview token or expected hash/);
+    for(const step of p.steps)expect(fs.existsSync(path.join(vault,step.path))).toBe(false);
+  }finally{await c.close();}
 });
 
 it("M54-F02 lost preview response rotates token; stale token is refused and fresh retry succeeds",async()=>{
