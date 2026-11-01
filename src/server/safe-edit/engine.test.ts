@@ -9,7 +9,11 @@ let engine:typeof import("./engine");let n=0;
 const id=()=>`synthetic-${++n}`;
 function input(extra:Record<string,unknown>={}) {return {operationId:id(),path:"Fixture.md",reason:"Synthetic regression test",change:{kind:"replace",oldText:"Existing statement.",newText:"Updated statement."},...extra};}
 function apply(p:ReturnType<typeof engine.preview>,who=actor) {return engine.apply({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},who);}
-beforeAll(async()=>{engine=await import("./engine");});
+beforeAll(async()=>{
+  // The end-to-end planner attests retrieved context with a synthetic server key.
+  vi.stubEnv("ENCRYPTION_KEY",Buffer.alloc(32,42).toString("hex"));
+  engine=await import("./engine");
+});
 beforeEach(()=>{
   vi.restoreAllMocks();process.env.SAFE_EDIT_ENABLED="1";
   if(dbModule.db().prepare("SELECT 1 FROM sqlite_master WHERE name='safe_edit_operations'").get()) dbModule.db().exec("UPDATE safe_edit_operations SET status='synthetic_recovered' WHERE status='writing'");
@@ -19,7 +23,7 @@ beforeEach(()=>{
   fs.writeFileSync(path.join(vault,"05_Thesis","NVDA - Evidence Register.md"),original);
   fs.writeFileSync(path.join(vault,"05_Thesis","NVDA - Change Log.md"),original);
 });
-afterAll(async()=>{vi.restoreAllMocks();(await import("../db")).db().close();fs.rmSync(root,{recursive:true,force:true});for(const key of ["DATA_DIR","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[key];});
+afterAll(async()=>{vi.restoreAllMocks();(await import("../db")).db().close();fs.rmSync(root,{recursive:true,force:true});for(const key of ["DATA_DIR","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[key];vi.unstubAllEnvs();});
 it("previews exact diff without writing, then atomically applies, backs up, indexes and returns idempotent receipt",()=>{
  const p=engine.preview(input(),actor);expect(fs.readFileSync(path.join(vault,"Fixture.md"),"utf8")).toBe(original);
  expect(p.diff.removed).toEqual(["Existing statement."]);expect(p.diff.added).toEqual(["Updated statement."]);
