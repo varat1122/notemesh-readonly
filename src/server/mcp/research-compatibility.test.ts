@@ -204,6 +204,17 @@ it("CORE-ENG-002 Event A save then Event B retrieves the dated AI review with So
   expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected synthetic thesis\n");
 });
 
+it("CORE-ENG-005 does not report a complete canonical save when the sync boundary fails after durable writes",async()=>{
+  afterSyntheticWrites=()=>{throw Error("synthetic resume status unknown; recovery required");};
+  const {result}=await save(news);
+  expect(result.receipts).toHaveLength(2);
+  expect(result.interrupted).toContain("resume status unknown");
+  expect(result.status).toBe("hold_post_write_verification");
+  expect(result.readyForNextNews).toBe(false);
+  expect(result.outcome).toBe("pending_or_blocked");
+  for(const step of result.steps)expect(fs.existsSync(path.join(vault,step.path))).toBe(true);
+});
+
 it("CORE-ENG-003 carries structured provenance and the actual MCP context manifest through canonical readback",async()=>{
   const reader=await connect("research");
   const pack=unpack(await reader.callTool({name:"investment_context_pack",arguments:{question:"NVDA earnings",issuers:["NVDA"]}}));

@@ -15,6 +15,17 @@ it("resumes daemon after mutation failure",async()=>{
  const start=vi.spyOn(s,"start").mockImplementation(()=>{});await expect(s.withPausedForEdit(()=>{throw Error("synthetic failure");})).rejects.toThrow(/synthetic/);expect(start).toHaveBeenCalledOnce();
 });
 it("fails closed without a running child",async()=>{const s=new SyncSupervisor(),run=vi.fn();await expect(s.withPausedForEdit(run)).rejects.toThrow();expect(run).not.toHaveBeenCalled();});
+it("exposes the intake pause gate throughout asynchronous child drain",async()=>{
+ const s=new SyncSupervisor();let finish!:()=>void;
+ const child=Object.assign(new Promise<void>(resolve=>{finish=()=>{(s as any).child=null;s.state="stopped";resolve();};}),{kill:vi.fn()});
+ (s as any).child=child;s.state="running";vi.spyOn(s,"start").mockImplementation(()=>{});
+ const edit=s.withPausedForEdit(()=>"written");
+ // This is the optional capability actually consumed by Cloud Intake.
+ const paused=(s as import("../sync/types").SyncBackend).isEditPaused?.();
+ expect(s.state).toBe("running");finish();await edit;
+ expect(paused).toBe(true);
+ expect((s as import("../sync/types").SyncBackend).isEditPaused?.()).toBe(false);
+});
 it("fails closed at ten seconds, never edits a live child, and resumes only after late exit",async()=>{
  vi.useFakeTimers();
  try {

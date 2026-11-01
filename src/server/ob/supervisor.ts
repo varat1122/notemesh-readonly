@@ -117,6 +117,8 @@ export class SyncSupervisor implements SyncBackend {
   private authProbing = false;
   private settingsSyncTried = false;
   private editPaused = false;
+
+  isEditPaused(): boolean { return this.editPaused; }
   private manualSyncActive = false;
 
   // Parse daemon output lines into a running tally of the current sync burst.

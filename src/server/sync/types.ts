@@ -75,6 +75,10 @@ export interface SyncBackend {
   note(line: string, level?: "error" | "warn"): void;
   /** Force a sync cycle now. Resolves when it has finished, or failed. */
   syncNow(): Promise<{ ok: boolean; output: string }>;
+  /** Optional guarded mutation boundary; resolves only after the callback settles. */
+  withPausedForEdit?<T>(run: () => T): Promise<T>;
+  /** True from admission through drain, callback and release (including a hold). */
+  isEditPaused?(): boolean;
   /**
    * Called after an MCP tool writes to the vault. Obsidian Sync notices on its
    * own via its own watcher, so it ignores this; git has to be told, because

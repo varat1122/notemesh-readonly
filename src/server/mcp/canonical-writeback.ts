@@ -180,14 +180,17 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
       protectedNotesTouched:false,perDeviceSync:"unverified",outcome:"pending_or_blocked",
       note:"Writes may already be durable. Inspect returned receipts and exact paths; resolve context/source drift before fresh planning. Do not blindly replay writes."};
   }
+  // Disk/index readback proves the files, not successful completion of the
+  // surrounding mutation/sync boundary (for example an unknown resume state).
+  const finalStatus=interrupted?"hold_post_write_verification":after.status;
   return {phase:"apply_verified_or_pending",planId:plan.planId,
     provenanceStatus:plan.provenanceStatus,contextManifestId:args.input.researchProvenance?.context?.id??null,
-    status:after.status,readyForNextNews:after.readyForNextNews,
+    status:finalStatus,readyForNextNews:!interrupted&&after.readyForNextNews,
     qualityIssues:after.qualityIssues,
     steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable,linksVerified})=>
       ({kind,path,state,receiptKey,readbackVerified,indexed,searchable,linksVerified})),
     receipts,interrupted,protectedNotesTouched:false,perDeviceSync:"unverified",
-    outcome:after.status==="saved_verified"?"saved_verified":
-      after.status==="source_saved_analysis_pending"?"source_saved_analysis_pending":"pending_or_blocked",
+    outcome:finalStatus==="saved_verified"?"saved_verified":
+      finalStatus==="source_saved_analysis_pending"?"source_saved_analysis_pending":"pending_or_blocked",
     note:"Partial source writes are retained and independently verifiable; retry only pending steps after a fresh preview. Device Sync is not proven."};
 }
