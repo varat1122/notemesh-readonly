@@ -9,6 +9,7 @@ import { z } from "zod";
 import { planInvestmentWriteback } from "../vault/investment-writeback-router";
 import { apply, preview, status } from "../safe-edit/engine";
 import { withPausedSync } from "../safe-edit/sync";
+import {researchProvenanceSchema} from "../vault/context-provenance";
 
 const nonempty = z.string().min(1);
 const canonicalBaseSchema = z.object({
@@ -22,6 +23,7 @@ const canonicalBaseSchema = z.object({
   sourceChat: nonempty.max(120),
   existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional(),
   completedAnalysis: nonempty.max(30000).optional(),
+  researchProvenance:researchProvenanceSchema.optional(),
   researchReview: z.object({
     headlineTh:nonempty.max(500),translationTh:z.string().max(30000).optional(),
     whatChangedTh:nonempty.max(6000),mechanismTh:nonempty.max(6000),
@@ -42,12 +44,12 @@ const canonicalBaseSchema = z.object({
   rawAttachmentContentType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]).nullable().optional(),
   focus: z.enum(["earnings", "broker", "tam", "macro", "thesis", "general"]).optional(),
   claim: z.object({metric: nonempty.max(140), period: nonempty.max(120), statement: z.string().min(8).max(2500),
-    value: z.string().max(150).optional(), unit: z.string().max(80).optional()}).optional(),
+    value: z.string().max(150).optional(), unit: z.string().max(80).optional()}).strict().optional(),
   contentTypes: z.array(z.enum(["reported_fact", "earnings", "guidance", "industry_data", "macro_data",
     "policy", "broker_rating", "broker_price_target", "broker_estimate", "analyst_opinion",
     "market_commentary", "portfolio_snapshot", "other"])).max(12).optional(),
   entityRoles: z.array(z.object({entity: nonempty.max(120),
-    role: z.enum(["primary_subject", "covered_company", "supplier", "customer", "competitor", "mentioned"])})).max(12).optional(),
+    role: z.enum(["primary_subject", "covered_company", "supplier", "customer", "competitor", "mentioned"])}).strict()).max(12).optional(),
   themes: z.array(nonempty.max(120)).max(12).optional(),
   brokerUpdate: z.object({
     bank: nonempty.max(120), reportDate: z.string().max(10).optional(),
@@ -57,8 +59,8 @@ const canonicalBaseSchema = z.object({
     currency: z.string().max(20).optional(), priorCurrency: z.string().max(20).optional(),
     targetHorizon: z.string().max(80).optional(), priorTargetHorizon: z.string().max(80).optional(),
     estimateChanges: z.array(z.object({metric: nonempty.max(120),period: nonempty.max(120),
-      oldValue:z.string().max(80),newValue:z.string().max(80),unit:z.string().max(60)})).max(12).optional(),
-  }).optional(),
+      oldValue:z.string().max(80),newValue:z.string().max(80),unit:z.string().max(60)}).strict()).max(12).optional(),
+  }).strict().optional(),
 }).strict();
 export const canonicalInputShape = canonicalBaseSchema.shape;
 export const canonicalInputSchema = canonicalBaseSchema.superRefine((v,ctx)=>{
@@ -93,8 +95,11 @@ function planned(input: z.infer<typeof canonicalInputSchema>) {
   // old active caller to Source-only during the initial code deployment.
   if(process.env.M55_REQUIRE_TYPED_REVIEW==="1"&&input.captureOnly!==true&&!input.researchReview){
     const review=workflow.steps.find(s=>s.kind==="canonical_review");
-    if(review){review.state="hold_quality_gate";review.safeEditRequest=null;}
-    workflow.status="hold_research_quality";
+    if(review&&review.state!=="hold_conflict"&&review.state!=="hold_index_repair"){
+      review.state="hold_quality_gate";review.safeEditRequest=null;
+    }
+    workflow.status=workflow.steps.some(s=>s.state==="hold_conflict"||s.state==="hold_index_repair")?
+      "hold_conflict_or_index":"hold_research_quality";
     workflow.qualityIssues=[...new Set([...workflow.qualityIssues,"typed_research_review_required"])];
     workflow.readyForNextNews=false;
     workflow.analysisComplete=false;
@@ -121,6 +126,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
     previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p});
   }
   return {phase:"preview_only",planId:plan.planId,workflowStatus:workflow.status,
+    provenanceStatus:plan.provenanceStatus,contextManifestId:input.researchProvenance?.context?.id??null,
     qualityIssues:workflow.qualityIssues,
     steps:workflow.steps.map(({kind,path,state,expectedSha256,receiptKey})=>({kind,path,state,expectedSha256,receiptKey})),
     previews,protectedNotesTouched:false,perDeviceSync:"unverified",writesPerformed:false,
@@ -159,14 +165,32 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   }
   // Re-plan from the unchanged source input; trust disk hash/FTS readback, not
   // mere Safe Edit success or a stale pre-write plan.
-  const after=planned(args.input).workflow;
+  let after:ReturnType<typeof planned>["workflow"];
+  try{after=planned(args.input).workflow;}
+  catch(e){
+    // Context/source can change after a successful per-note write. Preserve
+    // the actual durable receipts and report verification pending, instead
+    // of turning a partially/completely written pair into an opaque MCP error.
+    return {phase:"apply_verified_or_pending",planId:plan.planId,status:"hold_post_write_verification",
+      readyForNextNews:false,provenanceStatus:"post_write_verification_pending",
+      contextManifestId:args.input.researchProvenance?.context?.id??null,
+      qualityIssues:workflow.qualityIssues,
+      steps:workflow.steps.map(({kind,path,receiptKey})=>({kind,path,receiptKey,state:"verification_pending"})),
+      receipts,interrupted,postWriteVerificationError:e instanceof Error?e.message:"Post-write verification failed",
+      protectedNotesTouched:false,perDeviceSync:"unverified",outcome:"pending_or_blocked",
+      note:"Writes may already be durable. Inspect returned receipts and exact paths; resolve context/source drift before fresh planning. Do not blindly replay writes."};
+  }
+  // Disk/index readback proves the files, not successful completion of the
+  // surrounding mutation/sync boundary (for example an unknown resume state).
+  const finalStatus=interrupted?"hold_post_write_verification":after.status;
   return {phase:"apply_verified_or_pending",planId:plan.planId,
-    status:after.status,readyForNextNews:after.readyForNextNews,
+    provenanceStatus:plan.provenanceStatus,contextManifestId:args.input.researchProvenance?.context?.id??null,
+    status:finalStatus,readyForNextNews:!interrupted&&after.readyForNextNews,
     qualityIssues:after.qualityIssues,
-    steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable})=>
-      ({kind,path,state,receiptKey,readbackVerified,indexed,searchable})),
+    steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable,linksVerified})=>
+      ({kind,path,state,receiptKey,readbackVerified,indexed,searchable,linksVerified})),
     receipts,interrupted,protectedNotesTouched:false,perDeviceSync:"unverified",
-    outcome:after.status==="saved_verified"?"saved_verified":
-      after.status==="source_saved_analysis_pending"?"source_saved_analysis_pending":"pending_or_blocked",
+    outcome:finalStatus==="saved_verified"?"saved_verified":
+      finalStatus==="source_saved_analysis_pending"?"source_saved_analysis_pending":"pending_or_blocked",
     note:"Partial source writes are retained and independently verifiable; retry only pending steps after a fresh preview. Device Sync is not proven."};
 }

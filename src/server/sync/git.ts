@@ -1,10 +1,11 @@
-import { redactRemote, remoteHasCredentials } from "./remote";
+import { acquireGitMutationLock, type GitMutationLock } from "./mutation-lock";
+import { redactRemote, remoteHasCredentials, validateRemoteUrl } from "./remote";
 import { fenceInline } from "../mcp/boundary";
 import { postNotice } from "../notices";
 import fs from "node:fs";
 import path from "node:path";
 import { env } from "../env";
-import { getSetting } from "../db";
+import { db, getSetting } from "../db";
 import { runGit } from "./git-exec";
 import { refreshGitTimes } from "../vault/modified";
 import type { ConflictRecord } from "./types";
@@ -92,7 +93,7 @@ export function isGitRepo(dir: string): boolean {
   return fs.existsSync(path.join(dir, ".git"));
 }
 
-class GitBackend implements SyncBackend {
+export class GitBackend implements SyncBackend {
   readonly kind = "git" as const;
 
   private _state: SyncState = "stopped";
@@ -115,6 +116,145 @@ class GitBackend implements SyncBackend {
   private pushTimer: ReturnType<typeof setTimeout> | null = null;
   private pushDeadline: number | null = null;
   private busy = false;
+  private inFlight: Promise<boolean> | null = null;
+  private editPaused = false;
+  private generation = 0;
+  private stopping = false;
+
+  isEditPaused(): boolean { return this.editPaused; }
+
+  private clearTimers() {
+    if (this.pullTimer) clearInterval(this.pullTimer);
+    if (this.pushTimer) clearTimeout(this.pushTimer);
+    this.pullTimer = null;
+    this.pushTimer = null;
+    this.pushDeadline = null;
+  }
+
+  private armPoll() {
+    const generation = this.generation;
+    this.pullTimer = setInterval(() => {
+      if (generation === this.generation) void this.cycle("poll");
+    }, pullMs());
+  }
+
+  // Admission is synchronous. Every source of Git work checks this gate again
+  // when it actually wakes up; cancelling timers alone is not exclusion.
+  async withPausedForEdit<T>(run: () => T | Promise<T>): Promise<T> {
+    if (this.editPaused || this.state !== "running" || !this.pullTimer || this.stopping)
+      throw Error("Git must be running and healthy before Safe Edit");
+    const cfg = gitConfig();
+    const expected = process.env.SAFE_EDIT_GIT_REMOTE;
+    if (!cfg || !expected || cfg.remote !== expected || !validateRemoteUrl(expected, process.env.OB_ALLOW_LOCAL_GIT === "1").ok ||
+        !/^[A-Za-z0-9][\w./-]*$/.test(cfg.branch) ||
+        process.env.SAFE_EDIT_GIT_BRANCH !== cfg.branch)
+      throw Error("Safe Edit requires an exact reviewed Git remote and branch pin");
+    this.editPaused = true;
+    this.generation++;
+    this.clearTimers();
+    let release: GitMutationLock | undefined;
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let value: T | undefined;
+    let failure: { error: unknown } | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        reject(Error("Git pause timed out; no edit applied; administrator recovery required"));
+      }, 10_000);
+    });
+    try {
+      const prepare = async () => {
+        if (this.inFlight && !await this.inFlight) throw Error("In-flight Git cycle failed; no edit applied");
+        // A timed-out continuation must never acquire a lock or invoke run.
+        if (timedOut) return;
+        if (this.busy || this.state !== "running") throw Error("Git drain was not healthy");
+        release = acquireGitMutationLock();
+        await this.assertEditWorktree(cfg);
+      };
+      await Promise.race([prepare(), deadline]);
+      if (timer) clearTimeout(timer);
+      const current = gitConfig();
+      if (this.stopping || this.state !== "running" || getSetting("sync_backend") !== "git" ||
+          getSetting("vault_configured") !== "true" || current?.remote !== cfg.remote || current?.branch !== cfg.branch ||
+          process.env.SAFE_EDIT_ENABLED !== "1" || process.env.SAFE_EDIT_SINGLE_WRITER !== "1" ||
+          process.env.CLOUD_INTAKE !== "1" || process.env.SAFE_EDIT_GIT_REMOTE !== cfg.remote ||
+          process.env.SAFE_EDIT_GIT_BRANCH !== cfg.branch) throw Error("Git deployment changed during pause; no edit applied");
+      // Await even an accidental async callback: never resume under its writes.
+      release!.assertOwned();
+      value = await run();
+      release!.assertOwned();
+    } catch (error) {
+      failure = { error };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (timedOut || this.interruptedEdit()) {
+      // Neither a timer nor an unknown subprocess completion proves safety.
+      // Retain the gate and any acquired disk lock until explicit recovery.
+      this.note("[git] Safe Edit pause held; administrator recovery required", "error");
+      failure ??= { error: Error("Interrupted Safe Edit; administrator recovery required") };
+    } else {
+      try {
+        release?.assertOwned();
+        // Establish the resumable state while ownership and admission are
+        // still held. A scheduling/release failure must not open the gate.
+        this.generation++;
+        if (!this.stopping && this.state === "running") this.armPoll();
+        release?.();
+        this.editPaused = false;
+        if (!this.stopping && this.state === "running") {
+          // One reconcile discovers callback writes without notification.
+          void this.cycle("safe-edit-resume");
+        }
+      } catch (error) {
+        this.clearTimers();
+        this.note("[git] Safe Edit resume held; administrator recovery required", "error");
+        failure = { error };
+      }
+    }
+    if (failure) throw failure.error;
+    return value as T;
+  }
+
+  private interruptedEdit(): boolean {
+    if (fs.existsSync(path.join(env.dataDir, "safe-edit.lock"))) return true;
+    const d = db();
+    return Boolean(d.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_operations'").get() &&
+      d.prepare("SELECT 1 FROM safe_edit_operations WHERE status='writing' LIMIT 1").get());
+  }
+
+  private async assertEditWorktree(cfg: GitConfig) {
+    if (this.interruptedEdit()) throw Error("Interrupted Safe Edit operation requires recovery");
+    const check = async (args: string[]) => {
+      const result = await runGit(args, { timeoutMs: 5_000 });
+      if (!result.ok) throw Error("Git preflight failed; no edit applied");
+      return result.stdout.trim();
+    };
+    await check(["check-ref-format", `refs/heads/${cfg.branch}`]);
+    const top = await check(["rev-parse", "--show-toplevel"]);
+    if (fs.realpathSync(top) !== fs.realpathSync(env.vaultDir)) throw Error("Git root must be the configured vault");
+    if (await check(["remote", "get-url", "--all", "origin"]) !== cfg.remote ||
+        await check(["remote", "get-url", "--push", "--all", "origin"]) !== cfg.remote ||
+        await check(["symbolic-ref", "--short", "HEAD"]) !== cfg.branch ||
+        await check(["status", "--porcelain", "--untracked-files=all"]))
+      throw Error("Git remote, branch or clean worktree preflight refused edit");
+    for (const name of ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "index.lock", "HEAD.lock", "shallow"]) {
+      const location = await check(["rev-parse", "--git-path", name]);
+      if (fs.existsSync(path.resolve(env.vaultDir, location))) throw Error("Git has interrupted work or an external lock");
+    }
+    // Read-only remote observation. Remote writers are external; ordinary
+    // non-force reconciliation still handles changes after this observation.
+    const observed = await runGit(["ls-remote", "--exit-code", "origin", `refs/heads/${cfg.branch}`], { authenticated: true, timeoutMs: 5_000 });
+    if (!observed.ok) {
+      this.state = looksLikeAuthFailure(observed.combined) ? "needs-reauth" : "backoff";
+      throw Error("Cannot verify Git remote HEAD; no edit applied");
+    }
+    const head = await check(["rev-parse", "HEAD"]);
+    if (observed.stdout.trim() !== `${head}\trefs/heads/${cfg.branch}` ||
+        await check(["rev-parse", `refs/remotes/origin/${cfg.branch}`]) !== head)
+      throw Error("Git remote divergence requires a successful sync before editing");
+  }
   private pending: { tool: string; path: string }[] = [];
   private counts = { downloaded: 0, uploaded: 0, deleted: 0, startedAt: null as number | null, lastEventAt: null as number | null };
 
@@ -132,7 +272,10 @@ class GitBackend implements SyncBackend {
   }
 
   start() {
-    if (this.pullTimer) return;
+    if (this.editPaused) throw Error("Git is paused for Safe Edit");
+    if (this.pullTimer || this.inFlight || this.state === "needs-reauth") return;
+    this.stopping = false;
+    this.generation++;
     const cfg = gitConfig();
     if (!cfg) {
       this.log("[git] no remote configured", "error");
@@ -154,21 +297,21 @@ class GitBackend implements SyncBackend {
     // Commit times first, so the index a boot rebuilds carries them; then pull
     // promptly so the model isn't reading a stale vault, then on the
     // configured interval.
-    void this.refreshTimes().finally(() => void this.cycle("startup"));
-    this.pullTimer = setInterval(() => void this.cycle("poll"), pullMs());
+    // Startup history loading is part of the tracked cycle, too.
+    void this.cycle("startup");
+    this.armPoll();
   }
 
   stop() {
-    if (this.pullTimer) clearInterval(this.pullTimer);
-    if (this.pushTimer) clearTimeout(this.pushTimer);
-    this.pullTimer = null;
-    this.pushTimer = null;
-    this.pushDeadline = null;
+    this.stopping = true;
+    this.generation++;
+    this.clearTimers();
     this.state = "stopped";
     this.log("[git] stopped");
   }
 
   resetAndStart() {
+    if (this.editPaused || this.inFlight) throw Error("Git work must drain before restart");
     this.restartCount = 0;
     if (this.state === "needs-reauth" || this.state === "backoff") this.state = "stopped";
     this.stop();
@@ -179,6 +322,8 @@ class GitBackend implements SyncBackend {
   // otherwise keep resetting the timer and never publish anything.
   notifyLocalChange(change: { tool: string; path: string }) {
     if (this.pending.length < 200) this.pending.push(change);
+    if (this.editPaused || this.stopping || this.state === "needs-reauth") return;
+    const generation = this.generation;
     const now = Date.now();
     const maxWait = Math.max(MIN_MAX_WAIT_MS, debounceMs() * 6);
     if (this.pushDeadline === null) this.pushDeadline = now + maxWait;
@@ -187,11 +332,13 @@ class GitBackend implements SyncBackend {
     this.pushTimer = setTimeout(() => {
       this.pushTimer = null;
       this.pushDeadline = null;
-      void this.cycle("write");
+      if (generation === this.generation) void this.cycle("write");
     }, delay);
   }
 
   async syncNow(): Promise<{ ok: boolean; output: string }> {
+    if (this.editPaused || this.inFlight || this.state === "needs-reauth")
+      return { ok: false, output: "Git is busy, paused or requires re-authentication" };
     const before = this.ring.all().length;
     const ok = await this.cycle("manual");
     const lines = this.ring
@@ -219,32 +366,59 @@ class GitBackend implements SyncBackend {
 
   // One full reconcile: publish local work, take remote work, push.
   // Serialized — overlapping cycles would race on the index and the ref.
-  private async cycle(reason: string): Promise<boolean> {
-    if (this.busy) return true;
+  private cycle(reason: string): Promise<boolean> {
+    if (this.editPaused || this.state === "needs-reauth" || (this.stopping && reason !== "manual")) return Promise.resolve(false);
+    if (this.inFlight) return this.inFlight;
     const cfg = gitConfig();
-    if (!cfg) return false;
+    if (!cfg) return Promise.resolve(false);
     this.busy = true;
-    try {
-      const committed = await this.commitPending(cfg);
-      const fetched = await this.fetch(cfg);
-      if (!fetched) return false;
-      const integrated = await this.integrate(cfg);
-      if (!integrated) return false;
-      if (committed || (await this.aheadOfRemote(cfg))) {
-        return await this.push(cfg);
-      }
-      return true;
-    } catch (e: any) {
-      this.log(`[git] ${reason} cycle failed: ${String(e?.message ?? e)}`, "error");
-      this.state = "backoff";
-      return false;
-    } finally {
-      this.busy = false;
-    }
+    const work = this.reconcile(reason, cfg);
+    this.inFlight = work;
+    void work.then(() => { if (this.inFlight === work) this.inFlight = null; }, () => { if (this.inFlight === work) this.inFlight = null; });
+    return work;
   }
 
-  private async commitPending(cfg: GitConfig): Promise<boolean> {
+  private async reconcile(reason: string, cfg: GitConfig): Promise<boolean> {
+    let release: GitMutationLock | undefined;
+    let successful = false;
+    try {
+      release = acquireGitMutationLock();
+      if (this.interruptedEdit()) throw Error("Interrupted Safe Edit requires recovery before Git sync");
+      if (reason === "startup") await this.refreshTimes();
+      release.assertOwned();
+      const committed = await this.commitPending(cfg, release.assertOwned);
+      release.assertOwned();
+      const fetched = await this.fetch(cfg);
+      release.assertOwned();
+      if (fetched && await this.integrate(cfg, release.assertOwned)) {
+        release.assertOwned();
+        const needsPush = committed || await this.aheadOfRemote(cfg);
+        release.assertOwned();
+        successful = needsPush ? await this.push(cfg) : true;
+        release.assertOwned();
+      }
+    } catch (e: any) {
+      successful = false;
+      this.log(`[git] ${reason} cycle failed: ${String(e?.message ?? e)}`, "error");
+      if (!this.stopping) this.state = "backoff";
+    } finally {
+      try { release?.(); } catch (error) {
+        // Preserve a foreign or unreleasable lock and stop automatic retries.
+        // Do not produce an unhandled rejection from a background cycle.
+        this.editPaused = true;
+        successful = false;
+        this.clearTimers();
+        this.state = "backoff";
+        this.log(`[git] mutation ownership recovery required: ${String(error)}`, "error");
+      } finally { this.busy = false; }
+      if (this.stopping) this.state = "stopped";
+    }
+    return successful;
+  }
+
+  private async commitPending(cfg: GitConfig, assertOwned: () => void): Promise<boolean> {
     const st = await runGit(["status", "--porcelain"]);
+    assertOwned();
     if (!st.ok) {
       this.log(`[git] status failed: ${st.combined.trim()}`, "error");
       return false;
@@ -255,6 +429,7 @@ class GitBackend implements SyncBackend {
     }
     const changed = st.stdout.trim().split("\n").length;
     await runGit(["add", "-A"]);
+    assertOwned();
     const message = this.commitMessage(changed);
     // Identity is set per-invocation rather than in .git/config so `git log
     // --author=notemesh` cleanly separates assistant edits from the operator's.
@@ -267,6 +442,7 @@ class GitBackend implements SyncBackend {
       "-m",
       message,
     ]);
+    assertOwned();
     this.pending = [];
     if (!res.ok) {
       this.log(`[git] commit failed: ${res.combined.trim()}`, "error");
@@ -314,12 +490,14 @@ class GitBackend implements SyncBackend {
   // Bring remote work in. Never runs a bare `git merge` without checking first:
   // merge-tree does the merge in the object database, so a conflict is detected
   // with the working tree — and therefore the vault the model reads — untouched.
-  private async integrate(cfg: GitConfig): Promise<boolean> {
+  private async integrate(cfg: GitConfig, assertOwned: () => void): Promise<boolean> {
     const remote = `origin/${cfg.branch}`;
     const behind = await runGit(["rev-list", "--count", `HEAD..${remote}`]);
+    assertOwned();
     if (!behind.ok || Number(behind.stdout.trim()) === 0) return true;
 
     const probe = await probeMerge(env.vaultDir, "HEAD", remote);
+    assertOwned();
     if (probe.clean) {
       const merged = await runGit([
         "-c",
@@ -330,6 +508,7 @@ class GitBackend implements SyncBackend {
         "--no-edit",
         remote,
       ]);
+      assertOwned();
       if (!merged.ok) {
         // Should not happen after a clean probe; abort rather than leave the
         // vault mid-merge with markers on disk.
@@ -351,6 +530,7 @@ class GitBackend implements SyncBackend {
       remoteRef: remote,
       paths: probe.paths,
     });
+    assertOwned();
     if (!outcome.ok) {
       this.log(`[git] ${outcome.message}`, "error");
       this.state = "backoff";
@@ -452,6 +632,12 @@ export async function cloneVault(
   remote: string,
   branch: string,
 ): Promise<{ ok: boolean; message?: string }> {
+  const release = acquireGitMutationLock();
+  try { return await cloneVaultLocked(remote, branch); }
+  finally { release(); }
+}
+
+async function cloneVaultLocked(remote: string, branch: string): Promise<{ ok: boolean; message?: string }> {
   const dir = env.vaultDir;
   if (isGitRepo(dir)) {
     const cur = await runGit(["remote", "get-url", "origin"]);

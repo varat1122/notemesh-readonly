@@ -168,13 +168,23 @@ describe("RPC: the dashboard loaders return real data", () => {
     expect(res.status).toBe(200);
     const r = res.body.result as any;
     expect(r.tools.length).toBe(r.readCount + r.writeCount);
-    expect(r.readCount).toBeGreaterThan(0);
-    expect(r.writeCount).toBeGreaterThan(0);
-    // Read tools every deployment has, and a write tool, on the right sides.
+    expect(r.readCount).toBe(28);
+    expect(r.writeCount).toBe(0);
+    // The dashboard describes the research endpoint. Submission belongs to
+    // the separately scoped Save resource, never this read-only catalogue.
+    expect(r.tools.every((t: any) => t.write === false && t.intake === false &&
+      t.annotations.readOnlyHint === true)).toBe(true);
     const byName = Object.fromEntries(r.tools.map((t: any) => [t.name, t]));
     expect(byName.read_note.write).toBe(false);
     expect(byName.create_note).toBeUndefined();
-    expect(byName.submit_investment_notes.write).toBe(true);
+    expect(byName.submit_investment_notes).toBeUndefined();
+    expect(byName.get_submission_status).toBeUndefined();
+    expect(byName.apply_canonical_writeback).toBeUndefined();
+    const live = await mcp(server, "tools/list", {}, `Bearer ${apiKey}`);
+    expect(live.status).toBe(200);
+    expect(r.tools.map((t: any) => t.name).sort()).toEqual(
+      (live.json.result.tools as Array<{ name: string }>).map(t => t.name).sort(),
+    );
     expect(r.endpoint).toBe(`${server.url}/api/mcp`);
   });
 

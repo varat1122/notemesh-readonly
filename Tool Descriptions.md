@@ -68,8 +68,15 @@ commit pushed on the next git cycle. Every write is atomic: the note is the
 old version or the new one, never half of either. A write that would not
 leave the disk's reserve is refused with a message naming the volume.
 
-**Read-only clients.** A credential with read scope sees only the tools marked
-read below, plus `preview_edit`, which writes nothing.
+**Read-only research resource — unreleased candidate contract.** `/api/mcp`
+requires `vault:read` and exposes only read tools, including `preview_edit`,
+which writes nothing. Legacy submission or write permissions do not add tools
+to this resource. The write conventions and legacy internal references in this
+document do not grant write capability on `/api/mcp`.
+
+Submission and receipt tools are documented under the separate Save Analysis
+resource below. This candidate contract does not establish the deployed
+version or whether a client's cached tools have been refreshed.
 
 ---
 
@@ -435,6 +442,14 @@ taken in the configured timezone. A template's `{{date}}` and `{{time}}` use
 the Templates plugin's formats (`templates.json`) when set; content passed
 in goes after the template as its own block.
 
+## Save Analysis resource — /api/save-analysis
+
+These two tools belong to `/api/save-analysis` and require separate
+`vault:read inbox:submit` OAuth authorization. Neither is part of the Read Only
+research catalogue, even when a research token carries those scopes. Clients
+that previously submitted through `/api/mcp` need this separately authorized
+resource after an approved release.
+
 ### submit_investment_notes — write
 
 Add-only linked notes require vault:read and inbox:submit. Cannot modify an existing note.
@@ -443,4 +458,4 @@ Add-only linked notes require vault:read and inbox:submit. Cannot modify an exis
 
 Read the intake receipt with vault:read and inbox:submit. Does not prove remote device Sync.
 
-Safe Edit is a separate resource; its seven tools and permissions are documented in docs/SAFE_EDIT.md.
+Safe Edit is a separate resource; its tools and permissions are documented in docs/SAFE_EDIT.md.

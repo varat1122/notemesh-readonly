@@ -10,7 +10,7 @@ import { fetchAndArchiveOfficialSource } from "../research-source-fetch";
 import { inspectOriginalSourceHistory } from "../research-source-archive";
 import { syncBackend } from "../sync";
 import { storeUserAttachment, inspectUserAttachment, MAX_USER_ATTACHMENT_BYTES } from "../user-attachment-vault";
-import { canonicalInputShape, canonicalApplySchema, prepareCanonicalWriteback, applyCanonicalWriteback } from "./canonical-writeback";
+import { canonicalInputSchema, canonicalApplySchema, prepareCanonicalWriteback, applyCanonicalWriteback } from "./canonical-writeback";
 const securitySchemes=[{type:"oauth2",scopes:["vault:read","vault:edit"]}];
 const base=previewSchema.omit({change:true}).shape;
 export function createSafeEditMcpServer(access:McpAccess) {
@@ -32,12 +32,12 @@ export function createSafeEditMcpServer(access:McpAccess) {
   server.registerTool("create_note",{description:"PREVIEW ONLY: prepare a new Markdown note after duplicate checks. Existing paths are never overwritten. Parent folder must exist. Review then apply_edit.",inputSchema:{...base,content:z.string().min(1).max(100000)},annotations:{readOnlyHint:true,openWorldHint:false},...meta},async({content,...input})=>invoke(()=>preview({...input,change:{kind:"create",content}},access.label)));
   server.registerTool("prepare_canonical_writeback",{
     description:"M5.4 canonical Micro/Macro/PDF intake: validate the complete sourceChat + original extractedText + completedAnalysis (or Feed Only captureOnly), route in the EXISTING Investment_OS, and PREVIEW add-only Source and Company/Industry/Macro Review with per-step hashes and OAuth-bound tokens. No Vault notes are written. If metadata is missing, stop rather than falling back to legacy Inbox submission. Protected Thesis/Evidence Register/Timeline/Portfolio are never modified.",
-    inputSchema:canonicalInputShape,
+    inputSchema:canonicalInputSchema,
     annotations:{readOnlyHint:true,openWorldHint:false},...meta
   },async input=>invoke(()=>prepareCanonicalWriteback(input,access.label)));
   server.registerTool("apply_canonical_writeback",{
     description:"M5.4 authorized canonical write: after prepare_canonical_writeback diff review, send unchanged input/planId and exact per-step preview tokens. Uses existing OAuth vault:edit, verified idle Sync, Safe Edit CAS/backups, SHA readback and index. Saves Source then Review, reports partial failures without overwriting either note; idempotent retries must prepare anew. Never writes Current Thesis, Evidence Register, Company Timeline or Portfolio.",
-    inputSchema:canonicalApplySchema.shape,
+    inputSchema:canonicalApplySchema,
     annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},...meta
   },async input=>invoke(()=>applyCanonicalWriteback(input,access.label)));
   server.registerTool("archive_original_source",{

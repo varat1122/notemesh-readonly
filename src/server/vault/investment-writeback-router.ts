@@ -15,6 +15,7 @@ import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTa
 import { buildCanonicalSafeEditWorkflow, type CanonicalSafeEditWorkflow } from "./canonical-writeback-workflow";
 import type { ThaiResearchReview } from "./research-quality-m55";
 import {resolveSourceIdentityM56, type SourceIdentityResolution} from "./source-identity-m56";
+import {validateResearchProvenance,normalizeAsOf,readContextVersion,type ResearchProvenance,type ContextManifest} from "./context-provenance";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
@@ -51,6 +52,7 @@ export interface WritebackInput {
   originalDocumentAccess?:"full_original"|"excerpt_only"|"not_obtained";
   /** M5.6: an existing Source receipt must be proven against original bytes and chronology. */
   existingIntakeId?:string;
+  researchProvenance?:ResearchProvenance;
 }
 type Route={kind:"raw_input"|"research_review"|"company_timeline_candidate"|"industry_context_candidate"|"claim_registry_candidate";
   action:"candidate_create"|"candidate_append_after_review"|"link_existing_or_hold";
@@ -63,6 +65,8 @@ export interface WritebackPlan {
   inputFormat:IntakeFormat;
   sourceKind:IntakeSource;
   sourceLanguage:string|null;
+  researchProvenance:ResearchProvenance|null;
+  provenanceStatus:"context_bound_current_bytes"|"declared_only"|"not_supplied";
   sourceIdentity:SourceIdentityResolution;
   sourceCapture:{
     textDigest:string;
@@ -81,6 +85,7 @@ export interface WritebackPlan {
     selected:number;
     paths:string[];
     missing:string[];
+    manifest:ContextManifest;
   };
   historicalEventReview:{
     status:"possible_same_event_candidates"|"none_selected_not_proof_new";
@@ -141,7 +146,7 @@ function relatedIssuer(f:Record<string,unknown>,issuer:string):boolean{
   const names=[f.company,f.entity,f.ticker,f.issuer].flatMap(v=>Array.isArray(v)?v:[v]);
   return names.some(v=>typeof v==="string"&&v.trim().toUpperCase()===issuer.trim().toUpperCase());
 }
-function sourceEventCandidates(issuers:string[],sourceUrl:string|null|undefined,eventDate:string|null){
+function sourceEventCandidates(issuers:string[],sourceUrl:string|null|undefined,eventDate:string|null,eligible:(path:string)=>boolean=()=>true){
   const empty={candidatePaths:[] as string[],scanTruncated:false};
   const wanted=sourceUrl?canonicalSourceUrl(sourceUrl):null;
   if(!wanted||!eventDate)return empty;
@@ -161,6 +166,7 @@ function sourceEventCandidates(issuers:string[],sourceUrl:string|null|undefined,
     if(declaredIssuer&&!issuers.some(issuer=>relatedIssuer(fm,issuer)))continue;
     // A report imported on this day can discuss an entirely different event.
     if(fm.event_date!==eventDate)continue;
+    if(!eligible(path))continue;
     const declared=[fm.original_source,fm.source_url,fm.primary_url].some(
       v=>typeof v==="string"&&canonicalSourceUrl(v)===wanted);
     let inDocument=false;
@@ -177,6 +183,9 @@ function sourceEventCandidates(issuers:string[],sourceUrl:string|null|undefined,
 }
 
 export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
+  const provenance=input.researchProvenance?validateResearchProvenance(input.researchProvenance):undefined;
+  const asOf=normalizeAsOf(provenance?.asOf??provenance?.context?.asOf??undefined);
+  const eligible=(path:string)=>{if(!asOf)return true;try{readContextVersion(path,asOf);return true;}catch{return false;}};
   if(!input.entities.length||input.entities.length>6||input.entities.some(x=>T(x).length<1||x.length>120))
     throw Error("Provide 1-6 nonempty declared entities or domains, never infer an issuer from co-mentions");
   if(!T(input.topic)||input.topic.length>250)throw Error("topic must be 1-250 characters");
@@ -209,7 +218,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     throw Error("captureOnly and completedAnalysis are mutually exclusive");
   if(input.completedAnalysis!==undefined && (!T(input.completedAnalysis)||input.completedAnalysis.length>30000))
     throw Error("M5.3 completedAnalysis must be 1-30000 characters");
-  const routingV2=planCanonicalRoutingV2({...input,entities});
+  const routingV2=planCanonicalRoutingV2({...input,entities},eligible);
   const sourceIdentity=resolveSourceIdentityM56({extractedText:input.extractedText,
     inputFormat:input.inputFormat,sourceKind:input.sourceKind,sourceUrl:input.sourceUrl,
     rawAttachmentSha256:input.rawAttachmentSha256,eventDate,publicationDate,
@@ -230,7 +239,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   // A deterministic intake marker is added only after a reviewed Timeline
   // append. Repeated submission of identical source text must not propose
   // a second Timeline event even when a new research note already exists.
-  const timelineRecorded=Boolean(timelinePath && timelineExists &&
+  const timelineRecorded=Boolean(timelinePath && timelineExists && eligible(timelinePath) &&
     readNote(timelinePath).content.includes("<!-- investment-intake:"+planId+" -->"));
   const focus=input.focus??(input.sourceKind==="broker_research"?"broker":input.domain==="macro"?"macro":"general");
   const pack=buildInvestmentContextPack({
@@ -238,11 +247,11 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     issuers:[...new Set([
       ...routingV2.companyHubs.map(x=>x.path.slice("01_Companies/".length,-3)),
       ...(input.domain==="company"?entities.map(x=>safeTicker(x)).filter((x):x is string=>!!x):[])
-    ])].filter(x=>/^[A-Z][A-Z0-9.-]{0,11}$/.test(x)).slice(0,6),
+    ])].slice(0,6),
     industry:routingV2.industryHubs.length?
       routingV2.industryHubs.map(x=>x.label).join(" / ").slice(0,140):
       input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
-    focus,maxNotes:10,maxChars:8500
+    focus,maxNotes:10,maxChars:8500,asOf:asOf??undefined
   });
   // Only high-scoring, issuer-scoped Company Research excerpts are candidate
   // prior events; legacy archived AI is NOT a verified fact or duplicate verdict.
@@ -258,13 +267,13 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     ...(subject?[subject]:[]),
     ...routingV2.companyHubs.map(x=>x.path.slice("01_Companies/".length,-3))
   ])];
-  const sourceMatches=sourceEventCandidates(sourceIssuers,input.sourceUrl,eventDate);
+  const sourceMatches=sourceEventCandidates(sourceIssuers,input.sourceUrl,eventDate,eligible);
   const sameSourceEvent=sourceMatches.candidatePaths.length>0;
   const claim=input.claim;
   const claimReady=Boolean(claim&&T(claim.metric)&&T(claim.period)&&T(claim.statement).length>=8&&
     claim.value?.trim()&&claim.unit?.trim()&&input.sourceUrl?.trim()&&entities.length===1);
   let classification:ReviewClass|null=null,matched:string[]=[],truncated:boolean|null=null;
-  if(claimReady&&claim){
+  if(claimReady&&claim&&!asOf){
     const c=reviewInvestmentClaim({
       domain:input.domain,entity:entities[0],metric:claim.metric,period:claim.period,
       statement:claim.statement,originalSource:input.sourceUrl!,value:claim.value,unit:claim.unit,
@@ -276,6 +285,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   }
   const duplicates=classification==="duplicate_candidate";
   const warnings=[
+    ...(asOf?["Cutoff context and source-event candidates exclude late/current-unverifiable versions. Legacy exact-claim scan is not cutoff-aware and is not used; absence of a comparison is NOT proof of a new claim."]:[]),
     "Input and any source labels are user/analyst supplied; no issuer, broker report, translation or number independently verified.",
     "Input language is only caller-declared; do not silently translate, paraphrase or claim unreadable screenshot portions were extracted.",
     verifiedAttachment?"Original user attachment bytes are already preserved in the Vault and hash-readback verified; this is not publisher verification or OCR.":"Image/PDF binary is NOT verified by this router without matching archived user attachment digest; transcription is not original bytes.",
@@ -333,6 +343,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     status:"read_only_plan_not_written",planId,entityScope:entities,domain:input.domain,
     inputFormat:input.inputFormat,sourceKind:input.sourceKind,
     sourceLanguage:input.sourceLanguage?T(input.sourceLanguage):null,
+    researchProvenance:provenance??null,
+    provenanceStatus:provenance?.context?"context_bound_current_bytes":provenance?"declared_only":"not_supplied",
     sourceIdentity,
     sourceCapture:{
       textDigest:sourceIdentity.textSha256,extractedTextIsOriginalBinary:false,
@@ -342,7 +354,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     },
     chronology:{eventDate,publicationDate,importedAt:"not_yet_written"},
     historical:{source:"bounded_lexical_context_not_exhaustive",
-      selected:pack.selected,paths:pack.items.map(x=>x.path),missing:pack.incomplete},
+      selected:pack.selected,paths:pack.items.map(x=>x.path),missing:pack.incomplete,manifest:pack.manifest},
     historicalEventReview:{
       status:candidateEventPaths.length?"possible_same_event_candidates":"none_selected_not_proof_new",
       candidatePaths:candidateEventPaths,duplicateAdjudicated:false

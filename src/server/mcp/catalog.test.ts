@@ -2,12 +2,34 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { McpAccess } from "./server";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { withToolAuthMetadata } from "./tool-auth";
 
 // The Tools tab is documentation that has to stay true, and the only way it
 // stays true is by being the tool surface rather than a description of it.
-// These check that: same names as the server registers, write flags that follow
-// the registration conditionals, and conditional tools that appear and vanish
-// with their setting.
+// Compare actual protocol listings with the reviewed research contract, then
+// check its permission metadata and the separately scoped Save documentation.
+
+const RESEARCH_TOOLS = [
+  "assess_thesis_change_proposal", "daily_note", "discover_near_duplicate_sources",
+  "find_in_note", "get_links", "get_outline", "get_vault_info", "investment_context_pack",
+  "list_attachments", "list_directory", "list_folders", "list_link_issues", "list_notes",
+  "list_tags", "list_tasks", "notes_by_tag", "plan_duplicate_source_link",
+  "plan_investment_writeback", "plan_pdf_extraction_coverage", "plan_review_revision",
+  "preview_edit", "random_note", "read_attachment", "read_note", "read_properties",
+  "review_investment_claim", "search_vault", "word_count",
+].sort();
+const SAVE_TOOLS = ["get_submission_status", "submit_investment_notes"];
+const READ_ACCESS: McpAccess = {
+  read: true, write: false, intake: false, label: "oauth:catalog-read", scopes: ["vault:read"],
+};
+// Even a caller carrying legacy write/intake flags must get the same research
+// surface. The endpoint, not a broader credential, owns that boundary.
+const LEGACY_ACCESS: McpAccess = {
+  read: true, write: true, intake: true, label: "oauth:catalog-legacy",
+  scopes: ["vault:read", "inbox:submit", "vault:edit"],
+};
 
 let root: string;
 
@@ -28,32 +50,71 @@ async function catalog() {
   return listMcpTools();
 }
 
-async function registered(read: boolean, write: boolean): Promise<string[]> {
+async function registered(access: McpAccess, resource: "research" | "save-analysis" = "research") {
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
   const { createMcpServer } = await import("./server");
-  const server = createMcpServer({ read, write, intake: true, label: "test" }) as unknown as {
-    _registeredTools: Record<string, unknown>;
-  };
-  return Object.keys(server._registeredTools).sort();
+  const { createSaveMcpServer } = await import("./save-server");
+  const server = resource === "research" ? createMcpServer(access) : createSaveMcpServer(access);
+  const client = new Client({ name: "catalog-contract-test", version: "0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    return (await client.listTools()).tools;
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}
+
+function expectAdvertisedScopes(tools: Tool[], scopes: string[]) {
+  // Exercise the same descriptor transform as HTTP, including both formats
+  // consumed by clients. A correct catalogue alone could hide scope drift.
+  const message = withToolAuthMetadata({ jsonrpc: "2.0", id: 1, result: { tools } });
+  if (!("result" in message)) throw new Error("Expected a tools/list response");
+  const advertised = message.result.tools as (Tool & { securitySchemes?: unknown })[];
+  expect(advertised).toHaveLength(tools.length);
+  for (const tool of advertised) {
+    const expected = [{ type: "oauth2", scopes }];
+    expect(tool.securitySchemes, `${tool.name} top-level scopes`).toEqual(expected);
+    expect(tool._meta?.securitySchemes, `${tool.name} metadata scopes`).toEqual(expected);
+  }
 }
 
 describe("the tool catalogue", () => {
-  it("lists exactly what a write-scoped client is registered", async () => {
+  it("lists the exact 28 research tools for read-only and legacy OAuth callers", async () => {
     const names = (await catalog()).map((t) => t.name).sort();
-    expect(names).toEqual(await registered(true, true));
-    expect(names.length).toBe(30);
+    expect(names).toHaveLength(28);
+    expect(names).toEqual(RESEARCH_TOOLS);
+    for (const access of [READ_ACCESS, LEGACY_ACCESS]) {
+      expect((await registered(access)).map((t) => t.name).sort(), access.label).toEqual(names);
+    }
   });
 
-  it("marks as write exactly the tools a read-only client does not get", async () => {
+  it("keeps research read-only without intake or write scopes, with Save separately scoped", async () => {
     const tools = await catalog();
-    const readOnly = new Set(await registered(true, false));
+    const readOnly = new Set((await registered(READ_ACCESS)).map((t) => t.name));
+    expect(tools).toHaveLength(RESEARCH_TOOLS.length);
     for (const t of tools) {
       expect(t.write, `${t.name} write flag`).toBe(t.annotations?.readOnlyHint !== true);
       expect(readOnly.has(t.name)).toBe(true);
+      expect(t.write, `${t.name} cannot write`).toBe(false);
+      expect(t.intake, `${t.name} cannot submit`).toBe(false);
+      expect(t.annotations?.readOnlyHint, `${t.name} only reads`).toBe(true);
     }
-    // Both groups are non-empty, so a flag stuck at one value would show here
-    // rather than passing the check above vacuously.
-    expect(tools.some((t) => t.write)).toBe(true);
-    expect(tools.some((t) => !t.write)).toBe(true);
+    for (const access of [READ_ACCESS, LEGACY_ACCESS]) {
+      const listed = await registered(access);
+      expect(listed.filter((t) => SAVE_TOOLS.includes(t.name))).toEqual([]);
+      expect(listed.every((t) => t.annotations?.readOnlyHint === true)).toBe(true);
+      expectAdvertisedScopes(listed, ["vault:read"]);
+    }
+    // Positive control: separation must not erase Save's tools, write hint or
+    // required submission scope just to make the research assertions pass.
+    const save = await registered(LEGACY_ACCESS, "save-analysis");
+    expect(save.map((t) => t.name).sort()).toEqual(SAVE_TOOLS);
+    expect(save.find((t) => t.name === "submit_investment_notes")?.annotations?.readOnlyHint).toBe(false);
+    expect(save.find((t) => t.name === "get_submission_status")?.annotations?.readOnlyHint).toBe(true);
+    expectAdvertisedScopes(save, ["vault:read", "inbox:submit"]);
   });
 
   it("carries the description and parameters the protocol sends", async () => {
@@ -151,13 +212,23 @@ describe("the reported version", () => {
     }
   });
 
-  it("counts the tools the changelog claims", async () => {
-    // The release notes say how many tools there are; if that number is wrong
-    // it is wrong in the one document people read before deploying.
+  it("counts the separate research and Save surfaces in the unreleased changelog", async () => {
+    // Bind to the candidate entry; historical release counts describe their
+    // own artifacts and must not be rewritten to match this local change.
     const { readFileSync } = await import("node:fs");
-    const claimed = Number(readFileSync("CHANGELOG.md", "utf8").match(/(\d+) tools covering/)?.[1]);
+    const entry = readFileSync("CHANGELOG.md", "utf8").split(/^## /m)
+      .find((s) => s.startsWith("Unreleased — Read Only research candidate\n"));
+    expect(entry, "the changelog identifies candidate behavior").toBeDefined();
+    const claimed = Number(entry!.match(/Research surface: (\d+) tools covering/)?.[1]);
     expect(claimed).toBeGreaterThan(0);
     expect((await catalog()).length).toBe(claimed);
+    const saveClaimed = Number(entry!.match(/Save Analysis surface: (\d+) tools/)?.[1]);
+    expect(saveClaimed).toBeGreaterThan(0);
+    expect(await registered(LEGACY_ACCESS, "save-analysis")).toHaveLength(saveClaimed);
+    expect(entry).toContain("`/api/mcp`");
+    expect(entry).toContain("`/api/save-analysis`");
+    expect(entry).toContain("`vault:read inbox:submit`");
+    for (const name of SAVE_TOOLS) expect(entry).toContain(`\`${name}\``);
   });
 });
 
@@ -205,14 +276,29 @@ describe("tool definitions, as a client reads them", () => {
 describe("Tool Descriptions.md", () => {
   it("has a section for every tool, and no section for a tool that is gone", async () => {
     const doc = fs.readFileSync("Tool Descriptions.md", "utf8");
-    const documented = [...doc.matchAll(/^### (\w+) — /gm)].map((m) => m[1]).sort();
+    const sections = doc.split(/^## Save Analysis resource — \/api\/save-analysis$/m);
+    expect(sections, "separate research and Save documentation").toHaveLength(2);
+    const [researchDoc, saveDoc] = sections;
+    const documented = [...researchDoc.matchAll(/^### (\w+) — /gm)].map((m) => m[1]).sort();
     const tools = (await catalog()).map((t) => t.name).sort();
     expect(documented).toEqual(tools);
     // Each section says whether the tool reads or writes, matching its annotation.
     for (const t of await catalog()) {
-      const line = doc.match(new RegExp(`^### ${t.name} — (read|write)`, "m"));
+      const line = researchDoc.match(new RegExp(`^### ${t.name} — (read|write)`, "m"));
       expect(line, `${t.name} says read or write`).not.toBeNull();
       expect(line![1]).toBe(t.annotations!.readOnlyHint ? "read" : "write");
     }
+    const save = await registered(LEGACY_ACCESS, "save-analysis");
+    const saveDocumented = [...saveDoc.matchAll(/^### (\w+) — /gm)].map((m) => m[1]).sort();
+    expect(saveDocumented).toEqual(save.map((t) => t.name).sort());
+    expect(saveDocumented).toEqual(SAVE_TOOLS);
+    expect(saveDocumented.filter((name) => documented.includes(name))).toEqual([]);
+    for (const t of save) {
+      const line = saveDoc.match(new RegExp(`^### ${t.name} — (read|write)`, "m"));
+      expect(line, `${t.name} says read or write on Save`).not.toBeNull();
+      expect(line![1]).toBe(t.annotations!.readOnlyHint ? "read" : "write");
+    }
+    expect(researchDoc).toContain("`vault:read`");
+    expect(saveDoc).toContain("`vault:read inbox:submit`");
   });
 });

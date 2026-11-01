@@ -1,8 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
+import {instantSchema,researchProvenanceSchema} from "../vault/context-provenance";
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
@@ -362,19 +362,20 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       title: "Build investment research context pack",
       annotations: READ,
       description: "Read-only bounded investment retrieval across Obsidian. Prioritizes Current Thesis, Evidence Register, Company Evolution, issuer evidence, industry TAM and counter-evidence over repeated ChatGPT archives. Returns short path/line excerpts, missing evidence and honest coverage limits. Lexical only, not a semantic/full-vault guarantee. Never edits the Vault.",
-      inputSchema: {
+      inputSchema: z.object({
         question: z.string().min(3).max(1200).describe("Investment question to retrieve bounded, dated historical evidence for"),
-        issuers: z.array(z.string().min(1).max(12)).max(6).optional().describe("Up to six company tickers or issuer identifiers; omit for industry or macro questions"),
+        issuers: z.array(z.string().min(1).max(120)).max(6).optional().describe("Up to six exact Company Hub names/tickers or unambiguous indexed/curated aliases; no fuzzy matching"),
         industry: z.string().max(140).optional().describe("Industry or thematic context, such as optical networking or banking"),
         focus: z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Prioritize sources for earnings, broker research, TAM, macro, thesis, or general review"),
         maxNotes: z.number().int().min(5).max(16).optional().describe("Maximum retrieved notes in this context pack, from 5 to 16"),
         maxChars: z.number().int().min(4500).max(18000).optional().describe("Maximum excerpt characters returned, from 4500 to 18000"),
-      },
+        asOf:instantSchema.optional().describe("Optional ISO timestamp with timezone. Excludes current file versions or declared availability after cutoff; cannot restore historical bytes. Manifest carries observed hashes and exact excerpts, not a durable full-note archive."),
+      }).strict(),
     },
-    safe(({question,issuers,industry,focus,maxNotes,maxChars}: {
-      question:string;issuers?:string[];industry?:string;focus?:Focus;maxNotes?:number;maxChars?:number
+    safe(({question,issuers,industry,focus,maxNotes,maxChars,asOf}: {
+      question:string;issuers?:string[];industry?:string;focus?:Focus;maxNotes?:number;maxChars?:number;asOf?:string
     }) => {
-      const pack = buildInvestmentContextPack({question,issuers,industry,focus,maxNotes,maxChars});
+      const pack = buildInvestmentContextPack({question,issuers,industry,focus,maxNotes,maxChars,asOf});
       return json(withBoundary({...pack,items:fenceEach(pack.items,"excerpt")}));
     }),
   );
@@ -384,7 +385,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       title: "Plan multilingual investment intake and evidence-safe Vault writeback",
       annotations: READ,
       description: "PREFERRED for newly supplied Micro/Macro/PDF/Stock investment news when a canonical Company/Industry/Macro Research Review must be saved. Read-only M5.2/M5.3 plan resolves existing Company/Industry Hubs, broker vintage and duplicate candidates; sourceChat + completedAnalysis emit exact add-only Safe Edit Source and canonical Review recipes, with SHA readback and search-index verification on retries. Use separately authorized Investment OS — Safe Edit Chat preview/apply to write; NEVER substitute the legacy submit_investment_notes Inbox importer for canonical research. This planner NEVER writes or automatically changes Thesis/Evidence Register, Portfolio or Company Evolution Timeline.",
-      inputSchema: {
+      inputSchema: z.object({
         domain:z.enum(["company","industry","macro","asset"]).describe("Claim/knowledge domain; not an inferred company ticker"),
         entities:z.array(z.string().min(1).max(120)).min(1).max(6).describe("Explicit issuer ticker(s), macro geography, or industry topics. Do not include inferred suppliers as confirmed issuers."),
         topic:z.string().min(1).max(250).describe("Short source topic; may be in Thai, English, or any language"),
@@ -405,13 +406,13 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
           statement:z.string().min(8).max(2500),
           value:z.string().max(150).optional(),
           unit:z.string().max(80).optional(),
-        }).optional().describe("OPTIONAL exact dated metric; incomplete or absent values never establish a numeric duplicate"),
+        }).strict().optional().describe("OPTIONAL exact dated metric; incomplete or absent values never establish a numeric duplicate"),
         contentTypes:z.array(z.enum(["reported_fact","earnings","guidance","industry_data","macro_data","policy","broker_rating","broker_price_target","broker_estimate","analyst_opinion","market_commentary","portfolio_snapshot","other"]))
           .max(12).optional().describe("M5.2 multi-label content classification declared from actual read text; not independently verified"),
         entityRoles:z.array(z.object({
           entity:z.string().min(1).max(120),
           role:z.enum(["primary_subject","covered_company","supplier","customer","competitor","mentioned"])
-        })).max(12).optional().describe("M5.2 explicit roles for entities listed above; do not promote a casual mention to a confirmed supplier or customer"),
+        }).strict()).max(12).optional().describe("M5.2 explicit roles for entities listed above; do not promote a casual mention to a confirmed supplier or customer"),
         themes:z.array(z.string().min(1).max(120)).max(12).optional().describe("M5.2 explicit industry/theme subjects, e.g. Memory; links only to already indexed existing hub paths"),
         brokerUpdate:z.object({
           bank:z.string().min(1).max(120),
@@ -429,14 +430,15 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
           estimateChanges:z.array(z.object({
             metric:z.string().min(1).max(120),period:z.string().min(1).max(120),
             oldValue:z.string().max(80),newValue:z.string().max(80),unit:z.string().max(60)
-          })).max(12).optional()
-        }).optional().describe("M5.2 caller-declared broker old/new versions; same bank, dated vintages, matching old/new currencies and comparable PT horizons required before candidate PT direction"),
+          }).strict()).max(12).optional()
+        }).strict().optional().describe("M5.2 caller-declared broker old/new versions; same bank, dated vintages, matching old/new currencies and comparable PT horizons required before candidate PT direction"),
         sourceChat:z.string().min(1).max(120).optional().describe("M5.3 original Micro, Macro or PDF chat identifier. Required with completedAnalysis; source provenance, not necessarily publication date"),
         existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional().describe("M5.6 optional existing Source receipt ID; accepted only when exact original text, channel, format, URL and chronology match the indexed and readback-verified Source"),
         completedAnalysis:z.string().min(1).max(30000).optional().describe("M5.3 final analyst-reviewed Markdown separated from the exact extractedText. When set with sourceChat, produces source + canonical review Safe Edit recipes without writing anything"),
+        researchProvenance:researchProvenanceSchema.optional().describe("Optional structured policy/protocol/schema/producer declarations and exact Context Pack manifest. Hash checks bind current bytes/excerpts; identities and version assertions remain caller-declared."),
         captureOnly:z.boolean().optional().describe("M5.3 Feed Only: with sourceChat, prepare a source-only Safe Edit recipe. The Research Review remains pending. Must not be combined with completedAnalysis"),
         focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Historical context relevance; does not verify issuer claims")
-      }
+      }).strict()
     },
     safe((args:WritebackInput)=>json(withBoundary(planInvestmentWriteback(args)))),
   );
@@ -534,11 +536,8 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       }));
     }),
   );
-  // OAuth clients must be able to discover the scoped tool before approving
-  // its scope. The handlers enforce the grant on every invocation.
-  if (access.intake === true || access.label.startsWith("oauth:")) {
-    registerIntakeTools(server, access.intake === true);
-  }
+  // This resource is read-only even for legacy tokens with submission scopes.
+  // Submission tools and their consent challenge belong to /api/save-analysis.
 
   // ---- Files ----
   server.registerTool(
@@ -1232,7 +1231,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       saving: cloudIntakeStatus(),
       credentialType: access.label.startsWith("oauth:") ? "oauth" : access.label.startsWith("api-key:") ? "api-key" : "other",
       requestScopes: access.scopes ?? [],
-      read: access.read, submitAnalysis: access.intake === true,
+      read: access.read, submitAnalysis: false,
       editExistingNotes: false, deleteNotes: false,
       submissionRequires: "vault:read inbox:submit",
       ...(access.label.startsWith("oauth:") ? { grantDiagnostics: oauthScopeDiagnostics(access.label.slice(6)) } : {}),

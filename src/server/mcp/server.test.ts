@@ -17,6 +17,8 @@ let root: string;
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "notemesh-mcp-"));
   process.env.DATA_DIR = root;
+  // Context manifests use the same required server key as the real runtime.
+  vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 41).toString("hex"));
   // db.ts caches its handle at module scope, so without this every test in the
   // file would share the first test's database — and these cases differ
   // precisely by what is in the settings table.
@@ -26,6 +28,7 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
   delete process.env.DATA_DIR;
+  vi.unstubAllEnvs();
 });
 
 async function toolNames(read: boolean, write: boolean): Promise<string[]> {
