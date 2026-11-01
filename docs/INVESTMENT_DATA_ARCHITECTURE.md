@@ -17,7 +17,7 @@ Do not turn every price bar into a Markdown note. A saved research note contains
 
 Use separate `entity_id` (company), `security_id` (share class), `listing_id` (market listing), `event_id`, `note_id`, `claim_id`, `thesis_version_id`, `decision_id`, `account_id` and `execution_id`. Multiple listings, ADRs and Thai DRs can refer to the same economic company while retaining independent prices, volumes, currencies and calendars.
 
-The pilot currently exposes a listing reference such as `US:NVDA` / `TH:NVDA80`. Before importing a broad universe, introduce immutable listing IDs and a provider-symbol alias table with valid-from/valid-to dates. Preserve external references through aliases; ticker renames must not create a second holding or merge unrelated securities. IPOs, delistings and listing changes require explicit metadata; a present-day watchlist is not a survivorship-free historical universe.
+The pilot currently exposes a listing reference such as `US:NVDA` / `TH:NVDA80`. That value is now explicitly surfaced as a **legacy price-cache reference only**, never a canonical listing ID. The additive typed contract in [Instrument Identity Contract](INSTRUMENT_IDENTITY_CONTRACT.md) defines immutable listing/security/issuer IDs, dated provider aliases and evidence-bound ADR/DR underlying mappings. Until a real listing is admitted to that registry from reviewed primary evidence, cross-listing conversion stays disabled. Preserve external references through dated aliases; ticker renames must not create a second holding or merge unrelated securities. IPOs, delistings and listing changes require explicit metadata; a present-day watchlist is not a survivorship-free historical universe.
 
 Suggested event relationships:
 
