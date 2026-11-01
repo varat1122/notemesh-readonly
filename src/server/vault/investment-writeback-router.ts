@@ -102,6 +102,12 @@ export interface WritebackPlan {
   exactClaimReview:{status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
     classification:ReviewClass|null;matchingClaimPaths:string[];scanTruncated:boolean|null};
   routingV2:RoutingV2;
+  canonicalPersistenceAuthority:{
+    status:"diagnostic_planner_not_apply_authority";
+    prepareTool:"prepare_canonical_writeback";
+    applyTool:"apply_canonical_writeback";
+    rule:"Use the Safe Edit canonical prepare/apply pair for executable Source/Review persistence; this read-only plan is diagnostic and migration-compatible only.";
+  };
   safeEditWorkflow?:CanonicalSafeEditWorkflow;
   routes:Route[];
   gates:{
@@ -370,6 +376,12 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     exactClaimReview:{status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
     routingV2,
+    canonicalPersistenceAuthority:{
+      status:"diagnostic_planner_not_apply_authority",
+      prepareTool:"prepare_canonical_writeback",
+      applyTool:"apply_canonical_writeback",
+      rule:"Use the Safe Edit canonical prepare/apply pair for executable Source/Review persistence; this read-only plan is diagnostic and migration-compatible only."
+    },
     routes,gates:{
       fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,
