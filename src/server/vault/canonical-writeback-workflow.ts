@@ -9,6 +9,8 @@ import { readNote } from "./notes";
 import { searchVault } from "./queries";
 import type { WritebackInput, WritebackPlan } from "./investment-writeback-router";
 import {renderThaiResearchM55,validateResearchM55} from "./research-quality-m55";
+import {splitFrontmatter} from "./markdown";
+import {isDeepStrictEqual} from "node:util";
 
 const sha=(s:string)=>createHash("sha256").update(s,"utf8").digest("hex");
 const yaml=(s:string|null|undefined)=>s==null?"null":JSON.stringify(s);
@@ -32,6 +34,7 @@ export interface CanonicalSafeEditStep {
   readbackVerified:boolean;
   indexed:boolean;
   searchable:boolean;
+  linksVerified:boolean;
   safeEditRequest:{
     operationId:string;path:string;reason:string;
     change:{kind:"create";content:string};
@@ -54,7 +57,7 @@ export interface CanonicalSafeEditWorkflow {
   qualityIssues:string[];
 }
 
-function inspect(path:string,content:string,tag:string){
+function inspect(path:string,content:string,tag:string,requiredLinks:string[]){
   const indexed=Boolean(db().prepare("SELECT 1 FROM notes WHERE path=? LIMIT 1").get(path));
   const fts=Boolean(db().prepare("SELECT 1 FROM notes_fts WHERE path=? LIMIT 1").get(path));
   let existing:string|null=null;
@@ -64,19 +67,23 @@ function inspect(path:string,content:string,tag:string){
   if(indexed&&fts){
     try {searchable=searchVault(tag,{limit:50}).hits.some(x=>x.path===path);}catch{/* Fail closed. */}
   }
-  return {exists:existing!==null,indexed:indexed&&fts,hashOK,searchable};
+  // FTS membership does not prove the Source/Hub links survived indexing.
+  const linksOK=indexed&&fts&&requiredLinks.every(target=>Boolean(db().prepare(
+    "SELECT 1 FROM links WHERE source_path=? AND resolved_path=? LIMIT 1"
+  ).get(path,target)));
+  return {exists:existing!==null,indexed:indexed&&fts,hashOK,searchable,linksOK};
 }
 function toStep(kind:CanonicalSafeEditStep["kind"],path:string,content:string,tag:string,
-  hold:boolean):CanonicalSafeEditStep{
-  const check=inspect(path,content,tag),digest=sha(content);
+  hold:boolean,requiredLinks:string[]=[]):CanonicalSafeEditStep{
+  const check=inspect(path,content,tag,requiredLinks),digest=sha(content);
   const state:CanonicalSafeEditStep["state"]=check.exists?
-    !check.hashOK?"hold_conflict":!check.indexed||!check.searchable?"hold_index_repair":"verified_existing":
+    !check.hashOK?"hold_conflict":!check.indexed||!check.searchable||!check.linksOK?"hold_index_repair":"verified_existing":
     hold?"hold_event_review":"needs_create";
   // Operation IDs are deterministic across model retries but never reused for
   // changed content. A changed existing note is a conflict, not an overwrite.
   const operationId="ICW-"+sha([kind,path,digest].join("\n")).slice(0,32);
   return {kind,path,expectedSha256:digest,receiptKey:operationId,state,
-    readbackVerified:check.hashOK,indexed:check.indexed,searchable:check.searchable,
+    readbackVerified:check.hashOK,indexed:check.indexed,searchable:check.searchable,linksVerified:check.linksOK,
     safeEditRequest:state==="needs_create"?{operationId,path,
       reason:"M5.3 attributed investment source/review: add-only; no Thesis, Evidence Register, Portfolio or automatic Company Timeline edits",
       change:{kind:"create",content}}:null};
@@ -108,12 +115,24 @@ export function buildCanonicalSafeEditWorkflow(
   const tag="InvestmentIntake"+plan.planId.slice(3);
   const event=plan.chronology.eventDate,published=plan.chronology.publicationDate;
   const attachment=plan.sourceCapture.attachmentVerified?"hash_readback_verified_user_bytes":"not_verified";
+  // Preserve explicit attribution even in Feed Only/legacy freeform mode.
+  // These remain caller declarations, never publisher verification.
+  const declaredProvenance=[
+    ...(input.sourceChannel!==undefined?[`source_channel: ${yaml(input.sourceChannel)}`]:[]),
+    ...(input.attributedOrigin!==undefined?[`attributed_origin: ${yaml(input.attributedOrigin)}`]:[]),
+    ...(input.originalDocumentAccess!==undefined?[`original_document_access: ${yaml(input.originalDocumentAccess)}`]:[]),
+  ];
   const proposedSourceContent=[
     "---","type: investment_source_intake","source_type: user_supplied",
     "verification: not_reverified","status: user_input_not_publisher_verified",
     `intake_id: ${yaml(plan.planId)}`,`source_chat: ${yaml(sourceChat)}`,
     `source_kind: ${yaml(plan.sourceKind)}`,`input_format: ${yaml(plan.inputFormat)}`,
     `source_language: ${yaml(plan.sourceLanguage)}`,`attributed_publisher: ${yaml(input.publisher)}`,
+    ...declaredProvenance,
+    ...(input.researchProvenance?[
+      `research_provenance: ${JSON.stringify(input.researchProvenance)}`,
+      `research_provenance_assertion: ${input.researchProvenance.context?"caller_declared_references_server_attested_context_bytes_checked":"caller_declared_context_not_supplied"}`
+    ]:[]),
     `source_url: ${yaml(input.sourceUrl)}`,`event_date: ${yaml(event)}`,
     `published_at: ${yaml(published)}`,`attachment_status: ${yaml(attachment)}`,
     `attachment_path: ${yaml(plan.sourceCapture.rawAttachmentPath)}`,
@@ -134,6 +153,9 @@ export function buildCanonicalSafeEditWorkflow(
     sourceContent=readNote(rawPath).content;
     if(sha(sourceContent)!==plan.sourceIdentity.existingSourceSha256)
       throw Error("M56_SOURCE_CHANGED_DURING_PLAN");
+    if(captureOnly&&input.researchProvenance&&!isDeepStrictEqual(
+      splitFrontmatter(sourceContent).data.research_provenance,input.researchProvenance))
+      throw Error("SOURCE_CAPTURE_PROVENANCE_IMMUTABLE_USE_REVIEW: existing Source is unchanged; new provenance requires a Review");
   }
   const companyLinks=plan.routingV2.companyHubs.map(x=>`- ${wiki(x.path)} — ${x.role??"mentioned"}, caller-declared`);
   const themeLinks=plan.routingV2.industryHubs.map(x=>`- ${wiki(x.path)} — existing industry context`);
@@ -153,6 +175,8 @@ export function buildCanonicalSafeEditWorkflow(
     `- Bank: ${broker.bank}; report: ${broker.reportDate??"unknown"}; prior bank: ${broker.priorBank??"unknown"}; prior report: ${broker.priorReportDate??"unknown"}`,
     `- Rating: ${broker.priorRating??"unknown"} → ${broker.rating??"unknown"}`,
     `- PT: ${broker.priorTargetPrice??"unknown"} ${broker.priorCurrency??""} → ${broker.targetPrice??"unknown"} ${broker.currency??""}; version classification: ${plan.routingV2.brokerRevision.status}`,
+    ...(broker.targetHorizon!==undefined||broker.priorTargetHorizon!==undefined?
+      [`- PT horizon: ${broker.priorTargetHorizon??"unknown"} → ${broker.targetHorizon??"unknown"}`]:[]),
     ...plan.routingV2.brokerRevision.estimateRows.map(row=>
       `- ${row.metric} ${row.period}: ${row.oldValue} → ${row.newValue} ${row.unit} (attributed vintages)`),
     ""
@@ -166,13 +190,17 @@ export function buildCanonicalSafeEditWorkflow(
       `source_channel: ${yaml(input.sourceChannel??plan.sourceKind)}`,
       `attributed_origin: ${yaml(input.attributedOrigin??input.publisher)}`,
       `original_document_access: ${yaml(input.originalDocumentAccess??"not_obtained")}`
-    ]:[]),
+    ]:declaredProvenance),
     `event_date: ${yaml(event)}`,`published_at: ${yaml(published)}`,
     `review_scope: ${yaml(plan.routingV2.reviewScope)}`,
     `content_types: ${JSON.stringify(unique(input.contentTypes??[]))}`,
     ...(input.researchReview?[
       `company_hubs: ${JSON.stringify(plan.routingV2.companyHubs.map(x=>x.path))}`,
       `industry_hubs: ${JSON.stringify(plan.routingV2.industryHubs.map(x=>x.path))}`
+    ]:[]),
+    ...(input.researchProvenance?[
+      `research_provenance: ${JSON.stringify(input.researchProvenance)}`,
+      `research_provenance_assertion: ${input.researchProvenance.context?"caller_declared_references_server_attested_context_bytes_checked":"caller_declared_context_not_supplied"}`
     ]:[]),
     `original_source_path: ${yaml(rawPath)}`,"---","",
     `# Investment Review — ${safeSubject(subject)} — ${plan.planId}`,"",
@@ -183,6 +211,11 @@ export function buildCanonicalSafeEditWorkflow(
     `- Event date: ${event??"unknown"}; publication date: ${published??"unknown"}`,
     "","## Research analysis (AI interpretation; not approved Thesis)","",
     input.researchReview?renderThaiResearchM55(input.researchReview):analysis??"Analysis pending.","",
+    // Both fields are accepted by the existing input contract. Typed sections
+    // must not erase the caller's full analysis, citations or provenance.
+    ...(input.researchReview&&analysis?[
+      "## Additional completed analysis (caller-supplied; not independently verified)","",analysis,""
+    ]:[]),
     ...brokerLines,
     "## Canonical knowledge links","",
     ...companyLinks,...themeLinks,
@@ -203,8 +236,10 @@ export function buildCanonicalSafeEditWorkflow(
   const legacyConflict=Boolean(legacy&&legacy!==reviewPath&&
     db().prepare("SELECT 1 FROM notes WHERE path=? LIMIT 1").get(legacy))||Boolean(otherCanonical);
   const sourceStep=toStep("source_intake",rawPath,sourceContent,tag,false);
-  const reviewStep=captureOnly?null:toStep("canonical_review",reviewPath,reviewContent,tag,hasSourceMatch||legacyConflict);
-  if(reviewStep&&qualityIssues.length){
+  const reviewStep=captureOnly?null:toStep("canonical_review",reviewPath,reviewContent,tag,hasSourceMatch||legacyConflict,
+    unique([rawPath,...plan.routingV2.companyHubs.map(x=>x.path),...plan.routingV2.industryHubs.map(x=>x.path)]));
+  if(reviewStep&&qualityIssues.length&&
+    reviewStep.state!=="hold_conflict"&&reviewStep.state!=="hold_index_repair"){
     reviewStep.state="hold_quality_gate";
     reviewStep.safeEditRequest=null;
   }

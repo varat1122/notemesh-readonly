@@ -91,6 +91,55 @@ Some ordinary body text. #inbox
 
 const marker = /^%[0-9a-f]{8}%$/;
 
+it.each([false, true])("IOS-CORE-READ-001 keeps the OAuth research surface read-only (legacy submission grant: %s)", async legacyGrant => {
+  await seed("CoreFixture.md", "# Synthetic CORE fixture\nRead-only retrieval proof.\n");
+  const { createMcpServer } = await import("~/server/mcp/server");
+  const { withToolAuthMetadata } = await import("~/server/mcp/tool-auth");
+  const { db, setSetting } = await import("~/server/db");
+  const { nextIntake } = await import("~/server/intake");
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  setSetting("vault_name", "Investment_OS_SYNTHETIC");
+  nextIntake(); // Initialize the existing isolated queue, as the save-server fixture does.
+  const scopes = legacyGrant ? ["vault:read", "inbox:submit"] : ["vault:read"];
+  const server = createMcpServer({ read: true, write: false, intake: legacyGrant, scopes, label: "oauth:core-fixture" });
+  const client = new Client({ name: "core-read-fixture", version: "1" });
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  const network = vi.spyOn(globalThis, "fetch").mockImplementation(() => { throw Error("CORE_NETWORK_FORBIDDEN"); });
+  const original = fs.readFileSync(path.join(vault, "CoreFixture.md"), "utf8");
+  const queueCount = () => (db().prepare("SELECT count(*) AS n FROM intake_queue").get() as { n: number }).n;
+  const before = queueCount();
+  try {
+    await Promise.all([server.connect(right), client.connect(left)]);
+    const listed = await client.listTools();
+    // This is the same metadata transform applied by the HTTP transport.
+    const wire = withToolAuthMetadata({ jsonrpc: "2.0", id: 1, result: { tools: listed.tools } });
+    const read = await client.callTool({ name: "read_note", arguments: { path: "CoreFixture.md" } });
+    const info = await client.callTool({ name: "get_vault_info", arguments: {} });
+    const payload = JSON.parse((info.content as { text: string }[])[0].text);
+    const submitted = await client.callTool({ name: "submit_investment_notes", arguments: {
+      sourceChat: "SYNTHETIC CORE ONLY", notes: [{ title: "Synthetic only", eventDate: null,
+        userInput: "Synthetic source", analysis: "Synthetic analysis", relatedNotes: [] }],
+    } });
+    const receipt = { sourceTree: process.env.IOS_CORE_TEST_TREE ?? "UNSET", synthetic: true, scopes,
+      nonReadTools: listed.tools.filter(t => t.annotations?.readOnlyHint !== true).map(t => t.name),
+      submissionTools: listed.tools.filter(t => ["submit_investment_notes", "get_submission_status"].includes(t.name)).map(t => t.name),
+      wireAdvertisesInboxScope: JSON.stringify(wire).includes("inbox:submit"),
+      readSucceeded: read.isError !== true && JSON.stringify(read).includes("Read-only retrieval proof"),
+      vaultName: payload.vaultName, submitCapability: payload.connection.submitAnalysis,
+      submissionRejected: submitted.isError === true, queueBefore: before, queueAfter: queueCount(),
+      noteUnchanged: fs.readFileSync(path.join(vault, "CoreFixture.md"), "utf8") === original,
+      networkCalls: network.mock.calls.length };
+    const evidence = process.env.IOS_CORE_TEST_EVIDENCE_DIR;
+    if (evidence) { fs.mkdirSync(evidence, { recursive: true }); fs.writeFileSync(path.join(evidence, `oauth-${legacyGrant ? "legacy-grant" : "read-only"}.json`), JSON.stringify(receipt, null, 2)); }
+    expect(receipt).toMatchObject({ nonReadTools: [], submissionTools: [], wireAdvertisesInboxScope: false,
+      readSucceeded: true, vaultName: "Investment_OS_SYNTHETIC", submitCapability: false,
+      submissionRejected: true, queueAfter: before, noteUnchanged: true, networkCalls: 0 });
+  } finally {
+    network.mockRestore(); await client.close(); await server.close();
+  }
+});
+
 /** The three parts of a fenced string: open marker, payload, close marker. */
 function unfence(s: string): { token: string; inner: string } {
   const lines = s.split("\n");

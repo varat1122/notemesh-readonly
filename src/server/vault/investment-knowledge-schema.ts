@@ -51,6 +51,7 @@ function roleOfNote(path:string, fm:Data):SchemaInspection["role"] {
   if(t==="investment_structured_claim_register")return "structured_claim";
   // Source archive path always wins: an old archive can have type research_note.
   if(path.startsWith("07_Sources/ChatGPT/")||t==="chatgpt_archive")return "archive";
+  if(t==="investment_source_intake")return "source";
   if(t==="current_thesis"||t==="thesis"||/^05_Thesis\/.*Current Thesis/i.test(path))return "thesis";
   if(/Evidence Register/i.test(path))return "evidence_register";
   if(t==="company_evolution_timeline"||t==="investment_evolution_master"||/Company Evolution - |00_Investment_Evolution_Master/.test(path))return "timeline";
@@ -63,7 +64,7 @@ function roleOfNote(path:string, fm:Data):SchemaInspection["role"] {
     return "historical_analysis";
   if(["knowledge_index","company_history_index","topic_history_index","macro_hub",
       "chat_transcript_index","historical_navigation_redirect"].includes(t??""))return "navigation";
-  if(["news_thesis_review","investment_review","research_note","preferred_research_note",
+  if(["news_thesis_review","investment_review","investment_research_review","research_note","preferred_research_note",
       "research_update","macro_research_note","dated_evidence_review","research_synthesis",
       "research_map","import_review"].includes(t??""))return "review";
   if(t==="research_workflow"||path.startsWith("09_Templates/"))return "method";

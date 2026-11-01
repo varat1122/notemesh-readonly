@@ -64,6 +64,8 @@ export interface RoutingV2 {
 
 const key=(v:string)=>v.trim().normalize("NFC").replace(/\s+/g," ").toLocaleLowerCase("en");
 const curatedAliases:Record<string,string>={
+  // Explicit exchange-symbol/name compatibility; never a fuzzy rewrite.
+  "tsm":"TSMC",
   "samsung electronics":"Samsung", "micron":"MU", "micron technology":"MU",
   "sk hynix":"SK hynix", "sk hynix inc":"SK hynix"
 };
@@ -97,6 +99,28 @@ function findHub(label:string, indexed:ReturnType<typeof stems>, allowCurated:bo
   const curated=indexed.filter(x=>key(x.title)===key(canonical));
   return curated.length===1?{path:curated[0].path,resolution:"curated_alias" as const}:null;
 }
+
+/** Shared by routing and retrieval. Identity is an existing Hub path, not a
+ * guessed ticker. Ambiguous indexed aliases fail closed before curated fallback. */
+export function companyIdentityResolver(eligible:(path:string)=>boolean=()=>true,metadata?:(path:string)=>string){
+  const all=stems("01_Companies/");
+  return (label:string)=>{
+    const candidate=all.filter(x=>key(x.title)===key(label)||indexedAliases(x.frontmatter).some(a=>key(a)===key(label))||
+      key(x.title)===key(curatedAliases[key(label)]??""));
+    if(candidate.length>12)throw Error("Ambiguous company alias: "+label);
+    // Read only exact candidate Hubs, not every company file in the Vault.
+    const index=candidate.filter(x=>eligible(x.path)).map(x=>({...x,frontmatter:metadata?metadata(x.path):x.frontmatter}));
+    const matches=index.filter(x=>key(x.title)===key(label)||indexedAliases(x.frontmatter).some(a=>key(a)===key(label)));
+    const curated=curatedAliases[key(label)];
+    if(matches.length>1||matches.length===1&&curated&&index.some(x=>key(x.title)===key(curated)&&x.path!==matches[0].path))
+      throw Error("Ambiguous company alias: "+label);
+    const hub=findHub(label,index,true);
+    if(!hub){
+      return null;
+    }
+    return {...hub,requested:label,canonical:hub.path.slice("01_Companies/".length,-3)};
+  };
+}
 function isDate(value:string|undefined){
   if(!value||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value))return false;
   const d=new Date(value+"T00:00:00Z");
@@ -121,9 +145,9 @@ function brokerRevision(b:BrokerUpdate|undefined):RoutingV2["brokerRevision"]{
     "Caller-declared old/new same-bank PT; still requires original report, identical currency/horizon and independent verification.");
 }
 
-export function planCanonicalRoutingV2(input:RoutingV2Input):RoutingV2{
-  const companyIndex=stems("01_Companies/");
-  const industryIndex=stems("02_Industries_Themes/");
+export function planCanonicalRoutingV2(input:RoutingV2Input,eligible:(path:string)=>boolean=()=>true):RoutingV2{
+  const companyIndex=stems("01_Companies/").filter(x=>eligible(x.path));
+  const industryIndex=stems("02_Industries_Themes/").filter(x=>eligible(x.path));
   const tags=input.entityRoles??[];
   const companyHubs:HubLink[]=[],industryHubs:HubLink[]=[];
   const unresolvedEntities:string[]=[],unresolvedThemes:string[]=[];

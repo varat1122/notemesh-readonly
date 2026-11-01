@@ -1,6 +1,13 @@
 # Changelog
 
-Deployment surface: 30 tools covering read-only investment retrieval, M5.6 source/event relation and revision proposals, M5.7 PDF extraction coverage preflight, claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
+## Unreleased — Read Only research candidate
+
+Research surface: 28 tools covering read-only investment retrieval, M5.6 source/event relation and revision proposals, M5.7 PDF extraction coverage preflight, claim/evidence review and analyst thesis proposal quality checks. The `/api/mcp` resource requires `vault:read` and exposes only read tools, even to legacy credentials carrying submission or write permissions.
+
+Save Analysis surface: 2 tools (`submit_investment_notes` and `get_submission_status`) on the separate `/api/save-analysis` resource, requiring `vault:read inbox:submit` OAuth scopes. Clients that previously submitted through `/api/mcp` must use this separately authorized resource after an approved release.
+
+This entry describes candidate behavior. It does not establish a production deployment, a refreshed client tool list, or successful OAuth/client access.
+
 Safe Edit offers ten tools on a separate resource (including original-source archive and two user attachment byte-store/inspect actions); see docs/SAFE_EDIT.md.
 Historical upstream release descriptions below are preserved.
 
