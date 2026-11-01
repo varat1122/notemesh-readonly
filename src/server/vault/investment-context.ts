@@ -169,6 +169,29 @@ export function buildInvestmentContextPack(req: Input): Pack {
   ];
   const absent: string[] = [];
   for (const p of needed) { if (exists(p)) add(p,120); else absent.push(p); }
+
+  // The newest canonical Research Review is a first-class longitudinal anchor,
+  // not an FTS popularity result. A fresh Review can otherwise lose every slot
+  // to Thesis/Evidence/Timeline even though it is the exact comparator the next
+  // event needs. Order by first indexed appearance (falling back to modification
+  // time) and respect the optional as-of cutoff before selecting it.
+  const latestCanonicalReviews=new Map<string,string>();
+  for(const ticker of issuers){
+    const prefix="10_Knowledge/Company Research/Investment Review - "+ticker+" - ";
+    const rows=db().prepare(
+      "SELECT path,frontmatter FROM notes WHERE substr(path,1,?)=? ORDER BY coalesce(created,modified,mtime) DESC,path DESC LIMIT 24"
+    ).all(prefix.length,prefix) as {path:string;frontmatter:string|null}[];
+    for(const row of rows){
+      if(!exists(row.path)||!eligible(row.path))continue;
+      try{
+        const fm=JSON.parse(row.frontmatter??"null") as Record<string,unknown>|null;
+        if(!fm||fm.type!=="investment_research_review")continue;
+      }catch{continue;}
+      latestCanonicalReviews.set(ticker,row.path);
+      add(row.path,220);
+      break;
+    }
+  }
   // Historical Company indexes exist in two legacy locations. Neither is a
   // current/approved Thesis, but both provide routes back to dated prior
   // conversations. A missing newer index must not hide the older one or be
@@ -359,7 +382,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
     if (items.length>=maxNotes) {omit("maxNotes");continue;}
     if (remaining<250) {omit("maxChars");continue;}
     const n=roleCounts.get(row.role)||0;
-    if(n>=(quota[row.role]??4)){omit("role_quota:"+row.role);continue;}
+    const mandatoryLatestReview=[...latestCanonicalReviews.values()].includes(row.path);
+    if(!mandatoryLatestReview&&n>=(quota[row.role]??4)){omit("role_quota:"+row.role);continue;}
     try {
       const raw=version(row.path).content;
       const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining),row.role);
@@ -371,6 +395,12 @@ export function buildInvestmentContextPack(req: Input): Pack {
   }
   const roles=new Set(items.map(x=>x.role));
   const incomplete=[...absent];
+  for(const ticker of issuers){
+    const latest=latestCanonicalReviews.get(ticker);
+    if(!latest)incomplete.push("No Canonical Research Review found for "+ticker+"; next-event delta lacks a saved analyst comparator.");
+    else if(!items.some(x=>x.path===latest))
+      incomplete.push("Latest Canonical Research Review for "+ticker+" was discovered but could not fit the requested context budget.");
+  }
   if(issuers.length){
     if(!roles.has("thesis"))incomplete.push("No Current Thesis selected; owner-endorsed thesis is unknown.");
     if(!roles.has("evidence_register"))incomplete.push("No Evidence Register selected; prior claims may be missing.");
