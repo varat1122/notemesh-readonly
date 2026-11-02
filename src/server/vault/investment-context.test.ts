@@ -70,11 +70,11 @@ describe("investment context retrieval",()=>{
     const older="10_Knowledge/Company Research/Investment Review - NVDA - IN-1111111111111111.md";
     const latest="10_Knowledge/Company Research/Investment Review - NVDA - IN-2222222222222222.md";
     await addExtra(older,[
-      "---","type: investment_research_review","verification: not_reverified","published_at: 2026-10-20","event_date: 2026-10-20","---",
+      "---","type: investment_research_review","verification: not_reverified","published_at: 2026-10-20","event_date: 2026-10-20","analysis_as_of: 2026-10-20","comparator_eligible: true","---",
       "# Investment Review - NVDA - older","Older NVDA analyst comparator."
     ].join("\n"));
     await addExtra(latest,[
-      "---","type: investment_research_review","verification: not_reverified","published_at: 2026-11-02","event_date: 2026-11-02","---",
+      "---","type: investment_research_review","verification: not_reverified","published_at: 2026-11-02","event_date: null","analysis_as_of: 2026-11-02","comparator_eligible: true","---",
       "# Investment Review - NVDA - latest","Latest NVDA analyst comparator with cash conversion and valuation conditions."
     ].join("\n"));
     const {db}=await import("../db");
@@ -85,7 +85,8 @@ describe("investment context retrieval",()=>{
     expect(paths).toContain(latest);
     expect(paths).not.toContain(older);
     expect(p.decisions.find(x=>x.path===latest)?.decision).toBe("selected");
-    expect(p.incomplete.some(x=>x.includes("Latest Canonical Research Review"))).toBe(false);
+    expect(p.analyticalComparators[0]).toMatchObject({status:"selected",path:latest,analysisAsOf:"2026-11-02",eventDate:null});
+    expect(p.incomplete.some(x=>x.includes("Analytical comparator HOLD"))).toBe(false);
   });
   it("returns counter-evidence passage with its own source line pointer, not just a flattering lead excerpt",async()=>{
     const build=await fixture();
