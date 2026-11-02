@@ -47,8 +47,10 @@ export interface RoutingV2 {
   };
   companyHubs:HubLink[];
   industryHubs:HubLink[];
+  macroHubs:HubLink[];
   unresolvedEntities:string[];
   unresolvedThemes:string[];
+  unresolvedMacroHubs:string[];
   reviewScope:"company"|"industry"|"macro"|"asset";
   preferredReviewSubject:string;
   timelineEligibility:"primary_single_company_candidate_only"|"not_eligible_without_event_review";
@@ -148,9 +150,10 @@ function brokerRevision(b:BrokerUpdate|undefined):RoutingV2["brokerRevision"]{
 export function planCanonicalRoutingV2(input:RoutingV2Input,eligible:(path:string)=>boolean=()=>true):RoutingV2{
   const companyIndex=stems("01_Companies/").filter(x=>eligible(x.path));
   const industryIndex=stems("02_Industries_Themes/").filter(x=>eligible(x.path));
+  const macroIndex=stems("04_Macro/").filter(x=>eligible(x.path));
   const tags=input.entityRoles??[];
-  const companyHubs:HubLink[]=[],industryHubs:HubLink[]=[];
-  const unresolvedEntities:string[]=[],unresolvedThemes:string[]=[];
+  const companyHubs:HubLink[]=[],industryHubs:HubLink[]=[],macroHubs:HubLink[]=[];
+  const unresolvedEntities:string[]=[],unresolvedThemes:string[]=[],unresolvedMacroHubs:string[]=[];
   const companyCandidates=input.domain==="company"?input.entities:[...new Set(tags.map(x=>x.entity))];
   for(const label of companyCandidates){
     const declared=tags.find(x=>key(x.entity)===key(label));
@@ -173,6 +176,16 @@ export function planCanonicalRoutingV2(input:RoutingV2Input,eligible:(path:strin
     if(hub){if(!industryHubs.some(x=>x.path===hub.path))industryHubs.push({label,...hub});}
     else unresolvedThemes.push(label);
   }
+  // Macro Reviews link only to existing indexed 04_Macro hubs. Explicit
+  // entity/theme labels are treated as routing candidates, never as permission
+  // to create a new hub or infer one from free text.
+  if(input.domain==="macro"){
+    for(const label of [...new Set([...input.entities,...(input.themes??[])])]){
+      const hub=findHub(label,macroIndex,false);
+      if(hub){if(!macroHubs.some(x=>x.path===hub.path))macroHubs.push({label,...hub});}
+      else unresolvedMacroHubs.push(label);
+    }
+  }
   // The number of mentioned companies is NOT the number of principal
   // subjects. A single declared primary company keeps a company Review even
   // when competitors/suppliers are linked as context. If multiple declared
@@ -185,13 +198,14 @@ export function planCanonicalRoutingV2(input:RoutingV2Input,eligible:(path:strin
     (input.domain==="company"&&companyHubs.length>1&&!singlePrimary)?"industry":"company";
   const preferredReviewSubject=reviewScope==="industry"&&industryHubs.length?industryHubs[0].path.slice("02_Industries_Themes/".length,-3):
     reviewScope==="company"&&companyHubs.length?(singlePrimary?primaryHubs[0]:companyHubs[0]).path.slice("01_Companies/".length,-3):
+    reviewScope==="macro"&&macroHubs.length?macroHubs[0].path.slice("04_Macro/".length,-3):
     reviewScope==="macro"?input.entities.join(" / "):reviewScope==="asset"?"Asset / Portfolio":"Cross Theme";
   const onePrimary=companyHubs.length===1&&companyHubs[0].role==="primary_subject"&&input.domain==="company";
   return {
     version:"M5.2-read-only",
     classification:{contentTypes:[...new Set(input.contentTypes??[])],basis:"caller_declared_not_independently_verified",
       materiality:"unassessed",novelty:"unresolved_pending_original_event_review"},
-    companyHubs,industryHubs,unresolvedEntities,unresolvedThemes,reviewScope,preferredReviewSubject,
+    companyHubs,industryHubs,macroHubs,unresolvedEntities,unresolvedThemes,unresolvedMacroHubs,reviewScope,preferredReviewSubject,
     timelineEligibility:onePrimary?"primary_single_company_candidate_only":"not_eligible_without_event_review",
     brokerRevision:brokerRevision(input.brokerUpdate),neverAutoWriteProtected:true
   };
