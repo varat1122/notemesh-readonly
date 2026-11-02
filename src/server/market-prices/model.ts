@@ -85,6 +85,7 @@ export const PRICE_POLICY = {
   revisionNoise: "Store every returned value. Detailed correction receipts ignore adjustedClose-only relative changes <= 0.000001 (provider floating-point jitter); OHLC and volume changes are always recorded.",
   deviceSync: "Price database is server data outside the Obsidian vault; it is not replicated by Obsidian Sync.",
   quality: "Invalid OHLCV bars are quarantined, never repaired or forward-filled. Inspect quality issues and missing sessions before event/portfolio analysis.",
+  identity: "market:symbol is a legacy price-cache reference, not the canonical immutable listing identity. Never infer issuer, share class, ADR/DR relation or conversion ratio from it. Cross-listing use requires a dated Instrument Identity Registry mapping.",
 } as const;
 
 export class PriceError extends Error {
