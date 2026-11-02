@@ -159,12 +159,15 @@ export function buildCanonicalSafeEditWorkflow(
   }
   const companyLinks=plan.routingV2.companyHubs.map(x=>`- ${wiki(x.path)} — ${x.role??"mentioned"}, caller-declared`);
   const themeLinks=plan.routingV2.industryHubs.map(x=>`- ${wiki(x.path)} — existing industry context`);
+  const macroLinks=plan.routingV2.macroHubs.map(x=>`- ${wiki(x.path)} — existing macro context`);
   const qualityIssues=input.researchReview?validateResearchM55({
     domain:plan.domain,subject,contentTypes:input.contentTypes??[],
     resolvedSubjectPath:plan.routingV2.reviewScope==="industry"?plan.routingV2.industryHubs[0]?.path:
-      plan.routingV2.reviewScope==="company"?plan.routingV2.companyHubs[0]?.path:undefined,
+      plan.routingV2.reviewScope==="company"?plan.routingV2.companyHubs[0]?.path:
+      plan.routingV2.reviewScope==="macro"?plan.routingV2.macroHubs[0]?.path:undefined,
     companyHubPaths:plan.routingV2.companyHubs.map(x=>x.path),
     industryHubPaths:plan.routingV2.industryHubs.map(x=>x.path),
+    macroHubPaths:plan.routingV2.macroHubs.map(x=>x.path),
     sourceChannel:input.sourceChannel??"",
     attributedOrigin:input.attributedOrigin,
     originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage
@@ -196,7 +199,8 @@ export function buildCanonicalSafeEditWorkflow(
     `content_types: ${JSON.stringify(unique(input.contentTypes??[]))}`,
     ...(input.researchReview?[
       `company_hubs: ${JSON.stringify(plan.routingV2.companyHubs.map(x=>x.path))}`,
-      `industry_hubs: ${JSON.stringify(plan.routingV2.industryHubs.map(x=>x.path))}`
+      `industry_hubs: ${JSON.stringify(plan.routingV2.industryHubs.map(x=>x.path))}`,
+      `macro_hubs: ${JSON.stringify(plan.routingV2.macroHubs.map(x=>x.path))}`
     ]:[]),
     ...(input.researchProvenance?[
       `research_provenance: ${JSON.stringify(input.researchProvenance)}`,
@@ -218,8 +222,8 @@ export function buildCanonicalSafeEditWorkflow(
     ]:[]),
     ...brokerLines,
     "## Canonical knowledge links","",
-    ...companyLinks,...themeLinks,
-    ...(companyLinks.length||themeLinks.length?[]:["- No existing Company/Industry Hub was resolved; owner review of entity mapping required."]),
+    ...companyLinks,...themeLinks,...macroLinks,
+    ...(companyLinks.length||themeLinks.length||macroLinks.length?[]:["- No existing Company/Industry/Macro Hub was resolved; owner review of entity mapping required."]),
     "","## Ingestion safety","",
     "- Linked companies are not independent new events or verified customer/supplier relationships.",
     "- This note does not change Current Thesis, Evidence Register, Portfolio or Company Evolution Timeline.",
@@ -237,7 +241,7 @@ export function buildCanonicalSafeEditWorkflow(
     db().prepare("SELECT 1 FROM notes WHERE path=? LIMIT 1").get(legacy))||Boolean(otherCanonical);
   const sourceStep=toStep("source_intake",rawPath,sourceContent,tag,false);
   const reviewStep=captureOnly?null:toStep("canonical_review",reviewPath,reviewContent,tag,hasSourceMatch||legacyConflict,
-    unique([rawPath,...plan.routingV2.companyHubs.map(x=>x.path),...plan.routingV2.industryHubs.map(x=>x.path)]));
+    unique([rawPath,...plan.routingV2.companyHubs.map(x=>x.path),...plan.routingV2.industryHubs.map(x=>x.path),...plan.routingV2.macroHubs.map(x=>x.path)]));
   if(reviewStep&&qualityIssues.length&&
     reviewStep.state!=="hold_conflict"&&reviewStep.state!=="hold_index_repair"){
     reviewStep.state="hold_quality_gate";
