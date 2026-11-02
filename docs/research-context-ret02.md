@@ -38,6 +38,26 @@ Cloudflare evidence merely because it contains `NET INCOME`. Source prose is
 never automatically converted into new company links by the current planner.
 Historical Vault metadata and links are not changed by this correction.
 
+## Analytical comparator chronology (Candidate/Unreleased foundation correction)
+
+The current company Canonical Review is selected by the unique latest valid
+`event_date` from the current, cutoff-eligible note bytes. This existing field
+is the declared economic/analytical event date; import, index, file creation,
+modified time and publication time cannot replace it. Later Q2 backfill therefore
+cannot displace an already saved Q3 comparator. Historical Reviews remain
+retrievable through the ordinary bounded search.
+
+`analyticalComparators` identifies each issuer's selected path/date or explicit
+`hold` reason. Missing/invalid chronology, tied latest dates, no eligible Review,
+a scan exceeding 240 matching paths, or a selected comparator that cannot fit
+the requested context budget returns HOLD in `incomplete` and manifest
+limitations, without a timestamp fallback. Revisions sharing a latest event
+date require explicit reconciliation; filename or import order is not authority.
+Dates are declared metadata, not independently verified facts. Existing RET-02
+availability checks run before comparator ranking; economic dates do not bypass
+the knowledge cutoff or restore historical bytes. No new schema/migration is
+introduced and historical Vault metadata is not rewritten.
+
 ## Cutoff and what it can prove
 
 Optional `asOf` is an ISO timestamp **with timezone**, no later than retrieval

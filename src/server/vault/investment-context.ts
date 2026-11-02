@@ -11,7 +11,9 @@ export type Focus = "earnings" | "broker" | "tam" | "macro" | "thesis" | "genera
 export type Role = "rules" | "thesis" | "evidence_register" | "timeline" | "company" | "industry" | "source" | "research" | "archive";
 export interface Input { question: string; issuers?: string[]; industry?: string; focus?: Focus; maxNotes?: number; maxChars?: number; asOf?:string }
 export interface Item { path: string; role: Role; declaredVerification: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection; provenanceSummary:ReturnType<typeof contextDeclaredMetadata>["provenanceSummary"] }
+export interface AnalyticalComparator { issuer:string;status:"selected"|"hold";path:string|null;eventDate:string|null;reason:string }
 export interface Pack { status: "retrieval_only_not_verified"; question: string; issuers: string[]; focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[];
+  analyticalComparators:AnalyticalComparator[];
   manifest:ContextManifest;entityResolution:{requested:string;canonical:string;path:string|null;resolution:string}[];
   decisions:{path:string|null;decision:string;reason:string;score?:number}[];discoveryTruncated:boolean }
 
@@ -170,27 +172,40 @@ export function buildInvestmentContextPack(req: Input): Pack {
   const absent: string[] = [];
   for (const p of needed) { if (exists(p)) add(p,120); else absent.push(p); }
 
-  // The newest canonical Research Review is a first-class longitudinal anchor,
-  // not an FTS popularity result. A fresh Review can otherwise lose every slot
-  // to Thesis/Evidence/Timeline even though it is the exact comparator the next
-  // event needs. Order by first indexed appearance (falling back to modification
-  // time) and respect the optional as-of cutoff before selecting it.
+  // Economic chronology comes from the existing canonical event_date, never
+  // creation/import/index time. Inspect current eligible bytes before ranking;
+  // a truncated scan, unknown chronology or tied latest date cannot establish
+  // a unique comparator. Publication/knowledge availability stays in RET-02.
   const latestCanonicalReviews=new Map<string,string>();
+  const analyticalComparators:AnalyticalComparator[]=[];
   for(const ticker of issuers){
     const prefix="10_Knowledge/Company Research/Investment Review - "+ticker+" - ";
     const rows=db().prepare(
-      "SELECT path,frontmatter FROM notes WHERE substr(path,1,?)=? ORDER BY coalesce(created,modified,mtime) DESC,path DESC LIMIT 24"
-    ).all(prefix.length,prefix) as {path:string;frontmatter:string|null}[];
+      "SELECT path FROM notes WHERE substr(path,1,?)=? ORDER BY path LIMIT 241"
+    ).all(prefix.length,prefix) as {path:string}[];
+    const comparator:AnalyticalComparator={issuer:ticker,status:"hold",path:null,eventDate:null,reason:"no_eligible_canonical_review"};
+    analyticalComparators.push(comparator);
+    if(rows.length>240){discoveryTruncated=true;comparator.reason="bounded_comparator_scan_incomplete";continue;}
+    const dated:{path:string;date:string}[]=[];
+    let unknownChronology=false;
     for(const row of rows){
       if(!exists(row.path)||!eligible(row.path))continue;
-      try{
-        const fm=JSON.parse(row.frontmatter??"null") as Record<string,unknown>|null;
-        if(!fm||fm.type!=="investment_research_review")continue;
-      }catch{continue;}
-      latestCanonicalReviews.set(ticker,row.path);
-      add(row.path,220);
-      break;
+      const fm=version(row.path).fm;
+      if(fm.type!=="investment_research_review")continue;
+      const date=fm.event_date;
+      if(typeof date!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(date)||
+          !Number.isFinite(Date.parse(date+"T00:00:00Z"))||new Date(date+"T00:00:00Z").toISOString().slice(0,10)!==date){
+        unknownChronology=true;continue;
+      }
+      dated.push({path:row.path,date});
     }
+    if(unknownChronology){comparator.reason="missing_or_invalid_comparator_chronology";continue;}
+    if(!dated.length)continue;
+    dated.sort((a,b)=>b.date.localeCompare(a.date)||a.path.localeCompare(b.path));
+    if(dated[1]?.date===dated[0].date){comparator.reason="ambiguous_latest_comparator_chronology";continue;}
+    Object.assign(comparator,{status:"selected",path:dated[0].path,eventDate:dated[0].date,reason:"latest_declared_event_date"});
+    latestCanonicalReviews.set(ticker,dated[0].path);
+    add(dated[0].path,220);
   }
   // Historical Company indexes exist in two legacy locations. Neither is a
   // current/approved Thesis, but both provide routes back to dated prior
@@ -395,11 +410,11 @@ export function buildInvestmentContextPack(req: Input): Pack {
   }
   const roles=new Set(items.map(x=>x.role));
   const incomplete=[...absent];
-  for(const ticker of issuers){
-    const latest=latestCanonicalReviews.get(ticker);
-    if(!latest)incomplete.push("No Canonical Research Review found for "+ticker+"; next-event delta lacks a saved analyst comparator.");
-    else if(!items.some(x=>x.path===latest))
-      incomplete.push("Latest Canonical Research Review for "+ticker+" was discovered but could not fit the requested context budget.");
+  for(const comparator of analyticalComparators){
+    if(comparator.status==="selected"&&!items.some(x=>x.path===comparator.path)){
+      comparator.status="hold";comparator.path=null;comparator.eventDate=null;comparator.reason="comparator_excluded_by_context_budget";
+    }
+    if(comparator.status==="hold")incomplete.push("Analytical comparator HOLD for "+comparator.issuer+": "+comparator.reason+"; chronology must be explicit and unique, never inferred from import/mtime.");
   }
   if(issuers.length){
     if(!roles.has("thesis"))incomplete.push("No Current Thesis selected; owner-endorsed thesis is unknown.");
@@ -419,6 +434,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
       asOf?"Cutoff uses current filesystem version (including ctime) and declared availability. Future/unverifiable versions are excluded without exposing their filenames. It cannot reconstruct earlier bytes or authenticate historical clocks.":
         "No as-of/knowledge-cutoff filter is applied. Manifest hashes/excerpts describe this observation, not a durable full-note archive.",
       "Verification fields are note-declared metadata, NOT freshly reverified primary facts. File modified time is NOT event date.",
+      "Analytical comparators use unique latest declared canonical event_date, not import time or approval. A comparator HOLD requires chronology/review resolution; other retrieved Reviews remain historical context.",
+      ...incomplete.filter(x=>x.startsWith("Analytical comparator HOLD")),
       "An archived AI repost is not independent corroboration; deduplicate issuer+source+metric+fiscal period.",
       "Use full original notes and current external filings/consensus for investment decisions. This tool is read-only.",
       "Contradiction/risk sections are discoverability hints, not exhaustive counter-evidence verification. Original context must be read in full where material.",
@@ -446,6 +463,6 @@ export function buildInvestmentContextPack(req: Input): Pack {
   return {
     status:"retrieval_only_not_verified",question,issuers,focus,industry:req.industry?.slice(0,140)||null,
     items,considered:pool.size,selected:items.length,excerptChars:budget-remaining,
-    incomplete,omitted:omitted.slice(0,15),warnings,manifest,entityResolution,decisions,discoveryTruncated
+    incomplete,omitted:omitted.slice(0,15),warnings,manifest,entityResolution,decisions,discoveryTruncated,analyticalComparators
   };
 }

@@ -7,7 +7,8 @@
  */
 import { z } from "zod";
 import { planInvestmentWriteback } from "../vault/investment-writeback-router";
-import { apply, preview, status } from "../safe-edit/engine";
+import { applyCanonical as apply, previewCanonical as preview, status } from "../safe-edit/engine";
+import { buildCanonicalSafeEditWorkflow } from "../vault/canonical-writeback-workflow";
 import { withPausedSync } from "../safe-edit/sync";
 import {researchProvenanceSchema} from "../vault/context-provenance";
 
@@ -84,8 +85,7 @@ export const canonicalApplySchema = z.object({
 
 function planned(input: z.infer<typeof canonicalInputSchema>) {
   const plan = planInvestmentWriteback(input);
-  const workflow = plan.safeEditWorkflow;
-  if(!workflow) throw Error("No canonical Safe Edit recipe; sourceChat and analysis/capture mode are required");
+  const workflow = buildCanonicalSafeEditWorkflow(input,plan);
   // M5.5 applies to every canonical Safe Edit Review, including older callers
   // that still submit only completedAnalysis. Preserve Source capture; never
   // issue a review preview for an untyped analysis. M5.3 read-only planning

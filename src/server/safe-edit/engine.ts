@@ -200,10 +200,30 @@ function requiresApproval(r:RecordRow) {
     return data.user_endorsed===true || data.user_endorsed==="true" || data.status==="user_endorsed";
   });
 }
-export function preview(input:unknown,actor:string) {
+// These private dispatch values never enter MCP schemas, caller payloads or
+// the journal. Canonical tokens cannot be spent through generic apply_edit.
+function canonicalKind(p:string){
+  if(/^00_Inbox\/ChatGPT\/(?:[^/]+\/)*Investment Intake - [^/]+\.md$/i.test(p))return "investment_source_intake";
+  if(/^10_Knowledge\/(?:Company Research|Industry and Concepts|Macro and Markets)\/(?:[^/]+\/)*Investment Review - [^/]+\.md$/i.test(p))return "investment_research_review";
+  return null;
+}
+function assertPersistenceAuthority(p:PreviewInput,before:string,after:string,canonical:boolean){
+  const kind=canonicalKind(p.path);
+  const types=[document(before).data.type,document(after).data.type].map(x=>typeof x==="string"?x.trim().toLowerCase():"");
+  if(canonical){
+    if(!kind||p.change.kind!=="create"||types[1]!==kind)throw Error("Canonical authority accepts only its add-only Source/Review destinations");
+  }else if(kind||types.some(x=>x==="investment_source_intake"||x==="investment_research_review")){
+    throw Error("CANONICAL_PERSISTENCE_AUTHORITY_REQUIRED: Canonical Source/Review persistence requires prepare_canonical_writeback then apply_canonical_writeback; generic Safe Edit is not authorized");
+  }
+}
+export function preview(input:unknown,actor:string) {return previewOperation(input,actor,false);}
+/** Internal server entrypoint; only canonical-writeback may expose it to MCP. */
+export function previewCanonical(input:unknown,actor:string) {return previewOperation(input,actor,true);}
+function previewOperation(input:unknown,actor:string,canonical:boolean) {
   assertEnabled();const p=previewSchema.parse(input);const t=target(p.path);p.path=t.rel;
   if(store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND status='writing' LIMIT 1").get(p.path)) throw Error("This path has an interrupted operation; administrator recovery required");
   const before=read(t.abs);
+  assertPersistenceAuthority(p,before??"",p.change.kind==="create"?p.change.content:before??"",canonical);
   if(p.change.kind==="create"?before!==null:before===null) throw Error("Create never overwrites; other edits require an existing note");
   const existing=store().prepare("SELECT * FROM safe_edit_operations WHERE id=?").get(p.operationId) as RecordRow|undefined;
   if(existing) {
@@ -226,6 +246,7 @@ export function preview(input:unknown,actor:string) {
   if(size.n>=1000||size.bytes+200_000>20_000_000) throw Error("Safe Edit journal quota reached; administrator archival required");
   document(before??"");checkEvidence(p,before??"");
   const after=calculate(p,before??"",actor);
+  assertPersistenceAuthority(p,before??"",after,canonical);
   const afterMetadata=document(after).data,beforeMetadata=document(before??"").data;
   if(afterMetadata.verification==="verified_against_primary"&&beforeMetadata.verification!=="verified_against_primary") {
     if(p.evidence?.verification!=="verified_against_primary" || ["archived_ai","chatgpt_analysis"].includes(String(afterMetadata.source_type))) throw Error("Primary verification cannot be asserted by note content without a primary evidence review");
@@ -301,13 +322,17 @@ export function status(id:string,actor:string) {
   return {operationId:id,status:r.status,path:(JSON.parse(r.payload) as PreviewInput).path,
     beforeHash:r.before_hash,afterHash:r.after_hash,receipt:r.receipt?JSON.parse(r.receipt):null};
 }
-export function apply(input:unknown,actor:string) {
+export function apply(input:unknown,actor:string) {return applyOperation(input,actor,false);}
+/** Internal server entrypoint; canonical-writeback checks plan, pair and order. */
+export function applyCanonical(input:unknown,actor:string) {return applyOperation(input,actor,true);}
+function applyOperation(input:unknown,actor:string,canonical:boolean) {
   assertEnabled();const args=applySchema.parse(input),r=owned(args.operationId,actor);
+  const p=JSON.parse(r.payload) as PreviewInput;
+  assertPersistenceAuthority(p,r.before_text,r.after_text,canonical);
   if(!crypto.timingSafeEqual(Buffer.from(sha256(args.previewToken),"hex"),Buffer.from(r.token_hash,"hex"))||args.expectedHash!==r.before_hash) throw Error("Invalid preview token or expected hash");
   if(r.status==="written") return status(r.id,actor);
   if(Date.now()>r.expires) throw Error("Preview expired; review a fresh diff");
   if(requiresApproval(r)&&!r.approval) throw Error("Explicit admin approval of this exact thesis diff is required; open approvalUrl");
-  const p=JSON.parse(r.payload) as PreviewInput;
   if(r.status==="writing") throw Error("Interrupted write: inspect receipt and backup; do not replay without recovery review");
   // Cross-process lock deliberately has no stale timeout. A crash requires
   // administrator recovery, rather than silently racing an unknown writer.

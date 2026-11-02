@@ -202,7 +202,8 @@ it("runs MCP Event A context -> canonical Source/Review save -> Event B retrieva
       topic: "NVDA synthetic capacity event B", eventDate: "2026-10-30", publicationDate: "2026-10-31",
       researchProvenance: { ...provenance, context: packB.manifest } } }));
     expect(eventB.historical.paths).toContain(result.steps[1].path);
-    expect(eventB.safeEditWorkflow.writesPerformedByPlanner).toBe(false);
+    expect(eventB).not.toHaveProperty("safeEditWorkflow");
+  expect(eventB.canonicalPersistenceAuthority.status).toBe("diagnostic_planner_not_apply_authority");
     expect(fs.readFileSync(path.join(vault, "05_Thesis/NVDA - Current Thesis.md"), "utf8")).toBe("# Protected synthetic thesis\n");
   } finally {
     await reader.close(); await readerServer.close(); await writer.close(); await writerServer.close();

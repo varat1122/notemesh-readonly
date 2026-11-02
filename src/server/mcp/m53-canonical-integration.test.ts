@@ -58,7 +58,7 @@ afterAll(async()=>{
   for(const k of ["DATA_DIR","BASE_URL","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];
 });
 
-it("M5.3 Web tool contract: research MCP recipe → scoped Safe Edit preview/apply → receipts → retrieval MCP ready signal",async()=>{
+it("Canonical Web contract: diagnostic planner → canonical prepare/apply → ordered receipts → retrieval",async()=>{
   const {createMcpServer}=await import("./server");
   const {createSafeEditMcpServer}=await import("./safe-edit-server");
   const research=await connect(createMcpServer(readAccess));
@@ -69,27 +69,32 @@ it("M5.3 Web tool contract: research MCP recipe → scoped Safe Edit preview/app
     expect(tools.tools.some(x=>x.name==="preview_edit")).toBe(true);
     const first=parseResearch(await research.client.callTool({name:"plan_investment_writeback",arguments:news}));
     expect(first.status).toBe("read_only_plan_not_written");
-    expect(first.safeEditWorkflow).toMatchObject({status:"pending_safe_edit",readyForNextNews:false,
-      protectedNotesTouched:false,sourcePreservation:"text_only_binary_not_verified"});
-    const expected=first.safeEditWorkflow.steps;
+    expect(first).not.toHaveProperty("safeEditWorkflow");
+    const prepared=parseSafe(await safe.client.callTool({name:"prepare_canonical_writeback",arguments:news}));
+    expect(prepared.workflowStatus).toBe("pending_safe_edit");
+    const expected=prepared.steps;
     expect(expected).toHaveLength(2);
+    expect(expected.map((x:any)=>x.kind)).toEqual(["source_intake","canonical_review"]);
     for(const step of expected){
       expect(step.state).toBe("needs_create");
-      const prev=parseSafe(await safe.client.callTool({name:"preview_edit",arguments:step.safeEditRequest}));
-      expect(prev.status).toBe("preview");
       expect(fs.existsSync(path.join(vault,step.path))).toBe(false);
-      const written=parseSafe(await safe.client.callTool({name:"apply_edit",arguments:{
-        operationId:prev.operationId,previewToken:prev.previewToken,expectedHash:prev.beforeHash
-      }}));
-      expect(written).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified",
-        mobileSync:"unverified",remoteSync:"unverified"}});
-      const status=parseSafe(await safe.client.callTool({name:"get_edit_status",arguments:{operationId:prev.operationId}}));
-      expect(status.status).toBe("written");
     }
-    const again=parseResearch(await research.client.callTool({name:"plan_investment_writeback",arguments:news}));
-    expect(again.safeEditWorkflow).toMatchObject({status:"saved_verified",readyForNextNews:true,
-      analysisComplete:true,perDeviceSync:"unverified"});
-    expect(again.safeEditWorkflow.steps.every((x:any)=>x.readbackVerified&&x.indexed&&x.searchable)).toBe(true);
+    const written=parseSafe(await safe.client.callTool({name:"apply_canonical_writeback",arguments:{
+      input:news,planId:prepared.planId,authorizations:prepared.previews.map((x:any)=>x.authorization)
+    }}));
+    expect(written).toMatchObject({status:"saved_verified",readyForNextNews:true,perDeviceSync:"unverified"});
+    expect(written.receipts).toHaveLength(2);
+    for(let i=0;i<written.receipts.length;i++){
+      expect(written.receipts[i]).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified",
+        mobileSync:"unverified",remoteSync:"unverified"}});
+      const status=parseSafe(await safe.client.callTool({name:"get_edit_status",arguments:{operationId:prepared.previews[i].operationId}}));
+      expect(status.status).toBe("written");
+      expect(status.path).toBe(expected[i].path);
+    }
+    expect(written.steps.every((x:any)=>x.readbackVerified&&x.indexed&&x.searchable)).toBe(true);
+    const again=parseSafe(await safe.client.callTool({name:"prepare_canonical_writeback",arguments:news}));
+    expect(again.workflowStatus).toBe("saved_verified");
+    expect(again.previews).toEqual([]);
     const searched=parseResearch(await research.client.callTool({name:"search_vault",arguments:{
       query:"InvestmentIntake"+first.planId.slice(3),limit:20
     }}));

@@ -61,12 +61,14 @@ it("NET producer trace: source prose NET INCOME does not create a Cloudflare ent
   await add("01_Companies/TSMC.md","# TSMC\nFoundry.");
   await add("01_Companies/Cloudflare.md","---\naliases: [NET]\n---\n# Cloudflare\nNetwork services.");
   const {planInvestmentWriteback}=await import("./investment-writeback-router");
-  const plan=planInvestmentWriteback({domain:"company",entities:["TSMC"],topic:"TSMC earnings",
-    inputFormat:"text",sourceKind:"issuer_release",sourceChat:"synthetic-C07",
+  const input={domain:"company" as const,entities:["TSMC"],topic:"TSMC earnings",
+    inputFormat:"text" as const,sourceKind:"issuer_release" as const,sourceChat:"synthetic-C07",
     extractedText:"TSMC reports NET INCOME in a synthetic financial statement.",
-    completedAnalysis:"บทวิเคราะห์จำลองที่ยังไม่ยืนยัน"});
+    completedAnalysis:"บทวิเคราะห์จำลองที่ยังไม่ยืนยัน"};
+  const plan=planInvestmentWriteback(input);
+  const {buildCanonicalSafeEditWorkflow}=await import("./canonical-writeback-workflow");
   expect(plan.routingV2.companyHubs.map(x=>x.path)).toEqual(["01_Companies/TSMC.md"]);
-  const review=plan.safeEditWorkflow!.steps.find(x=>x.kind==="canonical_review")!;
+  const review=buildCanonicalSafeEditWorkflow(input,plan).steps.find(x=>x.kind==="canonical_review")!;
   expect(review.safeEditRequest?.change.content).not.toContain("01_Companies/Cloudflare");
   expect(plan.entityScope).toEqual(["TSMC"]);
 });

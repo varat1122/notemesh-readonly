@@ -384,7 +384,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     {
       title: "Diagnostic investment intake / routing plan (canonical writes use Safe Edit prepare/apply)",
       annotations: READ,
-      description: "DIAGNOSTIC / MIGRATION-COMPATIBILITY ONLY. Read-only M5.2/M5.3 routing plan resolves existing Company/Industry Hubs, broker vintage, duplicate candidates and historical context. Do NOT treat its recipe as the authoritative executable canonical write contract. For every new Micro/Macro/PDF Source/Review persistence, use Investment OS — Safe Edit Chat prepare_canonical_writeback followed by apply_canonical_writeback with the unchanged input/plan/tokens returned there. This planner NEVER writes or automatically changes Thesis/Evidence Register, Portfolio or Company Evolution Timeline; NEVER substitute legacy submit_investment_notes for canonical research.",
+      description: "DIAGNOSTIC / MIGRATION-COMPATIBILITY ONLY. Read-only M5.2/M5.3 routing plan resolves existing Company/Industry Hubs, broker vintage, duplicate candidates and historical context. It returns no executable canonical Safe Edit recipe or authorizations. For every new Micro/Macro/PDF Source/Review persistence, use Investment OS — Safe Edit Chat prepare_canonical_writeback followed by apply_canonical_writeback with the unchanged input/plan/tokens returned there. This planner NEVER writes or automatically changes Thesis/Evidence Register, Portfolio or Company Evolution Timeline; NEVER substitute legacy submit_investment_notes for canonical research.",
       inputSchema: z.object({
         domain:z.enum(["company","industry","macro","asset"]).describe("Claim/knowledge domain; not an inferred company ticker"),
         entities:z.array(z.string().min(1).max(120)).min(1).max(6).describe("Explicit issuer ticker(s), macro geography, or industry topics. Do not include inferred suppliers as confirmed issuers."),
@@ -434,9 +434,9 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         }).strict().optional().describe("M5.2 caller-declared broker old/new versions; same bank, dated vintages, matching old/new currencies and comparable PT horizons required before candidate PT direction"),
         sourceChat:z.string().min(1).max(120).optional().describe("M5.3 original Micro, Macro or PDF chat identifier. Required with completedAnalysis; source provenance, not necessarily publication date"),
         existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional().describe("M5.6 optional existing Source receipt ID; accepted only when exact original text, channel, format, URL and chronology match the indexed and readback-verified Source"),
-        completedAnalysis:z.string().min(1).max(30000).optional().describe("M5.3 final analyst-reviewed Markdown separated from the exact extractedText. When set with sourceChat, produces source + canonical review Safe Edit recipes without writing anything"),
+        completedAnalysis:z.string().min(1).max(30000).optional().describe("M5.3 final analyst-reviewed Markdown separated from the exact extractedText. With sourceChat, supports diagnostic routing only; Source/Review execution requires canonical prepare/apply"),
         researchProvenance:researchProvenanceSchema.optional().describe("Optional structured policy/protocol/schema/producer declarations and exact Context Pack manifest. Hash checks bind current bytes/excerpts; identities and version assertions remain caller-declared."),
-        captureOnly:z.boolean().optional().describe("M5.3 Feed Only: with sourceChat, prepare a source-only Safe Edit recipe. The Research Review remains pending. Must not be combined with completedAnalysis"),
+        captureOnly:z.boolean().optional().describe("M5.3 Feed Only: with sourceChat, diagnose source-only routing. Use canonical prepare/apply to persist Source; the Research Review remains pending. Must not be combined with completedAnalysis"),
         focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Historical context relevance; does not verify issuer claims")
       }).strict()
     },
@@ -448,13 +448,13 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     {
       title:"Preview M5.6 source-event relation proposal (read-only)",
       annotations:READ,
-      description:"M5.6 read-only guarded proposal: compare two existing indexed Source Receipts and an existing non-protected Canonical Review, require same event/publication dates and publisher family plus caller-supplied comparison rationale. Returns only an append-section Safe Edit recipe for human diff review. Never declares semantic duplication independently, never writes or changes Thesis/Evidence/Timeline/Portfolio.",
+      description:"M5.6 read-only guarded proposal: compare two existing indexed Source Receipts and an existing non-protected Canonical Review, require same event/publication dates and publisher family plus caller-supplied comparison rationale. Returns a diagnostic proposal with HOLD: canonical prepare/apply is add-only and existing canonical Review revisions are not supported. No executable Safe Edit request is returned. Never declares semantic duplication independently, never writes or changes Thesis/Evidence/Timeline/Portfolio.",
       inputSchema:{
         reviewPath:z.string().min(1).max(300).describe("Existing non-protected Canonical Research Review path; original Source must be linked already"),
         additionalSourcePath:z.string().min(1).max(300).describe("Existing second attributed Source Intake receipt that may cover the same dated event"),
         eventAnchor:z.string().regex(/^[a-z0-9][a-z0-9-]{7,119}$/).describe("Caller-declared semantic event slug, such as sk-hynix-solidigm-ipo-cancellation; not independent event verification"),
         comparisonBasis:z.string().min(40).max(1000).describe("Evidence-based human-readable passage/claim comparison supporting a candidate same-event relation, without inflating independent evidence"),
-        linkedOnDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Append receipt date YYYY-MM-DD; never substitute source event date"),
+        linkedOnDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Proposed relation date YYYY-MM-DD; never substitute source event date"),
       }
     },
     safe((args)=>json(withBoundary(planDuplicateSourceLinkM56(args)))),

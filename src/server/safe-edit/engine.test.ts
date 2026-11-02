@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+vi.mock("./sync",()=>({withPausedSync:async(run:()=>unknown)=>run()}));
 const root=fs.mkdtempSync(path.join(os.tmpdir(),"investment-safe-edit-"));
 process.env.DATA_DIR=root;process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
 const actor="oauth:synthetic",vault=path.join(root,"vault"),original="---\nstatus: draft\nverification: not_reverified\ncustom: preserved # keep comment\n---\n# NVDA synthetic only\n\n## Evidence\nExisting statement.\n\n## Risks\nCounter evidence.\n";
@@ -173,51 +174,34 @@ it("P0 synthetic end-to-end: historical retrieval → raw capture → linked rev
     domain:"company" as const,entities:[issuer],
     topic:"SYNZ demo milestone new input (synthetic 2026-10-19)",
     inputFormat:"text" as const,sourceKind:"user_commentary" as const,
-    sourceLanguage:"en",extractedText:text
+    sourceLanguage:"en",extractedText:text,sourceChat:"Foundation synthetic",eventDate:"2026-10-19",
+    completedAnalysis:"A demo mention does not prove bookings, ARR, cash flow, or thesis change."
   };
   const planned=planInvestmentWriteback(submission);
   expect(planned.historical.paths).toContain(hub);
   expect(planned.historical.paths).toContain(legacy);
   expect(planned.gates.canAutoWrite).toBe(false);
   expect(planned.gates.duplicateAdjudicated).toBe(false);
-  const raw=planned.routes.find(x=>x.kind==="raw_input")?.path;
-  const review=planned.routes.find(x=>x.kind==="research_review")?.path;
-  expect(raw).toBeTruthy();
-  expect(review).toBeTruthy();
-  if(!raw||!review)throw Error("Fixture router did not provide safe destinations");
-
+  expect(planned).not.toHaveProperty("safeEditWorkflow");
+  const {prepareCanonicalWriteback,applyCanonicalWriteback}=await import("../mcp/canonical-writeback");
+  const prepared=prepareCanonicalWriteback(submission,actor);
+  const [raw,review]=prepared.steps.map(x=>x.path);
+  const saved=await applyCanonicalWriteback({input:submission,planId:prepared.planId,
+    authorizations:prepared.previews.map(x=>x.authorization)},actor);
+  expect(saved.status).toBe("saved_verified");
+  expect(saved.receipts).toHaveLength(2);
+  for(const receipt of saved.receipts)expect(receipt).toMatchObject({status:"written",
+    receipt:{write:"written",readback:"verified",reindex:"verified",remoteSync:"unverified",mobileSync:"unverified"}});
+  expect(saved.steps.map(x=>x.kind)).toEqual(["source_intake","canonical_review"]);
+  for(const step of saved.steps)expect(step).toMatchObject({readbackVerified:true,indexed:true,searchable:true,linksVerified:true});
+  expect(readNote(review).content).toContain(hub.replace(/\.md$/,""));
   function reviewedWrite(relative:string,change:Record<string,unknown>){
-    const preview=engine.preview({
-      operationId:id(),path:relative,reason:"Synthetic closed-loop integration verification",
-      change
-    },actor);
-    // A preview alone never mutates the note. The regression then explicitly
-    // applies the same reviewed token; no automatic approvals are granted.
+    const preview=engine.preview({operationId:id(),path:relative,
+      reason:"Synthetic scoped timeline verification",change},actor);
     const receipt=apply(preview);
-    expect(receipt).toMatchObject({
-      status:"written",
-      receipt:{write:"written",readback:"verified",reindex:"verified",
-        remoteSync:"unverified",mobileSync:"unverified"}
-    });
+    expect(receipt).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified"}});
     return {preview,receipt};
   }
-  const original=reviewedWrite(raw,{kind:"create",content:[
-    "---","type: investment_raw_intake","source_type: user_supplied",
-    "verification: not_reverified", "event_date: null", "---",
-    "# SYNZ Synthetic Original User Input", "", text,""
-  ].join("\n")});
-  const reviewResult=reviewedWrite(review,{kind:"create",content:[
-    "---","type: investment_research_review","source_type: archived_ai",
-    "verification: not_reverified","event_date: null","---",
-    "# SYNZ Synthetic Review — Not Issuer Verified", "",
-    "## Source and boundaries",
-    "The source is a synthetic user-input fixture, not a company release.",
-    "[["+raw.replace(/\.md$/,"")+"|Exact original input]]",
-    "[["+hub.replace(/\.md$/,"")+"|Company Hub]]",
-    "[["+industry.replace(/\.md$/,"")+"|Industry context]]",
-    "## Analysis",
-    "A demo mention does not prove bookings, ARR, cash flow, or thesis change.",""
-  ].join("\n")});
   const timelineResult=reviewedWrite(timeline,{
     kind:"append",heading:"Chronology",date:"2026-10-19",content:[
       "Synthetic source submission — not an independently verified event",
@@ -231,12 +215,37 @@ it("P0 synthetic end-to-end: historical retrieval → raw capture → linked rev
 
   const repeated=planInvestmentWriteback(submission);
   expect(repeated.planId).toBe(planned.planId);
-  expect(repeated.routes.find(x=>x.kind==="raw_input")?.action).toBe("link_existing_or_hold");
-  expect(repeated.routes.find(x=>x.kind==="research_review")?.action).toBe("link_existing_or_hold");
-  expect(repeated.routes.find(x=>x.kind==="company_timeline_candidate")?.action).toBe("link_existing_or_hold");
+  const retry=prepareCanonicalWriteback(submission,actor);
+  expect(retry.previews).toEqual([]);
+  expect(retry.steps.every(x=>x.state==="verified_existing")).toBe(true);
   // Stable apply receipt is safe to retry, with no additional append.
   expect(apply(timelineResult.preview)).toEqual(timelineResult.receipt);
   expect(readNote(timeline).content.match(/investment-intake:IN-/g)).toHaveLength(1);
-  expect(engine.status(original.preview.operationId,actor).status).toBe("written");
-  expect(engine.status(reviewResult.preview.operationId,actor).status).toBe("written");
+  expect(engine.status(prepared.previews[0].operationId,actor).status).toBe("written");
+  expect(engine.status(prepared.previews[1].operationId,actor).status).toBe("written");
+});
+
+
+it.each(["preview","written"])("FOUNDATION refuses pre-upgrade canonical journal tokens even at status %s",status=>{
+ const dest=`00_Inbox/ChatGPT/Investment Intake - IN-${status==="preview"?"A":"B"}${"C".repeat(15)}.md`;
+ fs.mkdirSync(path.dirname(path.join(vault,dest)),{recursive:true});
+ const request=input({path:`Legacy-${status}.md`,change:{kind:"create",content:`# Legacy ${status}`}});
+ const token=engine.preview(request,actor);
+ const content="---\ntype: investment_source_intake\n---\n# Legacy canonical source\n";
+ // Fixture a durable pre-upgrade operation with a valid client/token and CAS.
+ const payload={...request,path:dest,change:{kind:"create",content}};
+ dbModule.db().prepare("UPDATE safe_edit_operations SET payload=?,after_text=?,after_hash=?,status=? WHERE id=?")
+   .run(JSON.stringify(payload),content,engine.sha256(content),status,token.operationId);
+ expect(()=>apply(token)).toThrow("CANONICAL_PERSISTENCE_AUTHORITY_REQUIRED");
+ expect(engine.status(token.operationId,actor).status).toBe(status);
+ expect(fs.existsSync(path.join(vault,dest))).toBe(false);
+});
+it.each(["replace","append","frontmatter","rollback"])("FOUNDATION generic %s cannot mutate a canonical note under a non-reserved filename",kind=>{
+ const canonical="---\ntype: investment_research_review\n---\n# Review\n## Evidence\nExisting statement.\n";
+ fs.writeFileSync(path.join(vault,"Fixture.md"),canonical);
+ const change=kind==="replace"?{kind,oldText:"Existing statement.",newText:"Changed."}:
+   kind==="append"?{kind,heading:"Evidence",date:"2026-11-02",content:"Bypass"}:
+   kind==="frontmatter"?{kind,properties:{updated:"2026-11-02"}}:{kind,operationId:"legacy-rollback"};
+ expect(()=>engine.preview(input({change}),actor)).toThrow("CANONICAL_PERSISTENCE_AUTHORITY_REQUIRED");
+ expect(fs.readFileSync(path.join(vault,"Fixture.md"),"utf8")).toBe(canonical);
 });

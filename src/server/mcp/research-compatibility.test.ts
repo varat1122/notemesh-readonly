@@ -66,6 +66,59 @@ async function save(input:Record<string,unknown>){
   return {client,p,result};
 }
 
+it("FOUNDATION legacy planner returns diagnostics without executable canonical requests",async()=>{
+  const client=await connect("research");
+  const diagnostic=unpack(await client.callTool({name:"plan_investment_writeback",arguments:{
+    domain:news.domain,entities:news.entities,topic:news.topic,inputFormat:news.inputFormat,
+    sourceKind:news.sourceKind,sourceChat:news.sourceChat,extractedText:news.extractedText,
+    eventDate:news.eventDate,publicationDate:news.publicationDate,completedAnalysis:"บทวิเคราะห์จำลอง"
+  }}));
+  expect(diagnostic.canonicalPersistenceAuthority.status).toBe("diagnostic_planner_not_apply_authority");
+  expect(diagnostic).not.toHaveProperty("safeEditWorkflow");
+  expect(JSON.stringify(diagnostic)).not.toMatch(/safeEditRequest|previewToken|"authorizations"/);
+});
+it("FOUNDATION generic apply cannot spend a canonical Review token before the Source",async()=>{
+  const client=await connect("safe-edit");
+  const p=unpack(await client.callTool({name:"prepare_canonical_writeback",arguments:news}),true);
+  const reviewPreview=p.previews.find((x:any)=>x.kind==="canonical_review");
+  const result=await client.callTool({name:"apply_edit",arguments:reviewPreview.authorization});
+  expect(result.isError).toBe(true);
+  expect(JSON.stringify(result.content)).toMatch(/canonical/i);
+  for(const step of p.steps)expect(fs.existsSync(path.join(vault,step.path))).toBe(false);
+});
+it.each(["preview_edit","create_note"])("FOUNDATION %s refuses reserved canonical paths and disguised canonical metadata",async tool=>{
+  const client=await connect("safe-edit");
+  for(const [index,target] of [
+    "00_Inbox/ChatGPT/Investment Intake - IN-AAAAAAAAAAAAAAAA.md",
+    "10_Knowledge/Company Research/Investment Review - NVDA - IN-AAAAAAAAAAAAAAAA.md",
+    "10_Knowledge/Industry and Concepts/Investment Review - Memory - IN-AAAAAAAAAAAAAAAA.md",
+    "10_Knowledge/Macro and Markets/Investment Review - Rates - IN-AAAAAAAAAAAAAAAA.md",
+    "00_Inbox/ChatGPT/disguised.md"
+  ].entries()){
+    const content="---\ntype: investment_research_review\n---\n# Synthetic unauthorized route\n";
+    const base={operationId:`foundation-generic-${tool}-${index}`,path:target,reason:"Synthetic boundary rejection"};
+    const result=await client.callTool({name:tool,arguments:tool==="create_note"?{...base,content}:{...base,change:{kind:"create",content}}});
+    expect(result.isError,target).toBe(true);expect(fs.existsSync(path.join(vault,target))).toBe(false);
+  }
+});
+it("FOUNDATION partial Source success stays recoverable only through canonical prepare/apply",async()=>{
+  const client=await connect("safe-edit");
+  const p=unpack(await client.callTool({name:"prepare_canonical_writeback",arguments:news}),true);
+  const authorizations=p.previews.map((x:any)=>({...x.authorization,previewToken:x.kind==="canonical_review"?"0".repeat(64):x.previewToken}));
+  const partial=unpack(await client.callTool({name:"apply_canonical_writeback",arguments:{input:news,planId:p.planId,authorizations}}),true);
+  expect(partial.status).toBe("hold_post_write_verification");expect(partial.receipts).toHaveLength(1);
+  expect(partial.steps.map((x:any)=>x.state)).toEqual(["verified_existing","needs_create"]);
+  const source=fs.readFileSync(path.join(vault,partial.steps[0].path));
+  const retry=unpack(await client.callTool({name:"prepare_canonical_writeback",arguments:news}),true);
+  expect(retry.previews.map((x:any)=>x.kind)).toEqual(["canonical_review"]);
+  const complete=unpack(await client.callTool({name:"apply_canonical_writeback",arguments:{input:news,planId:retry.planId,authorizations:retry.previews.map((x:any)=>x.authorization)}}),true);
+  expect(complete.status).toBe("saved_verified");expect(complete.receipts).toHaveLength(1);
+  expect(fs.readFileSync(path.join(vault,partial.steps[0].path))).toEqual(source);
+  const again=unpack(await client.callTool({name:"prepare_canonical_writeback",arguments:news}),true);
+  expect(again.previews).toEqual([]);
+  expect(unpack(await client.callTool({name:"apply_canonical_writeback",arguments:{input:news,planId:again.planId,authorizations:[]}}),true).status).toBe("saved_verified");
+});
+
 it.each([
   ["investment_context_pack","research",{question:"NVDA context",unsupportedCutoff:"2026-10-29"}],
   ["plan_investment_writeback","research",{...news,completedAnalysis:"บทวิเคราะห์",policyVersion:"synthetic-policy-1"}],
@@ -197,7 +250,8 @@ it("CORE-ENG-002 Event A save then Event B retrieves the dated AI review with So
   expect(eventB.status).toBe("read_only_plan_not_written");
   expect(eventB.historical.paths).toContain(saved.path);
   expect(eventB.historicalEventReview.duplicateAdjudicated).toBe(false);
-  expect(eventB.safeEditWorkflow.writesPerformedByPlanner).toBe(false);
+  expect(eventB).not.toHaveProperty("safeEditWorkflow");
+  expect(eventB.canonicalPersistenceAuthority.status).toBe("diagnostic_planner_not_apply_authority");
   expect(fs.readdirSync(path.join(vault,"00_Inbox/ChatGPT"))).toHaveLength(1);
   const retry=unpack(await safe.callTool({name:"prepare_canonical_writeback",arguments:news}),true);
   expect(retry.previews).toEqual([]);
