@@ -4,6 +4,15 @@ import crypto from "node:crypto";
 import Database from "better-sqlite3";
 import { instrument, isoDate, PRICE_POLICY, PriceError, type InstrumentInput, type PriceBar, type PriceSnapshot } from "./model.ts";
 
+export interface PriceInstrumentSummary {
+  id:string; market:string; symbol:string; yahooSymbol:string; currency:string; timeZone:string;
+  barCount:number; firstDate:string|null; lastDate:string|null; lastFetchedAt:string|null;
+  lastSuccessfulRefresh:string|null; lastError:string|null;
+  identityStatus:"legacy_price_cache_reference_only";
+  canonicalListingId:null;
+  crossListingConversionAllowed:false;
+}
+
 export function priceDatabaseLimit(): number {
   const mb = Number(process.env.MARKET_PRICES_MAX_DB_MB ?? "4");
   if (![4, 8, 16].includes(mb)) throw new PriceError("invalid_price_database_limit");
@@ -223,8 +232,9 @@ export class PriceStore {
       COUNT(b.date) AS barCount,MIN(b.date) AS firstDate,MAX(b.date) AS lastDate,MAX(b.fetched_at) AS lastFetchedAt,
       (SELECT attempted_at FROM refreshes r WHERE r.instrument_id=i.id AND success=1 ORDER BY id DESC LIMIT 1) AS lastSuccessfulRefresh,
       (SELECT error_code FROM refreshes r WHERE r.instrument_id=i.id ORDER BY id DESC LIMIT 1) AS lastError
-      FROM instruments i LEFT JOIN bars b ON b.instrument_id=i.id GROUP BY i.id ORDER BY i.id`).all() as Record<string,unknown>[];
-    return rows.map(row=>({...row,identityStatus:"legacy_price_cache_reference_only",
+      FROM instruments i LEFT JOIN bars b ON b.instrument_id=i.id GROUP BY i.id ORDER BY i.id`).all() as
+      Omit<PriceInstrumentSummary,"identityStatus"|"canonicalListingId"|"crossListingConversionAllowed">[];
+    return rows.map((row):PriceInstrumentSummary=>({...row,identityStatus:"legacy_price_cache_reference_only",
       canonicalListingId:null,crossListingConversionAllowed:false}));
   }
 
