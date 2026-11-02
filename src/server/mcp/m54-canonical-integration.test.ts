@@ -41,10 +41,11 @@ async function commit(c:any,input:any,p:any){return unpack(await c.callTool({nam
 
 beforeAll(async()=>{
   for(const folder of ["00_Inbox/ChatGPT","10_Knowledge/Company Research","10_Knowledge/Industry and Concepts",
-    "10_Knowledge/Macro and Markets","01_Companies","05_Thesis","06_Portfolio"])
+    "10_Knowledge/Macro and Markets","01_Companies","04_Macro","05_Thesis","06_Portfolio"])
     fs.mkdirSync(path.join(vault,folder),{recursive:true});
   for(const [rel,content] of [
     ["01_Companies/NVDA.md","# NVDA fixture\n"],
+    ["04_Macro/Rates and Liquidity.md","# Rates and Liquidity\n"],
     ["05_Thesis/NVDA - Current Thesis.md","# Protected thesis fixture\n"],
     ["05_Thesis/NVDA - Evidence Register.md","# Protected evidence fixture\n"],
     ["06_Portfolio/Team.md","# Protected portfolio fixture\n"]]){
@@ -199,6 +200,39 @@ it("M55 rollout switch preserves old M5.4 freeform behavior until deliberate cut
     else process.env.M55_REQUIRE_TYPED_REVIEW=original;
     await c.close();
   }
+});
+
+it("M54-M01 canonical Macro Review binds the existing 04_Macro hub and verifies the indexed link",async()=>{
+  const input={domain:"macro",entities:["Rates and Liquidity"],topic:"Synthetic liquidity routing control",
+    sourceKind:"official_macro",inputFormat:"text",sourceChat:"Macro 021126",
+    extractedText:"ข้อมูลสภาพคล่องสมมติสำหรับทดสอบ canonical macro hub เท่านั้น",
+    completedAnalysis:"## สรุป\nข้อมูลสมมติสำหรับทดสอบ routing ไม่ใช่ข้อเท็จจริงลงทุน",
+    sourceLanguage:"th",publisher:"Synthetic official macro source",
+    contentTypes:["macro_data"],sourceChannel:"official_macro",originalDocumentAccess:"excerpt_only",
+    researchReview:{headlineTh:"ทดสอบการเชื่อม Macro Review กับฮับสภาพคล่อง",
+      whatChangedTh:"เป็นข้อมูลสมมติสำหรับทดสอบเส้นทาง ไม่ใช่เหตุการณ์ลงทุนจริง",
+      mechanismTh:"สภาพคล่องอาจส่งผ่านอัตราดอกเบี้ยและสินทรัพย์ แต่รอบนี้ทดสอบเพียงโครงสร้างลิงก์",
+      thesisImplicationTh:"ไม่เปลี่ยน Thesis หรือ Portfolio จากข้อมูลสมมติ",
+      counterEvidenceTh:"ไม่มีข้อมูลเศรษฐกิจจริงใน fixture นี้",
+      requiredEvidenceTh:"ต้องใช้แหล่งมหภาคจริงก่อนวิเคราะห์เพื่อการลงทุน"}};
+  const c=await connect();
+  try{
+    const p=await prepare(c.client,input);
+    expect(p.workflowStatus).toBe("pending_safe_edit");
+    expect(p.qualityIssues).toEqual([]);
+    const review=p.previews.find((x:any)=>x.kind==="canonical_review");
+    expect(review).toBeTruthy();
+    const added=review.diff.added.join("\n");
+    expect(added).toContain('macro_hubs: ["04_Macro/Rates and Liquidity.md"]');
+    expect(added).toContain("[[04_Macro/Rates and Liquidity]]");
+    const applied=await commit(c.client,input,p);
+    expect(applied).toMatchObject({status:"saved_verified",readyForNextNews:true});
+    const reviewPath=applied.steps.find((x:any)=>x.kind==="canonical_review").path;
+    const body=fs.readFileSync(path.join(vault,reviewPath),"utf8");
+    expect(body).toContain("[[04_Macro/Rates and Liquidity]]");
+    const {outgoingLinks}=await import("../vault/queries");
+    expect(outgoingLinks(reviewPath).map(x=>x.resolved)).toContain("04_Macro/Rates and Liquidity.md");
+  }finally{await c.close();}
 });
 
 it("M54-H01 prepare emits the exact beforeHash authorization and rejects afterHash as a CAS precondition",async()=>{
