@@ -16,6 +16,7 @@ export interface ResearchClassification {
   contentTypes:string[];
   companyHubPaths:string[];
   industryHubPaths:string[];
+  macroHubPaths:string[];
   sourceChannel:string;
   attributedOrigin?:string;
   originalDocumentAccess?:"full_original"|"excerpt_only"|"not_obtained";
@@ -36,11 +37,16 @@ export function validateResearchM55(classification:ResearchClassification,review
     issues.push("company_hub_unresolved");
   if(classification.domain==="industry"&&!classification.industryHubPaths.length)
     issues.push("industry_hub_unresolved");
+  if(classification.domain==="macro"&&!classification.macroHubPaths.length)
+    issues.push("macro_hub_unresolved");
   if(classification.companyHubPaths.some(x=>!validHub(x,"01_Companies/"))||
-    classification.industryHubPaths.some(x=>!validHub(x,"02_Industries_Themes/")))
+    classification.industryHubPaths.some(x=>!validHub(x,"02_Industries_Themes/"))||
+    classification.macroHubPaths.some(x=>!validHub(x,"04_Macro/")))
     issues.push("invalid_hub_path");
   if(classification.domain==="industry"&&(!classification.resolvedSubjectPath||classification.resolvedSubjectPath!==classification.industryHubPaths[0]))
     issues.push("primary_theme_not_resolved");
+  if(classification.domain==="macro"&&(!classification.resolvedSubjectPath||classification.resolvedSubjectPath!==classification.macroHubPaths[0]))
+    issues.push("primary_macro_hub_not_resolved");
   if(!nonblank(classification.sourceChannel)||classification.sourceChannel==="unknown")
     issues.push("source_channel_unresolved");
   if(!classification.originalDocumentAccess)issues.push("original_document_access_unresolved");
