@@ -32,6 +32,11 @@ describe("multilingual read-only writeback router",()=>{
   expect(p.warnings.some(x=>x.includes("'reiterates'"))).toBe(true);
   expect(p.gates.canAutoUpdateThesis).toBe(false);
   expect(p.gates.canAutoWrite).toBe(false);
+  expect(p.canonicalPersistenceAuthority).toMatchObject({
+    status:"diagnostic_planner_not_apply_authority",
+    prepareTool:"prepare_canonical_writeback",
+    applyTool:"apply_canonical_writeback"
+  });
   expect(fs.readdirSync(vault)).toHaveLength(0);
  });
  it("Citi AI connectivity/HDD/NAND multi-issuer preview goes to research without inferred company guidance",async()=>{
@@ -398,6 +403,21 @@ describe("M5.2 classification and canonical routing acceptance fixtures",()=>{
   expect(p.routingV2.companyHubs).toHaveLength(0);
   expect(p.routingV2.classification.contentTypes).toEqual(["policy","macro_data"]);
   expect(p.gates.canAutoWrite).toBe(false);
+ });
+ it("F07B macro routing resolves an existing canonical Macro hub instead of leaving the Review structurally orphaned",async()=>{
+  await add("04_Macro/Rates and Liquidity.md","# Rates and Liquidity\n");
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const p=route({domain:"macro",entities:["Rates and Liquidity"],topic:"Liquidity update",
+    sourceKind:"official_macro",inputFormat:"text",sourceLanguage:"th",
+    contentTypes:["macro_data"],extractedText:"ข้อมูลสภาพคล่องมหภาคสำหรับทดสอบ routing ไปยัง hub ที่มีอยู่จริง"});
+  expect(p.routingV2.reviewScope).toBe("macro");
+  expect(p.routingV2.macroHubs).toEqual([expect.objectContaining({
+    path:"04_Macro/Rates and Liquidity.md",resolution:"exact_existing_title"
+  })]);
+  expect(p.routingV2.unresolvedMacroHubs).toEqual([]);
+  expect(p.routingV2.preferredReviewSubject).toBe("Rates and Liquidity");
+  expect(p.routes.find(x=>x.kind==="industry_context_candidate")?.path)
+    .toBe("04_Macro/Rates and Liquidity.md");
  });
  it("F08 Thai-extracted broker PDF is a genre, not a verified report or verified old→new EPS",async()=>{
   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");

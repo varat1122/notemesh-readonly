@@ -102,6 +102,12 @@ export interface WritebackPlan {
   exactClaimReview:{status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
     classification:ReviewClass|null;matchingClaimPaths:string[];scanTruncated:boolean|null};
   routingV2:RoutingV2;
+  canonicalPersistenceAuthority:{
+    status:"diagnostic_planner_not_apply_authority";
+    prepareTool:"prepare_canonical_writeback";
+    applyTool:"apply_canonical_writeback";
+    rule:"Use the Safe Edit canonical prepare/apply pair for executable Source/Review persistence; this read-only plan is diagnostic and migration-compatible only.";
+  };
   safeEditWorkflow?:CanonicalSafeEditWorkflow;
   routes:Route[];
   gates:{
@@ -295,7 +301,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   ];
   if(input.sourceKind==="broker_research")
     warnings.push("Broker model/version dedup requires exact bank, report date, prior same-bank PT, EPS vintage and actual report; 'reiterates' is not a new PT raise.");
-  if(routingV2.unresolvedEntities.length||routingV2.unresolvedThemes.length)
+  if(routingV2.unresolvedEntities.length||routingV2.unresolvedThemes.length||routingV2.unresolvedMacroHubs.length)
     warnings.push("M5.2 hub links use only existing indexed titles or explicit aliases; unresolved names must be adjudicated, never created or mapped by guesswork.");
   if(input.brokerUpdate)
     warnings.push("M5.2 broker PT/estimate old→new figures are caller-declared; same bank and dated versions are necessary but not independent verification or consensus.");
@@ -324,8 +330,9 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
         timelineExists?"Timeline exists; append only when dated source/event dedup and materiality confirmed; include <!-- investment-intake:"+planId+" --> in the approved append for idempotent retries.":
         "No canonical company timeline indexed; never invent one from a partial screenshot."});
   else routes.push({kind:"industry_context_candidate",action:"link_existing_or_hold",
-    path:routingV2.industryHubs.length===1?routingV2.industryHubs[0].path:null,requiresReview:true,
-    reason:"Multi-issuer, non-ticker or macro item: use existing indexed Industry/Macro hubs only after dated source/event review; this is a link candidate, not an auto-append."});
+    path:input.domain==="macro"&&routingV2.macroHubs.length===1?routingV2.macroHubs[0].path:
+      routingV2.industryHubs.length===1?routingV2.industryHubs[0].path:null,requiresReview:true,
+    reason:"Multi-issuer, non-ticker or macro item: use only explicitly resolved existing Industry/Macro hubs after dated source/event review; this is a link candidate, not an auto-append."});
   if(claimReady&&!duplicates)
     routes.push({kind:"claim_registry_candidate",action:"candidate_create",path:null,requiresReview:true,
       reason:"Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
@@ -370,6 +377,12 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     exactClaimReview:{status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
     routingV2,
+    canonicalPersistenceAuthority:{
+      status:"diagnostic_planner_not_apply_authority",
+      prepareTool:"prepare_canonical_writeback",
+      applyTool:"apply_canonical_writeback",
+      rule:"Use the Safe Edit canonical prepare/apply pair for executable Source/Review persistence; this read-only plan is diagnostic and migration-compatible only."
+    },
     routes,gates:{
       fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,

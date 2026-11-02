@@ -73,7 +73,8 @@ export const canonicalInputSchema = canonicalBaseSchema.superRefine((v,ctx)=>{
 export const canonicalAuthorizationSchema = z.object({
   operationId: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/),
   previewToken: z.string().regex(/^[a-f0-9]{64}$/),
-  expectedHash: z.string().regex(/^[a-f0-9]{64}$/),
+  expectedHash: z.string().regex(/^[a-f0-9]{64}$/)
+    .describe("CAS precondition copied from prepare preview.beforeHash; preview.afterHash is the target content hash and is NOT accepted here"),
 }).strict();
 export const canonicalApplySchema = z.object({
   input: canonicalInputSchema,
@@ -123,14 +124,15 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
     if(!step.safeEditRequest) throw Error("Missing add-only recipe");
     const p=preview(step.safeEditRequest,actor);
     if(!p.previewToken) throw Error("Safe Edit did not issue a fresh preview token");
-    previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p});
+    previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p,
+      authorization:{operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash}});
   }
   return {phase:"preview_only",planId:plan.planId,workflowStatus:workflow.status,
     provenanceStatus:plan.provenanceStatus,contextManifestId:input.researchProvenance?.context?.id??null,
     qualityIssues:workflow.qualityIssues,
     steps:workflow.steps.map(({kind,path,state,expectedSha256,receiptKey})=>({kind,path,state,expectedSha256,receiptKey})),
     previews,protectedNotesTouched:false,perDeviceSync:"unverified",writesPerformed:false,
-    next:"Review exact diffs and authorize apply_canonical_writeback with these tokens; no Vault notes have been written."};
+    next:"Review exact diffs, then pass each preview.authorization unchanged to apply_canonical_writeback. expectedHash is preview.beforeHash (the CAS precondition), never preview.afterHash. No Vault notes have been written."};
 }
 
 export async function applyCanonicalWriteback(raw:unknown,actor:string) {

@@ -12,7 +12,7 @@ const review:ThaiResearchReview={
 };
 const memory:ResearchClassification={domain:"industry",subject:"Memory",resolvedSubjectPath:"02_Industries_Themes/Memory.md",
   contentTypes:["analyst_opinion","market_commentary"],companyHubPaths:["01_Companies/MU.md","01_Companies/SK hynix.md","01_Companies/Samsung.md"],
-  industryHubPaths:["02_Industries_Themes/Memory.md"],sourceChannel:"social_repost",attributedOrigin:"J.P. Morgan",
+  industryHubPaths:["02_Industries_Themes/Memory.md"],macroHubPaths:[],sourceChannel:"social_repost",attributedOrigin:"J.P. Morgan",
   originalDocumentAccess:"excerpt_only",sourceLanguage:"en"};
 
 describe("M5.5 pre-write research contract",()=>{
@@ -24,6 +24,15 @@ describe("M5.5 pre-write research contract",()=>{
     expect(validateResearchM55({...memory,subject:"Cross Theme",resolvedSubjectPath:undefined,
       contentTypes:[],companyHubPaths:[],industryHubPaths:[]},review)).toEqual(expect.arrayContaining([
         "classification_primary_subject_unresolved","content_types_missing","industry_hub_unresolved","primary_theme_not_resolved"]));
+  });
+  it("requires an existing resolved Macro hub for a macro Research Review",()=>{
+    const macro:ResearchClassification={domain:"macro",subject:"Rates and Liquidity",
+      resolvedSubjectPath:"04_Macro/Rates and Liquidity.md",contentTypes:["macro_data"],
+      companyHubPaths:[],industryHubPaths:[],macroHubPaths:["04_Macro/Rates and Liquidity.md"],
+      sourceChannel:"official_macro",originalDocumentAccess:"excerpt_only",sourceLanguage:"th"};
+    expect(validateResearchM55(macro,{...review,translationTh:undefined})).toEqual([]);
+    expect(validateResearchM55({...macro,resolvedSubjectPath:undefined,macroHubPaths:[]},{...review,translationTh:undefined}))
+      .toEqual(expect.arrayContaining(["macro_hub_unresolved","primary_macro_hub_not_resolved"]));
   });
   it("does not confuse an X repost with the full JPMorgan report",()=>{
     expect(validateResearchM55({...memory,originalDocumentAccess:"full_original"},review)).toContain("repost_cannot_claim_full_original_without_separate_receipt");

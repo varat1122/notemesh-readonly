@@ -65,6 +65,28 @@ describe("investment context retrieval",()=>{
     expect(p.items.find(x=>x.role==="thesis")?.schemaCompatibility.canAutoUpdateThesis).toBe(false);
     expect(p.items.find(x=>x.role==="source")?.schemaCompatibility.declaredVerification).toBe("verified_against_primary");
   });
+  it("anchors the newest canonical company Review even when generic high-priority context competes for a small pack",async()=>{
+    const build=await fixture();
+    const older="10_Knowledge/Company Research/Investment Review - NVDA - IN-1111111111111111.md";
+    const latest="10_Knowledge/Company Research/Investment Review - NVDA - IN-2222222222222222.md";
+    await addExtra(older,[
+      "---","type: investment_research_review","verification: not_reverified","published_at: 2026-10-20","---",
+      "# Investment Review - NVDA - older","Older NVDA analyst comparator."
+    ].join("\n"));
+    await addExtra(latest,[
+      "---","type: investment_research_review","verification: not_reverified","published_at: 2026-11-02","---",
+      "# Investment Review - NVDA - latest","Latest NVDA analyst comparator with cash conversion and valuation conditions."
+    ].join("\n"));
+    const {db}=await import("../db");
+    db().prepare("UPDATE notes SET created=?,modified=? WHERE path=?").run(1000,1000,older);
+    db().prepare("UPDATE notes SET created=?,modified=? WHERE path=?").run(2000,2000,latest);
+    const p=build({question:"NVDA earnings",issuers:["NVDA"],focus:"earnings",maxNotes:5,maxChars:7000});
+    const paths=p.items.map(x=>x.path);
+    expect(paths).toContain(latest);
+    expect(paths).not.toContain(older);
+    expect(p.decisions.find(x=>x.path===latest)?.decision).toBe("selected");
+    expect(p.incomplete.some(x=>x.includes("Latest Canonical Research Review"))).toBe(false);
+  });
   it("returns counter-evidence passage with its own source line pointer, not just a flattering lead excerpt",async()=>{
     const build=await fixture();
     const p=build({question:"NVDA earnings",issuers:["NVDA"],maxNotes:11,maxChars:12000});

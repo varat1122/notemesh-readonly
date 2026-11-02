@@ -32,4 +32,8 @@ export const previewSchema = z.object({
   change, evidence:evidence.optional(),
 }).strict();
 export type PreviewInput = z.infer<typeof previewSchema>;
-export const applySchema = z.object({operationId, previewToken:z.string().regex(/^[a-f0-9]{64}$/), expectedHash:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
+export const applySchema = z.object({operationId,
+  previewToken:z.string().regex(/^[a-f0-9]{64}$/),
+  expectedHash:z.string().regex(/^[a-f0-9]{64}$/)
+    .describe("CAS precondition: MUST equal preview.beforeHash for the reviewed operation; never send preview.afterHash")
+}).strict();
