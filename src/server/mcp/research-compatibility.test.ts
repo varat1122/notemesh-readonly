@@ -363,3 +363,83 @@ it("CORE-ENG-003 preserves Feed Only provenance and refuses to silently replace 
   expect(changed.isError).toBe(true);expect(JSON.stringify(changed.content)).toContain("SOURCE_CAPTURE_PROVENANCE_IMMUTABLE_USE_REVIEW");
   expect(fs.readFileSync(path.join(vault,source.path),"utf8")).toBe(before);
 });
+
+
+it("FOUNDATION002 null-event baseline metadata survives canonical Source→Review, manifest and idempotent readback",async()=>{
+  const input={...news,eventDate:null,publicationDate:null,analysisAsOf:"2026-11-02",comparatorEligible:true};
+  const {client,p,result}=await save(input);
+  expect(result.status).toBe("saved_verified");
+  expect(result.steps.map((x:any)=>x.kind)).toEqual(["source_intake","canonical_review"]);
+  expect(result.steps.every((x:any)=>x.readbackVerified&&x.indexed&&x.searchable&&x.linksVerified)).toBe(true);
+  const {splitFrontmatter}=await import("../vault/markdown");
+  const source=fs.readFileSync(path.join(vault,result.steps[0].path),"utf8");
+  const sourceMetadata=splitFrontmatter(source).data;
+  expect(sourceMetadata.event_date).toBeNull();
+  expect(sourceMetadata).not.toHaveProperty("analysis_as_of");
+  expect(sourceMetadata).not.toHaveProperty("comparator_eligible");
+  const reader=await connect("research");
+  const read=unpack(await reader.callTool({name:"read_note",arguments:{path:result.steps[1].path}}));
+  expect(read.content.startsWith(read.boundary+"\n")).toBe(true);
+  expect(read.content.endsWith("\n"+read.boundary)).toBe(true);
+  expect(splitFrontmatter(read.content.slice(read.boundary.length+1,-read.boundary.length-1)).data)
+    .toMatchObject({event_date:null,analysis_as_of:"2026-11-02",comparator_eligible:true});
+  const pack=unpack(await reader.callTool({name:"investment_context_pack",arguments:{question:"NVDA baseline",issuers:["NVDA"]}}));
+  expect(pack.analyticalComparators[0]).toMatchObject({status:"selected",path:result.steps[1].path,eventDate:null,analysisAsOf:"2026-11-02"});
+  expect(pack.manifest.entries.find((x:any)=>x.path===result.steps[1].path).metadata)
+    .toMatchObject({declaredEventDate:null,declaredAnalysisAsOf:"2026-11-02",declaredComparatorEligible:true});
+  expect((await import("../vault/context-provenance")).verifyContextManifest(pack.manifest).id).toBe(pack.manifest.id);
+  const retry=unpack(await client.callTool({name:"prepare_canonical_writeback",arguments:input}),true);
+  expect(retry.previews).toEqual([]);
+  const again=unpack(await client.callTool({name:"apply_canonical_writeback",arguments:{input,planId:p.planId,authorizations:[]}}),true);
+  expect(again.status).toBe("saved_verified");expect(again.receipts).toEqual([]);
+  const changed=unpack(await client.callTool({name:"prepare_canonical_writeback",arguments:{...input,analysisAsOf:"2026-11-03"}}),true);
+  expect(changed.steps[1].state).toBe("hold_conflict");expect(changed.previews).toEqual([]);
+  expect(fs.readFileSync(path.join(vault,result.steps[0].path),"utf8")).toBe(source);
+  expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected synthetic thesis\n");
+});
+it("FOUNDATION002 Feed Only followed by an analytical baseline retains Source bytes",async()=>{
+  const feed={...news,researchReview:undefined,captureOnly:true,eventDate:null,publicationDate:null};
+  const captured=await save(feed);expect(captured.result.status).toBe("source_saved_analysis_pending");
+  const sourcePath=captured.result.steps[0].path,bytes=fs.readFileSync(path.join(vault,sourcePath));
+  const full={...news,eventDate:null,publicationDate:null,analysisAsOf:"2026-11-02T10:00:00Z",comparatorEligible:true};
+  const saved=await save(full);
+  expect(saved.p.previews.map((x:any)=>x.kind)).toEqual(["canonical_review"]);
+  expect(saved.result.status).toBe("saved_verified");
+  expect(fs.readFileSync(path.join(vault,sourcePath))).toEqual(bytes);
+});
+it("FOUNDATION002 partial canonical save repairs Review with unchanged analytical metadata",async()=>{
+  const input={...news,eventDate:null,analysisAsOf:"2026-11-02",comparatorEligible:true};
+  const client=await connect("safe-edit");
+  const p=unpack(await client.callTool({name:"prepare_canonical_writeback",arguments:input}),true);
+  const auth=p.previews.map((x:any)=>({...x.authorization,previewToken:x.kind==="canonical_review"?"0".repeat(64):x.previewToken}));
+  const partial=unpack(await client.callTool({name:"apply_canonical_writeback",arguments:{input,planId:p.planId,authorizations:auth}}),true);
+  expect(partial.status).toBe("hold_post_write_verification");expect(partial.receipts).toHaveLength(1);
+  expect(partial.steps.map((x:any)=>x.state)).toEqual(["verified_existing","needs_create"]);
+  const retry=await save(input);expect(retry.p.previews.map((x:any)=>x.kind)).toEqual(["canonical_review"]);
+  expect(retry.result.status).toBe("saved_verified");
+  const fm=(await import("../vault/markdown")).splitFrontmatter(fs.readFileSync(path.join(vault,retry.result.steps[1].path),"utf8")).data;
+  expect(fm).toMatchObject({analysis_as_of:"2026-11-02",comparator_eligible:true,event_date:null});
+});
+
+it.each([
+  {analysisAsOf:null,comparatorEligible:true},
+  {comparatorEligible:true},
+  {analysisAsOf:"2026-02-30",comparatorEligible:true},
+  {analysisAsOf:"2026-11-02T12:00:00",comparatorEligible:true},
+  {analysisAsOf:"2026-11-02",comparatorEligible:"true"},
+  {captureOnly:true,researchReview:undefined,analysisAsOf:"2026-11-02"},
+  {captureOnly:true,researchReview:undefined,comparatorEligible:false}
+])("FOUNDATION002 refuses invalid or silently dropped comparator metadata %j",async extra=>{
+  const writer=await connect("safe-edit");
+  const result=await writer.callTool({name:"prepare_canonical_writeback",arguments:{...news,...extra}});
+  expect(result.isError).toBe(true);
+  expect(fs.readdirSync(path.join(vault,"00_Inbox/ChatGPT"))).toEqual([]);
+});
+it("FOUNDATION002 a knowledge horizon alone does not opt a Review into comparator eligibility",async()=>{
+  const saved=await save({...news,eventDate:null,analysisAsOf:"2026-11-02"});
+  expect(saved.result.status).toBe("saved_verified");
+  const reader=await connect("research");
+  const result=unpack(await reader.callTool({name:"investment_context_pack",arguments:{question:"NVDA baseline",issuers:["NVDA"]}}));
+  expect(result.analyticalComparators[0]).toMatchObject({status:"hold",path:null,reason:"no_valid_analytical_comparator"});
+  expect(result.items.map((x:any)=>x.path)).toContain(saved.result.steps[1].path);
+});

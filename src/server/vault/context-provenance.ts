@@ -64,14 +64,21 @@ const provenanceSummarySchema=z.object({policy:reference.optional(),protocol:ref
   coverage:z.string().max(2000).optional(),limitations:z.array(z.string().max(1000)).max(20).optional(),
   status:z.literal("note_declared_not_reverified")}).strict();
 const declaredMetadataSchema=z.object({declaredVerification:z.string().max(500).nullable(),declaredEventDate:z.string().max(80).nullable(),
-  declaredPublishedAt:z.string().max(80).nullable(),provenanceSummary:provenanceSummarySchema.nullable()}).strict();
+  declaredPublishedAt:z.string().max(80).nullable(),provenanceSummary:provenanceSummarySchema.nullable(),
+  declaredAnalysisAsOf:z.string().max(80).nullable().optional(),declaredComparatorEligible:z.boolean().nullable().optional()}).strict();
 export function contextDeclaredMetadata(fm:Record<string,unknown>){
   const date=(v:unknown)=>typeof v==="string"&&/^\d{4}-\d{2}-\d{2}/.test(v)?v:null;
   const parsed=researchProvenanceSchema.safeParse(fm.research_provenance);
   let provenanceSummary:z.infer<typeof provenanceSummarySchema>|null=null;
   if(parsed.success){const {context,...p}=parsed.data;provenanceSummary={...p,contextId:context?.id??null,status:"note_declared_not_reverified"};}
   return {declaredVerification:typeof fm.verification==="string"?fm.verification:null,
-    declaredEventDate:date(fm.event_date),declaredPublishedAt:date(fm.published_at),provenanceSummary};
+    declaredEventDate:date(fm.event_date),declaredPublishedAt:date(fm.published_at),provenanceSummary,
+    // Absent legacy fields stay absent: do not manufacture semantics or alter
+    // the metadata representation of pre-existing context manifests.
+    ...(fm.type==="investment_research_review"&&fm.analysis_as_of!==undefined?
+      {declaredAnalysisAsOf:analysisAsOfMs(fm.analysis_as_of)!==null?fm.analysis_as_of as string:null}:{}),
+    ...(fm.type==="investment_research_review"&&fm.comparator_eligible!==undefined?
+      {declaredComparatorEligible:typeof fm.comparator_eligible==="boolean"?fm.comparator_eligible:null}:{})};
 }
 export const sha256=(value:string|Buffer)=>createHash("sha256").update(value).digest("hex");
 function stable(value:unknown):string{
@@ -94,6 +101,11 @@ function availableDate(value:unknown):number|null{
   }
   return instantSchema.safeParse(value).success?Date.parse(value):null;
 }
+/** Declared knowledge horizon of the whole analytical Review, NOT an economic
+ * event or import time. Date-only precision is conservatively end-of-day UTC. */
+export const analysisAsOfMs=(value:unknown):number|null=>availableDate(value);
+export const analysisAsOfSchema=z.string().max(80).refine(value=>analysisAsOfMs(value)!==null,
+  "analysisAsOf must be a valid YYYY-MM-DD or ISO timestamp with timezone");
 export class ContextExclusion extends Error{}
 /** Current bytes and a conservative filesystem-version bound, NOT a historical
  * snapshot. ctime catches edits/sync even if mtime is copied/backdated. */
@@ -112,7 +124,8 @@ export function readContextVersion(notePath:string,asOf:string|null){
     const research=fm.research_provenance as ResearchProvenance|undefined;
     const availability=[...["known_at","available_at","received_at","received_on","published_at","publication_date",
       "review_date","created_at","updated_at","updated","imported_at","imported_on"].map(field=>fm[field]),
-      research?.asOf,research?.context?.retrievedAt];
+      research?.asOf,research?.context?.retrievedAt,
+      fm.type==="investment_research_review"?fm.analysis_as_of:undefined];
     for(const value of availability){
       if(value==null)continue;
       const n=availableDate(value);

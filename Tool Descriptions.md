@@ -180,6 +180,24 @@ Parameters:
 
 Outputs include selected note paths, source-line excerpts, verification labels as declared by source notes, and coverage limitations. An archived, `not_reverified` thesis remains unverified. This tool never edits notes and requires the existing `vault:read` scope. A newly deployed MCP tool may require ChatGPT App/Connector tool-catalogue refresh; server registration alone does not confirm that a particular ChatGPT app can invoke it.
 
+**Candidate/Unreleased analytical comparator semantics:** only canonical
+Reviews explicitly declaring `comparator_eligible: true` and a valid
+`analysis_as_of` can be current comparators. Rank their analytical knowledge
+horizon, independently of nullable economic `event_date`; never infer either
+from import/mtime. Missing metadata excludes that note only and emits a
+limitation, while valid baselines still compete. No valid comparator or a true
+latest-horizon tie returns HOLD. Requested `asOf` excludes later analytical
+horizons from all returned context, not just comparator selection. Legacy and
+ineligible Reviews remain historical context under the existing bounds.
+
+Canonical prepare/apply accepts Review-only `analysisAsOf` (valid date or ISO
+timestamp with timezone) and `comparatorEligible` (boolean). True requires a
+horizon; omission never opts in. Date-only precision is end-of-day UTC.
+Feed Only does not accept these Review-only fields; supply them with full
+analysis after Source capture. They do not change Source bytes, protected
+records, or PR #145 canonical persistence authority. See
+[the semantic contract](docs/research-context-ret02.md#analytical-comparator-contract-candidateunreleased).
+
 ### read_note — read
 
 Returns a note's content, fenced, up to 2,000 lines or 100 KB per call with

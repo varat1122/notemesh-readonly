@@ -195,6 +195,10 @@ export function buildCanonicalSafeEditWorkflow(
       `original_document_access: ${yaml(input.originalDocumentAccess??"not_obtained")}`
     ]:declaredProvenance),
     `event_date: ${yaml(event)}`,`published_at: ${yaml(published)}`,
+    // Preserve old bytes when omitted; never derive analytical time/eligibility
+    // from event, import, Source chronology or context-only provenance.
+    ...(input.analysisAsOf!==undefined?[`analysis_as_of: ${yaml(input.analysisAsOf)}`]:[]),
+    ...(input.comparatorEligible!==undefined?[`comparator_eligible: ${input.comparatorEligible}`]:[]),
     `review_scope: ${yaml(plan.routingV2.reviewScope)}`,
     `content_types: ${JSON.stringify(unique(input.contentTypes??[]))}`,
     ...(input.researchReview?[

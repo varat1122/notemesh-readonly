@@ -10,7 +10,7 @@ import { planInvestmentWriteback } from "../vault/investment-writeback-router";
 import { applyCanonical as apply, previewCanonical as preview, status } from "../safe-edit/engine";
 import { buildCanonicalSafeEditWorkflow } from "../vault/canonical-writeback-workflow";
 import { withPausedSync } from "../safe-edit/sync";
-import {researchProvenanceSchema} from "../vault/context-provenance";
+import {analysisAsOfSchema,researchProvenanceSchema} from "../vault/context-provenance";
 
 const nonempty = z.string().min(1);
 const canonicalBaseSchema = z.object({
@@ -25,6 +25,8 @@ const canonicalBaseSchema = z.object({
   existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional(),
   completedAnalysis: nonempty.max(30000).optional(),
   researchProvenance:researchProvenanceSchema.optional(),
+  analysisAsOf:analysisAsOfSchema.nullable().optional().describe("Review-only knowledge horizon: information this synthesis claims to cover through, NOT event/import date. Date-only means end-of-day UTC; use timezone timestamp for intraday precision."),
+  comparatorEligible:z.boolean().optional().describe("Explicit opt-in for this canonical Review to serve as the current analytical comparator; true requires analysisAsOf. Omitted/false never opts in. Not Thesis approval."),
   researchReview: z.object({
     headlineTh:nonempty.max(500),translationTh:z.string().max(30000).optional(),
     whatChangedTh:nonempty.max(6000),mechanismTh:nonempty.max(6000),
@@ -65,6 +67,10 @@ const canonicalBaseSchema = z.object({
 }).strict();
 export const canonicalInputShape = canonicalBaseSchema.shape;
 export const canonicalInputSchema = canonicalBaseSchema.superRefine((v,ctx)=>{
+  if(v.comparatorEligible===true&&!v.analysisAsOf)
+    ctx.addIssue({code:"custom",message:"comparatorEligible requires explicit valid analysisAsOf"});
+  if(v.captureOnly===true&&(v.analysisAsOf!==undefined||v.comparatorEligible!==undefined))
+    ctx.addIssue({code:"custom",message:"Feed Only has no Review; analytical comparator metadata must accompany a Review"});
   if(v.captureOnly===true && (v.completedAnalysis!==undefined||v.researchReview!==undefined))
     ctx.addIssue({code:"custom",message:"Feed Only cannot include analysis or researchReview"});
   if(v.captureOnly!==true && !v.completedAnalysis&&!v.researchReview)

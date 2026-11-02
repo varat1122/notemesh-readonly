@@ -30,6 +30,9 @@ export interface WritebackInput {
   publisher?:string|null;
   eventDate?:string|null;
   publicationDate?:string|null;
+  /** Review-only analytical knowledge horizon and explicit comparator opt-in. */
+  analysisAsOf?:string|null;
+  comparatorEligible?:boolean;
   rawAttachmentPath?:string|null;
   rawAttachmentSha256?:string|null;
   rawAttachmentContentType?:AttachmentType|null;

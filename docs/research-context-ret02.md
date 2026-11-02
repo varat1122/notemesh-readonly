@@ -1,6 +1,7 @@
 # Research context fidelity — candidate behavior
 
-This describes the local IOS-ORCH-CORE-ENG-003 candidate, not a deployed release.
+This describes the local research candidate, including the
+IOS-ORCH-CORE-ENG-FOUNDATION-002 semantic correction, not a deployed release.
 It extends the existing Context Pack, M5.3 planner and M5.4 canonical tools.
 It does not introduce a new reasoning framework, database migration, writer,
 background task, Prices path or permission grant.
@@ -38,25 +39,75 @@ Cloudflare evidence merely because it contains `NET INCOME`. Source prose is
 never automatically converted into new company links by the current planner.
 Historical Vault metadata and links are not changed by this correction.
 
-## Analytical comparator chronology (Candidate/Unreleased foundation correction)
+## Analytical comparator contract (Candidate/Unreleased)
 
-The current company Canonical Review is selected by the unique latest valid
-`event_date` from the current, cutoff-eligible note bytes. This existing field
-is the declared economic/analytical event date; import, index, file creation,
-modified time and publication time cannot replace it. Later Q2 backfill therefore
-cannot displace an already saved Q3 comparator. Historical Reviews remain
-retrievable through the ordinary bounded search.
+Three distinct meanings are preserved:
 
-`analyticalComparators` identifies each issuer's selected path/date or explicit
-`hold` reason. Missing/invalid chronology, tied latest dates, no eligible Review,
-a scan exceeding 240 matching paths, or a selected comparator that cannot fit
-the requested context budget returns HOLD in `incomplete` and manifest
-limitations, without a timestamp fallback. Revisions sharing a latest event
-date require explicit reconciliation; filename or import order is not authority.
-Dates are declared metadata, not independently verified facts. Existing RET-02
-availability checks run before comparator ranking; economic dates do not bypass
-the knowledge cutoff or restore historical bytes. No new schema/migration is
-introduced and historical Vault metadata is not rewritten.
+| Review metadata | Meaning |
+| --- | --- |
+| `event_date` | Date the economic/company/macro event occurred. May be null for an analytical synthesis. Never populated from analysis/import/create time. |
+| `analysis_as_of` | Explicit knowledge horizon: information this whole analytical Review claims to know/use through this date or instant. It is not the event date or the time the note was written. |
+| `comparator_eligible` | Strict boolean opt-in to serve as a current analytical comparator for the resolved subject. Only `true` opts in; absent/false never does. This is a caller declaration, not verification or Thesis approval. |
+
+`analysis_as_of` accepts valid `YYYY-MM-DD` or ISO timestamps with timezone.
+Date-only precision means the end of that UTC day; for intraday cutoff use an
+explicit timestamp. Nothing substitutes filesystem/index times, received/import
+dates, event dates or publication dates. Existing `research_provenance.asOf`
+bounds retrieval and must agree with the supplied Context Pack cutoff; it does
+not by itself declare the whole synthesis horizon or comparator eligibility.
+There is no automatic legacy inference from it.
+
+Only canonical Reviews with `comparator_eligible: true` and valid
+`analysis_as_of` enter comparator ranking. RET-02 current-version/availability
+checks run first; `analysis_as_of` is also a cutoff constraint, so a later
+analytical horizon cannot leak via ordinary historical retrieval, excerpts,
+manifest or filenames. With no requested `asOf`, retrieval remains explicitly
+unfiltered as before; it does not establish a historical knowledge state.
+The newest eligible horizon wins. Equivalent instants with different timezone
+spellings tie; filename/mtime never breaks a genuine latest tie.
+
+`analyticalComparators` returns the selected path and `analysisAsOf`; its
+retained `eventDate` is the separate declared event date and can be null.
+Missing/invalid eligibility or analytical chronology excludes **that Review**
+from comparator ranking, adds a metadata limitation plus a per-path decision,
+and never disables another valid baseline. Explicitly ineligible historical
+Reviews remain normal historical context. If no valid comparator exists,
+the latest eligible horizon is ambiguous, more than 240 matching paths need
+inspection, or the selected comparator cannot fit the context budget, return
+an explicit HOLD in `incomplete` and manifest limitations.
+
+Legacy Reviews remain retrievable subject to the same cutoff/budget rules.
+They are comparator-ineligible without explicit valid metadata; no existing
+Vault note is relabelled, edited or migrated. A baseline can therefore have
+`event_date: null`, `analysis_as_of: 2026-11-02`, `comparator_eligible: true`.
+A later import of an older event or an explicitly ineligible historical
+analysis cannot supersede that baseline by its import time or newer file date.
+
+### Canonical persistence and compatibility
+
+The existing `prepare_canonical_writeback` / `apply_canonical_writeback` input
+accepts optional `analysisAsOf` and `comparatorEligible` and renders them only
+into the canonical Review as `analysis_as_of` / `comparator_eligible`.
+`comparatorEligible: true` requires valid non-null `analysisAsOf`. Supplying a
+horizon alone does not opt in. Feed Only rejects these Review-only inputs
+instead of silently dropping them; capture Source normally, then provide the
+metadata with the later full analysis. Source identity and bytes are unchanged.
+Omitted fields produce exactly the prior Source/Review bytes for legacy callers.
+
+`read_note` returns the stored metadata. Context items and the existing
+`ios-context-manifest/1` expose optional `declaredAnalysisAsOf` and
+`declaredComparatorEligible` when the Review declares those fields. Their
+absence on legacy notes remains absence, including in manifest verification.
+Content hashes bind the actual bytes; they do not certify the declared horizon
+or the correctness of the synthesis.
+
+The canonical pair, Source-first order, quality gates, CAS, receipts,
+partial-repair/idempotency, readback/index/links, and protected boundaries are
+unchanged. A changed analytical horizon on an already immutable Review is a
+conflict, not permission to rewrite it. Generic Safe Edit remains blocked for
+canonical notes. Fresh/current baselines require a separately authorized
+Research workflow; this candidate neither writes real baselines nor introduces
+an existing-Review revision executor, DB migration or global schema redesign.
 
 ## Cutoff and what it can prove
 
