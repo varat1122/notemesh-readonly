@@ -4,6 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import {createHash} from "node:crypto";
 
+import type {WritebackInput} from "./investment-writeback-router";
+
+// Only the sync daemon is stubbed; canonical pair enforcement, journal and FS are real.
+vi.mock("../safe-edit/sync",()=>({withPausedSync:async(run:()=>unknown)=>run()}));
+const inputs=new WeakMap<object,WritebackInput>();
 let root:string,vault:string;
 const actor="oauth:m53-synthetic";
 beforeEach(()=>{
@@ -44,22 +49,28 @@ const news={domain:"industry" as const,entities:["SK hynix","Samsung Electronics
   sourceChat:"Micro 251026",completedAnalysis:"## Investment takeaway\nASP growth deceleration can affect EPS revisions. HBM4 yield risks are unresolved; no verified thesis change."
 };
 async function applyRecipe(plan:Awaited<ReturnType<typeof route>>){
-  const {preview,apply}=await import("../safe-edit/engine");
-  const written=[];
-  for(const step of plan.safeEditWorkflow?.steps??[]){
-    if(!step.safeEditRequest)continue;
-    const p=preview(step.safeEditRequest,actor);
-    expect(fs.existsSync(path.join(vault,step.path))).toBe(false);
-    const receipt=apply({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor);
-    expect(receipt).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified",
-      mobileSync:"unverified",remoteSync:"unverified"}});
-    written.push(step.path);
-  }
-  return written;
+  const {prepareCanonicalWriteback,applyCanonicalWriteback}=await import("../mcp/canonical-writeback");
+  const input=inputs.get(plan)!;
+  const prepared=prepareCanonicalWriteback(input,actor);
+  for(const p of prepared.previews)expect(fs.existsSync(path.join(vault,p.path))).toBe(false);
+  const result=await applyCanonicalWriteback({input,planId:prepared.planId,
+    authorizations:prepared.previews.map(p=>p.authorization)},actor);
+  expect(result.receipts).toHaveLength(prepared.previews.length);
+  for(const receipt of result.receipts)expect(receipt).toMatchObject({status:"written",
+    receipt:{write:"written",readback:"verified",reindex:"verified",mobileSync:"unverified",remoteSync:"unverified"}});
+  return prepared.previews.map(p=>p.path);
 }
-async function route(input:typeof news|Record<string,unknown>){
+async function route(raw:typeof news|Record<string,unknown>){
+  const input=raw as WritebackInput;
   const {planInvestmentWriteback}=await import("./investment-writeback-router");
-  return planInvestmentWriteback(input as typeof news);
+  const {buildCanonicalSafeEditWorkflow}=await import("./canonical-writeback-workflow");
+  const diagnostics=planInvestmentWriteback(input);
+  expect(diagnostics).not.toHaveProperty("safeEditWorkflow");
+  // Internal renderer unit coverage; the public diagnostic planner never returns this.
+  const plan={...diagnostics,safeEditWorkflow:input.completedAnalysis||input.researchReview||input.captureOnly?
+    buildCanonicalSafeEditWorkflow(input,diagnostics):undefined};
+  inputs.set(plan,input);
+  return plan;
 }
 
 describe("M5.6 source identity and immutable legacy receipt linking",()=>{
@@ -154,7 +165,7 @@ describe("M5.6.2 Solidigm Thai/English same-event Source Receipt relation (synth
   eventAnchor:"sk-hynix-solidigm-ipo-cancellation",
   comparisonBasis:"Both user-supplied Investing.com language editions describe the Oct. 23 Solidigm IPO decision and the same LYNX NAND-capacity scenario; not a second economic event.",
   linkedOnDate:"2026-10-26"};
- it("previews an append-only related Source receipt, CAS-applies once and never edits protected notes",async()=>{
+ it("FOUNDATION duplicate-source diagnostics cannot provide an alternate canonical append authorization",async()=>{
   await seed(thai,source("IN-4AF8FD0215D3A798","https://th.investing.com/news/stock-market-news/article-810087","th"));
   await seed(english,source("IN-B637DC6926EBA011","https://www.investing.com/news/stock-market-news/micron-sandisk-gain-as-sk-hynix-scraps-solidigm-ipo-lynx-says-4970053","en"));
   await seed(review,["---","type: investment_research_review",`intake_id: "IN-4AF8FD0215D3A798"`,
@@ -163,21 +174,20 @@ describe("M5.6.2 Solidigm Thai/English same-event Source Receipt relation (synth
   await seed("05_Thesis/NVDA - Current Thesis.md","# Protected thesis fixture\n");
   const {planDuplicateSourceLinkM56}=await import("./event-review-relation-m56");
   const plan=planDuplicateSourceLinkM56(request);
-  expect(plan).toMatchObject({status:"requires_safe_edit_preview",writePerformed:false});
-  expect(plan.safeEditRequest?.change.kind).toBe("append");
-  expect(plan.safeEditRequest?.change.content).toContain("not independent confirmation");
-  const {preview,apply}=await import("../safe-edit/engine");
-  const prepared=preview(plan.safeEditRequest!,actor);
-  expect(prepared.beforeHash).toBe(plan.reviewVersionSha256);
-  const applied=apply({operationId:prepared.operationId,previewToken:prepared.previewToken,
-   expectedHash:prepared.beforeHash},actor);
-  expect(applied.receipt).toMatchObject({write:"written",readback:"verified",reindex:"verified"});
+  expect(plan).toMatchObject({status:"hold_canonical_revision_not_supported",writePerformed:false,safeEditRequest:null});
+  expect(plan.proposal?.content).toContain("not independent confirmation");
+  expect(plan.proposal?.content).toContain(`[[${english.slice(0,-3)}]]`);
+  const before=fs.readFileSync(path.join(vault,review),"utf8");
+  const {preview}=await import("../safe-edit/engine");
+  expect(()=>preview({operationId:"blocked-link-001",path:review,reason:"No canonical append bypass",
+    change:{kind:"append",heading:"Source provenance",date:request.linkedOnDate,content:plan.proposal!.content}},actor))
+    .toThrow("CANONICAL_PERSISTENCE_AUTHORITY_REQUIRED");
+  expect(fs.readFileSync(path.join(vault,review),"utf8")).toBe(before);
+  // Historical links remain readable; fixture setup is not an authorized write route.
+  await seed(review,before+`\n- [[${english.slice(0,-3)}]]\n`);
   const later=planDuplicateSourceLinkM56(request);
   expect(later.status).toBe("already_linked");
   expect(later.safeEditRequest).toBeNull();
-  const content=fs.readFileSync(path.join(vault,review),"utf8");
-  expect(content).toContain(`[[${english.slice(0,-3)}]]`);
-  expect(content).toContain("Unchanged synthetic review content.");
   expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected thesis fixture\n");
  });
  it("rejects a date mismatch or unrelated publisher without inventing event equivalence",async()=>{

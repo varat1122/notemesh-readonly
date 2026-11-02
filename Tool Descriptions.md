@@ -115,11 +115,30 @@ Read-only multilingual Investment OS intake planner for source text or ChatGPT-e
 
 This planner **does not store input**, fetch original broker or issuer source, OCR binary PDFs, upload screenshots, independently verify exact original bytes, decide thesis changes, or certify mobile Sync. A screenshot transcription is **not the screenshot binary**. Reported PT reiterations are not automatic target upgrades; planned investment is not completed CapEx. It never performs protected Current Thesis/Evidence Register/Portfolio edits. A separately authorized write, source capture, readback, and approval are needed to close the full loop. The client may need to refresh its MCP tool list to discover it.
 
+**Candidate/Unreleased canonical authority:** this diagnostic planner returns no
+`safeEditWorkflow`, executable `safeEditRequest`, preview token or authorization.
+Only `prepare_canonical_writeback` → `apply_canonical_writeback` can persist
+canonical Source/Review notes. The pair validates the complete pending set,
+writes Source before Review, verifies hashes/index/links and retains partial
+Source success for retry. Feed Only uses the same pair for Source capture.
+Generic Safe Edit remains available for other permitted notes, but rejects
+canonical destinations or canonical Source/Review metadata at both preview
+and apply, including previously issued or canonical tokens. Existing canonical
+Review append/revision is unsupported and returns HOLD; protected record
+approval rules are unchanged. This is a candidate contract, not a Production
+release statement.
+
 ### plan_duplicate_source_link — read
 
-M5.6.2 read-only proposal to link an additional **already saved** Source Intake receipt to an existing non-protected Canonical Research Review. Requires `reviewPath`, `additionalSourcePath`, a caller-declared `eventAnchor`, a substantive `comparisonBasis`, and `linkedOnDate`. The tool checks indexed Source/Review paths, original Source provenance, matching explicit event/publication dates, publisher URL family, and an existing `Source provenance` section. Source language can differ, as for the Solidigm Investing.com Thai and English reports.
-
-The output contains a deterministic proposed Event Key, current Review SHA-256 as the version boundary, and an **append-only Safe Edit recipe**, never a write. The caller must separately preview the exact diff, obtain authorized `vault:edit` apply permission, and verify CAS/write/readback/reindex receipts. A subsequent plan returns `already_linked` instead of duplicating the reference. A same-event comparison is caller interpretation pending human approval, **not independent confirmation, verified source authenticity, a second economic event, an EPS change, or a new Thesis**. Protected Thesis/Evidence Register/Timeline/Portfolio files are not eligible.
+Read-only evidence-bounded relation diagnostics for two existing Source
+receipts and an existing Canonical Review. Requires matching event/publication
+dates, publisher family, the original Source link and caller comparison basis.
+Returns `already_linked` for an existing link, otherwise
+`hold_canonical_revision_not_supported`, a diagnostic proposal and
+`safeEditRequest: null`. It neither certifies semantic equivalence nor provides
+an executable append recipe. Canonical prepare/apply is currently add-only;
+a separately supported canonical revision workflow is required to change an
+existing Review. No protected record is changed.
 
 ### discover_near_duplicate_sources — read
 

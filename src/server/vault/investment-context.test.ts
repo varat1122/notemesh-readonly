@@ -70,16 +70,16 @@ describe("investment context retrieval",()=>{
     const older="10_Knowledge/Company Research/Investment Review - NVDA - IN-1111111111111111.md";
     const latest="10_Knowledge/Company Research/Investment Review - NVDA - IN-2222222222222222.md";
     await addExtra(older,[
-      "---","type: investment_research_review","verification: not_reverified","published_at: 2026-10-20","---",
+      "---","type: investment_research_review","verification: not_reverified","published_at: 2026-10-20","event_date: 2026-10-20","---",
       "# Investment Review - NVDA - older","Older NVDA analyst comparator."
     ].join("\n"));
     await addExtra(latest,[
-      "---","type: investment_research_review","verification: not_reverified","published_at: 2026-11-02","---",
+      "---","type: investment_research_review","verification: not_reverified","published_at: 2026-11-02","event_date: 2026-11-02","---",
       "# Investment Review - NVDA - latest","Latest NVDA analyst comparator with cash conversion and valuation conditions."
     ].join("\n"));
     const {db}=await import("../db");
-    db().prepare("UPDATE notes SET created=?,modified=? WHERE path=?").run(1000,1000,older);
-    db().prepare("UPDATE notes SET created=?,modified=? WHERE path=?").run(2000,2000,latest);
+    db().prepare("UPDATE notes SET created=?,modified=? WHERE path=?").run(2000,2000,older);
+    db().prepare("UPDATE notes SET created=?,modified=? WHERE path=?").run(1000,1000,latest);
     const p=build({question:"NVDA earnings",issuers:["NVDA"],focus:"earnings",maxNotes:5,maxChars:7000});
     const paths=p.items.map(x=>x.path);
     expect(paths).toContain(latest);

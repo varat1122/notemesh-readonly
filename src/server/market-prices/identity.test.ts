@@ -58,4 +58,41 @@ describe("provider-neutral instrument identity",()=>{
     bad.listings[1].underlyingMappings.push({...bad.listings[1].underlyingMappings[0],listingUnits:"1",underlyingUnits:"10",effectiveFrom:"2026-01-01"});
     expect(()=>parseInstrumentIdentityRegistry(bad)).toThrow("overlapping_underlying_mapping");
   });
+  it.each(["unverified","not_reverified","disputed","superseded"])("requires primary-verified underlying identity, not %s",verification=>{
+    const changed=structuredClone(registry) as any;
+    changed.listings[0].identityEvidence={...changed.listings[0].identityEvidence,verification};
+    expect(changed.listings[1].identityEvidence.verification).toBe("verified_against_primary");
+    expect(changed.listings[1].underlyingMappings[0].verification).toBe("verified_against_primary");
+    const result=resolveUnderlyingMapping(changed,"LST-XYZADR001","2026-11-02");
+    expect(result.usableForConversion).toBe(false);
+    expect(result.status).not.toBe("verified_mapping");
+  });
+  it.each(["unverified","not_reverified","disputed","superseded"])("also requires verified receipt and mapping, not %s",verification=>{
+    for(const target of ["receipt","mapping"]){
+      const changed=structuredClone(registry) as any;
+      if(target==="receipt")changed.listings[1].identityEvidence={...changed.listings[1].identityEvidence,verification};
+      else changed.listings[1].underlyingMappings[0].verification=verification;
+      expect(changed.listings[0].identityEvidence.verification).toBe("verified_against_primary");
+      expect(resolveUnderlyingMapping(changed,"LST-XYZADR001","2026-11-02").usableForConversion).toBe(false);
+    }
+  });
+  it.each([0,1])("requires listing %i to be active at the requested date",index=>{
+    for(const bound of ["before","after"]){
+      const changed=structuredClone(registry) as any;
+      if(bound==="before")changed.listings[index].validFrom="2026-11-03";
+      else changed.listings[index].validTo="2026-11-01";
+      expect(resolveUnderlyingMapping(changed,"LST-XYZADR001","2026-11-02").usableForConversion).toBe(false);
+    }
+  });
+  it("returns unusable for a missing underlying while registry ingestion still rejects the broken reference",()=>{
+    const changed=structuredClone(registry);changed.listings.splice(0,1);
+    expect(()=>parseInstrumentIdentityRegistry(changed)).toThrow("underlying_listing_not_registered");
+    expect(resolveUnderlyingMapping(changed,"LST-XYZADR001","2026-11-02").usableForConversion).toBe(false);
+  });
+  it.each([["2026-11-01",false],["2026-11-02",true],["2026-11-03",true],["2026-11-04",false]] as const)("respects inclusive mapping date boundaries at %s",(asOf,usable)=>{
+    const changed=parseInstrumentIdentityRegistry(structuredClone(registry));
+    changed.listings[1].underlyingMappings[0].effectiveFrom="2026-11-02";
+    changed.listings[1].underlyingMappings[0].effectiveTo="2026-11-03";
+    expect(resolveUnderlyingMapping(changed,"LST-XYZADR001",asOf).usableForConversion).toBe(usable);
+  });
 });

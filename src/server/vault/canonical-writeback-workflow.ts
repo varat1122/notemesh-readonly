@@ -265,7 +265,7 @@ export function buildCanonicalSafeEditWorkflow(
       plan.sourceCapture.attachmentVerified?"text_plus_verified_user_attachment":"text_only_binary_not_verified",
     perDeviceSync:"unverified",
     instructions:[
-      "For each needs_create step, call the existing Safe Edit preview_edit tool with the exact safeEditRequest, then apply_edit using its token and beforeHash, in source-then-review order; never assume this read-only recipe wrote anything.",
+      "Internal rendering only: prepare_canonical_writeback issues exact authorizations; apply_canonical_writeback enforces the complete pending Source-then-Review sequence. Generic Safe Edit cannot execute canonical requests.",
       "For captureOnly, save and verify just the attributed raw Source. Return source_saved_analysis_pending, not a completed Research Review. Later retry the SAME source with completedAnalysis to create the linked review without duplicating the Source.",
       "After each apply, require receipt.write/readback/reindex all verified. Retry by re-running this planner and checking hashes; never overwrite a changed note.",
       "If hold_event_review, reconcile original economic event/source and old broker vintage before a new canonical review. Preserve the raw source independently.",

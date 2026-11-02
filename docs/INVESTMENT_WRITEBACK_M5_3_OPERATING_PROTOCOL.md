@@ -2,16 +2,18 @@
 
 ## State and release boundary
 
-This design is tested against **synthetic local Vault fixtures**. M5.3 has not
-been deployed to Railway or exercised on the Production Investment_OS Vault.
-It adds a deterministic, read-only write recipe to the **existing**
-`plan_investment_writeback` MCP tool and reuses the existing Web Safe Edit
-`preview_edit` / `apply_edit` actions. No new Safe Edit action, OAuth scope or bypass of write confirmation
-is introduced.
+**Candidate/Unreleased foundation correction.** This document retains its M5.3
+filename for compatibility; the supported execution route is now the M5.4
+`prepare_canonical_writeback` → `apply_canonical_writeback` pair. This statement
+does not establish any Production deployment or installed client version.
+`plan_investment_writeback` provides read-only routing/migration diagnostics
+only and returns no executable canonical Safe Edit recipe. Generic
+`preview_edit` / `apply_edit` / `create_note` reject canonical Source/Review
+paths or metadata, including old tokens. Other scoped generic edits and
+protected-record approval requirements remain unchanged.
 
-M5.2 `routingV2` identifies existing Company/Industry Hubs and classifies
-source/claims. M5.3 uses a finished analyst review (or a Feed-Only request) to
-construct exact **create-only** Safe Edit requests:
+The canonical pair uses the existing renderer, OAuth scope, journal, CAS,
+sync pause and receipts to construct exact **create-only** operations:
 
 1. Source: `00_Inbox/ChatGPT/Investment Intake - IN-....md` — source text in
    original language, metadata, attributed publisher, dates and attachment
@@ -37,31 +39,32 @@ For each input item:
 2. Query historical notes, Current Thesis/Evidence Register where relevant,
    and counter-evidence. Source/date/vintage duplicate candidates can block a
    second canonical review; they do not block raw source preservation.
-3. Call `plan_investment_writeback` with original `sourceChat`, input metadata,
-   `contentTypes[]`, `entityRoles[]`, `themes[]` and `completedAnalysis`.
-   Feed Only instead sets `captureOnly:true` and omits `completedAnalysis`.
-4. Inspect `safeEditWorkflow.steps` in source-then-review order:
-   - `needs_create`: invoke existing Safe Edit `preview_edit` with the exact
-     `safeEditRequest` (change.kind=`create`); then authorized `apply_edit` with its token
-     and beforeHash. Check write/readback/reindex stages in the receipt.
-   - `verified_existing`: do not create a duplicate.
-   - `hold_event_review`: preserve source but reconcile same original event,
-     prior broker report, date, Claim ID and independence before a new review.
-   - `hold_conflict` or `hold_index_repair`: stop that step. Never overwrite,
-     relabel an event, or fabricate a success signal.
-5. Re-run `plan_investment_writeback` with the **same** original input and
-   analysis. Only `safeEditWorkflow.status=saved_verified`, two verified
-   `steps`, and `readyForNextNews=true` certify the indexed text/review on
-   this server. For Feed Only, `source_saved_analysis_pending` certifies the
-   source only and review is still pending.
+3. Call `prepare_canonical_writeback` with original `sourceChat`, input metadata,
+   `contentTypes[]`, `entityRoles[]`, `themes[]` and completed analysis/typed
+   `researchReview`. Feed Only sets `captureOnly:true` and omits analysis.
+   Typed-review quality gates remain effective. Optional legacy planning does
+   not authorize or execute a save.
+4. Inspect the complete returned diffs and `steps`. After authorization, call
+   `apply_canonical_writeback` with unchanged input/planId and every pending
+   `preview.authorization` unchanged. `expectedHash` is `beforeHash`, never
+   `afterHash`. The server checks the exact pending set and writes Source
+   before Review. `verified_existing` notes are not duplicated; conflict,
+   index/quality/event holds never authorize overwriting.
+5. Check the canonical apply result and every write/readback/reindex/link stage.
+   `saved_verified` and `readyForNextNews=true` certify the Source/Review on
+   this server. Feed Only `source_saved_analysis_pending` certifies Source
+   only. On partial failure retain the verified Source; prepare the unchanged
+   input again and apply only the newly returned pending authorizations.
+   Existing canonical Review edits (including duplicate-source append) have
+   no supported revision executor and must HOLD, not fall back to generic edits.
 6. For screenshot/PDF input without verified original attachment bytes, state
    `text_only_binary_not_verified` in the user receipt even after successful
    text/review saves. Preserve actual binary through the separate authorized
    `store_user_attachment` capability when available.
 7. `perDeviceSync=unverified` means Android/desktop arrival is **not** proven.
 
-The planner itself is read-only: `writesPerformedByPlanner=false`. Calling
-Safe Edit and observing verification are indispensable. The ChatGPT host may
+The legacy planner itself is read-only and issues no execution recipe. Calling
+the canonical pair and observing verification are indispensable. The ChatGPT host may
 still prompt for an explicit OAuth/write approval; Project prompts cannot
 remove that boundary.
 
@@ -139,9 +142,9 @@ its state.
 
 ## Acceptance still needed before Production
 
-- Verify M5.2 and M5.3 stacked PRs together in Staging.
+- Verify the exact reviewed candidate in an independently authorized isolated runtime.
 - Confirm actual Web app tool registry and OAuth scopes; no additional
-  Safe Edit action was introduced by this code.
+  scope is granted by this candidate correction.
 - Run an authorized non-sensitive real news item through actual installed
   ChatGPT Web tools; validate source bytes (if any), two note receipts,
   FTS retrieval and cross-note backlinks.
@@ -160,7 +163,7 @@ gate or write into its persistent Vault. A separate isolated test target or
 explicit owner-approved reuse is required for an actual Railway staging run.
 
 The in-memory MCP integration regression exercises the real read-only
-planner, a consent-scoped Safe Edit server, preview/apply receipts, indexed
+planner, a consent-scoped Safe Edit server, canonical prepare/apply receipts, indexed
 search, and protected-note invariance against a temporary local Vault. It
 does **not** certify the installed ChatGPT Web host against a deployed M5.3
 endpoint or any real device's Obsidian Sync.

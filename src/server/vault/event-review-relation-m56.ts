@@ -1,8 +1,9 @@
 /**
  * M5.6.2: read-only, evidence-bounded proposal to link a second source receipt
  * into an existing Research Review. It never adjudicates semantic equivalence
- * automatically and never writes a Vault note. Authorized Safe Edit must
- * preview and CAS-apply its exact append recipe separately.
+ * automatically and never writes a Vault note. Canonical revisions currently
+ * have no supported execution path: return a diagnostic proposal, never a
+ * generic Safe Edit recipe that bypasses canonical persistence authority.
  */
 import {createHash} from "node:crypto";
 import {db} from "../db";
@@ -70,7 +71,6 @@ export function planDuplicateSourceLinkM56(input:DuplicateSourceLinkInput){
       safeEditRequest:null,reviewVersionSha256:sha(review.content),writePerformed:false};
   if(!review.content.includes("## Source provenance"))throw Error("M56_RELATION_SOURCE_SECTION_MISSING");
   const eventKey="EV-"+sha([date,input.eventAnchor].join("\n")).slice(0,16).toUpperCase();
-  const opId="ILK-"+sha([input.reviewPath,input.additionalSourcePath,eventKey].join("\n")).slice(0,32);
   // This is a reference update, not a second research verdict, event, claim or
   // independently verified source. Original metadata and existing prose stay.
   const content=[
@@ -82,10 +82,10 @@ export function planDuplicateSourceLinkM56(input:DuplicateSourceLinkInput){
     "- Evidence weight: this is an additional Source Receipt, **not independent confirmation** and not a new economic event, EPS/PT forecast, or approved Thesis change.",
     "- Original report/issuer authenticity and any substantive correction remain separately unverified; no protected record is modified."
   ].join("\n");
-  return {status:"requires_safe_edit_preview" as const,eventKey,existingReviewPath:input.reviewPath,
+  return {status:"hold_canonical_revision_not_supported" as const,eventKey,existingReviewPath:input.reviewPath,
     primarySourcePath:primaryPath,additionalSourcePath:input.additionalSourcePath,
     reviewVersionSha256:sha(review.content),writePerformed:false,
-    safeEditRequest:{operationId:opId,path:input.reviewPath,
-      reason:"M5.6 candidate same-event cross-language Source Receipt link; append references only, no new proof or protected mutations",
-      change:{kind:"append" as const,heading:"Source provenance",date:input.linkedOnDate,content}}};
+    safeEditRequest:null,
+    proposal:{content,linkedOnDate:input.linkedOnDate},
+    limitation:"Diagnostic only: canonical prepare/apply is add-only. Updating an existing canonical Review requires a separately supported canonical revision workflow; generic Safe Edit is prohibited."};
 }

@@ -151,14 +151,25 @@ export function resolveLegacyPriceListing(registry:InstrumentIdentityRegistry,in
 
 export function resolveUnderlyingMapping(registry:InstrumentIdentityRegistry,listingId:string,asOf:string){
   isoDate.parse(asOf);
-  const parsed=parseInstrumentIdentityRegistry(registry);
+  let parsed:InstrumentIdentityRegistry;
+  try{parsed=parseInstrumentIdentityRegistry(registry);}
+  catch(error){
+    if(error instanceof Error&&error.message==="underlying_listing_not_registered")
+      return {status:"underlying_listing_not_registered" as const,mapping:null,underlying:null,usableForConversion:false};
+    throw error;
+  }
   const listing=parsed.listings.find(x=>x.listingId===listingId);
   if(!listing)return {status:"listing_not_found" as const,mapping:null,underlying:null,usableForConversion:false};
+  if(!active(listing.validFrom,listing.validTo,asOf))
+    return {status:"inactive_listing" as const,mapping:null,underlying:null,usableForConversion:false};
   const mappings=listing.underlyingMappings.filter(x=>active(x.effectiveFrom,x.effectiveTo,asOf));
   if(!mappings.length)return {status:"no_active_mapping" as const,mapping:null,underlying:null,usableForConversion:false};
   if(mappings.length>1)throw new Error("ambiguous_underlying_mapping");
   const mapping=mappings[0],underlying=parsed.listings.find(x=>x.listingId===mapping.underlyingListingId)!;
-  const usable=mapping.verification==="verified_against_primary"&&listing.identityEvidence.verification==="verified_against_primary";
+  if(!active(underlying.validFrom,underlying.validTo,asOf))
+    return {status:"inactive_underlying_listing" as const,mapping,underlying,usableForConversion:false};
+  const usable=mapping.verification==="verified_against_primary"&&listing.identityEvidence.verification==="verified_against_primary"&&
+    underlying.identityEvidence.verification==="verified_against_primary";
   return {status:usable?"verified_mapping" as const:"unverified_mapping" as const,mapping,underlying,
     usableForConversion:usable,
     warning:"This mapping relates security units only. It never substitutes the underlying traded price for the ADR/DR listing price."};

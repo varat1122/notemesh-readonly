@@ -12,7 +12,6 @@ import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investme
 import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
 import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTag,
   type BrokerUpdate } from "./investment-routing-v2";
-import { buildCanonicalSafeEditWorkflow, type CanonicalSafeEditWorkflow } from "./canonical-writeback-workflow";
 import type { ThaiResearchReview } from "./research-quality-m55";
 import {resolveSourceIdentityM56, type SourceIdentityResolution} from "./source-identity-m56";
 import {validateResearchProvenance,normalizeAsOf,readContextVersion,type ResearchProvenance,type ContextManifest} from "./context-provenance";
@@ -41,7 +40,7 @@ export interface WritebackInput {
   entityRoles?:EntityTag[];
   themes?:string[];
   brokerUpdate?:BrokerUpdate;
-  /** M5.3: supply ONLY finished, source-separated analysis to obtain a Safe Edit recipe. */
+  /** Completed source-separated analysis; persistence is owned by canonical prepare/apply. */
   sourceChat?:string;
   completedAnalysis?:string;
   captureOnly?:boolean;
@@ -108,7 +107,6 @@ export interface WritebackPlan {
     applyTool:"apply_canonical_writeback";
     rule:"Use the Safe Edit canonical prepare/apply pair for executable Source/Review persistence; this read-only plan is diagnostic and migration-compatible only.";
   };
-  safeEditWorkflow?:CanonicalSafeEditWorkflow;
   routes:Route[];
   gates:{
     fullSourceRead:boolean;
@@ -389,7 +387,5 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       protectedThesisApprovalRequired:true,canAutoWrite:false},
     warnings,nextActions:needed
   };
-  if(input.completedAnalysis!==undefined||input.researchReview!==undefined||input.captureOnly===true)
-    plan.safeEditWorkflow=buildCanonicalSafeEditWorkflow(input,plan);
   return plan;
 }
