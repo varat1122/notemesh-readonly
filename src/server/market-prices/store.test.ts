@@ -23,6 +23,12 @@ it("persists, reads back, and retries without duplicate bars or actions", () => 
   const data = readPriceStore(s => s.read(input)) as ReturnType<PriceStore["read"]>;
   expect(data.total).toBe(2); expect(data.actions).toHaveLength(2);
   expect(data.bars[0]).toMatchObject({ open: 10, adjustedClose: 10.5 });
+  expect(data.identity).toMatchObject({status:"legacy_price_cache_reference_only",
+    canonicalListingId:null,crossListingConversionAllowed:false});
+  expect(data.warnings.join(" ")).toContain("cross-listing conversion is disabled");
+  const listed=store.instruments()[0] as any;
+  expect(listed).toMatchObject({identityStatus:"legacy_price_cache_reference_only",
+    canonicalListingId:null,crossListingConversionAllowed:false});
   expect(fs.existsSync(path.join(root, "vault"))).toBe(false);
 });
 it("records corrections separately and preserves rows omitted by a later response", () => {
