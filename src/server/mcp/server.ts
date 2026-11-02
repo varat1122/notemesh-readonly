@@ -382,9 +382,9 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
   server.registerTool(
     "plan_investment_writeback",
     {
-      title: "Plan multilingual investment intake and evidence-safe Vault writeback",
+      title: "Diagnostic investment intake / routing plan (canonical writes use Safe Edit prepare/apply)",
       annotations: READ,
-      description: "PREFERRED for newly supplied Micro/Macro/PDF/Stock investment news when a canonical Company/Industry/Macro Research Review must be saved. Read-only M5.2/M5.3 plan resolves existing Company/Industry Hubs, broker vintage and duplicate candidates; sourceChat + completedAnalysis emit exact add-only Safe Edit Source and canonical Review recipes, with SHA readback and search-index verification on retries. Use separately authorized Investment OS — Safe Edit Chat preview/apply to write; NEVER substitute the legacy submit_investment_notes Inbox importer for canonical research. This planner NEVER writes or automatically changes Thesis/Evidence Register, Portfolio or Company Evolution Timeline.",
+      description: "DIAGNOSTIC / MIGRATION-COMPATIBILITY ONLY. Read-only M5.2/M5.3 routing plan resolves existing Company/Industry Hubs, broker vintage, duplicate candidates and historical context. Do NOT treat its recipe as the authoritative executable canonical write contract. For every new Micro/Macro/PDF Source/Review persistence, use Investment OS — Safe Edit Chat prepare_canonical_writeback followed by apply_canonical_writeback with the unchanged input/plan/tokens returned there. This planner NEVER writes or automatically changes Thesis/Evidence Register, Portfolio or Company Evolution Timeline; NEVER substitute legacy submit_investment_notes for canonical research.",
       inputSchema: z.object({
         domain:z.enum(["company","industry","macro","asset"]).describe("Claim/knowledge domain; not an inferred company ticker"),
         entities:z.array(z.string().min(1).max(120)).min(1).max(6).describe("Explicit issuer ticker(s), macro geography, or industry topics. Do not include inferred suppliers as confirmed issuers."),

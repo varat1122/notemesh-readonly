@@ -51,6 +51,12 @@ Tools (require the existing read access and the feature flag):
 
 No tool fetches new source quotes, publishes data or creates a price file on disk. In Drive mode, cold reads may download only existing signed catalogue/price partitions into RAM; warm reads reuse the bounded cache. No-read credentials get no tools. All existing Read Only and Save Linked Notes behavior stays in place when the feature is off. Safe Edit OAuth/canary remains a separate pending workflow.
 
+### Canonical listing identity boundary
+
+The current `market:symbol` ID is a legacy cache/query reference. It does **not** by itself identify issuer, share class, ADR/DR status or an underlying conversion. Price reads and catalogue rows expose that limitation and keep cross-listing conversion disabled until a dated mapping is admitted under [Instrument Identity Contract](INSTRUMENT_IDENTITY_CONTRACT.md).
+
+Do not use a foreign underlying quote as the Thai DR quote, or an ADR quote as the local common-share quote. Any unit relationship must come from the explicit evidence-bound mapping; FX/session/basis risk remains separate.
+
 ## Example research flow
 
 Read the relevant source and thesis using Read Only. Establish the actual publication time and the first affected exchange session. Then request the price event comparison for that session with an explicit return basis and comparator. Preserve assumptions, sample hash, missing/quarantined data and any overlapping news in the analysis. Save a compact linked analysis note only when requested, using the existing Save Linked Notes tool. The calculator does not register the event or edit a thesis itself.
