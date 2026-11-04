@@ -120,6 +120,67 @@ export class GitBackend implements SyncBackend {
   private editPaused = false;
   private generation = 0;
   private stopping = false;
+  private maintenanceClosed = false;
+  private maintenanceDrained = false;
+  private maintenanceState: "stopped" | "starting" | "running" | "idle" | "draining" | "stopped-controlled" | "unknown" = "stopped";
+  private maintenanceSince = new Date().toISOString();
+
+  private lifecycle(next: typeof this.maintenanceState) {
+    this.maintenanceState = next;
+    this.maintenanceSince = new Date().toISOString();
+  }
+
+  maintenanceStatus() {
+    const state = this.editPaused ? "unknown" : this.maintenanceClosed ? this.maintenanceState :
+      this.inFlight ? "running" : this.pullTimer ? (this.state === "running" ? "idle" : "unknown") : this.maintenanceState;
+    return { state, disposition: state === "unknown" ? "UNKNOWN/HOLD" : "observed",
+      active: Number(Boolean(this.inFlight)), accepting: !this.maintenanceClosed && !this.stopping && Boolean(this.pullTimer),
+      pid: process.pid, last_transition: this.maintenanceSince, drained: this.maintenanceDrained };
+  }
+
+  async drainControlled(timeoutMs = 10_000) {
+    this.maintenanceClosed = true;
+    this.maintenanceDrained = false;
+    this.stopping = true;
+    this.generation++;
+    this.clearTimers();
+    this.lifecycle("draining");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      if (this.editPaused) throw Error("Safe Edit ownership unknown; hold");
+      const work = this.inFlight;
+      if (work && !await Promise.race([work, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(Error("Controlled drain timed out; hold")), timeoutMs);
+      })])) throw Error("In-flight cycle failed; hold");
+      if (this.inFlight || this.busy || this.editPaused || this.interruptedEdit() ||
+          fs.existsSync(path.join(env.dataDir, "git-mutation.lock"))) throw Error("Drain boundary unknown; hold");
+      this.maintenanceDrained = true;
+    } catch (error) { this.lifecycle("unknown"); throw error; }
+    finally { if (timer) clearTimeout(timer); }
+    return this.maintenanceStatus();
+  }
+
+  stopControlled() {
+    if (!this.maintenanceClosed || !this.maintenanceDrained || this.inFlight || this.busy || this.editPaused ||
+        this.interruptedEdit() || fs.existsSync(path.join(env.dataDir, "git-mutation.lock")))
+      throw Error("Controlled stop requires a proven drain; hold");
+    this.stop();
+    this.lifecycle("stopped-controlled");
+    return this.maintenanceStatus();
+  }
+
+  startControlled() {
+    if (this.inFlight || this.editPaused || (this.maintenanceClosed && !this.maintenanceDrained) ||
+        this.interruptedEdit() || fs.existsSync(path.join(env.dataDir, "git-mutation.lock")))
+      throw Error("Controlled start requires a safe boundary; hold");
+    this.maintenanceClosed = false;
+    this.maintenanceDrained = false;
+    this.lifecycle("starting");
+    this.start();
+    if (!this.pullTimer) { this.maintenanceClosed = true; this.lifecycle("unknown"); throw Error("Writer did not start; hold"); }
+    this.lifecycle("running");
+    return this.maintenanceStatus();
+  }
 
   isEditPaused(): boolean { return this.editPaused; }
 
@@ -141,7 +202,7 @@ export class GitBackend implements SyncBackend {
   // Admission is synchronous. Every source of Git work checks this gate again
   // when it actually wakes up; cancelling timers alone is not exclusion.
   async withPausedForEdit<T>(run: () => T | Promise<T>): Promise<T> {
-    if (this.editPaused || this.state !== "running" || !this.pullTimer || this.stopping)
+    if (this.maintenanceClosed || this.editPaused || this.state !== "running" || !this.pullTimer || this.stopping)
       throw Error("Git must be running and healthy before Safe Edit");
     const cfg = gitConfig();
     const expected = process.env.SAFE_EDIT_GIT_REMOTE;
@@ -272,6 +333,7 @@ export class GitBackend implements SyncBackend {
   }
 
   start() {
+    if (this.maintenanceClosed) throw Error("Git controlled maintenance gate is closed");
     if (this.editPaused) throw Error("Git is paused for Safe Edit");
     if (this.pullTimer || this.inFlight || this.state === "needs-reauth") return;
     this.stopping = false;
@@ -321,6 +383,7 @@ export class GitBackend implements SyncBackend {
   // Debounce, with a ceiling: a chatty agent writing continuously would
   // otherwise keep resetting the timer and never publish anything.
   notifyLocalChange(change: { tool: string; path: string }) {
+    if (this.maintenanceClosed) return;
     if (this.pending.length < 200) this.pending.push(change);
     if (this.editPaused || this.stopping || this.state === "needs-reauth") return;
     const generation = this.generation;
@@ -337,7 +400,7 @@ export class GitBackend implements SyncBackend {
   }
 
   async syncNow(): Promise<{ ok: boolean; output: string }> {
-    if (this.editPaused || this.inFlight || this.state === "needs-reauth")
+    if (this.maintenanceClosed || this.editPaused || this.inFlight || this.state === "needs-reauth")
       return { ok: false, output: "Git is busy, paused or requires re-authentication" };
     const before = this.ring.all().length;
     const ok = await this.cycle("manual");
@@ -367,11 +430,12 @@ export class GitBackend implements SyncBackend {
   // One full reconcile: publish local work, take remote work, push.
   // Serialized — overlapping cycles would race on the index and the ref.
   private cycle(reason: string): Promise<boolean> {
-    if (this.editPaused || this.state === "needs-reauth" || (this.stopping && reason !== "manual")) return Promise.resolve(false);
+    if (this.maintenanceClosed || this.editPaused || this.state === "needs-reauth" || (this.stopping && reason !== "manual")) return Promise.resolve(false);
     if (this.inFlight) return this.inFlight;
     const cfg = gitConfig();
     if (!cfg) return Promise.resolve(false);
     this.busy = true;
+    this.lifecycle("running");
     const work = this.reconcile(reason, cfg);
     this.inFlight = work;
     void work.then(() => { if (this.inFlight === work) this.inFlight = null; }, () => { if (this.inFlight === work) this.inFlight = null; });
@@ -410,7 +474,10 @@ export class GitBackend implements SyncBackend {
         this.clearTimers();
         this.state = "backoff";
         this.log(`[git] mutation ownership recovery required: ${String(error)}`, "error");
-      } finally { this.busy = false; }
+      } finally {
+        this.busy = false;
+        if (!this.maintenanceClosed) this.lifecycle(this.stopping ? "stopped" : this.state === "running" ? "idle" : "unknown");
+      }
       if (this.stopping) this.state = "stopped";
     }
     return successful;
