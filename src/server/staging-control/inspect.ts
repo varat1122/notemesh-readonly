@@ -1,3 +1,4 @@
+import { untimed, type PhaseRun } from "./read-timing";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -161,35 +162,40 @@ export function databaseLocks(root: string, procLocks = "/proc/locks") {
       state: matched.length ? "LOCKED/HOLD" : "no-lock-observed", scope: "visible proc namespace advisory locks on SQLite files; observed before opening read transaction" };
   } catch { return { count: null, write_count: null, state: "UNKNOWN/HOLD", scope: "proc SQLite locks unavailable" }; }
 }
-export function inspect(root: string, writer: unknown, build: unknown) {
-  const started = performance.now(), dbLocks = databaseLocks(root), db = openApp(root);
+export function inspect(root: string, writer: unknown, build: unknown, phase: PhaseRun = untimed) {
+  const started = performance.now(), dbLocks = phase("sqlite_locks", () => databaseLocks(root)), db = phase("db_open", () => openApp(root));
   try {
     db.exec("BEGIN");
     const count = (sql: string) => Number(db.prepare(sql).get()!.n);
-    const integrityRows = db.prepare("PRAGMA integrity_check(10)").all();
+    const integrityRows = phase("integrity", () => db.prepare("PRAGMA integrity_check(10)").all());
     const integrity = integrityRows.length === 1 && integrityRows[0].integrity_check === "ok";
-    const fk = count("SELECT count(*) AS n FROM pragma_foreign_key_check");
-    const writing = count("SELECT count(*) AS n FROM safe_edit_operations WHERE status='writing'");
-    const notes = db.prepare("SELECT path FROM notes LIMIT 10001").all();
-    const fts = db.prepare("SELECT path FROM notes_fts LIMIT 10001").all();
-    if (notes.length > 10_000 || fts.length > 10_000) throw new Hold("INDEX_BOUND_EXCEEDED");
-    // FTS path is UNINDEXED: correlated subqueries were quadratic. Compare sets.
-    const noteSet = new Set(notes.map(r => String(r.path))), ftsSet = new Set(fts.map(r => String(r.path)));
-    const missing = [...noteSet].filter(p => !ftsSet.has(p)).length, orphan = [...ftsSet].filter(p => !noteSet.has(p)).length;
-    const duplicate = fts.length - ftsSet.size, links = count("SELECT count(*) AS n FROM links");
-    const receipts = receiptWitness(db, root), auth = authWitness(db), git = gitView(root), fileLocks = locks(root);
+    const fk = phase("foreign_keys", () => count("SELECT count(*) AS n FROM pragma_foreign_key_check"));
+    const { writing, links } = phase("counts", () => ({ writing: count("SELECT count(*) AS n FROM safe_edit_operations WHERE status='writing'"), links: count("SELECT count(*) AS n FROM links") }));
+    const { notes, fts, missing, orphan, duplicate } = phase("notes_fts", () => {
+      const notes = db.prepare("SELECT path FROM notes LIMIT 10001").all();
+      const fts = db.prepare("SELECT path FROM notes_fts LIMIT 10001").all();
+      if (notes.length > 10_000 || fts.length > 10_000) throw new Hold("INDEX_BOUND_EXCEEDED");
+      // FTS path is UNINDEXED: correlated subqueries were quadratic. Compare sets.
+      const noteSet = new Set(notes.map(r => String(r.path))), ftsSet = new Set(fts.map(r => String(r.path)));
+      const missing = [...noteSet].filter(p => !ftsSet.has(p)).length, orphan = [...ftsSet].filter(p => !noteSet.has(p)).length;
+      const duplicate = fts.length - ftsSet.size;
+      return { notes, fts, missing, orphan, duplicate };
+    });
+    const receipts = phase("receipts", () => receiptWitness(db, root)), auth = phase("auth", () => authWitness(db));
+    const git = phase("git", () => gitView(root)), fileLocks = phase("file_locks", () => locks(root));
+    const protectedBoundary = phase("protected_boundary", () => protectedEvidence(git));
     return { observed_at: new Date().toISOString(), duration_ms: Math.round(performance.now() - started), build, target: TARGET,
       data_root_exists: true, db_exists: true, notes: notes.length, fts: fts.length, links,
       integrity: integrity ? "ok" : "HOLD", fk_count: fk, writing, receipts: receipts.total_receipts, receipt_evidence: receipts,
       locks: fileLocks, lock_count: Object.values(fileLocks).filter(Boolean).length, database_locks: dbLocks,
       in_progress: Object.entries(fileLocks).filter(([k, v]) => v && /MERGE|REBASE|REVERT|CHERRY|rebase|sequencer/.test(k)).map(([k]) => k),
       writer, git, auth, index: { missing, orphan, duplicate, scope: "path parity; PRAGMA integrity_check reported separately" },
-      protected_boundary: protectedEvidence(git),
+      protected_boundary: protectedBoundary,
       accepted_baseline: { provenance: "Owner accepted HOLD; expected values, not substituted observations", notes: 3955, fts: 3955, links: 64007,
         wave3_receipts: 3, verified: "2/90", accepted_batches: 0, head: ACCEPTED_HEAD, protected_reference: ACCEPTED_PROTECTED },
       canonical_counts_match: notes.length === 3955 && fts.length === 3955 && links === 64007 && writing === 0 && integrity && fk === 0,
     };
-  } finally { if (db.isTransaction) db.exec("ROLLBACK"); db.close(); }
+  } finally { phase("db_close", () => { if (db.isTransaction) db.exec("ROLLBACK"); db.close(); }); }
 }
 function physical(root: string, rel: string) {
   const file = exactPath(root, "vault/" + rel);

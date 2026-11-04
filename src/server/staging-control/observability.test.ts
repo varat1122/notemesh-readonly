@@ -12,6 +12,7 @@ import { processFence } from "./process-fence";
 import { authWitness } from "./auth-witness";
 import { databaseLocks, gitView, inspect, PREVIEW, previewStatus, protectedEvidence, ACCEPTED_HEAD } from "./inspect";
 import { boundedRead, READ_BUDGET_MS } from "./bounded-read";
+import { ReadHold, ReadTiming, READ_PHASES } from "./read-timing";
 import { hash, Hold, OPERATIONS, sign, TARGET } from "./contract";
 import { Journal } from "./journal";
 import { Runner, type Handlers } from "./runner";
@@ -28,9 +29,9 @@ afterAll(() => fs.rmSync(workerRoot, { recursive: true, force: true }));
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), "ios-observe-")); });
 afterEach(() => { vi.restoreAllMocks(); fs.rmSync(root, { recursive: true, force: true }); });
 
-function proc(pid: number, parent: number, comm: string, exe?: string) {
+function proc(pid: number, parent: number, comm: string, exe?: string, state = "S", start = String(100 + pid)) {
   const dir = path.join(root, "proc", String(pid)); fs.mkdirSync(path.join(dir, "fd"), { recursive: true }); fs.mkdirSync(path.join(dir, "fdinfo"));
-  const fields = Array(20).fill("0"); fields[0] = "S"; fields[1] = String(parent); fields[19] = String(100 + pid);
+  const fields = Array(20).fill("0"); fields[0] = state; fields[1] = String(parent); fields[19] = start;
   fs.writeFileSync(path.join(dir, "stat"), `${pid} (${comm}) ${fields.join(" ")}\n`);
   fs.writeFileSync(path.join(dir, "comm"), comm + "\n");
   if (exe) fs.symlinkSync(exe, path.join(dir, "exe"));
@@ -77,6 +78,69 @@ it("unreadable ancestor FD inventory is not waived by the exe fallback", () => {
 });
 it("missing lineage or changing PID identity cannot classify an ancestor as safe", () => {
   proc(10, 99, "node", "/usr/bin/node"); expect(fence().state).toBe("UNKNOWN/HOLD");
+});
+
+it("unreadable exe and FD reports bounded stable identity without exposing process paths", () => {
+  proc(10, 0, "node"); const other = proc(20, 10, "helper");
+  fs.rmSync(path.join(other, "fd"), { recursive: true });
+  const result = fence();
+  expect(result).toMatchObject({ state: "UNKNOWN/HOLD", unreadable: 1, fd_unreadable: 1, owned_children: 1 });
+  expect(result.observations[0]).toMatchObject({ pid: 20, ppid: 10, comm: "helper", process_state: "S", start_ticks: "120",
+    relationship: "control-descendant-unregistered", identity: "stable-reread", exe_status: "unreadable", fd_status: "unreadable", writable_data_fds: null });
+  expect(JSON.stringify(result)).not.toContain(root);
+});
+it.each([0, 10])("a live helper remains unknown regardless of ancestry (parent=%s)", parent => {
+  proc(10, 0, "node"); proc(20, parent, "git", "/usr/bin/git");
+  expect(fence()).toMatchObject({ state: "UNKNOWN/HOLD", unknown: 1, owned_children: parent === 10 ? 1 : 0 });
+});
+it("only stable Z identity with a readable empty FD table establishes inability to write", () => {
+  proc(10, 0, "node"); const zombie = proc(20, 10, "git", undefined, "Z");
+  expect(fence()).toMatchObject({ state: "exclusive-process-observed", non_writing_zombies: 1, fd_unreadable: 0 });
+  fs.rmSync(path.join(zombie, "fd"), { recursive: true });
+  expect(fence()).toMatchObject({ state: "UNKNOWN/HOLD", non_writing_zombies: 0, fd_unreadable: 1 });
+});
+it("a purported zombie with any FD is not exempt", () => {
+  proc(10, 0, "node"); const zombie = proc(20, 0, "git", undefined, "Z");
+  fs.symlinkSync("/dev/null", path.join(zombie, "fd/1"));
+  expect(fence()).toMatchObject({ state: "UNKNOWN/HOLD", non_writing_zombies: 0 });
+});
+it.each(["start", "parent", "state"])("changed zombie %s never establishes safety", field => {
+  proc(10, 0, "node"); const zombie = proc(20, 10, "git", undefined, "Z");
+  const original = fs.readFileSync; let reads = 0;
+  vi.spyOn(fs, "readFileSync").mockImplementation(((p: fs.PathOrFileDescriptor, ...args: unknown[]) => {
+    const raw = (original as (...args: unknown[]) => unknown)(p, ...args);
+    if (String(p) !== path.join(zombie, "stat") || ++reads < 2) return raw;
+    const fields = String(raw).trim().split(" ");
+    fields[field === "start" ? 21 : field === "parent" ? 3 : 2] = field === "state" ? "S" : "999";
+    return fields.join(" ");
+  }) as typeof fs.readFileSync);
+  expect(fence().state).toBe("UNKNOWN/HOLD");
+});
+it("PID reuse of an already inspected ancestor is detected by final identity pass", () => {
+  const init = proc(1, 0, "tini"); proc(10, 1, "node"); const original = fs.readFileSync; let reads = 0;
+  vi.spyOn(fs, "readFileSync").mockImplementation(((p: fs.PathOrFileDescriptor, ...args: unknown[]) => {
+    const raw = (original as (...args: unknown[]) => unknown)(p, ...args);
+    return String(p) === path.join(init, "stat") && ++reads >= 3 ? String(raw).replace(/101\n$/, "999\n") : raw;
+  }) as typeof fs.readFileSync);
+  expect(fence().state).toBe("UNKNOWN/HOLD");
+});
+it("process-set changes during scan remain HOLD", () => {
+  proc(10, 0, "node"); proc(20, 10, "git", undefined, "Z"); const original = fs.readdirSync; let reads = 0;
+  vi.spyOn(fs, "readdirSync").mockImplementation(((p: fs.PathLike, ...args: unknown[]) => {
+    const result = (original as (...args: unknown[]) => unknown)(p, ...args);
+    return String(p) === path.join(root, "proc") && ++reads === 2 ? [...result as string[], "30"] : result;
+  }) as typeof fs.readdirSync);
+  expect(fence().state).toBe("UNKNOWN/HOLD");
+});
+it("diagnostics do not expose comm paths, executable paths, FD targets or credentials", () => {
+  proc(10, 0, "node"); const other = proc(20, 0, "/secret/token", "/credential/private/helper");
+  fs.writeFileSync(path.join(other, "cmdline"), "credential-value"); fs.writeFileSync(path.join(other, "environ"), "credential-value");
+  fs.symlinkSync(path.join(root, "data/private-path"), path.join(other, "fd/3"));
+  fs.writeFileSync(path.join(other, "fdinfo/3"), "flags:\t0100002\n");
+  const result = fence();
+  expect(result).toMatchObject({ state: "UNKNOWN/HOLD", writable_data_fds: 1 });
+  expect(result.observations[0]).toMatchObject({ comm: null, exe_basename: "helper" });
+  expect(JSON.stringify(result)).not.toMatch(/secret|token|credential|private|\/usr|\/workspace/);
 });
 
 function database() {
@@ -143,6 +207,9 @@ it("realistic 3955 notes/FTS and 64007 links finish inside the bounded live budg
   const elapsed = performance.now() - start;
   console.info(JSON.stringify({ fixture: "3955-notes-64007-links", elapsed_ms: Math.round(elapsed), budget_ms: READ_BUDGET_MS }));
   expect(elapsed).toBeLessThan(READ_BUDGET_MS);
+  const timing = (result as unknown as { read_timing: ReturnType<ReadTiming["snapshot"]> }).read_timing;
+  expect(timing.current_phase).toBe(null);
+  expect(timing.events.filter(e => e.event === "end").map(e => e.phase)).toEqual(READ_PHASES.filter(p => p !== "preview"));
   expect(result).toMatchObject({ notes: 3955, fts: 3955, links: 64007, integrity: "ok", fk_count: 0, writing: 0, receipts: 3,
     canonical_counts_match: true, receipt_evidence: { wave3_receipts: 3, accepted_state_matches: true },
     index: { missing: 0, orphan: 0, duplicate: 0 }, git: { worktree: "dirty", local_equals_remote: true },
@@ -182,15 +249,22 @@ it("m000038 links and missing/competing preview records fail reconciliation with
 });
 
 it("a stuck read worker is killed before a terminal HOLD is journaled and admission is released", async () => {
-  const stuck = path.join(root, "stuck.mjs"); fs.writeFileSync(stuck, "process.stdin.resume(); setInterval(() => {}, 1000);");
+  const stuck = path.join(root, "stuck.mjs"); fs.writeFileSync(stuck, 'import fs from "node:fs"; fs.writeSync(3, JSON.stringify({seq:1,phase:"integrity",event:"start",elapsed_ms:0})+"\\n"); process.stdin.resume(); setInterval(() => {}, 1000);');
   const journal = new Journal(path.join(root, "journal.sqlite"), "fixture");
   const handlers = Object.fromEntries(OPERATIONS.map(op => [op, () => ({ op })])) as unknown as Handlers;
   handlers.inspect = () => boundedRead({ operation: "inspect", root }, pathToFileURL(stuck), 100);
   const runner = new Runner(journal, () => ({ reader: "a".repeat(64) }), () => {}, handlers, () => false);
   const body = JSON.stringify({ request_id: randomUUID(), nonce: randomUUID(), operation: "inspect", target: TARGET, issued_at: new Date().toISOString() });
   const result = await runner.execute(body, "reader", sign(body, "a".repeat(64)));
-  expect(result.body).toMatchObject({ terminal: "HOLD", error: "READ_BUDGET_EXCEEDED_HOLD" });
-  expect(journal.summary().recent[0].terminal).toBe("HOLD"); journal.close();
+  expect(result.body).toMatchObject({ terminal: "HOLD", error: "READ_BUDGET_EXCEEDED_HOLD", result: { witness_complete: false, read_timing: { current_phase: "integrity", budget_ms: 100 } } });
+  if (!("result" in result.body)) throw Error("admission expected");
+  expect(result.body).toHaveProperty("result_digest", hash(JSON.stringify({ result: result.body.result, error: result.body.error })));
+  expect(journal.summary().recent[0].terminal).toBe("HOLD");
+  const disk = new DatabaseSync(path.join(root, "journal.sqlite"), { readOnly: true });
+  const terminal = JSON.parse(String(disk.prepare("SELECT body FROM events WHERE json_extract(body,'$.terminal')='HOLD'").get()!.body));
+  expect(terminal.result.read_timing.current_phase).toBe("integrity");
+  expect(terminal.result_digest).toBe(hash(JSON.stringify({ result: terminal.result, error: terminal.error })));
+  disk.close(); journal.close();
 });
 it.each([false, true])("client disconnect after admission still produces a durable terminal event (failure=%s)", async failed => {
   const journal = new Journal(path.join(root, "journal.sqlite"), "fixture");
@@ -225,4 +299,60 @@ it("restart closes interrupted admission as unknown HOLD without ever replaying 
   journal.admit({ request_id: randomUUID(), nonce: randomUUID(), operation: "inspect", target: TARGET, issued_at: new Date().toISOString() }, "reader");
   journal.close(); const next = new Journal(file, "new");
   expect(next.summary().recent[0]).toMatchObject({ terminal: "HOLD", error: "PROCESS_INTERRUPTED_OUTCOME_UNKNOWN_HOLD" }); next.close();
+});
+
+it.each([
+  { seq: 1, phase: "/secret/credential", event: "start", elapsed_ms: 0 },
+  { seq: 1, phase: "integrity", event: "start", elapsed_ms: 0, credential: "secret" },
+  { seq: 9, phase: "integrity", event: "start", elapsed_ms: 0 },
+  { seq: 1, phase: "integrity", event: "end", elapsed_ms: 0 },
+])("rejects untrusted phase telemetry without relaying its fields (%j)", async event => {
+  const file = path.join(root, "invalid.mjs");
+  fs.writeFileSync(file, `import fs from 'node:fs'; fs.writeSync(3, ${JSON.stringify(JSON.stringify(event) + "\n")}); setInterval(()=>{},1000);`);
+  const error = await boundedRead({ operation: "inspect", root }, pathToFileURL(file), 1000).catch(e => e);
+  expect(error).toBeInstanceOf(ReadHold); if (!(error instanceof ReadHold)) throw Error("read failure expected"); expect(error.code).toBe("READ_TELEMETRY_INVALID_HOLD");
+  expect(JSON.stringify(error.timing)).not.toMatch(/secret|credential/);
+});
+it("telemetry output is bounded even without newline", async () => {
+  const file = path.join(root, "oversize.mjs");
+  fs.writeFileSync(file, "import fs from 'node:fs'; fs.writeSync(3, 'x'.repeat(20000)); setInterval(()=>{},1000);");
+  await expect(boundedRead({ operation: "inspect", root }, pathToFileURL(file), 1000)).rejects.toMatchObject({ code: "READ_TELEMETRY_BOUND_EXCEEDED" });
+});
+it.each([false, true])("owned read-worker group cannot retain a live helper after terminal result (early exit=%s)", async early => {
+  const file = path.join(root, "group.mjs"), pidFile = path.join(root, "pids.json");
+  fs.writeFileSync(file, `import fs from 'node:fs'; import {spawn} from 'node:child_process';
+    const helper=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:['ignore','inherit','inherit']});
+    fs.writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,helper.pid]));
+    fs.writeSync(3,JSON.stringify({seq:1,phase:'git',event:'start',elapsed_ms:0})+'\\n');
+    ${early ? "process.exit(1);" : "setInterval(()=>{},1000);"}`);
+  await expect(boundedRead({ operation: "inspect", root }, pathToFileURL(file), 500)).rejects.toBeInstanceOf(ReadHold);
+  const pids = JSON.parse(fs.readFileSync(pidFile, "utf8")) as number[];
+  // A killed grandchild may await container init reaping. Z is non-running; never kill unrelated /proc PIDs.
+  for (const pid of pids) {
+    let state = "gone";
+    try { const raw = fs.readFileSync(`/proc/${pid}/stat`, "utf8"); state = raw.slice(raw.lastIndexOf(")") + 2)[0]; } catch { /* reaped */ }
+    expect(["gone", "Z"]).toContain(state);
+  }
+});
+it("an unproven worker cleanup poisons further admission, while retaining a terminal audit", async () => {
+  const journal = new Journal(path.join(root, "journal.sqlite"), "fixture");
+  const handlers = Object.fromEntries(OPERATIONS.map(op => [op, () => ({ op })])) as unknown as Handlers;
+  handlers.inspect = () => { throw new ReadHold("READ_WORKER_CLEANUP_UNKNOWN_HOLD", new ReadTiming().snapshot(8000, 8000)); };
+  const runner = new Runner(journal, () => ({ reader: "a".repeat(64) }), () => {}, handlers, () => false);
+  const run = (operation: string) => {
+    const body = JSON.stringify({ request_id: randomUUID(), nonce: randomUUID(), operation, target: TARGET, issued_at: new Date().toISOString() });
+    return runner.execute(body, "reader", sign(body, "a".repeat(64)));
+  };
+  expect((await run("inspect")).body).toMatchObject({ terminal: "HOLD", error: "READ_WORKER_CLEANUP_UNKNOWN_HOLD" });
+  expect((await run("writer_status")).body).toMatchObject({ terminal: "REJECTED", error: "AUDIT_COMPLETION_UNKNOWN_HOLD" });
+  expect(journal.summary().recent.some(e => e.terminal === "HOLD")).toBe(true);
+  await expect(runner.waitForIdle()).rejects.toMatchObject({ code: "AUDIT_COMPLETION_UNKNOWN_HOLD" }); journal.close();
+});
+it("changed FD inventory fails closed even for a verified ancestor", () => {
+  const init = proc(1, 0, "tini"); proc(10, 1, "node"); const original = fs.readdirSync; let reads = 0;
+  vi.spyOn(fs, "readdirSync").mockImplementation(((p: fs.PathLike, ...args: unknown[]) => {
+    const result = (original as (...args: unknown[]) => unknown)(p, ...args);
+    return String(p) === path.join(init, "fd") && ++reads === 2 ? ["99"] : result;
+  }) as typeof fs.readdirSync);
+  expect(fence()).toMatchObject({ state: "UNKNOWN/HOLD", fd_unreadable: 1 });
 });

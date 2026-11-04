@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { authenticate, hash, Hold, OPERATIONS, READ_ONLY, requestSchema, TARGET, VERSION, type Keys, type Operation } from "./contract";
 import { Journal } from "./journal";
+import { ReadHold } from "./read-timing";
 export type Handlers = Record<Operation, (run: ReturnType<Journal["admit"]>) => unknown | Promise<unknown>>;
 
 export class Runner {
@@ -60,7 +61,13 @@ export class Runner {
       this.targetCheck();
       if (r.diagnostic) throw new Hold("CONTROLLED_READ_ONLY_FAILURE");
       result = await this.handlers[r.operation](run);
-    } catch (e) { error = e instanceof Hold ? e.code : "OPERATION_FAILED_HOLD"; }
+    } catch (e) {
+      error = e instanceof Hold ? e.code : "OPERATION_FAILED_HOLD";
+      if (e instanceof ReadHold) {
+        result = { read_timing: e.timing, witness_complete: false };
+        if (e.code === "READ_WORKER_CLEANUP_UNKNOWN_HOLD") this.poisoned = true;
+      }
+    }
     const response = { ...run, finished_at: new Date().toISOString(), terminal: error ? "HOLD" : "SUCCEEDED",
       result, error, result_digest: hash(JSON.stringify({ result, error })), implementation: this.journal.implementation, version: VERSION };
     let audit;
