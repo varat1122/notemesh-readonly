@@ -147,6 +147,14 @@ export function buildCanonicalSafeEditWorkflow(
     attributedOrigin:input.attributedOrigin,
     originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage
   },input.researchReview):[];
+  const sourceArchive=plan.sourceCapture.originalSourceArchive;
+  const sourceArchiveLines=sourceArchive?[
+    `- Original-byte archive: snapshot ${sourceArchive.snapshotId}; SHA-256 ${sourceArchive.sha256}; revision ${sourceArchive.revision}; ${sourceArchive.byteLength} bytes; captured ${sourceArchive.capturedAt}`,
+    `- Archive readback: ${sourceArchive.archiveStatus}; content type ${sourceArchive.contentType}; revisions changed: ${sourceArchive.changesObserved?"yes":"no"}`,
+    "- Archive limitation: publisher authenticity/signature and claim truth are NOT verified by the byte archive; this is provenance/integrity evidence only."
+  ]:[
+    "- Original-byte archive: not linked by this canonical Review."
+  ];
   const broker=input.brokerUpdate;
   const brokerLines=broker?[
     "## Attributed broker version (not independently verified)","",
@@ -180,6 +188,7 @@ export function buildCanonicalSafeEditWorkflow(
     "## Source provenance","",
     `- Exact user-supplied source: ${wiki(rawPath)}`,
     `- Original publication/source authentication: not verified by this workflow`,
+    ...sourceArchiveLines,
     `- Event date: ${event??"unknown"}; publication date: ${published??"unknown"}`,
     "","## Research analysis (AI interpretation; not approved Thesis)","",
     input.researchReview?renderThaiResearchM55(input.researchReview):analysis??"Analysis pending.","",
