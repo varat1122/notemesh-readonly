@@ -31,8 +31,8 @@ and gates; existing normal stop semantics are preserved for existing consumers.
 debounce and Safe Edit), waits for the tracked cycle, checks locks/writing state,
 and leaves admission closed. Timeout/failure is UNKNOWN/HOLD, never idle.
 `stopControlled` requires a proven drain; restart is not drain. No stale-lock theft.
-A live external/unknown process blocks recovery. Runner-owned Git subprocesses
-are counted separately so an actual in-flight Git cycle can drain.
+A live external/unknown process blocks recovery. Descendants are counted separately, but unregistered children remain HOLD.
+Recovery lifecycle availability must be assessed separately before CORE-OPS arming.
 
 ## Request contract and security
 
@@ -75,8 +75,9 @@ from this task's OAuth-only control plane (variable names only).
 
 Nonce and request ID are unique in a FULL-synchronous SQLite transaction before
 operation dispatch. A failed, busy, interrupted or successful execution consumes
-its nonce; retry is `NO_REEXECUTION`. No result cache is served. A process crash
-leaves the RUNNING admission as UNKNOWN/HOLD operationally; do not replay it.
+its nonce; retry is `NO_REEXECUTION`. No result cache is served. A restart appends a terminal HOLD for interrupted admissions with outcome
+explicitly unknown; it never replays or erases the RUNNING event. A stale runner
+lock still blocks startup until separately authorized operator recovery.
 Recovery of an uncertain mutation needs a fresh inspected state and a new explicit
 request. Terminal audit failure poisons admission in that process.
 
@@ -94,7 +95,7 @@ before operator recovery; the endpoint cannot remove it.
 
 | Operation | Behavior |
 | --- | --- |
-| inspect | Build/deployment identity; existing root/DB; integrity/FK; writing/receipt counts; locks; bounded Git HEAD/worktree/upstream-tracking comparison; writer state; FTS path parity; conservative Vault content fingerprint. |
+| inspect | Build/deployment identity; existing root/DB; integrity/FK; writing/receipt counts; locks; bounded Git HEAD/worktree/upstream-tracking comparison; writer state; FTS path parity; bounded auth/count/receipt evidence and tracked-Vault Git equivalence (no full-content hash). |
 | writer_status | Live owned lifecycle/active count/PID/transition and external-process fence. Unknown remains UNKNOWN/HOLD. |
 | reconcile_preview_status | Exact m000038 plan/operation/path/after-hash/actor/preview/receipt checks, physical files, FTS, links and competing operation detection. No preview writes. |
 | auth_cleanup_wave3 | Resolve IDs from DB using accepted hashes/name, shared owner and zero access+refresh tokens. Refuse ambiguity/mismatch. Fixed parameterized DELETE of exact session/client, transactional integrity/FK and all non-target-row fingerprint checks. Idempotent absent result; no broad cleanup. |
@@ -102,13 +103,45 @@ before operator recovery; the endpoint cannot remove it.
 | writer_drain | Close admission, await actual in-flight terminal completion, leave gate closed. |
 | writer_stop | Require completed controlled drain and safe boundary before stopped-controlled. |
 
-Bounds: DB <=256 MiB; note <=100 KB; preview rows <=20; auth scan <=10,000
-rows per auth table; cleanup preservation scan <=100,000 rows per table; Git
-commands <=5 seconds and 512 KB output; drain <=10 seconds. Exceeding a bound is
-HOLD. The Vault fingerprint covers <=20,000 entries/256 MiB and excludes `.git`;
-it does not claim complete Protected-state coverage or an accepted baseline match.
-Remote Git relationship uses existing tracking refs only, explicitly not a fresh
-remote observation. No implementation-status/verified-batch ledger is invented.
+Inspect and preview execute in a dedicated read-only child with an 8-second
+budget, a 256 KiB output cap, no inherited credentials, and no shell or dynamic
+command. Expiry SIGKILLs its process group, including fixed Git read subprocesses;
+the parent waits for close before recording terminal HOLD and releasing admission.
+DB <=256 MiB; note <=100 KB; preview rows <=20; auth <=10,000 rows/table; note/FTS
+paths <=10,000; receipts <=1,000; Git cumulative budget <=3 seconds/output <=2 MB.
+FTS parity compares bounded path sets instead of quadratic correlated queries.
+No full-Vault content hashing occurs on the live inspect path.
+
+Process classification derives ancestors from proc stat parent/start-time data.
+Only verified init ancestors (tini/dumb-init/railway-init/docker-init) can use
+matching stat+comm when exe is unreadable. An unrelated init name is not trusted.
+Unknown processes, incomplete lineage, unreadable FD inventories and other
+processes' writable FDs in the checkpoint remain HOLD. Responses contain only
+PIDs, classification and fixed reasons, never command lines, paths or environment.
+
+Git witness includes clean/untracked/ignored state, hidden index flags, HEAD,
+upstream ref/relationship and a fresh read of the accepted local bare remote ref
+at wave1-local-git/vault.git, branch ios-p3-remainder-wave1. No fetch or arbitrary
+remote transport is executed. Protected proof is explicitly TRACKED_VAULT_GIT_EQUIVALENCE
+only at accepted HEAD b69de8c57bafdbd3c75a32c0b056b47103ed87c4 with a clean tree,
+no hidden index flags and no ignored entries. The tracked manifest/tree and
+historical reference are returned; hash equality is null, not fabricated. This
+covers the tracked Vault, not external state or an unknown historical scope.
+
+Read-only auth resolves client/session IDs internally, compares accepted hashes,
+name and shared ownership, and counts linked access+refresh tokens. No raw auth
+ID or token is returned. Receipt evidence separates all receipts from Wave 3
+receipts scoped by the accepted client fingerprint; validates written/readback/
+reindex fields, content hash and FTS presence without canonical writes. OS SQLite
+locks are observed from proc before opening the read transaction; unknown is not 0.
+
+HTTP disconnect does not cancel admitted work or its terminal audit.
+Shutdown closes admission and waits for pending executions, including disconnected
+clients, before closing the journal or releasing ownership. Responses
+include the committed terminal anchor (sequence/previous/digest/body hash) and a
+bounded projection of the last 16 events. This is not a full audit export. A disk
+failure cannot be guaranteed away: terminal append failure poisons admission and
+remains explicit HOLD. No historical verified/batch/comparator ledger is invented.
 
 ## Accepted Wave 3 evidence
 
@@ -130,54 +163,37 @@ Owner state, not newly measured live counts.
 
 ## Verification and activation gate
 
-Local suites: staging-control, sync, safe-edit, M5.3/M5.4 canonical integration,
-canonical workflow, investment router and Foundation comparator/context semantics.
-Local runner/sync/canonical subset: 270 tests passed; separate Foundation comparator/context
-subset: 48 passed (318 distinct tests). Typecheck and changed-file lint passed.
-Standalone bundle and runtime dependency-exclusion checks passed; the Docker image
-built successfully using inherited proxy + mounted CA trust. Live acceptance remains blocked. Includes all 14 requested categories,
-real SQLite/fixed filesystem fixtures, five fresh loopback HTTP requests, all eight
-negative cases, durable replay across journal reopen/key change and crash-before-
-completion, ownership mismatch and timeout/controlled-stop semantics. Fixture auth
-cleanup is exercised only in disposable temporary directories.
+The observability patch follows e4e584649690cd346f94db308ed983cffebcf62e on the
+same engineering branch. Preserve all previous tests and add ancestry/unreadable/
+FD cases, realistic 3955-note/64007-link budget tests, auth/receipt/Git/preview
+fixtures, child timeout, disconnect terminal audit and interrupted-admission
+recovery tests. Full CI and the exact-head staging image workflow are required.
 
-Build locally after committing: `node scripts/build-staging-control.mjs`.
-This creates `dist/staging-control/{main.mjs,identity.json,acceptance.mjs}`.
-The acceptance client uses only reader credentials and the fixed HTTPS service URL:
-`node dist/staging-control/acceptance.mjs`. It produces per-run JSON evidence,
-checks fresh request/nonce/execution IDs and result digests, exact preview state,
-then all eight negative cases. Loopback tests do NOT count as those live runs.
+Build after committing: `node scripts/build-staging-control.mjs` creates
+`dist/staging-control/{main.mjs,read-worker.mjs,identity.json,acceptance.mjs}`.
+The pre-activation assertion validates both bundle hashes and SQLite dependencies.
+Root branch-only railway.json continues selecting Dockerfile.staging-control,
+start `node control/main.mjs`, and pre-deploy `node control/verify-artifact.mjs --canary`.
+Keep recovery mode 0, recovery key absent, existing reader key, volume and DATA_DIR.
+Production/default branch and Foundation PR #146 are not modified.
 
-Activation is blocked in this executor:
+The acceptance client needs IOS_CONTROL_READER_KEY, IOS_CONTROL_EXPECTED_COMMIT,
+and IOS_CONTROL_EXPECTED_DEPLOYMENT through the environment. It starts with writer
+status, validates bounded witnesses, five fresh executions and audit anchors,
+then ten negative cases plus four reader-key recovery rejections. It does not
+by itself certify the complete Wave 3 historical boundary or declare recovery READY.
+No fixture result substitutes for live runtime acceptance.
 
-1. HTTPS service endpoint `notemesh-pilot-001-staging.up.railway.app` returns
-   proxy CONNECT 403 (2026-11-04 09:30 UTC). Control-plane backboard access alone
-   cannot carry runner acceptance traffic. Add this exact domain to the published
-   environment's restricted allowed hosts, preserving backboard access.
-2. Connected Railway tooling can inspect config/logs but exposes no live process/
-   filesystem command and no CLI credential here. Latest observed INSPECTION_COMPLETE
-   log is 05:16:36 UTC, not a current writer/drain/checkpoint proof. Obtain a current
-   read-only runtime process/lock/checkpoint and volume-permission witness via an
-   authorized staging operator/control connection BEFORE replacing the deployment.
-   Old success logs do not authorize stopping a possibly live Wave 3 writer.
+Current live canary before this patch: d22a2429-82c8-4ad4-92fd-1669a3897d8e,
+commit e4e584649690cd346f94db308ed983cffebcf62e. Prior acceptance HOLD:
+writer unknown/unreadable=1 and inspect client timeout/HTTP 499, terminal outcome
+unobserved. Do not infer the unknown process is infrastructure without fresh
+classification. Do not roll back unless a new mutation/safety risk is established.
+Stage only the exact reviewed new commit for the existing staging service after
+CI/artifact gates. If Apply requires Owner confirmation, return the staged patch
+ID and diff first. Do not apply the entire environment patch without reviewing it.
 
-No staging config/secret change or deployment has been made. Once the gates are
-resolved, pin the reviewed candidate, use Dockerfile.staging-control, explicitly
-replace the old inspection start command with `node control/main.mjs`, remove any
-pre-deploy command and HTTP health check, retain one replica and the existing
-volume/mount. Disable sleep/restarts during acceptance as appropriate without
-booting the ordinary application. DATA_DIR must equal the exact checkpoint path.
-Provision only the dedicated reader key; retain existing secrets without printing
-or recreating them. Journal directory must be writable by node without recursive
-chown of checkpoint. Verify no other staged changes before activation.
-
-Observed prior deployment / rollback candidate:
-`222bd2b6-82f1-4203-a5fe-ab368bb0c8a9` (Foundation #146), service
-`notemesh-pilot-001`, exact staging IDs above. Its service command is the OPS008
-inspection-only command, NOT normal application startup. Before actual activation
-export the complete current config as a protected operator artifact, reconfirm
-rollback availability (control plane reported canRollback=true on 2026-11-04) and preserve the volume; rollback restores that exact
-inspection command/source/config without resetting the checkpoint. Do not roll
-back through the default Docker CMD. No deploy or rollback has been executed.
-
-No Production Deploy. No Merge Main. No Wave 3 Resume. No Protected Mutation.
+The accepted Wave 3 checkpoint, auth and Protected reference remain expectations
+until fresh runtime evidence passes every gate after deployment. No Wave 3
+resume, auth cleanup, recovery mutation, Production deploy, merge main or
+Protected mutation is authorized by this engineering acceptance.

@@ -21,6 +21,19 @@ export class Journal {
       if (row.previous !== previous || row.digest !== hash(previous + String(row.body))) throw new Hold("AUDIT_CHAIN_INVALID");
       previous = String(row.digest);
     }
+    // On restart, preserve nonce consumption and close interrupted admissions as
+    // UNKNOWN/HOLD. This never claims that an interrupted operation did not run.
+    const interrupted = this.db.prepare(`SELECT e.body FROM events e
+      WHERE json_extract(e.body,'$.terminal')='RUNNING' AND NOT EXISTS (
+        SELECT 1 FROM events t WHERE json_extract(t.body,'$.execution_id')=json_extract(e.body,'$.execution_id')
+        AND json_extract(t.body,'$.terminal') IN ('SUCCEEDED','HOLD')) LIMIT 1001`).all();
+    if (interrupted.length > 1000) throw new Hold("AUDIT_RECOVERY_BOUND_EXCEEDED");
+    for (const row of interrupted) {
+      const admitted = JSON.parse(String(row.body));
+      const result = null, error = "PROCESS_INTERRUPTED_OUTCOME_UNKNOWN_HOLD";
+      this.append({ ...admitted, terminal: "HOLD", finished_at: new Date().toISOString(), result, error,
+        result_digest: hash(JSON.stringify({ result, error })), recovered_by: implementation });
+    }
   }
   append(event: Record<string, unknown>) {
     const own = !this.db.isTransaction;
@@ -28,9 +41,22 @@ export class Journal {
     try {
       const previous = String(this.db.prepare("SELECT digest FROM events ORDER BY seq DESC LIMIT 1").get()?.digest ?? "0".repeat(64));
       const body = JSON.stringify({ ...event, implementation: this.implementation, version: VERSION });
-      this.db.prepare("INSERT INTO events(body,previous,digest) VALUES(?,?,?)").run(body, previous, hash(previous + body));
+      const digest = hash(previous + body);
+      const inserted = this.db.prepare("INSERT INTO events(body,previous,digest) VALUES(?,?,?)").run(body, previous, digest);
       if (own) this.db.exec("COMMIT");
+      return { seq: Number(inserted.lastInsertRowid), previous, digest, body_sha256: hash(body) };
     } catch (error) { if (own && this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+  }
+  summary() {
+    // Bounded projection: no stored results, raw targets, auth rows or payloads.
+    const recent = this.db.prepare(`SELECT seq,previous,digest,
+      json_extract(body,'$.execution_id') AS execution_id, json_extract(body,'$.request_id') AS request_id,
+      json_extract(body,'$.operation') AS operation, json_extract(body,'$.terminal') AS terminal,
+      json_extract(body,'$.started_at') AS started_at, json_extract(body,'$.finished_at') AS finished_at,
+      json_extract(body,'$.result_digest') AS result_digest, json_extract(body,'$.error') AS error
+      FROM events ORDER BY seq DESC LIMIT 16`).all();
+    return { head: recent[0] ? { seq: recent[0].seq, digest: recent[0].digest } : null,
+      recent, scope: "last 16 control events; terminal anchors, not a full journal export" };
   }
   admit(r: ControlRequest, actor: string) {
     this.db.exec("BEGIN IMMEDIATE");

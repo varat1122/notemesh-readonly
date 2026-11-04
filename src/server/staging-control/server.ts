@@ -3,6 +3,9 @@ import type { Runner } from "./runner";
 
 export function controlServer(runner: Runner) {
   const server = createServer(async (req, res) => {
+    // Losing the response must not cancel an admitted operation or its terminal
+    // audit. Runner completion is independent of HTTP connection lifetime.
+    res.on("error", () => { /* terminal audit belongs to Runner, not the socket */ });
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -18,9 +21,9 @@ export function controlServer(runner: Runner) {
       }
       const header = (name: string) => typeof req.headers[name] === "string" ? req.headers[name] as string : "";
       const result = await runner.execute(Buffer.concat(chunks).toString("utf8"), header("x-ios-key-id"), header("x-ios-signature"));
-      res.writeHead(result.status); res.end(JSON.stringify(result.body));
+      if (!res.destroyed) { res.writeHead(result.status); res.end(JSON.stringify(result.body)); }
     } catch {
-      res.writeHead(503); res.end('{"terminal":"HOLD","error":"CONTROL_UNAVAILABLE"}');
+      if (!res.destroyed) { res.writeHead(503); res.end('{"terminal":"HOLD","error":"CONTROL_UNAVAILABLE"}'); }
     }
   });
   server.requestTimeout = 15_000;

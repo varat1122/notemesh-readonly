@@ -24,7 +24,12 @@ const result = await build({ entryPoints: ['src/server/staging-control/main.ts']
 if (Object.keys(result.metafile.inputs).some(p => /middleware|safe-edit\/engine|vault\/indexer|cloud-intake|server\/auth\.ts/.test(p)))
   throw Error('Forbidden startup dependency in maintenance bundle');
 const bundleSha256 = createHash('sha256').update(fs.readFileSync('dist/staging-control/main.mjs')).digest('hex');
-fs.writeFileSync('dist/staging-control/identity.json', JSON.stringify({ foundation, commit, tree, bundleSha256 }) + '\n');
+const worker = await build({ entryPoints: ['src/server/staging-control/read-worker.ts'], outfile: 'dist/staging-control/read-worker.mjs',
+  bundle: true, platform: 'node', format: 'esm', target: 'node24', metafile: true });
+if (Object.keys(worker.metafile.inputs).some(p => /middleware|safe-edit\/engine|vault\/indexer|cloud-intake|server\/auth\.ts|staging-control\/recovery/.test(p)))
+  throw Error('Forbidden dependency in read-only worker');
+const readWorkerSha256 = createHash('sha256').update(fs.readFileSync('dist/staging-control/read-worker.mjs')).digest('hex');
+fs.writeFileSync('dist/staging-control/identity.json', JSON.stringify({ foundation, commit, tree, bundleSha256, readWorkerSha256 }) + '\n');
 fs.copyFileSync('scripts/verify-staging-control-artifact.mjs', 'dist/staging-control/verify-artifact.mjs');
 // COPY preserves host modes; make the assertion readable by the runtime node user.
 fs.chmodSync('dist/staging-control/verify-artifact.mjs', 0o644);

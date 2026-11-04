@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 const fixtures: string[] = [];
 afterEach(() => { for (const p of fixtures.splice(0)) fs.rmSync(p, { recursive: true, force: true }); });
@@ -31,6 +32,20 @@ it.each(["missing", "corrupt"])("pre-activation assertion rejects %s control bun
     foundation: "b0aeed37b910efbd3a96a52d41b885621e7f25d7", commit: "a".repeat(40), bundleSha256: "0".repeat(64),
   }));
   if (condition === "corrupt") fs.writeFileSync(path.join(root, "main.mjs"), "throw Error('must never execute')");
+  const result = run(path.join(root, "verify-artifact.mjs"));
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toMatch(condition === "missing" ? /ENOENT/ : /AssertionError/);
+});
+it.each(["missing", "corrupt"])("pre-activation assertion rejects %s read-only worker", condition => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ios-worker-artifact-")); fixtures.push(root);
+  fs.copyFileSync("scripts/verify-staging-control-artifact.mjs", path.join(root, "verify-artifact.mjs"));
+  const main = "// fixture syntax only\n";
+  fs.writeFileSync(path.join(root, "main.mjs"), main);
+  fs.writeFileSync(path.join(root, "identity.json"), JSON.stringify({
+    foundation: "b0aeed37b910efbd3a96a52d41b885621e7f25d7", commit: "a".repeat(40),
+    bundleSha256: createHash("sha256").update(main).digest("hex"), readWorkerSha256: "0".repeat(64),
+  }));
+  if (condition === "corrupt") fs.writeFileSync(path.join(root, "read-worker.mjs"), "// wrong worker");
   const result = run(path.join(root, "verify-artifact.mjs"));
   expect(result.status).not.toBe(0);
   expect(result.stderr).toMatch(condition === "missing" ? /ENOENT/ : /AssertionError/);

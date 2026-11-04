@@ -7,7 +7,8 @@ import { assertRuntimeIdentity, hash, Hold, TARGET } from "./contract";
 import { Journal } from "./journal";
 import { Runner } from "./runner";
 import { controlServer } from "./server";
-import { exactPath, inspect, previewStatus, processFence, openApp } from "./inspect";
+import { exactPath, processFence, openApp } from "./inspect";
+import { boundedRead } from "./bounded-read";
 import { assertQuiescent, cleanupWave3, loadRecoveryPacket } from "./recovery";
 import type { GitBackend } from "../sync/git";
 
@@ -17,6 +18,7 @@ function boundary() {
   const identity = assertRuntimeIdentity(process.env);
   const build = JSON.parse(fs.readFileSync(new URL("./identity.json", import.meta.url), "utf8"));
   if (build.foundation !== TARGET.foundation || build.commit !== identity.commit || build.bundleSha256 !== hash(fs.readFileSync(new URL("./main.mjs", import.meta.url)))) throw new Hold("BUILD_IDENTITY_REJECTED");
+  if (build.readWorkerSha256 !== hash(fs.readFileSync(new URL("./read-worker.mjs", import.meta.url)))) throw new Hold("READ_WORKER_IDENTITY_REJECTED");
   exactPath(root);
   if (!fs.statSync(root).isDirectory()) throw new Hold("DATA_ROOT_MISSING");
   const mounts = fs.readFileSync("/proc/self/mountinfo", "utf8").split("\n").map(l => l.split(" ")[4]).filter(Boolean);
@@ -46,7 +48,12 @@ async function main() {
   const requireExclusive = () => { if (processFence().state === "UNKNOWN/HOLD") throw new Hold("EXTERNAL_WRITER_UNKNOWN_HOLD"); };
   const getWriter = async () => { writer ??= new (await import("../sync/git")).GitBackend(); return writer; };
   const runner = new Runner(journal, () => ({ reader: process.env.IOS_CONTROL_READER_KEY!, recovery: process.env.IOS_CONTROL_RECOVERY_KEY }), boundary, {
-    inspect: () => inspect(root, status(), boundary()), writer_status: status, reconcile_preview_status: () => previewStatus(root),
+    inspect: async () => {
+      const before = status();
+      const result = await boundedRead({ operation: "inspect", root, writer: before, build: boundary() });
+      return { ...result as Record<string, unknown>, writer_before: before, writer: status() };
+    }, writer_status: status,
+    reconcile_preview_status: () => boundedRead({ operation: "reconcile_preview_status", root }),
     auth_cleanup_wave3: run => { requireExclusive(); return cleanupWave3(root, () =>
       !writer || writer.maintenanceStatus().state === "stopped-controlled",
         counts => journal.append({ ...run, phase: "AUTH_OWNERSHIP_VERIFIED_BEFORE", counts })); },
@@ -77,6 +84,8 @@ async function main() {
     runner.closeAdmission();
     try {
       await new Promise<void>(resolve => server.close(() => resolve()));
+      // Disconnected HTTP requests can still own admitted work and its audit.
+      await runner.waitForIdle();
       if (writer) { await writer.drainControlled(); writer.stopControlled(); }
       journal.append({ event: "RUNNER_STOPPED", at: new Date().toISOString(), target: TARGET });
       journal.close();

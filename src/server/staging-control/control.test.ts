@@ -9,7 +9,7 @@ import { Journal } from "./journal";
 import { Runner, type Handlers } from "./runner";
 import { controlServer } from "./server";
 import { cleanupOwnedRows, cleanupWave3, WAVE3_OWNERSHIP } from "./recovery";
-import { inspect, previewStatus, PREVIEW, SOURCE } from "./inspect";
+import { inspect, previewStatus, PREVIEW, SOURCE, vaultFingerprint } from "./inspect";
 let root: string, journal: Journal, runner: Runner, handlers: Handlers;
 const reader = "a".repeat(64), recovery = "b".repeat(64);
 const payload = (overrides: Record<string, unknown> = {}) => ({ request_id: randomUUID(), nonce: randomUUID(),
@@ -45,6 +45,13 @@ it("admits authenticated read-only execution with complete fresh evidence", asyn
   expect(result.body).toMatchObject({ terminal: "SUCCEEDED", operation: "inspect", target: TARGET, implementation: "fixture-implementation" });
   expect(result.body).toHaveProperty("result_digest");
   expect(result.body).toHaveProperty("finished_at");
+  if (!("result_digest" in result.body)) throw Error("terminal result missing");
+  const d = new DatabaseSync(path.join(root, "control.sqlite"), { readOnly: true });
+  const event = d.prepare("SELECT body,previous,digest FROM events WHERE seq=?").get(result.body.audit.seq)!;
+  expect(hash(String(event.previous) + String(event.body))).toBe(result.body.audit.digest);
+  expect(hash(String(event.body))).toBe(result.body.audit.body_sha256);
+  expect(JSON.parse(String(event.body))).toMatchObject({ terminal: "SUCCEEDED", result_digest: result.body.result_digest });
+  d.close();
 });
 it.each(["project", "environment", "service", "volume", "data_root", "foundation", "tier"])("rejects wrong target %s", async key => {
   const result = await send(payload({ target: { ...TARGET, [key]: key === "tier" ? "production" : "wrong" } }));
@@ -206,9 +213,9 @@ it("loopback HTTP integration: five fresh reads and all eight negative cases", a
 it("read-only fingerprint changes on fixture Protected-like content and never writes it", () => {
   fixture(); const dir = path.join(root, "vault", "06_Portfolio"); fs.mkdirSync(dir);
   fs.writeFileSync(path.join(dir, "fixture.md"), "# fixture only");
-  const first = inspect(root, {}, {}).protected_boundary;
+  const first = vaultFingerprint(root);
   fs.appendFileSync(path.join(dir, "fixture.md"), "\nowner fixture edit");
-  const second = inspect(root, {}, {}).protected_boundary;
+  const second = vaultFingerprint(root);
   expect(first.sha256).not.toBe(second.sha256); expect(second.file_count).toBe(1);
   expect(second.accepted_reference).toBe("UNKNOWN/HOLD");
 });
@@ -221,7 +228,7 @@ it("failure to durably audit cleanup before-counts rolls back without deleting",
 });
 it("terminal audit failure closes subsequent admission without replay", async () => {
   const append = journal.append.bind(journal);
-  journal.append = event => { if (event.terminal === "SUCCEEDED") throw Error("fixture disk failure"); append(event); };
+  journal.append = event => { if (event.terminal === "SUCCEEDED") throw Error("fixture disk failure"); return append(event); };
   await expect(send(payload())).rejects.toThrow(/AUDIT_COMPLETION/);
   expect((await send(payload())).body).toMatchObject({ error: "AUDIT_COMPLETION_UNKNOWN_HOLD" });
   expect(handlers.inspect).toHaveBeenCalledTimes(1);

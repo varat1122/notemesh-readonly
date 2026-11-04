@@ -7,17 +7,28 @@ export class Runner {
   private busy = false;
   private poisoned = false;
   private closing = false;
+  private pending = new Set<Promise<unknown>>();
   closeAdmission() { this.closing = true; }
+  async waitForIdle() {
+    await Promise.allSettled([...this.pending]);
+    if (this.poisoned) throw new Hold("AUDIT_COMPLETION_UNKNOWN_HOLD");
+  }
   constructor(private journal: Journal, private keys: () => Keys, private targetCheck: () => void,
     private handlers: Handlers, private recoveryEnabled: () => boolean) {}
-  async execute(body: string, keyId: string, signature: string) {
+  execute(body: string, keyId: string, signature: string) {
+    const execution = this.run(body, keyId, signature);
+    this.pending.add(execution);
+    void execution.then(() => this.pending.delete(execution), () => this.pending.delete(execution));
+    return execution;
+  }
+  private async run(body: string, keyId: string, signature: string) {
     let safe: { request_id: string | null; nonce: string | null; operation: string | null } = { request_id: null, nonce: null, operation: null };
     const rejected = (code: string, actor = "unauthenticated") => {
       const at = new Date().toISOString();
       const response = { ...safe, execution_id: randomUUID(), implementation: this.journal.implementation, started_at: at, finished_at: at, terminal: "REJECTED", error: code, version: VERSION };
       // Do not echo untrusted payloads, supplied targets, auth headers or errors.
-      this.journal.append({ ...response, admission: "REJECTED", actor, target: null, configured_target: TARGET, request_digest: hash(body) });
-      return { status: code === "AUTH_REJECTED" ? 401 : code === "NO_REEXECUTION" ? 409 : 400, body: response };
+      const audit = this.journal.append({ ...response, admission: "REJECTED", actor, target: null, configured_target: TARGET, request_digest: hash(body) });
+      return { status: code === "AUTH_REJECTED" ? 401 : code === "NO_REEXECUTION" ? 409 : 400, body: { ...response, audit } };
     };
     let actor: string;
     let r;
@@ -52,9 +63,10 @@ export class Runner {
     } catch (e) { error = e instanceof Hold ? e.code : "OPERATION_FAILED_HOLD"; }
     const response = { ...run, finished_at: new Date().toISOString(), terminal: error ? "HOLD" : "SUCCEEDED",
       result, error, result_digest: hash(JSON.stringify({ result, error })), implementation: this.journal.implementation, version: VERSION };
-    try { this.journal.append({ ...response, admission: "ADMITTED" }); }
+    let audit;
+    try { audit = this.journal.append({ ...response, admission: "ADMITTED" }); }
     catch { this.poisoned = true; throw new Hold("AUDIT_COMPLETION_UNKNOWN_HOLD"); }
     finally { if (acquired) this.busy = false; }
-    return { status: error ? 409 : 200, body: response };
+    return { status: error ? 409 : 200, body: { ...response, audit, audit_status: this.journal.summary() } };
   }
 }

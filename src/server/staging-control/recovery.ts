@@ -2,11 +2,8 @@ import { z } from "zod";
 import fs from "node:fs";
 import { hash, Hold, TASK } from "./contract";
 import { exactPath, locks, openApp } from "./inspect";
-export const WAVE3_OWNERSHIP = Object.freeze({
-  name: "IOS P3 historical remainder Wave 3 scoped staging writer",
-  clientHash: "b7529bac8afe25cb1c01d54646d36320d5a1aa4438b622aff0c0a3726d078678",
-  sessionHash: "88bb5632ec3d8ae0e28493621f0cc77d30c1d0f77210a2526b7c89fcd71e8899",
-});
+import { WAVE3_OWNERSHIP } from "./auth-witness";
+export { WAVE3_OWNERSHIP } from "./auth-witness";
 export const recoveryPacketSchema = z.object({
   task: z.literal(TASK),
   writerRemote: z.string().url().refine(v => { const u = new URL(v); return u.protocol === "https:" && !u.username && !u.password; }),

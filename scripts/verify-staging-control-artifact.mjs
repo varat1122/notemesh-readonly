@@ -13,6 +13,9 @@ assert.equal(identity.foundation, 'b0aeed37b910efbd3a96a52d41b885621e7f25d7');
 assert.match(identity.commit, /^[a-f0-9]{40}$/);
 assert.equal(identity.bundleSha256, createHash('sha256').update(fs.readFileSync(main)).digest('hex'));
 execFileSync(process.execPath, ['--check', fileURLToPath(main)], { stdio: 'pipe' });
+const worker = new URL('./read-worker.mjs', import.meta.url);
+assert.equal(identity.readWorkerSha256, createHash('sha256').update(fs.readFileSync(worker)).digest('hex'));
+execFileSync(process.execPath, ['--check', fileURLToPath(worker)], { stdio: 'pipe' });
 const require = createRequire(import.meta.url);
 const NativeSQLite = require('better-sqlite3');
 for (const db of [new NativeSQLite(':memory:'), new DatabaseSync(':memory:')]) {
@@ -36,4 +39,4 @@ if (process.argv.includes('--canary')) {
   assert.ok(/^[a-f0-9]{64}$/.test(process.env.IOS_CONTROL_READER_KEY ?? ''), 'Reader key required');
 }
 console.log(JSON.stringify({ artifact: 'control/main.mjs', commit: identity.commit,
-  bundleSha256: identity.bundleSha256, sqliteDependencies: 'ok', canary: process.argv.includes('--canary') }));
+  bundleSha256: identity.bundleSha256, readWorkerSha256: identity.readWorkerSha256, sqliteDependencies: 'ok', canary: process.argv.includes('--canary') }));
