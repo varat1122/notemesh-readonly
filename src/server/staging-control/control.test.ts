@@ -67,6 +67,22 @@ it("rejects invalid auth before any operation; read-only key cannot mutate", asy
   expect(handlers.writer_start).not.toHaveBeenCalled();
   expect((await runner.execute(JSON.stringify(payload()), "reader", "")).status).toBe(401);
 });
+it.each([
+  { mode: false, keyPresent: false },
+  { mode: false, keyPresent: true },
+  { mode: true, keyPresent: false },
+])("canary rejects every recovery operation before dispatch: %j", async ({ mode, keyPresent }) => {
+  runner = new Runner(journal, () => ({ reader, recovery: keyPresent ? recovery : undefined }), () => {}, handlers, () => mode);
+  for (const operation of ["inspect", "writer_status", "reconcile_preview_status"])
+    expect((await send(payload({ operation }))).body.terminal).toBe("SUCCEEDED");
+  for (const operation of ["auth_cleanup_wave3", "writer_start", "writer_drain", "writer_stop"] as const) {
+    expect((await send(payload({ operation }))).body).toMatchObject({ terminal: "REJECTED", error: "RECOVERY_DISABLED" });
+    expect((await send(payload({ operation }), "recovery", recovery)).body).toMatchObject({
+      terminal: "REJECTED", error: keyPresent ? "RECOVERY_DISABLED" : "AUTH_REJECTED",
+    });
+    expect(handlers[operation]).not.toHaveBeenCalled();
+  }
+});
 it("durably consumes nonce before dispatch, including failures and across restart/key rotation", async () => {
   const p = payload({ operation: "writer_start" });
   expect((await send(p, "recovery", recovery)).status).toBe(200);

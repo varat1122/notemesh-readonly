@@ -2,6 +2,7 @@ import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+execFileSync(process.execPath, ['scripts/check-staging-control-config.mjs'], { stdio: 'inherit' });
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
 const foundation = 'b0aeed37b910efbd3a96a52d41b885621e7f25d7';
 let commit, tree;
@@ -24,5 +25,8 @@ if (Object.keys(result.metafile.inputs).some(p => /middleware|safe-edit\/engine|
   throw Error('Forbidden startup dependency in maintenance bundle');
 const bundleSha256 = createHash('sha256').update(fs.readFileSync('dist/staging-control/main.mjs')).digest('hex');
 fs.writeFileSync('dist/staging-control/identity.json', JSON.stringify({ foundation, commit, tree, bundleSha256 }) + '\n');
+fs.copyFileSync('scripts/verify-staging-control-artifact.mjs', 'dist/staging-control/verify-artifact.mjs');
+// COPY preserves host modes; make the assertion readable by the runtime node user.
+fs.chmodSync('dist/staging-control/verify-artifact.mjs', 0o444);
 await build({ entryPoints: ['scripts/staging-control-acceptance.ts'], outfile: 'dist/staging-control/acceptance.mjs', bundle: true,
   platform: 'node', format: 'esm', target: 'node24' });

@@ -20,6 +20,7 @@ COPY --from=build /app/dist/staging-control ./control
 # No normal app command, mkdir/chown of checkpoint, or runtime shell.
 # The existing volume must already permit the unprivileged node user.
 USER node
+RUN test -f /app/control/main.mjs && node control/verify-artifact.mjs
 ENV NODE_ENV=production
 EXPOSE 8080
 ENTRYPOINT ["tini", "--"]
