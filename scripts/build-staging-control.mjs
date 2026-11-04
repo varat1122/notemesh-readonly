@@ -27,6 +27,6 @@ const bundleSha256 = createHash('sha256').update(fs.readFileSync('dist/staging-c
 fs.writeFileSync('dist/staging-control/identity.json', JSON.stringify({ foundation, commit, tree, bundleSha256 }) + '\n');
 fs.copyFileSync('scripts/verify-staging-control-artifact.mjs', 'dist/staging-control/verify-artifact.mjs');
 // COPY preserves host modes; make the assertion readable by the runtime node user.
-fs.chmodSync('dist/staging-control/verify-artifact.mjs', 0o444);
+fs.chmodSync('dist/staging-control/verify-artifact.mjs', 0o644);
 await build({ entryPoints: ['scripts/staging-control-acceptance.ts'], outfile: 'dist/staging-control/acceptance.mjs', bundle: true,
   platform: 'node', format: 'esm', target: 'node24' });

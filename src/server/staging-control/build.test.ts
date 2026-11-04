@@ -7,13 +7,16 @@ import { spawnSync } from "node:child_process";
 const fixtures: string[] = [];
 afterEach(() => { for (const p of fixtures.splice(0)) fs.rmSync(p, { recursive: true, force: true }); });
 const run = (script: string, args: string[] = []) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
-it("accepts the explicit staging config and rejects the normal application's config", () => {
+it("accepts the branch's root config and rejects a normal application Dockerfile", () => {
   expect(run("scripts/check-staging-control-config.mjs").status).toBe(0);
-  expect(run("scripts/check-staging-control-config.mjs", ["railway.json"]).status).not.toBe(0);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ios-build-")); fixtures.push(root);
+  const file = path.join(root, "railway.json");
+  fs.writeFileSync(file, JSON.stringify({ build: { builder: "DOCKERFILE", dockerfilePath: "Dockerfile" } }));
+  expect(run("scripts/check-staging-control-config.mjs", [file]).status).not.toBe(0);
 });
 it.each(["dockerfile", "startup", "predeploy", "override"])("rejects build selection regression: %s", field => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ios-build-")); fixtures.push(root);
-  const config = JSON.parse(fs.readFileSync("railway.staging-control.json", "utf8"));
+  const config = JSON.parse(fs.readFileSync("railway.json", "utf8"));
   if (field === "dockerfile") config.build.dockerfilePath = "Dockerfile";
   if (field === "startup") config.deploy.startCommand = "node .output/server/index.mjs";
   if (field === "predeploy") config.deploy.preDeployCommand = [];
