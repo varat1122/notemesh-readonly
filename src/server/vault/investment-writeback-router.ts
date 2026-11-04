@@ -141,6 +141,14 @@ function relatedIssuer(f:Record<string,unknown>,issuer:string):boolean{
   const names=[f.company,f.entity,f.ticker,f.issuer].flatMap(v=>Array.isArray(v)?v:[v]);
   return names.some(v=>typeof v==="string"&&v.trim().toUpperCase()===issuer.trim().toUpperCase());
 }
+function planSourceEventCandidates(
+  matches:{candidatePaths:string[];scanTruncated:boolean},
+  existingSourcePath:string|null
+){
+  if(!existingSourcePath)return matches;
+  return {...matches,candidatePaths:matches.candidatePaths.filter(path=>path!==existingSourcePath)};
+}
+
 function sourceEventCandidates(issuers:string[],sourceUrl:string|null|undefined,eventDate:string|null){
   const empty={candidatePaths:[] as string[],scanTruncated:false};
   const wanted=sourceUrl?canonicalSourceUrl(sourceUrl):null;
@@ -258,7 +266,12 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     ...(subject?[subject]:[]),
     ...routingV2.companyHubs.map(x=>x.path.slice("01_Companies/".length,-3))
   ])];
-  const sourceMatches=sourceEventCandidates(sourceIssuers,input.sourceUrl,eventDate);
+  const sourceMatchesRaw=sourceEventCandidates(sourceIssuers,input.sourceUrl,eventDate);
+  // When this call is explicitly linking/replaying the deterministic Source
+  // receipt that belongs to the same intake, that Source is provenance for
+  // this Review, not a competing same-event receipt. Exclude only that exact
+  // proven existing Source path; any other URL/date match remains a blocker.
+  const sourceMatches=planSourceEventCandidates(sourceMatchesRaw,sourceIdentity.existingSourcePath);
   const sameSourceEvent=sourceMatches.candidatePaths.length>0;
   const claim=input.claim;
   const claimReady=Boolean(claim&&T(claim.metric)&&T(claim.period)&&T(claim.statement).length>=8&&
