@@ -18,6 +18,8 @@ const first = request(), seen = new Set<string>();
 for (const r of [first, request("writer_status"), request("reconcile_preview_status"), request(), request("writer_status")]) {
   const { status, record } = await call(r);
   if (status !== 200 || record.terminal !== "SUCCEEDED" || record.nonce !== r.nonce || record.request_id !== r.request_id ||
+      Date.parse(record.result?.observed_at) < Date.parse(record.started_at) ||
+      Date.parse(record.result?.observed_at) > Date.parse(record.finished_at) || !Number.isFinite(Date.parse(record.result?.observed_at)) ||
       seen.has(record.execution_id) || record.result_digest !== hash(JSON.stringify({ result: record.result, error: record.error })) ||
       JSON.stringify(record.target) !== JSON.stringify(TARGET)) throw Error("FRESH_READ_ACCEPTANCE_FAILED");
   if (r.operation === "reconcile_preview_status" && record.result.accepted_state_matches !== true) throw Error("WAVE3_PREVIEW_BOUNDARY_HOLD");

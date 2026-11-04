@@ -98,7 +98,7 @@ before operator recovery; the endpoint cannot remove it.
 | writer_status | Live owned lifecycle/active count/PID/transition and external-process fence. Unknown remains UNKNOWN/HOLD. |
 | reconcile_preview_status | Exact m000038 plan/operation/path/after-hash/actor/preview/receipt checks, physical files, FTS, links and competing operation detection. No preview writes. |
 | auth_cleanup_wave3 | Resolve IDs from DB using accepted hashes/name, shared owner and zero access+refresh tokens. Refuse ambiguity/mismatch. Fixed parameterized DELETE of exact session/client, transactional integrity/FK and all non-target-row fingerprint checks. Idempotent absent result; no broad cleanup. |
-| writer_start | Start only existing accepted Git backend/config after quiescent/exclusive checks. No shell/command/config argument. |
+| writer_start | Start only the Foundation Git sync backend (not normal application HTTP startup)/config after quiescent/exclusive checks. No shell/command/config argument. |
 | writer_drain | Close admission, await actual in-flight terminal completion, leave gate closed. |
 | writer_stop | Require completed controlled drain and safe boundary before stopped-controlled. |
 
@@ -132,7 +132,10 @@ Owner state, not newly measured live counts.
 
 Local suites: staging-control, sync, safe-edit, M5.3/M5.4 canonical integration,
 canonical workflow, investment router and Foundation comparator/context semantics.
-Local runner/sync/canonical subset: 270 tests passed; typecheck and changed-file lint passed. Includes all 14 requested categories,
+Local runner/sync/canonical subset: 270 tests passed; separate Foundation comparator/context
+subset: 48 passed (318 distinct tests). Typecheck and changed-file lint passed.
+Standalone bundle and runtime dependency-exclusion checks passed; the Docker image
+built successfully using inherited proxy + mounted CA trust. Live acceptance remains blocked. Includes all 14 requested categories,
 real SQLite/fixed filesystem fixtures, five fresh loopback HTTP requests, all eight
 negative cases, durable replay across journal reopen/key change and crash-before-
 completion, ownership mismatch and timeout/controlled-stop semantics. Fixture auth

@@ -40,7 +40,7 @@ async function main() {
   const boot = new Date().toISOString();
   const status = () => {
     const fence = processFence();
-    return { ...(writer?.maintenanceStatus() ?? { state: "stopped", active: 0, accepting: false, pid: process.pid, last_transition: boot }),
+    return { observed_at: new Date().toISOString(), ...(writer?.maintenanceStatus() ?? { state: "stopped", active: 0, accepting: false, pid: process.pid, last_transition: boot }),
       ...(fence.state === "UNKNOWN/HOLD" ? { state: "unknown", active: null, disposition: "UNKNOWN/HOLD" } : {}), process_fence: fence };
   };
   const requireExclusive = () => { if (processFence().state === "UNKNOWN/HOLD") throw new Hold("EXTERNAL_WRITER_UNKNOWN_HOLD"); };
