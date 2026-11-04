@@ -15,6 +15,7 @@ import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTa
 import { buildCanonicalSafeEditWorkflow, type CanonicalSafeEditWorkflow } from "./canonical-writeback-workflow";
 import type { ThaiResearchReview } from "./research-quality-m55";
 import {resolveSourceIdentityM56, type SourceIdentityResolution} from "./source-identity-m56";
+import {inspectOriginalSourceHistory} from "../research-source-archive";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
@@ -70,6 +71,11 @@ export interface WritebackPlan {
     rawAttachmentPath:string|null;
     attachmentVerified:boolean;
     originalSourceVerified:false;
+    originalSourceArchive:null|{
+      snapshotId:string;sha256:string;byteLength:number;revision:number;capturedAt:string;
+      contentType:string;archiveStatus:"intact_stored_bytes";
+      changesObserved:boolean;publisherAuthenticityVerified:false;originalDocumentSignatureVerified:false;
+    };
     preservation:"needs_safe_edit_raw_capture"|"stored_original_user_bytes";
   };
   chronology:{
@@ -215,6 +221,19 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     rawAttachmentSha256:input.rawAttachmentSha256,eventDate,publicationDate,
     verifiedAttachmentPath:verifiedAttachment?actualAttachmentPath:null,
     existingIntakeId:input.existingIntakeId});
+  let originalSourceArchive:WritebackPlan["sourceCapture"]["originalSourceArchive"]=null;
+  if(input.sourceUrl){
+    try{
+      const history=inspectOriginalSourceHistory(input.sourceUrl,true);
+      const latest=[...history.snapshots].reverse().find(x=>x.archiveStatus==="intact_stored_bytes");
+      if(latest)originalSourceArchive={
+        snapshotId:latest.snapshotId,sha256:latest.sha256,byteLength:latest.byteLength,
+        revision:latest.revision,capturedAt:latest.capturedAt,contentType:latest.contentType,
+        archiveStatus:"intact_stored_bytes",changesObserved:history.changesObserved,
+        publisherAuthenticityVerified:false,originalDocumentSignatureVerified:false
+      };
+    }catch{/* Invalid/unarchived URL is not an intake failure; keep archive provenance absent. */}
+  }
   const planId=sourceIdentity.planId;
   const rawPath="00_Inbox/ChatGPT/Investment Intake - "+planId+".md";
   // Same digest is a stable idempotency key across repeated routing calls.
@@ -290,7 +309,9 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(input.brokerUpdate)
     warnings.push("M5.2 broker PT/estimate old→new figures are caller-declared; same bank and dated versions are necessary but not independent verification or consensus.");
   if(input.sourceKind==="issuer_release"||input.sourceKind==="regulatory_filing")
-    warnings.push("Source URL supplied is not proof that the original was fetched or verified.");
+    warnings.push(originalSourceArchive?
+      "Original source bytes are archived and hash-readback intact on this server; this still does not prove publisher signature, claim truth or independent confirmation.":
+      "Source URL supplied is not proof that the original was fetched or verified.");
   if(!input.sourceUrl)warnings.push("Original source URL absent; screenshots and snippets are attributed inputs, not independently validated source records.");
   if(candidateEventPaths.length)warnings.push("Matching-title historical research candidates require same original event/source/date review before creating a new distinct analysis; selection is not a deduplication verdict.");
   if(sameSourceEvent)warnings.push("Existing issuer/date/original-URL source records found: review original event and provenance before creating a second Timeline entry. This is NOT a verified duplicate classification.");
@@ -338,6 +359,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       textDigest:sourceIdentity.textSha256,extractedTextIsOriginalBinary:false,
       rawAttachmentPath:actualAttachmentPath,
       attachmentVerified:verifiedAttachment,originalSourceVerified:false,
+      originalSourceArchive,
       preservation:verifiedAttachment?"stored_original_user_bytes":"needs_safe_edit_raw_capture"
     },
     chronology:{eventDate,publicationDate,importedAt:"not_yet_written"},
