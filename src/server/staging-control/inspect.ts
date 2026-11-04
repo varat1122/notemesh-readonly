@@ -1,4 +1,6 @@
 import { untimed, type PhaseRun } from "./read-timing";
+import { dbCharacteristics, configureIntegrityRead, fullIntegrity } from "./integrity-read";
+import { MAX_INSPECT_DB_BYTES, type DiagnosticReporter } from "./read-diagnostics";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -12,7 +14,7 @@ export const PREVIEW = Object.freeze([
   { id: "ICW-05b126e0aaff09989ad657f79a01bf46", path: SOURCE, after: "f7e7d9f3170ec5975406e27414f56852eae5cfde7a02501c02b51f0ceb4b7f51" },
   { id: "ICW-97139c54c8aa29931bc6705e97fe88c0", path: REVIEW, after: "9c24b956b37f5a08f221555b988e3a487c13f5c45d9261d3fe6f39219db24305" },
 ]);
-const MAX_DB = 256 * 1024 * 1024;
+const MAX_DB = MAX_INSPECT_DB_BYTES;
 export function exactPath(root: string, rel = "") {
   const p = path.join(root, rel);
   if (path.resolve(p) !== p || (rel && (!p.startsWith(root + "/") || rel.includes("..")))) throw new Hold("PATH_BOUNDARY_HOLD");
@@ -162,13 +164,26 @@ export function databaseLocks(root: string, procLocks = "/proc/locks") {
       state: matched.length ? "LOCKED/HOLD" : "no-lock-observed", scope: "visible proc namespace advisory locks on SQLite files; observed before opening read transaction" };
   } catch { return { count: null, write_count: null, state: "UNKNOWN/HOLD", scope: "proc SQLite locks unavailable" }; }
 }
-export function inspect(root: string, writer: unknown, build: unknown, phase: PhaseRun = untimed) {
+export function inspect(root: string, writer: unknown, build: unknown, phase: PhaseRun = untimed, report: DiagnosticReporter = () => {}) {
   const started = performance.now(), dbLocks = phase("sqlite_locks", () => databaseLocks(root)), db = phase("db_open", () => openApp(root));
   try {
+    const characteristics = phase("db_characteristics", () => {
+      const file = (suffix: string) => {
+        const p = exactPath(root, "app.sqlite" + suffix);
+        try { const stat = fs.statSync(p); if (!stat.isFile()) throw new Hold("DB_FILE_BOUNDARY_HOLD"); return { exists: true, bytes: stat.size }; }
+        catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return { exists: false, bytes: null }; throw e; }
+      };
+      const data = dbCharacteristics(db, { database: file(""), wal: file("-wal"), shm: file("-shm") });
+      report({ kind: "db_characteristics", data }); return data;
+    });
+    const readProfile = phase("db_read_profile", () => {
+      const data = configureIntegrityRead(db, characteristics);
+      report({ kind: "db_read_profile", data }); return data;
+    });
     db.exec("BEGIN");
     const count = (sql: string) => Number(db.prepare(sql).get()!.n);
-    const integrityRows = phase("integrity", () => db.prepare("PRAGMA integrity_check(10)").all());
-    const integrity = integrityRows.length === 1 && integrityRows[0].integrity_check === "ok";
+    const integrityCheck = phase("integrity", () => fullIntegrity(db));
+    const integrity = integrityCheck.ok;
     const fk = phase("foreign_keys", () => count("SELECT count(*) AS n FROM pragma_foreign_key_check"));
     const { writing, links } = phase("counts", () => ({ writing: count("SELECT count(*) AS n FROM safe_edit_operations WHERE status='writing'"), links: count("SELECT count(*) AS n FROM links") }));
     const { notes, fts, missing, orphan, duplicate } = phase("notes_fts", () => {
@@ -186,6 +201,7 @@ export function inspect(root: string, writer: unknown, build: unknown, phase: Ph
     const protectedBoundary = phase("protected_boundary", () => protectedEvidence(git));
     return { observed_at: new Date().toISOString(), duration_ms: Math.round(performance.now() - started), build, target: TARGET,
       data_root_exists: true, db_exists: true, notes: notes.length, fts: fts.length, links,
+      db_characteristics: characteristics, db_read_profile: readProfile, integrity_check: integrityCheck,
       integrity: integrity ? "ok" : "HOLD", fk_count: fk, writing, receipts: receipts.total_receipts, receipt_evidence: receipts,
       locks: fileLocks, lock_count: Object.values(fileLocks).filter(Boolean).length, database_locks: dbLocks,
       in_progress: Object.entries(fileLocks).filter(([k, v]) => v && /MERGE|REBASE|REVERT|CHERRY|rebase|sequencer/.test(k)).map(([k]) => k),
