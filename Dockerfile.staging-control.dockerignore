@@ -1,0 +1,13 @@
+.git
+node_modules
+dist
+.vinxi
+.output
+.env
+.env.*
+*.local
+*.sqlite
+*.sqlite-*
+data
+/test-results
+/playwright-report

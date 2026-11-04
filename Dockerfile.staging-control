@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1
+# Exact candidate source is pinned by the deployment operator, never main.
+FROM node:24-trixie-slim AS build
+WORKDIR /app
+RUN corepack enable && apt-get update && apt-get install -y --no-install-recommends git python3 make g++ && rm -rf /var/lib/apt/lists/*
+COPY . .
+ARG RAILWAY_GIT_COMMIT_SHA
+ARG RAILWAY_GIT_BRANCH
+# Public dependencies use Node's default CA trust on Railway; no build credentials.
+RUN pnpm install --frozen-lockfile && pnpm exec tsc --noEmit && pnpm exec vitest run src/server/staging-control src/server/sync/git-safe-edit.test.ts src/server/sync/git-safe-edit.integration.test.ts src/server/mcp/m54-canonical-integration.test.ts && node scripts/build-staging-control.mjs --railway-source
+# Only the native SQLite dependency stays external to the standalone bundle.
+RUN node scripts/staging-control-runtime-deps.mjs && node scripts/check-runtime-exclusions.mjs dist/staging-control dist/staging-runtime
+FROM node:24-trixie-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends git git-lfs ca-certificates tini && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app/dist/staging-runtime/node_modules ./node_modules
+COPY --from=build /app/dist/staging-control ./control
+# No normal app command, mkdir/chown of checkpoint, or runtime shell.
+# The existing volume must already permit the unprivileged node user.
+USER node
+RUN test -f /app/control/main.mjs && node control/verify-artifact.mjs
+ENV NODE_ENV=production
+EXPOSE 8080
+ENTRYPOINT ["tini", "--"]
+CMD ["node", "control/main.mjs"]

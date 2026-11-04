@@ -208,3 +208,38 @@ it("does not report successful reconciliation when releasing ownership fails", a
   expect(b.isEditPaused()).toBe(true); expect(b.state).toBe("backoff");
   expect(fs.existsSync(path.join(root, "git-mutation.lock"))).toBe(true);
 });
+
+it("controlled drain closes every admission and waits for in-flight terminal completion", async () => {
+  const d = deferred(); m.fetch = d.promise;
+  const sync = b.syncNow(); await settle();
+  let drained = false;
+  const drain = b.drainControlled().then(() => { drained = true; });
+  await settle(); expect(drained).toBe(false);
+  expect(b.maintenanceStatus()).toMatchObject({ state: "draining", accepting: false, active: 1 });
+  expect((await b.syncNow()).ok).toBe(false);
+  expect(() => b.start()).toThrow(/gate/);
+  expect(() => b.stopControlled()).toThrow(/drain/);
+  const count = m.calls.length;
+  b.notifyLocalChange({ tool: "fixture", path: "fixture.md" });
+  await vi.advanceTimersByTimeAsync(1000); expect(m.calls).toHaveLength(count);
+  d.resolve(ok); await sync; await drain;
+  expect(b.maintenanceStatus()).toMatchObject({ drained: true, active: 0, accepting: false });
+  expect(b.stopControlled()).toMatchObject({ state: "stopped-controlled", active: 0 });
+  await vi.advanceTimersByTimeAsync(60_000); expect(m.calls.filter(a => a[0] === "fetch")).toHaveLength(2);
+});
+it("controlled drain timeout stays closed and cannot claim controlled shutdown", async () => {
+  const d = deferred(); m.fetch = d.promise; const sync = b.syncNow(); await settle();
+  const rejected = expect(b.drainControlled(100)).rejects.toThrow(/timed out/);
+  await vi.advanceTimersByTimeAsync(100); await rejected;
+  expect(b.maintenanceStatus()).toMatchObject({ state: "unknown", disposition: "UNKNOWN/HOLD", accepting: false });
+  expect(() => b.stopControlled()).toThrow(); expect(() => b.startControlled()).toThrow();
+  d.resolve(ok); await sync; expect(b.maintenanceStatus().drained).toBe(false);
+  await b.drainControlled(); expect(b.stopControlled().state).toBe("stopped-controlled");
+});
+it("controlled stop requires drain; failed work holds instead of becoming idle", async () => {
+  expect(() => b.stopControlled()).toThrow(/drain/);
+  const d = deferred(); m.fetch = d.promise; const sync = b.syncNow(); await settle();
+  const rejected = expect(b.drainControlled()).rejects.toThrow(/failed/);
+  d.resolve({ ...ok, ok: false, combined: "Authentication failed" }); await sync; await rejected;
+  expect(b.maintenanceStatus().state).toBe("unknown"); expect(() => b.stopControlled()).toThrow();
+});

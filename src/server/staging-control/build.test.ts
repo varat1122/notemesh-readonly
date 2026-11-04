@@ -1,0 +1,66 @@
+import { afterEach, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+
+const fixtures: string[] = [];
+afterEach(() => { for (const p of fixtures.splice(0)) fs.rmSync(p, { recursive: true, force: true }); });
+const run = (script: string, args: string[] = []) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+it("accepts the branch's root config and rejects a normal application Dockerfile", () => {
+  expect(run("scripts/check-staging-control-config.mjs").status).toBe(0);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ios-build-")); fixtures.push(root);
+  const file = path.join(root, "railway.json");
+  fs.writeFileSync(file, JSON.stringify({ build: { builder: "DOCKERFILE", dockerfilePath: "Dockerfile" } }));
+  expect(run("scripts/check-staging-control-config.mjs", [file]).status).not.toBe(0);
+});
+it.each(["dockerfile", "startup", "predeploy", "override"])("rejects build selection regression: %s", field => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ios-build-")); fixtures.push(root);
+  const config = JSON.parse(fs.readFileSync("railway.json", "utf8"));
+  if (field === "dockerfile") config.build.dockerfilePath = "Dockerfile";
+  if (field === "startup") config.deploy.startCommand = "node .output/server/index.mjs";
+  if (field === "predeploy") config.deploy.preDeployCommand = [];
+  if (field === "override") config.environments = { staging: { build: { dockerfilePath: "Dockerfile" } } };
+  const file = path.join(root, "railway.json"); fs.writeFileSync(file, JSON.stringify(config));
+  expect(run("scripts/check-staging-control-config.mjs", [file]).status).not.toBe(0);
+});
+it.each(["missing", "corrupt"])("pre-activation assertion rejects %s control bundle", condition => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ios-artifact-")); fixtures.push(root);
+  fs.copyFileSync("scripts/verify-staging-control-artifact.mjs", path.join(root, "verify-artifact.mjs"));
+  fs.writeFileSync(path.join(root, "identity.json"), JSON.stringify({
+    foundation: "b0aeed37b910efbd3a96a52d41b885621e7f25d7", commit: "a".repeat(40), bundleSha256: "0".repeat(64),
+  }));
+  if (condition === "corrupt") fs.writeFileSync(path.join(root, "main.mjs"), "throw Error('must never execute')");
+  const result = run(path.join(root, "verify-artifact.mjs"));
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toMatch(condition === "missing" ? /ENOENT/ : /AssertionError/);
+});
+it.each(["missing", "corrupt"])("pre-activation assertion rejects %s read-only worker", condition => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ios-worker-artifact-")); fixtures.push(root);
+  fs.copyFileSync("scripts/verify-staging-control-artifact.mjs", path.join(root, "verify-artifact.mjs"));
+  const main = "// fixture syntax only\n";
+  fs.writeFileSync(path.join(root, "main.mjs"), main);
+  fs.writeFileSync(path.join(root, "identity.json"), JSON.stringify({
+    foundation: "b0aeed37b910efbd3a96a52d41b885621e7f25d7", commit: "a".repeat(40),
+    bundleSha256: createHash("sha256").update(main).digest("hex"), readWorkerSha256: "0".repeat(64),
+  }));
+  if (condition === "corrupt") fs.writeFileSync(path.join(root, "read-worker.mjs"), "// wrong worker");
+  const result = run(path.join(root, "verify-artifact.mjs"));
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toMatch(condition === "missing" ? /ENOENT/ : /AssertionError/);
+});
+it.each([
+  "RUN --mount=type=secret,id=proxy_ca pnpm install",
+  "RUN --mount=type=bind,target=/ca pnpm install",
+  "ENV NODE_TLS_REJECT_UNAUTHORIZED=0",
+  "RUN pnpm install --strict-ssl=false",
+])("rejects unsupported mounts or TLS bypass before building: %s", instruction => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ios-dockerfile-")); fixtures.push(root);
+  fs.copyFileSync("railway.json", path.join(root, "railway.json"));
+  fs.writeFileSync(path.join(root, "Dockerfile.staging-control"), `FROM node:24-trixie-slim\n${instruction}\n`);
+  const check = path.resolve("scripts/check-staging-control-config.mjs");
+  const result = spawnSync(process.execPath, [check], { cwd: root, encoding: "utf8" });
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toMatch(/AssertionError/);
+});
