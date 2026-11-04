@@ -395,6 +395,26 @@ describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
     readyForNextNews:true});
   expect(fs.readdirSync(path.join(vault,"00_Inbox/ChatGPT")).filter(x=>x.endsWith(".md"))).toHaveLength(1);
  });
+ it("M53-F11b saved Source with exact URL/date does not block its own later canonical Review",async()=>{
+  const sourceUrl="https://example.org/issuer/q3-2026";
+  const feed=await route({...news,sourceUrl,completedAnalysis:undefined,captureOnly:true});
+  expect(feed.safeEditWorkflow?.steps[0].state).toBe("needs_create");
+  await applyRecipe(feed);
+  const sourcePath=feed.safeEditWorkflow!.steps[0].path;
+
+  const full=await route({...news,sourceUrl,existingIntakeId:feed.planId});
+  expect(full.sourceIdentity.mode).toBe("explicit_existing");
+  expect(full.sourceEventReview.candidatePaths).not.toContain(sourcePath);
+  expect(full.sourceEventReview.status).toBe("no_structured_match_not_proof_new");
+  expect(full.safeEditWorkflow?.steps.map(x=>x.state)).toEqual(["verified_existing","needs_create"]);
+
+  await applyRecipe(full);
+  const verified=await route({...news,sourceUrl,existingIntakeId:feed.planId});
+  expect(verified.safeEditWorkflow).toMatchObject({
+    status:"saved_verified",analysisComplete:true,readyForNextNews:true
+  });
+  expect(verified.safeEditWorkflow?.steps.map(x=>x.state)).toEqual(["verified_existing","verified_existing"]);
+ });
  it("M53-F12 a review already indexed under another path with the same intake ID blocks second review creation",async()=>{
   const initial=await route(news);
   await seed("10_Knowledge/Company Research/Existing indexed review.md",[
