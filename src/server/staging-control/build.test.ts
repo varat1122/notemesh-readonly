@@ -35,3 +35,17 @@ it.each(["missing", "corrupt"])("pre-activation assertion rejects %s control bun
   expect(result.status).not.toBe(0);
   expect(result.stderr).toMatch(condition === "missing" ? /ENOENT/ : /AssertionError/);
 });
+it.each([
+  "RUN --mount=type=secret,id=proxy_ca pnpm install",
+  "RUN --mount=type=bind,target=/ca pnpm install",
+  "ENV NODE_TLS_REJECT_UNAUTHORIZED=0",
+  "RUN pnpm install --strict-ssl=false",
+])("rejects unsupported mounts or TLS bypass before building: %s", instruction => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ios-dockerfile-")); fixtures.push(root);
+  fs.copyFileSync("railway.json", path.join(root, "railway.json"));
+  fs.writeFileSync(path.join(root, "Dockerfile.staging-control"), `FROM node:24-trixie-slim\n${instruction}\n`);
+  const check = path.resolve("scripts/check-staging-control-config.mjs");
+  const result = spawnSync(process.execPath, [check], { cwd: root, encoding: "utf8" });
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toMatch(/AssertionError/);
+});

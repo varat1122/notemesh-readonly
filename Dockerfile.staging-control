@@ -6,10 +6,8 @@ RUN corepack enable && apt-get update && apt-get install -y --no-install-recomme
 COPY . .
 ARG RAILWAY_GIT_COMMIT_SHA
 ARG RAILWAY_GIT_BRANCH
-RUN --mount=type=secret,id=proxy_ca \
-    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
-    export NODE_USE_ENV_PROXY=1; \
-    pnpm install --frozen-lockfile && pnpm exec tsc --noEmit && pnpm exec vitest run src/server/staging-control src/server/sync/git-safe-edit.test.ts src/server/sync/git-safe-edit.integration.test.ts src/server/mcp/m54-canonical-integration.test.ts && node scripts/build-staging-control.mjs --railway-source
+# Public dependencies use Node's default CA trust on Railway; no build credentials.
+RUN pnpm install --frozen-lockfile && pnpm exec tsc --noEmit && pnpm exec vitest run src/server/staging-control src/server/sync/git-safe-edit.test.ts src/server/sync/git-safe-edit.integration.test.ts src/server/mcp/m54-canonical-integration.test.ts && node scripts/build-staging-control.mjs --railway-source
 # Only the native SQLite dependency stays external to the standalone bundle.
 RUN node scripts/staging-control-runtime-deps.mjs && node scripts/check-runtime-exclusions.mjs dist/staging-control dist/staging-runtime
 FROM node:24-trixie-slim
