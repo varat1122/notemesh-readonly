@@ -385,7 +385,7 @@ describe("P0 canonical Review original-source archive provenance",()=>{
     expect(after.safeEditWorkflow!.status).toBe("hold_conflict_or_index");
   });
   it("does not mistake an unchanged analysis quotation for a second provenance section",async()=>{
-    const quoted={...input,researchReview:{...review,whatChangedTh:review.whatChangedTh+
+    const quoted={...input,researchReview:{...review,whatChangedTh:review.whatChangedTh+" ข้อความต่อไปนี้ยกมาจากขอบเขตการตรวจสอบเดิมเพื่อประกอบคำอธิบาย ไม่ใช่การรับรองต้นฉบับข่าว"+
       "\n- Original publication/source authentication: not verified by this workflow\n"}};
     await capture();await applyRecipe(await route(quoted));const saved=await historicalState();
     await capture({bytes:Buffer.from("<html>New archive revision with unchanged quoted analysis.</html>")});

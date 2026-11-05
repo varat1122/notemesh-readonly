@@ -41,7 +41,15 @@ const news={domain:"industry" as const,entities:["SK hynix","Samsung Electronics
   sourceKind:"broker_research" as const,sourceLanguage:"en",
   eventDate:"2026-10-22",publicationDate:"2026-10-23",publisher:"J.P. Morgan (user-attributed)",
   extractedText:"User-supplied English excerpt: Memory pricing and HBM4 yield vary by producer. Yield concern is market noise, not confirmed company fact.",
-  sourceChat:"Micro 251026",completedAnalysis:"## Investment takeaway\nASP growth deceleration can affect EPS revisions. HBM4 yield risks are unresolved; no verified thesis change."
+  sourceChat:"Micro 251026",sourceChannel:"broker_research",originalDocumentAccess:"excerpt_only" as const,
+  researchReview:{headlineTh:"ข่าวสมมติกล่าวถึงข้อมูลที่ยังต้องตรวจสอบต้นฉบับ",
+    translationTh:"ข้อความภาษาอังกฤษที่ผู้ใช้ส่งมา: ราคาหน่วยความจำและอัตราผลผลิต HBM4 แตกต่างกันตามผู้ผลิต ข้อกังวลเรื่องผลผลิตเป็นกระแสตลาด ไม่ใช่ข้อเท็จจริงที่บริษัทยืนยัน",
+    whatChangedTh:"เป็นข้อมูลที่ผู้ใช้ส่งมาและยังไม่ได้ตรวจสอบกับหลักฐานต้นฉบับ",
+    mechanismTh:"ความต้องการและกำลังการผลิตอาจส่งผลต่อรายได้และกำไร แต่ยังต้องตรวจสอบข้อมูลจริง",
+    thesisImplicationTh:"ยังไม่เปลี่ยนสมมติฐานการลงทุนหรือประมาณการกำไร",
+    counterEvidenceTh:"ต้นทุนและอัตราผลผลิตจริงอาจแตกต่างจากคาด",
+    requiredEvidenceTh:"ต้องตรวจเอกสารบริษัทและวันที่ประกาศก่อนใช้ข้อมูล"},
+  completedAnalysis:"## Investment takeaway\nASP growth deceleration can affect EPS revisions. HBM4 yield risks are unresolved; no verified thesis change."
 };
 async function applyRecipe(plan:Awaited<ReturnType<typeof route>>){
   const {preview,apply}=await import("../safe-edit/engine");
@@ -299,7 +307,7 @@ describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
   expect(steps[0].path).toContain("00_Inbox/ChatGPT/Investment Intake - IN-");
   expect(steps[1].path).toContain("10_Knowledge/Industry and Concepts/Investment Review - Memory - IN-");
   expect(steps[0].safeEditRequest?.change.content).toContain(news.extractedText);
-  expect(steps[1].safeEditRequest?.change.content).toContain(news.completedAnalysis);
+  expect(steps[1].safeEditRequest?.change.content).toContain(news.researchReview.whatChangedTh);
   expect(steps[1].safeEditRequest?.change.content).toContain("[[01_Companies/MU]]");
   expect(steps[1].safeEditRequest?.change.content).toContain("[[02_Industries_Themes/Memory]]");
   const written=await applyRecipe(first);
@@ -355,15 +363,16 @@ describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
   expect(fs.readFileSync(path.join(vault,"05_Thesis/MU - Current Thesis.md"),"utf8")).toBe("# User-protected MU thesis\n");
  });
  it("M53-F02 incomplete input stays a read-only analysis plan and cannot fabricate successful write",async()=>{
-  const p=await route({...news,completedAnalysis:undefined});
+  const p=await route({...news,completedAnalysis:undefined,researchReview:undefined});
   expect(p.safeEditWorkflow).toBeUndefined();
   expect(p.gates.canAutoWrite).toBe(false);
   await expect(route({...news,sourceChat:undefined})).rejects.toThrow(/requires sourceChat/);
  });
  it("M53-F03 changed review text for identical raw intake holds conflict and never overwrites",async()=>{
+  await seed("02_Industries_Themes/Memory.md","# Memory");
   const a=await route(news);
   await applyRecipe(a);
-  const changed=await route({...news,completedAnalysis:news.completedAnalysis+" Follow-up inference."});
+  const changed=await route({...news,researchReview:{...news.researchReview,whatChangedTh:"มีข้อความเพิ่มเติมที่แตกต่างจากบทวิเคราะห์เดิม"}});
   expect(changed.planId).toBe(a.planId);
   expect(changed.safeEditWorkflow?.steps[0].state).toBe("verified_existing");
   expect(changed.safeEditWorkflow?.steps[1].state).toBe("hold_conflict");
@@ -383,13 +392,13 @@ describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
   expect(p.safeEditWorkflow?.steps[1].state).toBe("hold_event_review");
   expect(p.safeEditWorkflow?.steps[1].safeEditRequest).toBeNull();
  });
- it("M53-F05 legacy generic review gets a hold instead of duplicate canonical review",async()=>{
+ it("M53-F05 existing canonical path with generic historical bytes holds conflict instead of overwrite",async()=>{
   const first=await route(news);
   const legacy=first.routes.find(x=>x.kind==="research_review")?.path;
   expect(legacy).toBeTruthy();
   await seed(legacy!,"# Previously imported generic review\n");
   const second=await route(news);
-  expect(second.safeEditWorkflow?.steps[1].state).toBe("hold_event_review");
+  expect(second.safeEditWorkflow?.steps[1].state).toBe("hold_conflict");
   expect(second.safeEditWorkflow?.readyForNextNews).toBe(false);
  });
  it("M53-F06 unindexed existing same bytes require index repair, not a duplicate create",async()=>{
@@ -424,7 +433,7 @@ describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
   expect(fs.readdirSync(path.join(vault,"00_Inbox/ChatGPT"))).toHaveLength(0);
  });
  it("M53-F10 stable intake identity distinguishes dates, while classification/review changes do not alter original source ID",async()=>{
-  const a=await route(news),b=await route({...news,contentTypes:["analyst_opinion"],completedAnalysis:"Short follow-up"});
+  const a=await route(news),b=await route({...news,contentTypes:["analyst_opinion"],researchReview:{...news.researchReview,whatChangedTh:"การวิเคราะห์เพิ่มเติมโดยใช้ต้นฉบับเดิม"}});
   const c=await route({...news,eventDate:"2026-10-24"});
   expect(a.planId).toBe(b.planId);
   expect(a.safeEditWorkflow?.steps[0].expectedSha256).toBe(b.safeEditWorkflow?.steps[0].expectedSha256);
@@ -432,12 +441,13 @@ describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
   expect(a.planId).not.toBe(c.planId);
  });
  it("M53-F11 Feed Only archives exact source, then later analysis adds a review without duplicating the source",async()=>{
-  const feed=await route({...news,completedAnalysis:undefined,captureOnly:true});
+  await seed("02_Industries_Themes/Memory.md","# Memory");
+  const feed=await route({...news,completedAnalysis:undefined,researchReview:undefined,captureOnly:true});
   expect(feed.safeEditWorkflow).toMatchObject({status:"pending_source_capture",analysisComplete:false,
     readyForNextNews:false});
   expect(feed.safeEditWorkflow?.steps).toHaveLength(1);
   await applyRecipe(feed);
-  const accepted=await route({...news,completedAnalysis:undefined,captureOnly:true});
+  const accepted=await route({...news,completedAnalysis:undefined,researchReview:undefined,captureOnly:true});
   expect(accepted.safeEditWorkflow).toMatchObject({status:"source_saved_analysis_pending",
     analysisComplete:false,readyForNextNews:true,perDeviceSync:"unverified"});
   const full=await route(news);
@@ -461,6 +471,7 @@ describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
   expect(replan.safeEditWorkflow?.steps[1].safeEditRequest).toBeNull();
  });
  it("M53-F13 broker FY2027E old/new model rows remain attributed and distinct from management guidance",async()=>{
+  await seed("02_Industries_Themes/Memory.md","# Memory");
   const p=await route({...news,brokerUpdate:{bank:"J.P. Morgan",priorBank:"J.P. Morgan",
     reportDate:"2026-10-23",priorReportDate:"2026-09-25",targetPrice:"120",priorTargetPrice:"110",
     currency:"USD",priorCurrency:"USD",estimateChanges:[{metric:"EPS",period:"2027E",oldValue:"9.1",newValue:"9.8",unit:"USD/share"}]}});
@@ -468,7 +479,7 @@ describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
   expect(body).toContain("J.P. Morgan");
   expect(body).toContain("EPS 2027E: 9.1 → 9.8 USD/share");
   expect(body).toContain("pt_raise_candidate");
-  expect(body).toContain("not independently verified");
+  expect(body).toContain("ยังไม่ได้ตรวจสอบโดยอิสระ");
  });
  it("M53-F14 industry repost with different wording but same original URL/date holds a second canonical review",async()=>{
   const sourceUrl="https://example.org/memory/industry-update";

@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import {researchReviewSchema} from "./research-review-schema";
 import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
@@ -420,7 +421,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     {
       title: "Plan multilingual investment intake and evidence-safe Vault writeback",
       annotations: READ,
-      description: "PREFERRED for newly supplied Micro/Macro/PDF/Stock investment news when a canonical Company/Industry/Macro Research Review must be saved. Read-only M5.2/M5.3 plan resolves existing Company/Industry Hubs, broker vintage and duplicate candidates; sourceChat + completedAnalysis emit exact add-only Safe Edit Source and canonical Review recipes, with SHA readback and search-index verification on retries. Use separately authorized Investment OS — Safe Edit Chat preview/apply to write; NEVER substitute the legacy submit_investment_notes Inbox importer for canonical research. This planner NEVER writes or automatically changes Thesis/Evidence Register, Portfolio or Company Evolution Timeline.",
+      description: "PREFERRED for newly supplied Micro/Macro/PDF/Stock investment news when a canonical Company/Industry/Macro Research Review must be saved. Read-only M5.2/M5.3 plan resolves existing Company/Industry Hubs, broker vintage and duplicate candidates; sourceChat + typed researchReview emit quality-gated add-only Safe Edit Source and canonical Review recipes (legacy completedAnalysis alone holds the Review), with SHA readback and search-index verification on retries. Use separately authorized Investment OS — Safe Edit Chat preview/apply to write; NEVER substitute the legacy submit_investment_notes Inbox importer for canonical research. This planner NEVER writes or automatically changes Thesis/Evidence Register, Portfolio or Company Evolution Timeline.",
       inputSchema: {
         domain:z.enum(["company","industry","macro","asset"]).describe("Claim/knowledge domain; not an inferred company ticker"),
         entities:z.array(z.string().min(1).max(120)).min(1).max(6).describe("Explicit issuer ticker(s), macro geography, or industry topics. Do not include inferred suppliers as confirmed issuers."),
@@ -470,8 +471,12 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         }).optional().describe("M5.2 caller-declared broker old/new versions; same bank, dated vintages, matching old/new currencies and comparable PT horizons required before candidate PT direction"),
         sourceChat:z.string().min(1).max(120).optional().describe("M5.3 original Micro, Macro or PDF chat identifier. Required with completedAnalysis; source provenance, not necessarily publication date"),
         existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional().describe("M5.6 optional existing Source receipt ID; accepted only when exact original text, channel, format, URL and chronology match the indexed and readback-verified Source"),
-        completedAnalysis:z.string().min(1).max(30000).optional().describe("M5.3 final analyst-reviewed Markdown separated from the exact extractedText. When set with sourceChat, produces source + canonical review Safe Edit recipes without writing anything"),
-        captureOnly:z.boolean().optional().describe("M5.3 Feed Only: with sourceChat, prepare a source-only Safe Edit recipe. The Research Review remains pending. Must not be combined with completedAnalysis"),
+        completedAnalysis:z.string().min(1).max(30000).optional().describe("Legacy freeform input retained for diagnostics/Source capture. A fresh canonical Review requires typed researchReview; completedAnalysis alone cannot issue a Review recipe"),
+        researchReview:researchReviewSchema,
+        sourceChannel:z.string().max(80).optional().describe("Actual attributed source channel; repost is not an authenticated original"),
+        attributedOrigin:z.string().max(160).optional().describe("Attributed origin, not independently verified"),
+        originalDocumentAccess:z.enum(["full_original","excerpt_only","not_obtained"]).optional().describe("Actual reading scope; never claim access to unread original pages"),
+        captureOnly:z.boolean().optional().describe("M5.3 Feed Only: with sourceChat, prepare a source-only Safe Edit recipe. The Research Review remains pending. Must not be combined with completedAnalysis or researchReview"),
         focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Historical context relevance; does not verify issuer claims")
       }
     },

@@ -6,6 +6,7 @@
  * a failed review never rolls back or overwrites a successfully saved source.
  */
 import { z } from "zod";
+import {researchReviewSchema} from "./research-review-schema";
 import { planInvestmentWriteback } from "../vault/investment-writeback-router";
 import { apply, preview, status } from "../safe-edit/engine";
 import { withPausedSync } from "../safe-edit/sync";
@@ -22,26 +23,7 @@ const canonicalBaseSchema = z.object({
   sourceChat: nonempty.max(120),
   existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional(),
   completedAnalysis: nonempty.max(30000).optional(),
-  researchReview: z.object({
-    headlineTh:nonempty.max(500),translationTh:z.string().max(30000).optional(),
-    whatChangedTh:nonempty.max(6000),mechanismTh:nonempty.max(6000),
-    thesisImplicationTh:nonempty.max(6000),counterEvidenceTh:nonempty.max(6000),
-    requiredEvidenceTh:nonempty.max(6000),
-    claimAssessments:z.array(z.object({
-      entity:nonempty.max(120).optional(),
-      metric:nonempty.max(140),period:nonempty.max(120),unit:nonempty.max(80),
-      competingValues:z.array(nonempty.max(150)).min(1).max(8),
-      resolution:z.enum(["unresolved","verified_primary"]).describe(
-        "AI autonomous default: unresolved if publisher provenance, metric scope, vintage or counter-evidence is uncertain. verified_primary needs an independently server-validated claim-scope receipt; AI confidence and user-provided receipt IDs are insufficient."),
-      conclusion:z.enum(["no_change","conditional","confirmed"]).describe(
-        "AI decides independently: no_change or conditional are allowed for unresolved evidence if prose clearly retains uncertainty. confirmed is blocked unless verified_primary passes the server evidence gate. Neither changes Thesis/Portfolio."),
-      primaryEvidenceReceipt:z.string().max(500).optional().describe(
-        "Server-issued claim-scope receipt only. Do not fabricate IDs or use ordinary Source/Vault receipts as proof; omit for unresolved claims."),
-      primarySourceUrl:z.string().url().max(2000).optional(),
-      verifiedValue:nonempty.max(150).optional()
-    }).strict()).max(24).optional().describe(
-      "Autonomous AI evidence decisions. Supply when Source text contains numeric guidance OR review prose/headline asserts material financial percentages (revenue, EPS, profit, margin, orders, targets, macro figures), regardless of caller-selected contentTypes/sourceKind. Record EACH material metric/period/unit/value and conflicting sources; unresolved + conditional/no_change is normal without trusted primary proof. Prose must not assert an unresolved number as fact. Never invent a primary Receipt ID.")
-  }).strict().optional(),
+  researchReview: researchReviewSchema,
   sourceChannel:z.string().max(80).optional(),
   attributedOrigin:z.string().max(160).optional(),
   originalDocumentAccess:z.enum(["full_original","excerpt_only","not_obtained"]).optional(),
@@ -97,28 +79,8 @@ function planned(input: z.infer<typeof canonicalInputSchema>) {
   const plan = planInvestmentWriteback(input);
   const workflow = plan.safeEditWorkflow;
   if(!workflow) throw Error("No canonical Safe Edit recipe; sourceChat and analysis/capture mode are required");
-  // M5.5 applies to every canonical Safe Edit Review, including older callers
-  // that still submit only completedAnalysis. Preserve Source capture; never
-  // issue a review preview for an untyped analysis. M5.3 read-only planning
-  // remains available for migration/diagnostics, not as a bypass in M5.4.
-  // Deploy in compatibility mode first, update the linked caller, then set
-  // M55_REQUIRE_TYPED_REVIEW=1 for a verified production cutover. Typed payloads
-  // are always quality-gated regardless of the flag. Never silently switch an
-  // old active caller to Source-only during the initial code deployment.
-  if(process.env.M55_REQUIRE_TYPED_REVIEW==="1"&&input.captureOnly!==true&&!input.researchReview){
-    const review=workflow.steps.find(s=>s.kind==="canonical_review");
-    if(review){
-      if(review.state==="needs_create"||review.state==="verified_existing")
-        review.state="hold_quality_gate";
-      review.safeEditRequest=null;
-    }
-    if(workflow.status!=="hold_conflict_or_index"&&workflow.status!=="hold_source_event_review"&&
-      workflow.status!=="hold_archive_provenance"&&workflow.status!=="hold_archive_drift")
-      workflow.status="hold_research_quality";
-    workflow.qualityIssues=[...new Set([...workflow.qualityIssues,"typed_research_review_required"])];
-    workflow.readyForNextNews=false;
-    workflow.analysisComplete=false;
-  }
+  // The shared workflow gates both read-only recipes and Safe Edit, without
+  // an environment-variable bypass for untyped completedAnalysis.
   for(const step of workflow.steps){
     const allowed = step.kind === "source_intake" ? /^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/ :
       /^10_Knowledge\/(Company Research|Industry and Concepts|Macro and Markets)\/Investment Review - [^/]+\.md$/;

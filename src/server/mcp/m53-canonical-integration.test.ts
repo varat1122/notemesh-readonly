@@ -24,6 +24,14 @@ const news={domain:"industry",entities:["SK hynix","Micron"],themes:["Memory"],
   topic:"Synthetic HBM4 investor comment",sourceKind:"broker_research",inputFormat:"screenshot",
   sourceChat:"Micro 251026",sourceLanguage:"en",eventDate:"2026-10-21",
   extractedText:"Synthetic user screenshot describes HBM4 yield, unrelated to issuer confirmation.",
+  sourceChannel:"broker_research",originalDocumentAccess:"excerpt_only" as const,
+  researchReview:{headlineTh:"ข่าวสมมติกล่าวถึงข้อมูลที่ยังต้องตรวจสอบต้นฉบับ",
+    translationTh:"ภาพหน้าจอสมมติที่ผู้ใช้ส่งกล่าวถึงอัตราผลผลิต HBM4 และไม่ได้เกี่ยวข้องกับการยืนยันจากบริษัท",
+    whatChangedTh:"เป็นข้อมูลที่ผู้ใช้ส่งมาและยังไม่ได้ตรวจสอบกับหลักฐานต้นฉบับ",
+    mechanismTh:"ความต้องการและกำลังการผลิตอาจส่งผลต่อรายได้และกำไร แต่ยังต้องตรวจสอบข้อมูลจริง",
+    thesisImplicationTh:"ยังไม่เปลี่ยนสมมติฐานการลงทุนหรือประมาณการกำไร",
+    counterEvidenceTh:"ต้นทุนและอัตราผลผลิตจริงอาจแตกต่างจากคาด",
+    requiredEvidenceTh:"ต้องตรวจเอกสารบริษัทและวันที่ประกาศก่อนใช้ข้อมูล"},
   completedAnalysis:"## ข้อสรุป\nHBM4 qualification remains unverified; do not change issuer thesis."
 };
 function parseResearch(result:any){

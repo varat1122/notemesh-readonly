@@ -33,13 +33,18 @@ For each input item:
    Feed Only, translate non-Thai input fully in original ordering while keeping
    numbers, tables, source claims and caveats; then provide a concise one-line
    Thai headline and investment interpretation. Retain translation in
-   `completedAnalysis`, separate from preserved `extractedText`.
+   `researchReview.translationTh`, separate from preserved `extractedText`.
+   Thai input needs no duplicate translation. Use only the actually read scope;
+   never fabricate missing pages. A mechanical language PASS does not verify
+   translation completeness or source claims.
 2. Query historical notes, Current Thesis/Evidence Register where relevant,
    and counter-evidence. Source/date/vintage duplicate candidates can block a
    second canonical review; they do not block raw source preservation.
 3. Call `plan_investment_writeback` with original `sourceChat`, input metadata,
-   `contentTypes[]`, `entityRoles[]`, `themes[]` and `completedAnalysis`.
-   Feed Only instead sets `captureOnly:true` and omits `completedAnalysis`.
+   `contentTypes[]`, `entityRoles[]`, `themes[]`, `sourceChannel`,
+   `originalDocumentAccess` and typed `researchReview` (including `attributedOrigin`
+   where required). Freeform `completedAnalysis` alone now holds the Review.
+   Feed Only instead sets `captureOnly:true` and omits both analysis inputs.
 4. Inspect `safeEditWorkflow.steps` in source-then-review order:
    - `needs_create`: invoke existing Safe Edit `preview_edit` with the exact
      `safeEditRequest` (change.kind=`create`); then authorized `apply_edit` with its token
