@@ -137,3 +137,47 @@ cover explicit aliases, ambiguity, stale/missing readback, bounds, qualified
 identifiers, missing roles, NVDA control, macro relevance, archive non-promotion,
 counter-evidence clipping and byte/index invariance. Synthetic alias declarations
 are not evidence of a mapping in the live Vault; live validation is separate.
+
+### Canonical Review discovery and intake-bound context
+
+Issuer-scoped retrieval also checks the existing canonical Company Research
+filename family directly, before the broad FTS cutoff. The path index bounds
+each issuer scan to 100 rows plus a sentinel; at most eight Review readbacks
+are attempted, ordered by declared publication. Invalid/stale metadata,
+unreadable notes, or either cutoff report incomplete discovery. This is not a
+global Vault absence proof. No Current Thesis or Evidence Register is created
+or inferred from a Research Review.
+
+`researchCoverage` separates canonical Review, counter-evidence section hints,
+and dated historical comparator coverage. `FOUND` identifies selected paths;
+`scanComplete=false` still warns that other candidates may be missing.
+`NOT_FOUND` means no matching result in the completed, bounded candidate scope,
+not that no evidence exists externally or anywhere else in the Vault.
+`SCAN_INCOMPLETE` covers unresolved issuer scope, read/scan/selection bounds,
+clipped excerpts and unknown comparator chronology. Counter-evidence is a
+visible section-heading witness, not verified contradictory evidence.
+Comparators are earlier declared publications, not independent corroboration.
+
+`latestReviewPaths` uses only valid `published_at`, never file mtime or
+`event_date`. Date-only values span possible timezones; unknown dates and
+overlapping windows return `ORDER_UNKNOWN`, and incomplete scans cannot assert
+a unique latest. A selected latest Review remains unverified research context.
+
+`contextBundles` keeps each intake separate. The exact canonical Review path,
+typed metadata, `intake_id`, `original_source_path`, Source metadata, dates,
+source-token FTS hits, physical wikilink and resolved link index must agree.
+Both current files must match their existing canonical Safe Edit create
+receipts, including hashes and successful write/readback/reindex. A missing,
+pending, drifted or unverifiable binding returns `HOLD`; no other Source is
+substituted and no receipt store is initialized. These receipts are historical
+write evidence, not primary-claim verification. Unknown event dates stay null;
+`economicEventEquivalence=not_established` even for two intakes of one issuer or
+URL. Optional `intakeId` requires issuer scope and selects that intake's canonical
+Source/Review pair while retaining separately labelled issuer background.
+
+An unbound but readable Review can still be discovered as note-declared
+research, with its binding HOLD visible. No historical bytes/receipts are
+rewritten, no repair is attempted, and primary evidence or independence is not
+inferred. Decision packets carry these coverage and bundle results unchanged.
+`investment-research-context.test.ts` exercises real receipts in temporary
+fixtures, not live mutation or live instrument-identity acceptance.

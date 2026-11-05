@@ -1,4 +1,5 @@
-import { buildInvestmentContextPack, type Focus, type Role, type Item, type IssuerResolution, type IssuerCoverage } from "./investment-context";
+import { buildInvestmentContextPack, type Focus, type Role, type Item, type IssuerResolution, type IssuerCoverage, type ResearchCoverage } from "./investment-context";
+import type {ContextBundle} from "./investment-research-context";
 import type { IncomingClaim, ClaimReview, Domain, ReviewClass } from "./investment-claim-review";
 import { buildEvidenceVerificationLedger, type EvidenceVerificationLedger } from "./evidence-verification-ledger";
 
@@ -37,6 +38,7 @@ export interface InvestmentDecisionPacket {
   historicalContext:{
     retrieval:"bounded_lexical_only";selected:number;considered:number;
     issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];
+    researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];
     sourcePointers:ContextRef[];
     noteDeclaredPrimaryCandidates:string[];
     protectedThesisPaths:string[];
@@ -188,6 +190,7 @@ export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimRe
     historicalContext:{
       retrieval:"bounded_lexical_only",selected:scoped.selected,considered:scoped.considered,
       issuerResolution:scoped.issuerResolution,issuerCoverage:scoped.issuerCoverage,
+      researchCoverage:scoped.researchCoverage,contextBundles:scoped.contextBundles,
       sourcePointers:pointers,noteDeclaredPrimaryCandidates:primaryCandidates,
       protectedThesisPaths:thesisPaths,historicalThesisOwnerApproval:"not_established",
       missing,truncatedOrOmitted:scoped.omitted.length>0 || pointers.some(p=>p.truncated)

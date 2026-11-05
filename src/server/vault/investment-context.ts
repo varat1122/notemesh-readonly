@@ -6,17 +6,25 @@ import { resolveNotePath } from "./paths";
 import { splitFrontmatter } from "./markdown";
 import { inspectCanonicalKnowledgeMetadata, type SchemaInspection } from "./investment-knowledge-schema";
 import { hubIdentityKey, indexedHubAliases } from "./investment-routing-v2";
+import { discoverCanonicalResearch, isCanonicalResearchPath, publicationWindow, type ContextBundle, type CanonicalResearchScan } from "./investment-research-context";
 
 export type Focus = "earnings" | "broker" | "tam" | "macro" | "thesis" | "general";
 export type Role = "rules" | "thesis" | "evidence_register" | "timeline" | "company" | "industry" | "source" | "research" | "archive";
-export interface Input { question: string; issuers?: string[]; industry?: string; focus?: Focus; maxNotes?: number; maxChars?: number }
+export interface Input { question: string; issuers?: string[]; intakeId?: string; industry?: string; focus?: Focus; maxNotes?: number; maxChars?: number }
 export interface IssuerResolution {
   requested:string;contextKey:string|null;hubPath:string|null;
   status:"exact_existing_title"|"indexed_alias"|"unresolved"|"ambiguous_hold"|"readback_hold"|"index_limit_hold"|"invalid_hold";
 }
 export interface IssuerCoverage {requested:string;contextKey:string|null;selectedRoles:Role[];missingRoles:Role[]}
+export interface ResearchCoverage {
+  requested:string;contextKey:string|null;
+  scope:"bounded_issuer_research_candidates";
+  canonicalReview:Coverage;counterEvidence:Coverage;historicalComparator:Coverage;
+  chronology:CanonicalResearchScan["chronology"];latestReviewPaths:string[];
+}
+interface Coverage {status:"FOUND"|"NOT_FOUND"|"SCAN_INCOMPLETE";paths:string[];scanComplete:boolean;reasons:string[]}
 export interface Item { path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
-export interface Pack { status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
+export interface Pack { status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
 function resolveIssuers(requested:string[]):IssuerResolution[]{
   if(!requested.length)return [];
@@ -200,6 +208,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
   const question = req.question.trim().slice(0,1200);
   if (question.length<3) throw new Error("Question must contain at least 3 characters");
   const requestedIssuers = [...new Set((req.issuers||[]).map(s=>s.trim().toUpperCase()))].slice(0,6);
+  if(req.intakeId&&(!/^IN-[A-F0-9]{16}$/.test(req.intakeId)||!requestedIssuers.length))throw Error("Intake scope requires a valid intake ID and issuer scope");
   const issuerResolution=resolveIssuers(requestedIssuers);
   const issuers=[...new Set(issuerResolution.flatMap(scopeKeys).map(x=>x.toUpperCase()))];
   const contextKeys=[...new Set(issuerResolution.flatMap(r=>r.contextKey?[r.contextKey]:scopeKeys(r)))];
@@ -209,6 +218,19 @@ export function buildInvestmentContextPack(req: Input): Pack {
   const budget = Math.min(18000,Math.max(4500,req.maxChars??12000));
   const pool = new Map<string,number>();
   const limits=new Set<string>();
+  const researchScans=contextKeys.map(key=>discoverCanonicalResearch(key,req.intakeId));
+  const canonicalReviews=new Map(researchScans.flatMap(scan=>scan.reviews.map(review=>[review.path,review] as const)));
+  const boundSources=new Map(researchScans.flatMap(scan=>scan.reviews.flatMap(review=>review.bundle.status==="BOUND_SOURCE_REVIEW"&&review.bundle.sourcePath
+    ?[[review.bundle.sourcePath,scan.contextKey] as const]:[])));
+  for(const scan of researchScans){
+    for(const reason of scan.reasons)limits.add(`${scan.contextKey}: ${reason}`);
+    for(const [i,review] of scan.reviews.entries()){
+      // Discover canonical Reviews before broad lexical windows can hide them.
+      // Ranking is publication-based context priority, never event equivalence.
+      pool.set(review.path,195-i*3);
+      if(review.bundle.status==="BOUND_SOURCE_REVIEW"&&review.bundle.sourcePath)pool.set(review.bundle.sourcePath,194-i*3);
+    }
+  }
   const search=(query:string,opts:Parameters<typeof searchVault>[1])=>{
     const result=searchVault(query,opts);
     if(result.total>result.hits.length)limits.add("Search window truncated: "+query);
@@ -326,6 +348,10 @@ export function buildInvestmentContextPack(req: Input): Pack {
   for (const term of searchTerms) {
     try {
       for (const [i,h] of search(term,{limit:30}).hits.entries()) {
+        // FTS cannot bypass failed canonical readback, the scoped read bound,
+        // or an explicitly requested intake. Source pairing is receipt-bound.
+        if(issuerScoped&&isCanonicalResearchPath(h.path)&&!canonicalReviews.has(h.path))continue;
+        if(issuerScoped&&h.path.startsWith("00_Inbox/ChatGPT/Investment Intake - ")&&!boundSources.has(h.path))continue;
         const role=roleOf(h.path);
         const scopedIssuerNames=namedIssuers(h.path);
         if(issuers.length && scopedIssuerNames.length &&
@@ -422,6 +448,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
   }
   const roles=new Set(items.map(x=>x.role));
   const incomplete=[...absent,...limits];
+  for(const scan of researchScans)for(const review of scan.reviews)if(review.bundle.status==="HOLD")
+    incomplete.push(`${review.intakeId}: Source/Review context binding HOLD (${review.bundle.reason}); no alternate Source inferred.`);
   for(const r of issuerResolution)if(!r.contextKey)
     incomplete.push(`${r.requested}: issuer context ${r.status}; no alias expansion or security/listing equivalence established.`);
   const issuerCoverage=issuerResolution.map(r=>{
@@ -431,6 +459,39 @@ export function buildInvestmentContextPack(req: Input): Pack {
     const missingRoles=(["company","thesis","evidence_register","timeline","source"] as Role[]).filter(role=>!selectedRoles.includes(role));
     for(const role of missingRoles)incomplete.push(`${r.requested}: no ${role} selected for this issuer scope.`);
     return {requested:r.requested,contextKey:r.contextKey,selectedRoles,missingRoles};
+  });
+  const coverage=(paths:string[],complete:boolean,reasons:string[]):Coverage=>({
+    status:paths.length?"FOUND":complete?"NOT_FOUND":"SCAN_INCOMPLETE",paths,scanComplete:complete,reasons:[...new Set(reasons)]
+  });
+  const researchCoverage:ResearchCoverage[]=issuerResolution.map(r=>{
+    const key=r.contextKey??scopeKeys(r)[0];
+    const scan=researchScans.find(s=>s.contextKey===key);
+    const scopedItems=items.filter(x=>namedIssuers(x.path).some(t=>scopeKeys(r).map(k=>k.toUpperCase()).includes(t)));
+    const selectedReviews=scan?.reviews.filter(review=>items.some(item=>item.path===review.path))??[];
+    const omittedReviews=scan?.reviews.some(review=>!items.some(item=>item.path===review.path))??false;
+    const canonicalComplete=!!r.contextKey&&!!scan?.complete&&!omittedReviews;
+    const reasons=[...(scan?.reasons??[]),...(!r.contextKey?["issuer_scope_unresolved"]:[]),...(omittedReviews?["selection_budget"]:[])];
+    // Counter-evidence is an excerpt/heading witness, not a semantic claim
+    // that no contrary evidence exists anywhere in the Vault or externally.
+    const candidatePaths=rank.filter(x=>namedIssuers(x.path).some(t=>scopeKeys(r).map(k=>k.toUpperCase()).includes(t))).map(x=>x.path);
+    const excerptIncomplete=candidatePaths.some(p=>!scopedItems.some(x=>x.path===p))||scopedItems.some(x=>x.truncated);
+    const contextComplete=canonicalComplete&&!limits.size&&!failed.length&&!excerptIncomplete;
+    const contextReasons=[...reasons,...(limits.size||failed.length?["retrieval_window_incomplete"]:[]),...(excerptIncomplete?["excerpt_or_selection_incomplete"]:[])];
+    const latest=scan?.reviews.find(review=>scan.latestReviewPaths.includes(review.path));
+    const latestWindow=publicationWindow(latest?.publishedAt??null);
+    const earlier=scopedItems.filter(item=>{
+      if(item.role!=="research"||item.path===latest?.path)return false;
+      const window=publicationWindow(item.schemaCompatibility.publishedAt);
+      return latestWindow&&window&&window[1]<latestWindow[0];
+    }).map(x=>x.path);
+    const orderKnown=scan?.chronology==="LATEST_BY_DECLARED_PUBLICATION";
+    const undatedComparator=scopedItems.some(item=>item.role==="research"&&item.path!==latest?.path&&!publicationWindow(item.schemaCompatibility.publishedAt));
+    return {requested:r.requested,contextKey:r.contextKey,scope:"bounded_issuer_research_candidates",
+      canonicalReview:coverage(selectedReviews.map(x=>x.path),canonicalComplete,reasons),
+      counterEvidence:coverage(scopedItems.filter(x=>x.counterEvidenceExcerptIncluded).map(x=>x.path),contextComplete,contextReasons),
+      historicalComparator:coverage(earlier,contextComplete&&!!orderKnown&&!undatedComparator,
+        [...contextReasons,...(!orderKnown||undatedComparator?["publication_order_unresolved"]:[])]),
+      chronology:scan?.chronology??"SCAN_INCOMPLETE",latestReviewPaths:scan?.latestReviewPaths??[]};
   });
   if(issuerScoped){
     if(!roles.has("thesis"))incomplete.push("No Current Thesis selected; owner-endorsed thesis is unknown.");
@@ -447,7 +508,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
   }
   if(failed.length)incomplete.push("Search failed on terms: "+failed.join(", "));
   return {
-    status:"retrieval_only_not_verified",question,issuers:requestedIssuers,issuerResolution,issuerCoverage,focus,industry:req.industry?.slice(0,140)||null,
+    status:"retrieval_only_not_verified",question,issuers:requestedIssuers,issuerResolution,issuerCoverage,researchCoverage,
+    contextBundles:researchScans.flatMap(scan=>scan.reviews.map(review=>review.bundle)),focus,industry:req.industry?.slice(0,140)||null,
     items,considered:rank.length,selected:items.length,excerptChars:budget-remaining,
     incomplete,omitted:omitted.slice(0,15),
     warnings:[
@@ -455,6 +517,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
       "Verification fields are note-declared metadata, NOT freshly reverified primary facts. File modified time is NOT event date.",
       "An archived AI repost is not independent corroboration; deduplicate issuer+source+metric+fiscal period.",
       "Hub title/alias readback is issuer-context discovery only, not security/listing equivalence or primary verification. ADR, DR, exchange, prices and claim identities are not rewritten.",
+      "Source/Review bundles are separate intake bindings, not merged economic events. Write receipts establish historical write/readback/index only; neither receipt nor retrieval verifies a claim. Latest uses declared publication chronology, not file time or event date.",
       "Use full original notes and current external filings/consensus for investment decisions. This tool is read-only.",
       "Contradiction/risk sections are discoverability hints, not exhaustive counter-evidence verification. Original context must be read in full where material.",
     ]
