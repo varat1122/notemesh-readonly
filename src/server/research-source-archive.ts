@@ -44,7 +44,7 @@ function validTimestamp(s:string):boolean {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(s)&&
     !Number.isNaN(d.valueOf())&&d.toISOString().slice(0,19)===s.slice(0,19);
 }
-function normalizedSource(source:string):string{
+export function normalizedArchiveSource(source:string):string{
   let u:URL;
   try{u=new URL(source);}catch{throw new Error("source_url_invalid");}
   if(u.protocol!=="https:"||!u.hostname||u.username||u.password||u.port)
@@ -121,9 +121,9 @@ export function captureOriginalDocumentBytes(input:DocumentArchiveInput):Documen
     throw new Error("source_document_invalid_size");
   if(!validTimestamp(input.capturedAt))throw new Error("capture_timestamp_invalid");
   if(!input.reviewerOrOperator.trim()||input.reviewerOrOperator.length>160)throw new Error("operator_label_required");
-  if(!normalizedSource(input.retrievedFrom))throw new Error("retrieved_url_required");
-  const key=normalizedSource(input.originalSource);
-  if(input.captureMethod==="authorized_external_download"&&normalizedSource(input.retrievedFrom)!==key)
+  if(!normalizedArchiveSource(input.retrievedFrom))throw new Error("retrieved_url_required");
+  const key=normalizedArchiveSource(input.originalSource);
+  if(input.captureMethod==="authorized_external_download"&&normalizedArchiveSource(input.retrievedFrom)!==key)
     throw new Error("download_url_must_match_original_source");
   if(input.contentType==="application/pdf"&&!input.bytes.subarray(0,5).equals(Buffer.from("%PDF-")))
     throw new Error("file_is_not_pdf");
@@ -154,7 +154,7 @@ export function inspectOriginalSourceHistory(originalSource:string,validateBytes
   changesObserved:boolean;limitReached:boolean;
   publisherAuthenticityVerified:false;
 }{
-  const key=normalizedSource(originalSource);
+  const key=normalizedArchiveSource(originalSource);
   const all=db().prepare("SELECT * FROM source_snapshots WHERE source_key = ? ORDER BY revision LIMIT 101")
     .all(key) as Row[];
   const truncated=all.length>100;

@@ -9,6 +9,7 @@ import { readNote } from "./notes";
 import { searchVault } from "./queries";
 import type { WritebackInput, WritebackPlan } from "./investment-writeback-router";
 import {renderThaiResearchM55,validateResearchM55} from "./research-quality-m55";
+import {sourceArchiveReviewLines} from "./source-archive-provenance-p0";
 
 const sha=(s:string)=>createHash("sha256").update(s,"utf8").digest("hex");
 const yaml=(s:string|null|undefined)=>s==null?"null":JSON.stringify(s);
@@ -148,6 +149,7 @@ export function buildCanonicalSafeEditWorkflow(
     originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage,
     sourceKind:plan.sourceKind,entityScope:plan.entityScope
   },input.researchReview,input.extractedText):[];
+  const sourceArchiveLines=sourceArchiveReviewLines(plan.sourceCapture.originalSourceArchive);
   const broker=input.brokerUpdate;
   const brokerLines=broker?[
     "## Attributed broker version (not independently verified)","",
@@ -181,6 +183,7 @@ export function buildCanonicalSafeEditWorkflow(
     "## Source provenance","",
     `- Exact user-supplied source: ${wiki(rawPath)}`,
     `- Original publication/source authentication: not verified by this workflow`,
+    ...sourceArchiveLines,
     `- Event date: ${event??"unknown"}; publication date: ${published??"unknown"}`,
     "","## Research analysis (AI interpretation; not approved Thesis)","",
     input.researchReview?renderThaiResearchM55(input.researchReview):analysis??"Analysis pending.","",
