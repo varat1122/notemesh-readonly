@@ -167,7 +167,11 @@ describe("RI-001 macro relevance and archive independence",()=>{
     }
     const pack=build({question:"Vietnam GDP",industry:"Vietnam macro and markets",focus:"macro",maxNotes:5});
     expect(pack.items.map(x=>x.path)).toContain(target);
-    expect(pack.items.some(x=>x.path.includes("fisheries"))).toBe(false);
+    // H2: country context remains eligible even without subject vocabulary.
+    // It has a bounded background slot and cannot displace the requested release.
+    const background=pack.items.filter(x=>x.path.includes("fisheries"));
+    expect(background.length).toBeLessThanOrEqual(1);
+    for(const item of background)expect(pack.items.findIndex(x=>x.path===target)).toBeLessThan(pack.items.indexOf(item));
     expect(pack.items.filter(x=>x.evidenceUse==="historical_context_only").length).toBeLessThanOrEqual(1);
     expect(pack.items.find(x=>x.path===target)?.counterEvidenceExcerptIncluded).toBe(true);
     expect(pack.status).toBe("retrieval_only_not_verified");

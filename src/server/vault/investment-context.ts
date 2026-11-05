@@ -2,10 +2,10 @@ import fs from "node:fs";
 import { searchVault } from "./queries";
 import { db } from "../db";
 import { readNote } from "./notes";
-import { resolveNotePath } from "./paths";
+import { resolveNotePath, resolveFolderPath } from "./paths";
 import { splitFrontmatter } from "./markdown";
 import { inspectCanonicalKnowledgeMetadata, type SchemaInspection } from "./investment-knowledge-schema";
-import { hubIdentityKey, indexedHubAliases } from "./investment-routing-v2";
+import { hubIdentityKey, indexedHubAliases, indexedTopLevelHubs } from "./investment-routing-v2";
 import { discoverCanonicalResearch, isCanonicalResearchPath, publicationWindow, type ContextBundle, type CanonicalResearchScan } from "./investment-research-context";
 
 export type Focus = "earnings" | "broker" | "tam" | "macro" | "thesis" | "general";
@@ -23,23 +23,26 @@ export interface ResearchCoverage {
   chronology:CanonicalResearchScan["chronology"];latestReviewPaths:string[];
 }
 interface Coverage {status:"FOUND"|"NOT_FOUND"|"SCAN_INCOMPLETE";paths:string[];scanComplete:boolean;reasons:string[]}
-export interface Item { path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
-export interface Pack { status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
+export interface IdentityHoldDiscovery {
+  requested:string;resolutionStatus:IssuerResolution["status"];mappingVerified:false;
+  basis:"literal_historical_candidates_only";candidatePaths:string[];scanComplete:boolean;reasons:string[];
+}
+export interface MacroCoverage {scope:string;subjectEvidence:Coverage;counterEvidence:Coverage}
+type DeclaredDate={status:"DECLARED"|"UNKNOWN";value:string|null};
+export interface ResearchChronology {eventDate:DeclaredDate;publicationDate:DeclaredDate;analysisDate:DeclaredDate;importDate:DeclaredDate}
+export interface Item { path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
+export interface Pack { status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
 function resolveIssuers(requested:string[]):IssuerResolution[]{
   if(!requested.length)return [];
   // Same indexed Company Hub/alias contract as M5.2. A sentinel prevents an
   // incomplete index scan from establishing a falsely unique mapping.
-  const prefix="01_Companies/";
-  const rows=db().prepare("SELECT path,frontmatter FROM notes WHERE substr(path,1,?)=? ORDER BY path LIMIT 3001")
-    .all(prefix.length,prefix) as {path:string;frontmatter:string|null}[];
-  const hubs=rows.filter(x=>x.path.endsWith(".md")&&!x.path.slice(prefix.length).includes("/"))
-    .map(x=>({...x,title:x.path.slice(prefix.length,-3)}));
+  const hubs=indexedTopLevelHubs("01_Companies/");
   return requested.map(label=>{
     const result=(status:IssuerResolution["status"],contextKey:string|null=null,hubPath:string|null=null):IssuerResolution=>
       ({requested:label,status,contextKey,hubPath});
     if(!label||label.length>120||/[\\/]/.test(label)||[...label].some(c=>c.charCodeAt(0)<32)||label==="..")return result("invalid_hold");
-    if(rows.length>3000)return result("index_limit_hold");
+    if(hubs.length>3000)return result("index_limit_hold");
     const wanted=hubIdentityKey(label);
     // Count title AND alias collisions. An exact title cannot excuse a second
     // Hub claiming the same alias. Never derive ADR/DR/market aliases by syntax.
@@ -61,6 +64,29 @@ function scopeKeys(r:IssuerResolution):string[]{
   // Unmapped plain tickers retain literal historical discovery, explicitly
   // unresolved. Qualified/invalid identifiers never become unscoped queries.
   return r.status==="unresolved"&&/^[A-Z][A-Z0-9.-]{0,11}$/.test(r.requested)?[r.requested]:[];
+}
+function discoverDuringIdentityHold(resolutions:IssuerResolution[]):IdentityHoldDiscovery[]{
+  return resolutions.filter(r=>["ambiguous_hold","readback_hold","index_limit_hold"].includes(r.status)&&
+    /^[A-Z][A-Z0-9.-]{0,11}$/.test(r.requested)).map(r=>{
+    const result:IdentityHoldDiscovery={requested:r.requested,resolutionStatus:r.status,mappingVerified:false,
+      basis:"literal_historical_candidates_only",candidatePaths:[],scanComplete:true,reasons:[]};
+    const folder="10_Knowledge/Company Research";
+    if(!folderExists(folder)){
+      result.scanComplete=false;result.reasons.push("literal_folder_unavailable");return result;
+    }
+    try{
+      const found=searchVault(r.requested,{folder,limit:31});
+      if(found.total>30){result.scanComplete=false;result.reasons.push("literal_search_limit");}
+      const candidates=found.hits.slice(0,30).filter(h=>namedIssuers(h.path).includes(r.requested));
+      if(candidates.length>12){result.scanComplete=false;result.reasons.push("literal_read_limit");}
+      for(const h of candidates.slice(0,12))try{
+        const raw=readNote(h.path).content;
+        if(Buffer.byteLength(raw)>100000||JSON.stringify(splitFrontmatter(raw).data)!==JSON.stringify(indexedMetadata(h.path)))throw Error("unreadable");
+        result.candidatePaths.push(h.path);
+      }catch{result.scanComplete=false;result.reasons.push("literal_readback_unavailable");}
+    }catch{result.scanComplete=false;result.reasons.push("literal_search_unavailable");}
+    result.reasons=[...new Set(result.reasons)];return result;
+  });
 }
 
 export function roleOf(path: string): Role {
@@ -122,17 +148,15 @@ function issuerTokenInTitle(path: string, issuers: string[]) {
 // headline is not sufficient relevance for a country-specific macro brief.
 // Retain topic-named notes and explicit country-tagged metadata; broader
 // regional documents require separate query/review rather than silent mixing.
-function explicitMacroScope(path: string, topic: string): boolean {
+function explicitMacroScope(path: string, topic: string, current?:Record<string,unknown>): boolean {
   const title=(path.split("/").at(-1)||"").normalize("NFC").toUpperCase();
   const t=topic.normalize("NFC").toUpperCase();
   const isBoundary=(c:string|undefined)=>!c||!/[\p{L}\p{N}]/u.test(c);
   for(let at=title.indexOf(t);at>=0;at=title.indexOf(t,at+1)){
     if(isBoundary(title[at-1])&&isBoundary(title[at+t.length]))return true;
   }
-  const row=db().prepare("SELECT frontmatter FROM notes WHERE path = ?").get(path) as {frontmatter:string|null}|undefined;
-  if(!row?.frontmatter)return false;
   try {
-    const fm=JSON.parse(row.frontmatter) as Record<string,unknown>;
+    const fm=current??indexedMetadata(path);
     const fields=[fm.country,fm.entity,fm.geography,fm.region].flatMap(x=>Array.isArray(x)?x:[x]);
     return fields.some(x=>typeof x==="string"&&x.trim().normalize("NFC").toUpperCase()===t);
   }catch{return false;}
@@ -159,6 +183,11 @@ function hasDeclaredMacroPrimary(path:string):boolean {
 function exists(path: string): boolean {
   try { return fs.existsSync(resolveNotePath(path)); } catch { return false; }
 }
+function folderExists(path:string):boolean{
+  try{return fs.statSync(resolveFolderPath(path)).isDirectory();}catch{return false;}
+}
+// Section hints only, never a factual determination that a claim is adverse.
+const COUNTER_SECTION=/^\s*#{1,6}\s+.*(counter[- ]?evidence|contradict|invalidation|\brisk|\badverse|\bdownside|\bstress|ข้อขัดแย้ง|ข้อโต้แย้ง|ความเสี่ยง)/i;
 function selectedLines(raw: string, search: string[], max: number, role: Role) {
   const lines = raw.split(/\r?\n/);
   let index = 0, maxHits = 0;
@@ -176,8 +205,7 @@ function selectedLines(raw: string, search: string[], max: number, role: Role) {
   // a note's introduction. Source line labels prevent disjoint snippets from
   // appearing to be one continuous quotation.
   if ((role==="thesis" || role==="evidence_register" || role==="source" || role==="research") && max>=700) {
-    const counter = lines.findIndex((s,i) => i < 1200 &&
-      /^\s*#{1,6}\s+.*(counter[- ]?evidence|contradict|invalidation|ข้อขัดแย้ง|ข้อโต้แย้ง|ความเสี่ยง)/i.test(s));
+    const counter = lines.findIndex((s,i) => i < 1200 && COUNTER_SECTION.test(s));
     counterHeading=counter>=0?lines[counter]:null;
     if (counter>=0 && (counter<start || counter>=firstEnd)) {
       const secondEnd = Math.min(lines.length,counter+8);
@@ -199,10 +227,12 @@ function selectedLines(raw: string, search: string[], max: number, role: Role) {
     counterEvidenceExcerptIncluded:counterEvidenceExcerptIncluded&&counterHeading!==null&&clipped.includes(counterHeading),
   };
 }
-function dateOf(v: unknown) { return typeof v==="string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v : null; }
 function declared(raw: string, notePath: string) {
   const f = splitFrontmatter(raw).data as Record<string,unknown>;
-  return { declaredVerification:typeof f.verification==="string"?f.verification:null, declaredEventDate:dateOf(f.event_date), declaredPublishedAt:dateOf(f.published_at), schemaCompatibility: inspectCanonicalKnowledgeMetadata(notePath,f) };
+  const schema=inspectCanonicalKnowledgeMetadata(notePath,f);
+  const date=(value:string|null):DeclaredDate=>({status:value?"DECLARED":"UNKNOWN",value});
+  return {declaredVerification:typeof f.verification==="string"?f.verification:null,declaredEventDate:schema.eventDate,declaredPublishedAt:schema.publishedAt,
+    chronology:{eventDate:date(schema.eventDate),publicationDate:date(schema.publishedAt),analysisDate:date(schema.analysisDate),importDate:date(schema.importedAt)},schemaCompatibility:schema};
 }
 export function buildInvestmentContextPack(req: Input): Pack {
   const question = req.question.trim().slice(0,1200);
@@ -210,6 +240,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
   const requestedIssuers = [...new Set((req.issuers||[]).map(s=>s.trim().toUpperCase()))].slice(0,6);
   if(req.intakeId&&(!/^IN-[A-F0-9]{16}$/.test(req.intakeId)||!requestedIssuers.length))throw Error("Intake scope requires a valid intake ID and issuer scope");
   const issuerResolution=resolveIssuers(requestedIssuers);
+  const identityHoldDiscovery=discoverDuringIdentityHold(issuerResolution);
   const issuers=[...new Set(issuerResolution.flatMap(scopeKeys).map(x=>x.toUpperCase()))];
   const contextKeys=[...new Set(issuerResolution.flatMap(r=>r.contextKey?[r.contextKey]:scopeKeys(r)))];
   const issuerScoped=requestedIssuers.length>0;
@@ -239,7 +270,12 @@ export function buildInvestmentContextPack(req: Input): Pack {
   const macroScope = !issuerScoped && focus==="macro";
   // Country/topic-only questions do not inherit company-thesis obligations.
   // Prefer the explicitly supplied scope over incidental query terms.
-  const primaryTopic=(req.industry?topicTerms(req.industry).join(" "):topicTerms(question)[0])||null;
+  // Explicit separators split scopes; preserve multiword names and do not
+  // guess country aliases or split "and" inside a country's proper name.
+  const requestedMacroScopes=macroScope?[...new Set((req.industry??topicTerms(question)[0]??"").split(/[/;|,]/)
+    .map(x=>topicTerms(x).join(" ")).filter(Boolean))]:[];
+  const macroScopes=requestedMacroScopes.slice(0,4);
+  if(requestedMacroScopes.length>4)limits.add("Macro scope limit: only the first four explicit scopes searched; remaining scopes were not assessed.");
   const needed = [
     "10_Knowledge/Research Methods/Investment OS - Evidence and Update Rules.md",
     ...(issuers.length?["08_Daily_Weekly/Research Indexes/00_Investment_Evolution_Master.md"]:[]),
@@ -302,32 +338,32 @@ export function buildInvestmentContextPack(req: Input): Pack {
   const failed: string[] = [];
   const macroSubjectPaths = new Set<string>();
   let macroSubjectRequested=false;
-  if(macroScope && primaryTopic){
-    const subject=topicTerms(question).filter(x=>!primaryTopic.split(" ").includes(x) && x.length>=3)
-      .filter(x=>!/^\d+$|^(?:THIRD|QUARTER)$/.test(x)).slice(0,5);
+  const macroSubjectByScope=new Map(macroScopes.map(scope=>[scope,new Set<string>()]));
+  if(macroScope){
+    const scopeWords=new Set(macroScopes.flatMap(x=>x.split(" ")));
+    const subject=topicTerms(question).filter(x=>!scopeWords.has(x)&&x.length>=3)
+      .filter(x=>!/^\d+$|^(?:THIRD|QUARTER|COMPARISON|COMPARE)$/.test(x)).slice(0,5);
     macroSubjectRequested=subject.length>0;
-    for(const word of subject){
-      try{
-        // Search the existing macro folder separately so repeated archive hits
-        // cannot consume every slot before an official-source candidate.
-        const folder="10_Knowledge/Macro and Markets";
-        const hits=[...search(primaryTopic+" "+word,{limit:100}).hits,
-          ...(exists(folder)?search(primaryTopic+" "+word,{limit:100,folder}).hits:[])];
-        for(const h of hits)if(explicitMacroScope(h.path,primaryTopic)){
-          macroSubjectPaths.add(h.path);
+    for(const scope of macroScopes){
+      const folder="10_Knowledge/Macro and Markets";
+      // Country-only discovery keeps differing risk vocabulary eligible.
+      // Subject hits rank higher but never become a blanket admission filter.
+      if(folderExists(folder))try{
+        for(const h of search(scope,{limit:100,folder}).hits)if(explicitMacroScope(h.path,scope))pool.set(h.path,22);
+      }catch{failed.push(scope);}
+      for(const word of subject)try{
+        const hits=[...search(scope+" "+word,{limit:100}).hits,
+          ...(folderExists(folder)?search(scope+" "+word,{limit:100,folder}).hits:[])];
+        for(const h of hits)if(explicitMacroScope(h.path,scope)){
+          macroSubjectPaths.add(h.path);macroSubjectByScope.get(scope)!.add(h.path);
           if(h.path.startsWith(folder+"/"))pool.set(h.path,60);
         }
-      }catch{failed.push(primaryTopic+" "+word);}
-    }
-    // Direct indexed filename discovery avoids losing relevant country-titled
-    // macro notes to the FTS relevance cutoff of the first 30 chat articles.
-    const candidatePaths=db().prepare("SELECT path FROM notes WHERE instr(upper(path),?)>0 ORDER BY path DESC LIMIT 151")
-      .all(primaryTopic) as {path:string}[];
-    if(candidatePaths.length>150)limits.add("Macro filename window truncated: "+primaryTopic);
-    for(const r of candidatePaths.slice(0,150)){
-      if((r.path.startsWith("10_Knowledge/Macro and Markets/")||r.path.startsWith("02_Industries_Themes/"))&&
-         explicitMacroScope(r.path,primaryTopic) && exists(r.path))
-        pool.set(r.path,Math.max(pool.get(r.path)||0,macroSubjectPaths.has(r.path)?60:22));
+      }catch{failed.push(scope+" "+word);}
+      const candidatePaths=db().prepare("SELECT path FROM notes WHERE instr(upper(path),?)>0 ORDER BY path DESC LIMIT 151")
+        .all(scope) as {path:string}[];
+      if(candidatePaths.length>150)limits.add("Macro filename window truncated: "+scope);
+      for(const r of candidatePaths.slice(0,150))if((r.path.startsWith(folder+"/")||r.path.startsWith("02_Industries_Themes/"))&&
+        explicitMacroScope(r.path,scope)&&exists(r.path))pool.set(r.path,Math.max(pool.get(r.path)||0,macroSubjectPaths.has(r.path)?60:22));
     }
   }
   const industryMatches = new Set<string>();
@@ -379,7 +415,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
           role!=="industry" && role!=="rules" && !pool.has(h.path)) continue;
         if(macroScope){
           // One shared word (e.g. "revenue") must not pull an unrelated issuer.
-          if(!primaryTopic || !explicitMacroScope(h.path,primaryTopic))continue;
+          if(!macroScopes.some(scope=>explicitMacroScope(h.path,scope)))continue;
           if(role==="company"||role==="thesis"||role==="evidence_register"||
             (role==="timeline" && scopedIssuerNames.length>0)||
             h.path.startsWith("10_Knowledge/Company Research/"))continue;
@@ -388,6 +424,24 @@ export function buildInvestmentContextPack(req: Input): Pack {
         if (pool.size>200) break;
       }
     } catch { failed.push(term); }
+  }
+  const macroRiskPaths=new Set<string>();
+  const macroReadReasons=new Map(macroScopes.map(scope=>[scope,[] as string[]]));
+  const macroCandidates=new Map(macroScopes.map(scope=>[scope,[...pool.keys()].filter(p=>roleOf(p)!=="rules"&&explicitMacroScope(p,scope))]));
+  for(const [scope,paths] of macroCandidates){
+    // A bounded section scan, not an inference about semantic risk. Admit all
+    // country candidates to ranking, including unread/unmarked background.
+    const reasons=macroReadReasons.get(scope)!;
+    if(paths.length>24)reasons.push("counter_read_limit");
+    for(const p of [...paths].sort().slice(0,24))try{
+      const raw=readNote(p).content;
+      if(Buffer.byteLength(raw)>100000)throw Error("read_limit");
+      const parsed=splitFrontmatter(raw);
+      if(!explicitMacroScope(p,scope,parsed.data))throw Error("scope_readback");
+      const lines=parsed.body.split(/\r?\n/);
+      if(lines.length>1200)reasons.push("counter_line_limit");
+      if(lines.slice(0,1200).some(line=>COUNTER_SECTION.test(line)))macroRiskPaths.add(p);
+    }catch{reasons.push("counter_readback_unavailable");}
   }
   // Promote same-event research whose headline contains the user's specific
   // subject (e.g. CrowdStrike + CLEAR), not older ticker-only summaries.
@@ -402,10 +456,11 @@ export function buildInvestmentContextPack(req: Input): Pack {
     const eventTitleMatches=subjectTerms.filter(term=>title.split(/[^\p{L}\p{N}]+/u).includes(term)).length;
     const specificEventBonus=issuers.length && role==="research"
       ? Math.min(3,eventTitleMatches)*35:0;
-    const macroBonus=macroScope && primaryTopic ?
-      (explicitMacroScope(path,primaryTopic)?25:0) +
+    const macroBonus=macroScope && macroScopes.length ?
+      (macroScopes.some(scope=>explicitMacroScope(path,scope))?25:0) +
       (path.startsWith("10_Knowledge/Macro and Markets/")?25:0) +
       (macroSubjectPaths.has(path)?32:0) +
+      (macroRiskPaths.has(path)?85:0) +
       // Ranking priority only: this note DECLARES a primary original URL.
       // It is not an independent or fresh verification of the claim.
       (hasDeclaredMacroPrimary(path)?65:0):0;
@@ -414,9 +469,28 @@ export function buildInvestmentContextPack(req: Input): Pack {
       focus==="earnings"&&/Primary Evidence|Event_Lineage/.test(path)?20:0;
     // Company-event reconciliation also consumes these scores. Preserve its
     // historical research discovery; de-rank AI recaps only in macro scope.
-    return {path,role,historical,score:base[role]+boost+companyBonus+focusBonus+macroBonus+specificEventBonus-(role==="archive"?45:macroScope&&historical?70:0)};
-  }).filter(r=>!macroScope||r.role==="rules"||!macroSubjectPaths.size||macroSubjectPaths.has(r.path))
-    .sort((a,b)=>b.score-a.score||a.path.localeCompare(b.path));
+    const publication=inspectCanonicalKnowledgeMetadata(path,indexedMetadata(path)).publishedAt;
+    return {path,role,historical,publication,score:base[role]+boost+companyBonus+focusBonus+macroBonus+specificEventBonus-(role==="archive"?45:macroScope&&historical?70:0)};
+  }).sort((a,b)=>b.score-a.score||a.path.localeCompare(b.path));
+  // Build stable relevance cohorts from each highest remaining score. Unlike
+  // fixed buckets, a one-point difference at a bucket edge does not defeat
+  // chronology. Dates rank like roles within ten points of that anchor only.
+  // Unknown dates never borrow import/analysis/file time or imply event order.
+  for(let start=0;start<rank.length;){
+    let end=start+1;
+    while(end<rank.length&&rank[start].score-rank[end].score<=10)end++;
+    const group=rank.slice(start,end).sort((a,b)=>base[b.role]-base[a.role]||
+      (publicationWindow(b.publication)?.[0]??-Infinity)-(publicationWindow(a.publication)?.[0]??-Infinity)||
+      b.score-a.score||a.path.localeCompare(b.path));
+    rank.splice(start,group.length,...group);start=end;
+  }
+  // Reserve bounded subject/counter slots per explicitly requested scope.
+  // Paths stay separate, with per-scope attribution; no country/event merge.
+  const reserve=[...macroScopes.map(scope=>(rank.find(r=>macroCandidates.get(scope)?.includes(r.path)&&macroSubjectPaths.has(r.path))??
+      rank.find(r=>macroCandidates.get(scope)?.includes(r.path)))?.path),
+    ...macroScopes.map(scope=>rank.find(r=>macroCandidates.get(scope)?.includes(r.path)&&macroRiskPaths.has(r.path)&&!macroSubjectPaths.has(r.path))?.path)];
+  const priority=[...new Set(reserve.filter((p):p is string=>!!p))];
+  if(macroScope)rank.sort((a,b)=>(priority.includes(a.path)?priority.indexOf(a.path):priority.length)-(priority.includes(b.path)?priority.indexOf(b.path):priority.length));
   const items: Item[] = [];
   // Archived chat excerpts are a last resort and may repeat one issuer event.
   // Prefer current Thesis, original-source review and company evolution unless
@@ -428,21 +502,28 @@ export function buildInvestmentContextPack(req: Input): Pack {
   let remaining=budget;
   const omitted: string[]=[];
   let historicalCount=0;
+  const macroBackgroundCounts=new Map<string,number>();
   for (const row of rank) {
     // Company history and protected drafts must remain discoverable even when
     // derived from AI. Only raw archives / macro recaps share this fallback cap.
     const archivalSelection=row.role==="archive"||macroScope&&row.historical&&row.role==="research";
     if (archivalSelection && (!allowArchived || !archivalRequested&&historicalCount>=1)) {omitted.push(row.path);continue;}
     if (items.length>=maxNotes||remaining<250) {omitted.push(row.path);continue;}
+    const matchedMacroScopes=macroScopes.filter(scope=>explicitMacroScope(row.path,scope));
+    const background=macroScope&&macroSubjectRequested&&row.role!=="rules"&&!macroSubjectPaths.has(row.path)&&!macroRiskPaths.has(row.path);
+    if(background&&matchedMacroScopes.every(scope=>(macroBackgroundCounts.get(scope)||0)>=1)){omitted.push(row.path);continue;}
     const n=roleCounts.get(row.role)||0;
     if(n>=(quota[row.role]??4)){omitted.push(row.path);continue;}
     try {
       const raw=readNote(row.path).content;
-      const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining),row.role);
+      const current=splitFrontmatter(raw).data;
+      if(macroScope&&row.role!=="rules"&&!matchedMacroScopes.some(scope=>explicitMacroScope(row.path,scope,current)))throw Error("macro_scope_readback");
+      const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining,macroScope?Math.floor(budget/Math.max(2,macroScopes.length*2)):2000),row.role);
       if(!excerpt.excerpt.trim())continue;
       const historical=row.historical||historicalOnly(row.path,splitFrontmatter(raw).data);
-      items.push({path:row.path,role:row.role,evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
+      items.push({path:row.path,role:row.role,matchedMacroScopes:matchedMacroScopes.filter(scope=>explicitMacroScope(row.path,scope,current)),evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
       if(archivalSelection)historicalCount++;
+      if(background)for(const scope of matchedMacroScopes)macroBackgroundCounts.set(scope,(macroBackgroundCounts.get(scope)||0)+1);
       roleCounts.set(row.role,n+1);remaining-=excerpt.excerpt.length;
     } catch {omitted.push(row.path);}
   }
@@ -450,6 +531,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
   const incomplete=[...absent,...limits];
   for(const scan of researchScans)for(const review of scan.reviews)if(review.bundle.status==="HOLD")
     incomplete.push(`${review.intakeId}: Source/Review context binding HOLD (${review.bundle.reason}); no alternate Source inferred.`);
+  for(const discovery of identityHoldDiscovery)incomplete.push(`${discovery.requested}: identity HOLD; ${discovery.candidatePaths.length} literal historical candidates retained separately, not issuer mappings or duplicate adjudication. ${discovery.reasons.join(", ")}`);
   for(const r of issuerResolution)if(!r.contextKey)
     incomplete.push(`${r.requested}: issuer context ${r.status}; no alias expansion or security/listing equivalence established.`);
   const issuerCoverage=issuerResolution.map(r=>{
@@ -462,6 +544,15 @@ export function buildInvestmentContextPack(req: Input): Pack {
   });
   const coverage=(paths:string[],complete:boolean,reasons:string[]):Coverage=>({
     status:paths.length?"FOUND":complete?"NOT_FOUND":"SCAN_INCOMPLETE",paths,scanComplete:complete,reasons:[...new Set(reasons)]
+  });
+  const macroCoverage:MacroCoverage[]=macroScopes.map(scope=>{
+    const selected=items.filter(item=>item.matchedMacroScopes.includes(scope));
+    const paths=macroCandidates.get(scope)??[];
+    const reasons=[...(macroReadReasons.get(scope)??[]),...(limits.size||failed.length?["retrieval_window_incomplete"]:[]),
+      ...(paths.some(p=>!selected.some(x=>x.path===p))||selected.some(x=>x.truncated)?["excerpt_or_selection_incomplete"]:[])];
+    const complete=!reasons.length;
+    return {scope,subjectEvidence:coverage(selected.filter(x=>macroSubjectByScope.get(scope)?.has(x.path)).map(x=>x.path),complete,reasons),
+      counterEvidence:coverage(selected.filter(x=>x.counterEvidenceExcerptIncluded).map(x=>x.path),complete,reasons)};
   });
   const researchCoverage:ResearchCoverage[]=issuerResolution.map(r=>{
     const key=r.contextKey??scopeKeys(r)[0];
@@ -508,13 +599,15 @@ export function buildInvestmentContextPack(req: Input): Pack {
   }
   if(failed.length)incomplete.push("Search failed on terms: "+failed.join(", "));
   return {
-    status:"retrieval_only_not_verified",question,issuers:requestedIssuers,issuerResolution,issuerCoverage,researchCoverage,
+    status:"retrieval_only_not_verified",question,issuers:requestedIssuers,issuerResolution,issuerCoverage,identityHoldDiscovery,macroCoverage,researchCoverage,
     contextBundles:researchScans.flatMap(scan=>scan.reviews.map(review=>review.bundle)),focus,industry:req.industry?.slice(0,140)||null,
     items,considered:rank.length,selected:items.length,excerptChars:budget-remaining,
     incomplete,omitted:omitted.slice(0,15),
     warnings:[
       "Bounded FTS5 lexical discovery, not semantic recall or full Vault coverage. Missing/omitted notes may contain counter-evidence.",
       "Verification fields are note-declared metadata, NOT freshly reverified primary facts. File modified time is NOT event date.",
+      "Event/publication/analysis/import dates are separate declarations; missing or invalid dates are UNKNOWN. Nearby relevance scores use declared publication for display ordering only; overlapping/unknown dates do not establish latest or event order.",
+      "Macro scopes retain separate source paths and declared country/topic attribution. Risk headings and country-background slots are bounded discovery hints, not semantic counter-evidence verification.",
       "An archived AI repost is not independent corroboration; deduplicate issuer+source+metric+fiscal period.",
       "Hub title/alias readback is issuer-context discovery only, not security/listing equivalence or primary verification. ADR, DR, exchange, prices and claim identities are not rewritten.",
       "Source/Review bundles are separate intake bindings, not merged economic events. Write receipts establish historical write/readback/index only; neither receipt nor retrieval verifies a claim. Latest uses declared publication chronology, not file time or event date.",

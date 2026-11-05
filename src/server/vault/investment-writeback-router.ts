@@ -8,7 +8,7 @@
 import { readNote } from "./notes";
 import {canonicalHttpSourceUrl as canonicalSourceUrl} from "../source-url";
 import { db } from "../db";
-import { buildInvestmentContextPack, type Focus } from "./investment-context";
+import { buildInvestmentContextPack, type Focus, type IdentityHoldDiscovery } from "./investment-context";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
 import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
 import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTag,
@@ -86,6 +86,7 @@ export interface WritebackPlan {
     selected:number;
     paths:string[];
     missing:string[];
+    identityHoldDiscovery:IdentityHoldDiscovery[];
   };
   historicalEventReview:{
     status:"possible_same_event_candidates"|"none_selected_not_proof_new";
@@ -240,13 +241,13 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
     focus,maxNotes:10,maxChars:8500
   });
-  // Only high-scoring, issuer-scoped Company Research excerpts are candidate
-  // prior events; legacy archived AI is NOT a verified fact or duplicate verdict.
-  // No similarity score by itself establishes identical original source/vintage.
-  const candidateEventPaths=pack.items.filter(x=>
+  // Preserve literal historical hints when identity resolution HOLDs, without
+  // treating them as mapped issuers. Otherwise retain the existing high-score
+  // Company Research candidates. Neither path adjudicates event equivalence.
+  const candidateEventPaths=[...new Set([...pack.identityHoldDiscovery.flatMap(x=>x.candidatePaths),...pack.items.filter(x=>
     input.domain==="company" && x.role==="research" &&
     x.path.startsWith("10_Knowledge/Company Research/") && x.score>=110
-  ).slice(0,4).map(x=>x.path);
+  ).map(x=>x.path)])].slice(0,4);
   // The same broker/industry source can mention several declared companies.
   // Reconcile all already-resolved issuer identities by exact URL/event date,
   // never counting co-mentions or raw message repetitions as independent proof.
@@ -292,6 +293,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(archiveWitness.status==="HOLD")warnings.push("Archive provenance HOLD: "+archiveWitness.reason+"; retain historical Source/Review bytes and receipts. Separate reviewed repair required.");
   if(!input.sourceUrl)warnings.push("Original source URL absent; screenshots and snippets are attributed inputs, not independently validated source records.");
   if(candidateEventPaths.length)warnings.push("Matching-title historical research candidates require same original event/source/date review before creating a new distinct analysis; selection is not a deduplication verdict.");
+  if(pack.identityHoldDiscovery.length)warnings.push("Issuer identity HOLD: literal historical candidates are retained separately for review, not verified mappings or adjudicated duplicate events. Do not infer resolved identity from discovery hints.");
   if(sameSourceEvent)warnings.push("Existing issuer/date/original-URL source records found: review original event and provenance before creating a second Timeline entry. This is NOT a verified duplicate classification.");
   if(input.inputFormat!=="text"&&!verifiedAttachment)
     warnings.push("No verified, matching original image/PDF attachment bytes; call scoped Safe Edit store_user_attachment first.");
@@ -342,7 +344,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     },
     chronology:{eventDate,publicationDate,importedAt:"not_yet_written"},
     historical:{source:"bounded_lexical_context_not_exhaustive",
-      selected:pack.selected,paths:pack.items.map(x=>x.path),missing:pack.incomplete},
+      selected:pack.selected,paths:pack.items.map(x=>x.path),missing:pack.incomplete,identityHoldDiscovery:pack.identityHoldDiscovery},
     historicalEventReview:{
       status:candidateEventPaths.length?"possible_same_event_candidates":"none_selected_not_proof_new",
       candidatePaths:candidateEventPaths,duplicateAdjudicated:false

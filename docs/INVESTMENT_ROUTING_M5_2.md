@@ -94,7 +94,7 @@ missing hubs, stable receipt IDs and duplicate source/event candidate.
 `aliases`, `alias`, `company_name`, `ticker` metadata vocabulary. It adds no
 hard-coded TSM/TSMC or security-master mapping. A unique indexed Hub must be
 readable and its alias set must agree with current Markdown readback. Title/alias
-collisions, missing/changed readback, and a Company Hub index over the 3,000-row
+collisions, missing/changed readback, and a top-level Company Hub index over the 3,000-row
 bound HOLD alias expansion; the sentinel is never a partial uniqueness result.
 This is indexed metadata plus readback, not external legal-issuer verification;
 an unindexed Hub/alias cannot be discovered by this bounded contract.
@@ -106,7 +106,22 @@ co-mentions. Qualified identifiers require an explicit matching Hub declaration;
 no market prefix, ADR/DR suffix, or exchange code is stripped. A Hub alias provides
 company-context linkage only. It never substitutes a security, listing, price
 series, claim entity, Source ID, event identity or canonical write authority.
-The canonical routing/writeback resolver's behavior is unchanged.
+Canonical Hub matching semantics are unchanged. Context and canonical routing
+now share the top-level Markdown Hub scan: nested files and non-Markdown entries
+are excluded before the 3,000-Hub limit plus sentinel. An incomplete Hub scan
+cannot establish a unique routing match.
+
+On identity HOLD, `identityHoldDiscovery` retains up to 12 read-back historical
+Company Research paths from a 30-hit literal-identifier search plus sentinel.
+Only the requested plain identifier is searched; ambiguous aliases are not
+expanded and body co-mentions of another named issuer are excluded. Invalid or
+qualified identifiers are not reduced to a guessed ticker. Search/read bounds
+and stale/unavailable note metadata are explicit. These are unverified hints,
+not issuer mappings, selected canonical context, primary facts or adjudicated
+duplicates. Decision Packets carry them separately. The writeback router keeps
+them in its existing possible-event hints (at most four), with the full bounded
+discovery status in `historical`, so identity HOLD cannot silently imply no
+history. No new write authority or identity rebinding follows from these hints.
 
 `issuerCoverage` reports selected and missing roles separately per request. A
 complete NVDA result cannot conceal missing MRVL Thesis/Evidence/Timeline/Source
@@ -116,10 +131,24 @@ claim entity or inferring verification, independence, owner approval or valuatio
 
 For macro queries, explicit country/topic scope is kept separate from subject
 terms. Matching macro-folder searches supplement the existing global FTS window.
-When subject matches exist, unrelated country-only results do not fill the pack;
-otherwise country-only fallback is explicitly marked incomplete. Filename and
-FTS cutoffs are reported, not treated as exhaustive absence. Multiword explicit
-scope is matched as a whole; no geographic alias table is inferred.
+Subject matches receive ranking priority; they do not exclude other scoped
+country/risk evidence. Explicit `/`, `;`, `|` or comma separators select at most
+four distinct scopes; multiword names remain intact, and `and` is not split into
+speculative geographic identities. Each selected item carries its own
+`matchedMacroScopes` and source path. No country, event or source is merged.
+Unsearched scopes and filename/FTS cutoffs are reported, not treated as absence.
+
+Per scope, at most 24 candidate readbacks (100 KB per accepted note, 1,200 body
+lines) look for explicit counter-evidence/risk/adverse-section headings. These
+are untrusted section hints, not semantic proof that a document contradicts a
+claim. Unread or unmarked country candidates remain eligible for ranking.
+Selection reserves context and contrary-section slots per scope within the
+existing total budget; country-only background gets at most one slot per scope
+when a subject was requested. Archived AI remains historical and subject to its
+existing fallback cap. If there is no subject hit, country context is explicitly
+incomplete for that subject. `macroCoverage` reports subject and counter-section
+coverage separately for each scope, including read/window/excerpt/selection
+limits; `NOT_FOUND` is only within that bounded heading/candidate contract.
 
 The existing read-time schema adapter identifies archived AI and derivative
 summaries. Raw ChatGPT paths are historical even if metadata declares primary.
@@ -162,6 +191,16 @@ Comparators are earlier declared publications, not independent corroboration.
 `event_date`. Date-only values span possible timezones; unknown dates and
 overlapping windows return `ORDER_UNKNOWN`, and incomplete scans cannot assert
 a unique latest. A selected latest Review remains unverified research context.
+
+Every excerpt also carries separate declared `eventDate`, `publicationDate`,
+`analysisDate` and `importDate` values with `DECLARED`/`UNKNOWN` status. They use
+only valid explicit `event_date`, `published_at`, `analysis_date`, `imported_at`
+metadata respectively. Legacy `date`/`imported_on`, Review creation and filesystem
+times never fill these gaps. For similarly relevant notes (cohorts within ten
+points of the highest remaining score), like-role results prefer declared
+publication time. Unknown/overlapping
+dates and deterministic filename tie-breaks are display ordering only, not a
+latest-event claim. Analysis/import dates never affect this ordering.
 
 `contextBundles` keeps each intake separate. The exact canonical Review path,
 typed metadata, `intake_id`, `original_source_path`, Source metadata, dates,

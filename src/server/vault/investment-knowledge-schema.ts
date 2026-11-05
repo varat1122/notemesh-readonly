@@ -19,6 +19,7 @@ export interface SchemaInspection {
   sourceUrlAlias: string | null;
   eventDate: string | null;
   publishedAt: string | null;
+  analysisDate: string | null;
   importedAt: string | null;
   legacyDate: string | null;
   legacyImportedOn: string | null;
@@ -111,7 +112,7 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   if(sourceRaw&&!declaredSourceType&&!alias)
     warnings.push(sourceRaw==="unverified"?"source_type_misused_for_verification":"unmapped_legacy_source_type");
   if(alias)warnings.push("legacy_source_alias_retained_raw_provenance");
-  const dateFields=["event_date","published_at","received_at","imported_at","verified_at"] as const;
+  const dateFields=["event_date","published_at","analysis_date","received_at","imported_at","verified_at"] as const;
   for(const field of dateFields){
     if(fm[field]!==undefined&&fm[field]!==null&&strictDate(fm[field])===null)
       warnings.push("invalid_"+field);
@@ -168,7 +169,7 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
     status:"read_time_adapter_only",role,declaredSourceType,rawSourceType,
     normalizedSourceType,sourceTypeMapping,independenceAssessment,
     declaredVerification:asText(fm.verification),
-    originalSource,sourceUrlAlias,eventDate,publishedAt,importedAt,
+    originalSource,sourceUrlAlias,eventDate,publishedAt,analysisDate:strictDate(fm.analysis_date),importedAt,
     legacyDate,legacyImportedOn,sourceHashScope,
     claimCount:claims.length,claimIssues:claimIssues.slice(0,35),
     warnings:[...new Set(warnings)].slice(0,20),canAutoUpdateThesis:false,
