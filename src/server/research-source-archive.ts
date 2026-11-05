@@ -155,8 +155,20 @@ export function inspectOriginalSourceHistory(originalSource:string,validateBytes
   if(!all.length){
     // Older archive keys may predate the shared trailing-punctuation policy.
     // Never silently call that expected state absent or rewrite historical IDs.
-    const keys=db().prepare("SELECT DISTINCT source_key FROM source_snapshots LIMIT 101").all() as {source_key:string}[];
-    if(keys.length>100)throw Error("source_archive_alias_scan_limit");
+    // Stored legacy keys were URL-serialized: narrow by the same origin and
+    // complete path, then admit only query/fragment/trailing-punctuation suffixes.
+    // Separate binary ranges use the existing source_key index even for path '/':
+    // no global/host-wide scan, LIKE wildcards or generic child-path expansion.
+    const url=new URL(key),prefix=url.origin+url.pathname;
+    const keys=db().prepare("SELECT source_key FROM source_snapshots WHERE source_key = ? LIMIT 1")
+      .all(prefix) as {source_key:string}[];
+    const range=db().prepare(`SELECT DISTINCT source_key FROM source_snapshots
+      WHERE source_key >= ? AND source_key < ? ORDER BY source_key LIMIT ?`);
+    for(const suffix of ["#",")",",",".",";","?"]){
+      const upper=String.fromCharCode(suffix.charCodeAt(0)+1);
+      keys.push(...range.all(prefix+suffix,prefix+upper,101-keys.length) as {source_key:string}[]);
+      if(keys.length>100)throw Error("source_archive_alias_scan_limit");
+    }
     if(keys.some(row=>canonicalSourceUrl(row.source_key)===key))throw Error("source_archive_legacy_url_binding");
   }
   const truncated=all.length>100;

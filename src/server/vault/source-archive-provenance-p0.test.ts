@@ -402,6 +402,74 @@ describe("P0 canonical Review original-source archive provenance",()=>{
     const p=await route();expect(p.sourceCapture.archiveProvenanceReason).toBe("legacy_url_binding");
     expect(p.safeEditWorkflow!.steps[1].state).toBe("hold_archive_provenance");
   });
+  it.each(["fresh","historical"] as const)("unrelated archive growth does not HOLD a %s unarchived URL",async(mode)=>{
+    if(mode==="historical")await applyRecipe(await route());
+    const historical=mode==="historical"?await historicalState():null;
+    for(let i=0;i<101;i++){
+      const url=`https://unrelated-${i}.example.org/doc`;
+      await capture({originalSource:url,retrievedFrom:url});
+      const sibling=sourceUrl.replace("mu-test.htm",`other-${i}.htm`);
+      await capture({originalSource:sibling,retrievedFrom:sibling});
+    }
+    const fresh=await route();
+    expect(fresh.sourceCapture).toMatchObject({archiveProvenanceStatus:"ABSENT",archiveProvenanceReason:"no_archive"});
+    expect(fresh.safeEditWorkflow!.steps[1].state).toBe(mode==="fresh"?"needs_create":"verified_existing");
+    if(historical)expect(await historicalState()).toEqual(historical);
+    await applyRecipe(fresh);const saved=await historicalState();
+    const url="https://one-more.example.org/doc";await capture({originalSource:url,retrievedFrom:url});
+    const repeat=await route();expect(repeat.safeEditWorkflow!.status).toBe("saved_verified");
+    expect(await applyRecipe(repeat)).toHaveLength(0);expect(await historicalState()).toEqual(saved);
+  });
+  it("unrelated root/child paths, host prefixes and URL wildcard characters do not widen alias scope",async()=>{
+    for(const target of ["https://example.org/","https://example.org/a%20b_under"]){
+      for(let i=0;i<101;i++){
+        const url=target+`child-${i}`;await capture({originalSource:url,retrievedFrom:url});
+        const other=target.replace("example.org","example.org.evil.invalid")+`?x=${i}`;
+        await capture({originalSource:other,retrievedFrom:other});
+      }
+      const p=await route({...input,sourceUrl:target});
+      expect(p.sourceCapture).toMatchObject({archiveProvenanceStatus:"ABSENT",archiveProvenanceReason:"no_archive"});
+      expect(p.safeEditWorkflow!.steps[1].state).toBe("needs_create");
+    }
+  });
+  it("caps plausible same-path alias candidates with a dedicated reason, without arbitrary selection",async()=>{
+    for(let i=0;i<100;i++){
+      const url=sourceUrl+`?document=${i}`;await capture({originalSource:url,retrievedFrom:url});
+    }
+    expect((await route()).sourceCapture).toMatchObject({archiveProvenanceStatus:"ABSENT",archiveProvenanceReason:"no_archive"});
+    const selected=await capture({originalSource:sourceUrl+"?document=100",retrievedFrom:sourceUrl+"?document=100"});
+    const {db}=await import("../db");
+    db().prepare("UPDATE source_snapshots SET source_key=? WHERE snapshot_id=?").run(sourceUrl+").",selected.snapshotId);
+    const before=db().prepare("SELECT * FROM source_snapshots ORDER BY source_key").all();
+    const archive=await import("../research-source-archive");const read=vi.spyOn(archive,"inspectOriginalSourceSnapshot");
+    const p=await route();
+    expect(p.sourceCapture).toMatchObject({archiveProvenanceStatus:"HOLD",archiveProvenanceReason:"legacy_alias_scan_limit"});
+    expect(p.safeEditWorkflow!.steps.map(x=>x.state)).toEqual(["needs_create","hold_archive_provenance"]);
+    expect(p.safeEditWorkflow!.steps[1].safeEditRequest).toBeNull();expect(p.safeEditWorkflow!.readyForNextNews).toBe(false);
+    expect(read).not.toHaveBeenCalled();
+    expect(db().prepare("SELECT * FROM source_snapshots ORDER BY source_key").all()).toEqual(before);
+    // Exact current keys bypass the compatibility path even in a busy family.
+    const exact=await route({...input,sourceUrl:sourceUrl+"?document=0"});
+    expect(exact.sourceCapture.archiveProvenanceStatus).toBe("ARCHIVED_BYTES_INTACT");
+  });
+  it.each([")",",",".",";","#legacy","?utm_source=legacy"])("finds plausible legacy suffix %s despite unrelated archive growth, without rebinding it",async(suffix)=>{
+    for(let i=0;i<101;i++){
+      const url=`https://unrelated-${i}.example.org/doc`;await capture({originalSource:url,retrievedFrom:url});
+    }
+    const snap=await capture();const {db}=await import("../db");
+    db().prepare("UPDATE source_snapshots SET source_key=? WHERE snapshot_id=?").run(sourceUrl+suffix,snap.snapshotId);
+    const before=db().prepare("SELECT * FROM source_snapshots ORDER BY source_key").all();
+    expect((await route()).sourceCapture).toMatchObject({archiveProvenanceStatus:"HOLD",archiveProvenanceReason:"legacy_url_binding"});
+    expect(db().prepare("SELECT * FROM source_snapshots ORDER BY source_key").all()).toEqual(before);
+  });
+  it("counts distinct scoped keys rather than revisions of a different same-path source",async()=>{
+    const url=sourceUrl+"?document=other";
+    for(let i=0;i<101;i++)await capture({originalSource:url,retrievedFrom:url,
+      bytes:Buffer.from(`<html>Other query-specific source revision ${i}.</html>`)});
+    expect((await route()).sourceCapture).toMatchObject({archiveProvenanceStatus:"ABSENT",archiveProvenanceReason:"no_archive"});
+    expect((await route({...input,sourceUrl:url})).sourceCapture)
+      .toMatchObject({archiveProvenanceStatus:"HOLD",archiveProvenanceReason:"history_limit"});
+  });
   it("checks selected bytes only: older non-selected blob corruption is outside this witness",async()=>{
     const old=await capture();const selected=await capture({bytes:Buffer.from("<html>The selected current archive revision is independently intact.</html>")});
     await applyRecipe(await route());const saved=await historicalState();fs.writeFileSync(blob(old),Buffer.alloc(bytes.length,0x78));

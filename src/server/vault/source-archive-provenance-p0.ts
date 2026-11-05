@@ -23,7 +23,7 @@ export interface SourceArchiveProvenance {
 }
 export type ArchiveWitness={
   status:"ABSENT"|"HOLD"|"ARCHIVED_BYTES_INTACT";
-  reason:"no_source_url"|"not_archivable"|"no_archive"|"history_limit"|"metadata_invalid"|
+  reason:"no_source_url"|"not_archivable"|"no_archive"|"history_limit"|"legacy_alias_scan_limit"|"metadata_invalid"|
     "selected_snapshot_missing_or_corrupt"|"archive_unavailable"|"legacy_url_binding"|"url_correlated_snapshot";
   snapshot:SourceArchiveProvenance|null;
 };
@@ -87,7 +87,7 @@ export function inspectSourceArchiveProvenance(sourceUrl:string|null|undefined,
       claimVerification:"NOT_ESTABLISHED_BY_ARCHIVE",independentEvidenceIncrement:0
     }};
   }catch(e){return {status:"HOLD",reason:e instanceof Error&&e.message==="source_archive_legacy_url_binding"?
-    "legacy_url_binding":e instanceof Error&&e.message==="source_archive_alias_scan_limit"?"history_limit":"archive_unavailable",snapshot:null};}
+    "legacy_url_binding":e instanceof Error&&e.message==="source_archive_alias_scan_limit"?"legacy_alias_scan_limit":"archive_unavailable",snapshot:null};}
 }
 
 export function sourceArchiveReviewLines(s:SourceArchiveProvenance|null):string[]{

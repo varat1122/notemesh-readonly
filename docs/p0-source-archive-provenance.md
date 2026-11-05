@@ -78,11 +78,41 @@ and no non-default port. HTTP, unsupported schemes/ports and free text return
 `ABSENT / not_archivable`, without attempting archive reads. An eligible lookup
 failure is HOLD, not an assertion that there was no archive.
 
-Historical archive keys/IDs are not migrated. When no canonical key exists, a
-bounded distinct-key compatibility scan detects a legacy noncanonical alias and
-returns `HOLD / legacy_url_binding` for explicit reconciliation. It does not
-silently relabel old snapshots as absent or rewrite IDs. An incomplete alias scan
-also HOLDs. No automatic schema cleanup or archive repair is introduced.
+Historical archive keys/IDs are not migrated. Exact canonical-key history is
+checked first. Only when it is absent, compatibility lookup uses the serialized
+canonical **origin + full path**: one exact-key lookup for that prefix, then six
+disjoint binary index ranges for suffixes `# ) , . ; ?`, in that order. Each
+range starts at `prefix + suffix` and ends before `prefix + next ASCII character`.
+The existing `source_key` index seeks directly into each range, including for
+root path `/`; no global/host-wide scan or URL `%`/`_` wildcard matching is used.
+This admits query/fragment variants and legacy trailing punctuation; ordinary
+sibling/child paths outside these suffix ranges do not consume the bound. It is
+a candidate scope, so punctuation-prefixed filenames or differing query values
+may also enter it; only full canonical comparison establishes an alias.
+
+At most 100 distinct candidate keys plus one sentinel are returned in total.
+Each query uses the remaining budget, and the ranges do not overlap. Only after
+all ranges complete within the bound are candidates compared using the unchanged
+shared canonicalizer. This adds at most seven indexed compatibility queries;
+it does not canonicalize every key in the archive.
+
+- `HOLD / history_limit`: more than 100 snapshots for the exact matched source.
+- `HOLD / legacy_alias_scan_limit`: more than 100 plausible distinct alias keys
+  in this origin/path scope. No partial candidate set is selected, even if it
+  already contains a canonical match. Unrelated archive keys do not consume this
+  bound. Exact current keys bypass the compatibility lookup.
+- `HOLD / legacy_url_binding`: the complete bounded candidate set contains a
+  noncanonical key that normalizes to this source; explicit reconciliation is
+  required. No rebinding, historical ID rewrite or migration occurs.
+- `ABSENT / no_archive`: no exact history and no matching alias within this
+  completed compatibility scope. Unrelated archive growth cannot by itself HOLD
+  a fresh unarchived URL or make its historical Review drift.
+
+This is compatibility with URL-serialized legacy keys, not exhaustive recovery
+of arbitrary malformed historical values. Leading whitespace, nonserialized
+host spellings or path encodings outside the defined prefix may not be found;
+they require a separately reviewed diagnostic/reconciliation workflow. No
+automatic schema cleanup or archive repair is introduced.
 
 ## Binding, chronology and public metadata
 
@@ -118,8 +148,10 @@ failures can still HOLD a history lookup; this is not a claim about older bytes.
 
 Read at most 100 snapshot metadata rows plus one truncation sentinel, then hash
 one document capped at 8 MiB. The no-canonical-key compatibility scan is limited
-to 100 distinct keys plus one sentinel. Oversized/inconsistent metadata, history
-truncation and selected corruption fail closed. Never silently fall back to an
+to 100 distinct keys in the defined origin/path candidate scope plus one sentinel,
+not the global archive. Actual history truncation and alias-scope truncation have
+separate HOLD reasons. Oversized/inconsistent metadata and selected corruption
+fail closed. Never silently fall back to an
 older intact snapshot. The URL+bytes retry retains the original snapshot/capture
 metadata; changed bytes create a distinct archive revision only through the
 existing separately authorized capture mechanism.
