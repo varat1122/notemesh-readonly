@@ -6,20 +6,10 @@
 import {createHash} from "node:crypto";
 import {db} from "../db";
 import {readNote} from "./notes";
+import {canonicalSourceUrl as canonicalUrl,legacyCanonicalSourceUrlN1c} from "../source-url";
 
 const sha=(s:string)=>createHash("sha256").update(s,"utf8").digest("hex");
 const idFromPath=(path:string)=>/^00_Inbox\/ChatGPT\/Investment Intake - (IN-[A-F0-9]{16})\.md$/.exec(path)?.[1];
-function canonicalUrl(url:string|null|undefined){
-  if(!url?.trim())return null;
-  try {
-    const u=new URL(url.trim().replace(/[),.;]+$/g,""));
-    if(!["https:","http:"].includes(u.protocol)||u.username||u.password)return url.trim();
-    u.hash="";
-    for(const k of [...u.searchParams.keys()])if(/^utm_|^(?:fbclid|gclid)$/i.test(k))u.searchParams.delete(k);
-    u.searchParams.sort();
-    return u.toString();
-  }catch{return url.trim();}
-}
 function sourceFence(text:string){
   const max=Math.max(2,...[...(text.match(/`+/g)??[])].map(x=>x.length));
   const fence="`".repeat(max+1);
@@ -47,6 +37,10 @@ const value=(fm:Record<string,unknown>,key:string)=>typeof fm[key]==="string"?fm
 export function resolveSourceIdentityM56(input:SourceIdentityInput):SourceIdentityResolution {
   const textSha256=sha(input.extractedText);
   const requestedUrl=canonicalUrl(input.sourceUrl);
+  const digest=sha(["investment_os_source_v3",textSha256,
+    requestedUrl??"",input.rawAttachmentSha256??"",input.eventDate??"unknown_event_date",
+    input.publicationDate??"unknown_publication_date"].join("\n"));
+  const currentPlanId="IN-"+digest.slice(0,16).toUpperCase();
   const rows=db().prepare(`SELECT path,frontmatter FROM notes WHERE path LIKE '00_Inbox/ChatGPT/Investment Intake - IN-%'
     AND json_valid(frontmatter)=1 AND json_extract(frontmatter,'$.type')='investment_source_intake'
     AND json_extract(frontmatter,'$.source_text_sha256')=? ORDER BY path LIMIT 101`).all(textSha256) as
@@ -81,6 +75,10 @@ export function resolveSourceIdentityM56(input:SourceIdentityInput):SourceIdenti
       provenanceConflict=true;
       continue;
     }
+    // An old ID whose URL meaning changed must not be silently rebound. Newly
+    // created receipts already carry the corrected ID and remain replayable.
+    if(legacyCanonicalSourceUrlN1c(value(fm,"source_url"))!==requestedUrl&&id!==currentPlanId)
+      throw Error("M56_LEGACY_SOURCE_URL_RECONCILIATION_REQUIRED: preserve historical Source IDs and receipts; no Source may be created");
     matching.push({path:row.path,id,contentHash:sha(content)});
   }
   if(input.existingIntakeId){
@@ -97,9 +95,6 @@ export function resolveSourceIdentityM56(input:SourceIdentityInput):SourceIdenti
     mode:"linked_existing",textSha256};}
   // New receipts use only original-source identity, never analyst classifications,
   // publisher label, entity order, translation, or Review prose.
-  const digest=sha(["investment_os_source_v3",textSha256,
-    requestedUrl??"",input.rawAttachmentSha256??"",input.eventDate??"unknown_event_date",
-    input.publicationDate??"unknown_publication_date"].join("\n"));
-  return {planId:"IN-"+digest.slice(0,16).toUpperCase(),existingSourcePath:null,existingSourceSha256:null,
+  return {planId:currentPlanId,existingSourcePath:null,existingSourceSha256:null,
     mode:"new_v3",textSha256};
 }

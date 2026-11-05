@@ -6,6 +6,7 @@
  * Never edits the vault or upgrades protected investment decisions.
  */
 import { readNote } from "./notes";
+import {canonicalHttpSourceUrl as canonicalSourceUrl} from "../source-url";
 import { db } from "../db";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
@@ -15,6 +16,7 @@ import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTa
 import { buildCanonicalSafeEditWorkflow, type CanonicalSafeEditWorkflow } from "./canonical-writeback-workflow";
 import type { ThaiResearchReview } from "./research-quality-m55";
 import {resolveSourceIdentityM56, type SourceIdentityResolution} from "./source-identity-m56";
+import {inspectSourceArchiveProvenance,type SourceArchiveProvenance} from "./source-archive-provenance-p0";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
@@ -70,6 +72,9 @@ export interface WritebackPlan {
     rawAttachmentPath:string|null;
     attachmentVerified:boolean;
     originalSourceVerified:false;
+    originalSourceArchive:SourceArchiveProvenance|null;
+    archiveProvenanceStatus:ReturnType<typeof inspectSourceArchiveProvenance>["status"];
+    archiveProvenanceReason:ReturnType<typeof inspectSourceArchiveProvenance>["reason"];
     preservation:"needs_safe_edit_raw_capture"|"stored_original_user_bytes";
   };
   chronology:{
@@ -126,17 +131,6 @@ const MAX_TEXT=12000;
  * Accept only exact issuer + asserted original event date + canonical URL.
  * File modified/imported dates never identify an economic event.
  */
-function canonicalSourceUrl(value:string):string|null{
-  try {
-    const u=new URL(value.replace(/[),.;]+$/g,""));
-    if(!["https:","http:"].includes(u.protocol)||u.username||u.password)return null;
-    u.hash="";
-    for(const k of [...u.searchParams.keys()])
-      if(/^utm_|^(?:fbclid|gclid)$/i.test(k))u.searchParams.delete(k);
-    u.searchParams.sort();
-    return u.toString();
-  }catch{return null;}
-}
 function relatedIssuer(f:Record<string,unknown>,issuer:string):boolean{
   const names=[f.company,f.entity,f.ticker,f.issuer].flatMap(v=>Array.isArray(v)?v:[v]);
   return names.some(v=>typeof v==="string"&&v.trim().toUpperCase()===issuer.trim().toUpperCase());
@@ -215,6 +209,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     rawAttachmentSha256:input.rawAttachmentSha256,eventDate,publicationDate,
     verifiedAttachmentPath:verifiedAttachment?actualAttachmentPath:null,
     existingIntakeId:input.existingIntakeId});
+  const archiveWitness=inspectSourceArchiveProvenance(input.sourceUrl,eventDate,publicationDate);
+  const originalSourceArchive=archiveWitness.snapshot;
   const planId=sourceIdentity.planId;
   const rawPath="00_Inbox/ChatGPT/Investment Intake - "+planId+".md";
   // Same digest is a stable idempotency key across repeated routing calls.
@@ -290,7 +286,10 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(input.brokerUpdate)
     warnings.push("M5.2 broker PT/estimate old→new figures are caller-declared; same bank and dated versions are necessary but not independent verification or consensus.");
   if(input.sourceKind==="issuer_release"||input.sourceKind==="regulatory_filing")
-    warnings.push("Source URL supplied is not proof that the original was fetched or verified.");
+    warnings.push(originalSourceArchive?
+      "Original source bytes are archived and hash-readback intact on this server; this still does not prove publisher signature, claim truth or independent confirmation.":
+      "Source URL supplied is not proof that the original was fetched or verified.");
+  if(archiveWitness.status==="HOLD")warnings.push("Archive provenance HOLD: "+archiveWitness.reason+"; retain historical Source/Review bytes and receipts. Separate reviewed repair required.");
   if(!input.sourceUrl)warnings.push("Original source URL absent; screenshots and snippets are attributed inputs, not independently validated source records.");
   if(candidateEventPaths.length)warnings.push("Matching-title historical research candidates require same original event/source/date review before creating a new distinct analysis; selection is not a deduplication verdict.");
   if(sameSourceEvent)warnings.push("Existing issuer/date/original-URL source records found: review original event and provenance before creating a second Timeline entry. This is NOT a verified duplicate classification.");
@@ -338,6 +337,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       textDigest:sourceIdentity.textSha256,extractedTextIsOriginalBinary:false,
       rawAttachmentPath:actualAttachmentPath,
       attachmentVerified:verifiedAttachment,originalSourceVerified:false,
+      originalSourceArchive,archiveProvenanceStatus:archiveWitness.status,archiveProvenanceReason:archiveWitness.reason,
       preservation:verifiedAttachment?"stored_original_user_bytes":"needs_safe_edit_raw_capture"
     },
     chronology:{eventDate,publicationDate,importedAt:"not_yet_written"},

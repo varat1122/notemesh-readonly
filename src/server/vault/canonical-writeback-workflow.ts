@@ -9,6 +9,8 @@ import { readNote } from "./notes";
 import { searchVault } from "./queries";
 import type { WritebackInput, WritebackPlan } from "./investment-writeback-router";
 import {renderThaiResearchM55,validateResearchM55} from "./research-quality-m55";
+import {sourceArchiveReviewLines} from "./source-archive-provenance-p0";
+import {revalidateHistoricalArchive} from "./canonical-archive-revalidation";
 
 const sha=(s:string)=>createHash("sha256").update(s,"utf8").digest("hex");
 const yaml=(s:string|null|undefined)=>s==null?"null":JSON.stringify(s);
@@ -28,7 +30,7 @@ export interface CanonicalSafeEditStep {
   path:string;
   expectedSha256:string;
   receiptKey:string;
-  state:"needs_create"|"verified_existing"|"hold_conflict"|"hold_event_review"|"hold_index_repair"|"hold_quality_gate";
+  state:"needs_create"|"verified_existing"|"hold_conflict"|"hold_event_review"|"hold_index_repair"|"hold_quality_gate"|"hold_archive_provenance"|"hold_archive_drift";
   readbackVerified:boolean;
   indexed:boolean;
   searchable:boolean;
@@ -41,7 +43,7 @@ export interface CanonicalSafeEditWorkflow {
   version:"M5.3-recipe";
   status:"pending_safe_edit"|"saved_verified"|"pending_source_capture"|
     "source_saved_analysis_pending"|"hold_source_event_review"|
-    "hold_conflict_or_index"|"hold_research_quality";
+    "hold_conflict_or_index"|"hold_research_quality"|"hold_archive_provenance"|"hold_archive_drift";
   sourceChat:string;
   steps:CanonicalSafeEditStep[];
   readyForNextNews:boolean;
@@ -52,6 +54,8 @@ export interface CanonicalSafeEditWorkflow {
   perDeviceSync:"unverified";
   instructions:string[];
   qualityIssues:string[];
+  archiveProvenanceStatus:WritebackPlan["sourceCapture"]["archiveProvenanceStatus"];
+  archiveProvenanceReason:WritebackPlan["sourceCapture"]["archiveProvenanceReason"];
 }
 
 function inspect(path:string,content:string,tag:string){
@@ -148,6 +152,7 @@ export function buildCanonicalSafeEditWorkflow(
     originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage,
     sourceKind:plan.sourceKind,entityScope:plan.entityScope
   },input.researchReview,input.extractedText):[];
+  const sourceArchiveLines=sourceArchiveReviewLines(plan.sourceCapture.originalSourceArchive);
   const broker=input.brokerUpdate;
   const brokerLines=broker?[
     "## Attributed broker version (not independently verified)","",
@@ -181,6 +186,7 @@ export function buildCanonicalSafeEditWorkflow(
     "## Source provenance","",
     `- Exact user-supplied source: ${wiki(rawPath)}`,
     `- Original publication/source authentication: not verified by this workflow`,
+    ...sourceArchiveLines,
     `- Event date: ${event??"unknown"}; publication date: ${published??"unknown"}`,
     "","## Research analysis (AI interpretation; not approved Thesis)","",
     input.researchReview?renderThaiResearchM55(input.researchReview):analysis??"Analysis pending.","",
@@ -214,10 +220,27 @@ export function buildCanonicalSafeEditWorkflow(
   const legacyConflict=Boolean(legacy&&legacy!==reviewPath&&
     db().prepare("SELECT 1 FROM notes WHERE path=? LIMIT 1").get(legacy))||Boolean(otherCanonical);
   const reviewStep=captureOnly?null:toStep("canonical_review",reviewPath,reviewContent,tag,hasSourceMatch||legacyConflict);
+  const archiveHold=plan.sourceCapture.archiveProvenanceStatus==="HOLD";
+  if(reviewStep&&(reviewStep.state==="hold_conflict"||archiveHold&&reviewStep.state==="verified_existing")){
+    const historical=revalidateHistoricalArchive(reviewPath,reviewContent,plan.sourceCapture.originalSourceArchive,archiveHold);
+    if(historical){
+      const check=inspect(reviewPath,historical.content,tag);
+      reviewStep.state=!check.hashOK?"hold_conflict":!check.indexed||!check.searchable?"hold_index_repair":historical.state;
+      reviewStep.expectedSha256=sha(historical.content);
+      reviewStep.receiptKey=historical.receiptKey;
+      reviewStep.readbackVerified=check.hashOK;
+      reviewStep.indexed=check.indexed;reviewStep.searchable=check.searchable;
+      reviewStep.safeEditRequest=null;
+    }
+  }
+  // Current provenance HOLD blocks new Review, while Source capture is independent.
+  if(reviewStep&&archiveHold&&(reviewStep.state==="needs_create"||reviewStep.state==="verified_existing")){
+    reviewStep.state="hold_archive_provenance";reviewStep.safeEditRequest=null;
+  }
   // Whole-note SHA and FTS prove bytes/indexing, but NOT Obsidian graph integrity.
   // A canonical Review must have a real resolved backlink to its immutable
   // Source. An FTS-fresh note with a stale/missing link index is not ready.
-  if(reviewStep?.state==="verified_existing"){
+  if(reviewStep?.state==="verified_existing"||reviewStep?.state==="hold_archive_drift"){
     const hasResolvedSourceLink=Boolean(db().prepare(
       "SELECT 1 FROM links WHERE source_path=? AND resolved_path=? LIMIT 1"
     ).get(reviewPath,rawPath));
@@ -239,14 +262,16 @@ export function buildCanonicalSafeEditWorkflow(
   const blocked=steps.some(x=>x.state==="hold_conflict"||x.state==="hold_index_repair");
   const reviewHeld=reviewStep?.state==="hold_event_review";
   const qualityHeld=reviewStep?.state==="hold_quality_gate";
+  const archiveState=reviewStep?.state==="hold_archive_drift"||reviewStep?.state==="hold_archive_provenance"?reviewStep.state:null;
   return {
     version:"M5.3-recipe",status:blocked?"hold_conflict_or_index":
       captureOnly?(saved?"source_saved_analysis_pending":"pending_source_capture"):
-      qualityHeld?"hold_research_quality":
+      archiveState??(qualityHeld?"hold_research_quality":
       saved?"saved_verified":
-      reviewHeld?"hold_source_event_review":"pending_safe_edit",
-    sourceChat,steps,readyForNextNews:saved&&!qualityHeld,analysisComplete:!captureOnly&&saved&&!qualityHeld,writesPerformedByPlanner:false,
-    qualityIssues,
+      reviewHeld?"hold_source_event_review":"pending_safe_edit"),
+    sourceChat,steps,readyForNextNews:saved&&!qualityHeld&&!archiveHold&&!archiveState,analysisComplete:!captureOnly&&saved&&!qualityHeld&&!archiveHold&&!archiveState,writesPerformedByPlanner:false,
+    qualityIssues,archiveProvenanceStatus:plan.sourceCapture.archiveProvenanceStatus,
+    archiveProvenanceReason:plan.sourceCapture.archiveProvenanceReason,
     protectedNotesTouched:false,
     sourcePreservation:plan.inputFormat==="text"?"text_input":
       plan.sourceCapture.attachmentVerified?"text_plus_verified_user_attachment":"text_only_binary_not_verified",
