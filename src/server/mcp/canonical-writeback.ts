@@ -112,7 +112,8 @@ function planned(input: z.infer<typeof canonicalInputSchema>) {
         review.state="hold_quality_gate";
       review.safeEditRequest=null;
     }
-    if(workflow.status!=="hold_conflict_or_index"&&workflow.status!=="hold_source_event_review")
+    if(workflow.status!=="hold_conflict_or_index"&&workflow.status!=="hold_source_event_review"&&
+      workflow.status!=="hold_archive_provenance"&&workflow.status!=="hold_archive_drift")
       workflow.status="hold_research_quality";
     workflow.qualityIssues=[...new Set([...workflow.qualityIssues,"typed_research_review_required"])];
     workflow.readyForNextNews=false;
@@ -140,7 +141,8 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
     previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p});
   }
   return {phase:"preview_only",planId:plan.planId,workflowStatus:workflow.status,
-    qualityIssues:workflow.qualityIssues,
+    qualityIssues:workflow.qualityIssues,readyForNextNews:workflow.readyForNextNews,
+    archiveProvenanceStatus:workflow.archiveProvenanceStatus,archiveProvenanceReason:workflow.archiveProvenanceReason,
     steps:workflow.steps.map(({kind,path,state,expectedSha256,receiptKey})=>({kind,path,state,expectedSha256,receiptKey})),
     previews,protectedNotesTouched:false,perDeviceSync:"unverified",writesPerformed:false,
     next:"Review exact diffs and authorize apply_canonical_writeback with these tokens; no Vault notes have been written."};
@@ -170,7 +172,16 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
       await withPausedSync(()=>{
         for(const step of pending) {
           const a=args.authorizations.find(x=>x.operationId===step.receiptKey)!;
-          try {receipts.push(apply(a,actor));}
+          try {
+            // Sync pause is asynchronous: archive state may have changed since
+            // admission. Revalidate immediately before each canonical write.
+            // A safe Source may survive; never use a stale Review authorization.
+            const current=planned(args.input).workflow.steps.find(s=>s.kind===step.kind);
+            if(current?.state!=="needs_create"||current.receiptKey!==step.receiptKey||
+              current.expectedSha256!==step.expectedSha256)
+              throw Error("Canonical state or archive provenance changed; prepare again");
+            receipts.push(apply(a,actor));
+          }
           catch(e) {interrupted=e instanceof Error?e.message:"Safe Edit operation failed";break;}
         }
       });
@@ -182,6 +193,7 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   return {phase:"apply_verified_or_pending",planId:plan.planId,
     status:after.status,readyForNextNews:after.readyForNextNews,
     qualityIssues:after.qualityIssues,
+    archiveProvenanceStatus:after.archiveProvenanceStatus,archiveProvenanceReason:after.archiveProvenanceReason,
     steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable})=>
       ({kind,path,state,receiptKey,readbackVerified,indexed,searchable})),
     receipts,interrupted,protectedNotesTouched:false,perDeviceSync:"unverified",

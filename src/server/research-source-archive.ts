@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { db } from "./db";
 import { env } from "./env";
+import {archiveEligibleUrl,canonicalSourceUrl} from "./source-url";
 
 /**
  * Internal, authenticated-ingest ADAPTER DEPENDENCY — not an MCP write action.
@@ -45,15 +46,9 @@ function validTimestamp(s:string):boolean {
     !Number.isNaN(d.valueOf())&&d.toISOString().slice(0,19)===s.slice(0,19);
 }
 export function normalizedArchiveSource(source:string):string{
-  let u:URL;
-  try{u=new URL(source);}catch{throw new Error("source_url_invalid");}
-  if(u.protocol!=="https:"||!u.hostname||u.username||u.password||u.port)
-    throw new Error("source_url_must_be_standard_https");
-  u.hash="";
-  for(const k of [...u.searchParams.keys()])
-    if(/^utm_|^(fbclid|gclid)$/i.test(k))u.searchParams.delete(k);
-  u.searchParams.sort();
-  return u.toString(); // URL path/query values remain case-sensitive
+  const canonical=archiveEligibleUrl(source);
+  if(!canonical)throw new Error("source_url_must_be_standard_https");
+  return canonical;
 }
 function sourceDir():string {
   const root=path.resolve(env.dataDir);
@@ -157,6 +152,13 @@ export function inspectOriginalSourceHistory(originalSource:string,validateBytes
   const key=normalizedArchiveSource(originalSource);
   const all=db().prepare("SELECT * FROM source_snapshots WHERE source_key = ? ORDER BY revision LIMIT 101")
     .all(key) as Row[];
+  if(!all.length){
+    // Older archive keys may predate the shared trailing-punctuation policy.
+    // Never silently call that expected state absent or rewrite historical IDs.
+    const keys=db().prepare("SELECT DISTINCT source_key FROM source_snapshots LIMIT 101").all() as {source_key:string}[];
+    if(keys.length>100)throw Error("source_archive_alias_scan_limit");
+    if(keys.some(row=>canonicalSourceUrl(row.source_key)===key))throw Error("source_archive_legacy_url_binding");
+  }
   const truncated=all.length>100;
   const snapshots=all.slice(0,100).map(x=>getRow(x,validateBytes));
   return {status:"source_byte_archive_inspection_only",originalSource,revisionCount:snapshots.length,

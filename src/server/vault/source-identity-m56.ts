@@ -6,20 +6,10 @@
 import {createHash} from "node:crypto";
 import {db} from "../db";
 import {readNote} from "./notes";
+import {canonicalSourceUrl as canonicalUrl} from "../source-url";
 
 const sha=(s:string)=>createHash("sha256").update(s,"utf8").digest("hex");
 const idFromPath=(path:string)=>/^00_Inbox\/ChatGPT\/Investment Intake - (IN-[A-F0-9]{16})\.md$/.exec(path)?.[1];
-function canonicalUrl(url:string|null|undefined){
-  if(!url?.trim())return null;
-  try {
-    const u=new URL(url.trim().replace(/[),.;]+$/g,""));
-    if(!["https:","http:"].includes(u.protocol)||u.username||u.password)return url.trim();
-    u.hash="";
-    for(const k of [...u.searchParams.keys()])if(/^utm_|^(?:fbclid|gclid)$/i.test(k))u.searchParams.delete(k);
-    u.searchParams.sort();
-    return u.toString();
-  }catch{return url.trim();}
-}
 function sourceFence(text:string){
   const max=Math.max(2,...[...(text.match(/`+/g)??[])].map(x=>x.length));
   const fence="`".repeat(max+1);

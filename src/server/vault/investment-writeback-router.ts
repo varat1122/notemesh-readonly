@@ -6,6 +6,7 @@
  * Never edits the vault or upgrades protected investment decisions.
  */
 import { readNote } from "./notes";
+import {canonicalHttpSourceUrl as canonicalSourceUrl} from "../source-url";
 import { db } from "../db";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
@@ -130,17 +131,6 @@ const MAX_TEXT=12000;
  * Accept only exact issuer + asserted original event date + canonical URL.
  * File modified/imported dates never identify an economic event.
  */
-function canonicalSourceUrl(value:string):string|null{
-  try {
-    const u=new URL(value.replace(/[),.;]+$/g,""));
-    if(!["https:","http:"].includes(u.protocol)||u.username||u.password)return null;
-    u.hash="";
-    for(const k of [...u.searchParams.keys()])
-      if(/^utm_|^(?:fbclid|gclid)$/i.test(k))u.searchParams.delete(k);
-    u.searchParams.sort();
-    return u.toString();
-  }catch{return null;}
-}
 function relatedIssuer(f:Record<string,unknown>,issuer:string):boolean{
   const names=[f.company,f.entity,f.ticker,f.issuer].flatMap(v=>Array.isArray(v)?v:[v]);
   return names.some(v=>typeof v==="string"&&v.trim().toUpperCase()===issuer.trim().toUpperCase());
