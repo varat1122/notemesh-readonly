@@ -25,6 +25,12 @@ Status: **PREVIEW/REVIEW ONLY — NOT APPLIED.** This document does not authoriz
 5. Re-run integrity checks and prove retained admin account and authorization records, existing sign-in, new sign-in/session, OAuth DCR/consent, refresh scope narrowing, revocation and Safe Edit resource-audience separation on the isolated restored copy. Document as-of time and exact SHA/receipt.
 6. Only after compatible tests **and** a reviewed recoverable copy are confirmed, schedule a Staging-only cutover with authentication/Sync paused, schema cleanup, and coordinated deployment of the reviewed SHA. A rollback of the application **alone** is unsafe after a changed auth schema; define a compatible rollback/restore plan before cutover.
 
+## Manual cleanup and rollback contract
+
+Cleanup is an explicit operator action only, never automatic or boot-time migration. The manual `scripts/account-issuer-cleanup.mjs` procedure does not replace the verified backup and isolated restore rehearsal above; its default report mode is not a backup receipt.
+
+If rollback is required after cleanup, keep authentication/Sync and other writers paused. Restore the verified, compatible **pre-cleanup database/schema** together with the reviewed application/configuration version and coherent recovery set. Verify integrity, schema and authentication compatibility before resuming the approved prior state. **Do not rely on an older application's boot to recreate `account.issuer` or its index**: that is not a verified restore or an authorized rollback mechanism. Preserve the original backup and receipts. This contract does not authorize executing cleanup or restore.
+
 ## M4 Acceptance
 - Security audit, lint, typecheck, build, all unit/HTTP/E2E tests, Docker image/process gate GREEN for the exact commit. No ignored high/critical Better Auth advisories.
 - Test-DB migration rehearsal with verified backup/readback and old/new login compatibility; no Production modifications.

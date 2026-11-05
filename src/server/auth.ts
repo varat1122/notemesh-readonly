@@ -255,26 +255,17 @@ export const auth = betterAuth({
 
 let migrated = false;
 
-// Creates/updates Better Auth tables on demand. Better Auth >=1.7.3
-// reverted the mandatory account.issuer schema added in 1.7.0-1.7.2.
-// A claimed older database requires a separate, checksum-backed cleanup.
-// Fail closed here instead of silently changing an authenticated live DB.
+// Better Auth >=1.7.3 removed account.issuer. Do not silently alter a live
+// legacy authentication table during the dependency security upgrade.
 function assertLegacyAccountSchemaCleared(): void {
-  // Better Auth >=1.7.3 removed the account.issuer column. Existing 1.7.0-1.7.2
-  // databases may still have a NOT NULL issuer and composite unique index.
-  // A package-only upgrade can break sign-ins/account creation. Do not mutate
-  // a live SQLite auth database without an independently verified backup.
   const d = db();
-  const hasAccount = d.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'account'",
-  ).get();
+  const hasAccount = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'account'").get();
   if (!hasAccount) return;
   const columns = d.prepare("PRAGMA table_info(account)").all() as { name: string }[];
   if (columns.some(c => c.name === "issuer")) {
     throw new Error(
-      "Legacy Better Auth 1.7.0-1.7.2 account.issuer column detected. " +
-      "Stop before enabling the patched build; back up app.sqlite, verify a restored copy, " +
-      "and apply the reviewed SQLite issuer-index/column cleanup in docs/SECURITY_BETTER_AUTH_177_STAGING.md.",
+      "Legacy Better Auth account.issuer detected; deployment held. " +
+      "A verified encrypted off-volume backup, isolated restore and separately reviewed production schema cleanup are required before this build can serve authentication.",
     );
   }
 }

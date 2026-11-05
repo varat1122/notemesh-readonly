@@ -33,6 +33,34 @@ transaction or background queue**. A successfully stored Source is retained
 when a Review fails. Interrupted Safe Edit journal operations require operator
 reconciliation; the system never silently overwrites another writer's note.
 
+### Historical receipts and current revalidation
+
+A durable successful Safe Edit write receipt records that the named operation's
+write, readback and index verification passed **at that time**, for its recorded
+path/hash. It is historical execution evidence, not a promise that the current
+Vault, link index or research evidence will remain valid indefinitely.
+
+Every future prepare/re-plan checks current state again. A missing Review-to-Source
+link, changed index/content or invalid primary-evidence receipt can therefore
+produce a current HOLD even when the historical write succeeded. For an
+already-written Review, that HOLD preserves its bytes and historical receipt;
+it does not delete, overwrite or authorize replay of the Review. Keep the original
+receipt and record the new HOLD separately; never rewrite history as a failed
+write or treat an old success as permission to bypass current checks.
+
+A primary-evidence receipt is claim-scoped evidence, distinct from the Safe Edit
+write receipt. Revoking it leaves prior Source/Review bytes and historical write
+receipts intact, but **current evidence usability must HOLD**: it cannot support
+a fresh `verified_primary` conclusion. Read-time validation also rechecks scope,
+signatures and archived bytes; a formerly approved receipt is not a cached PASS.
+
+Repair is a separate explicit, reviewed workflow with its own authority and
+evidence. A re-plan/HOLD is not an automatic repair, reindex, deletion or note
+overwrite. Preserve existing bytes/receipts, diagnose the current failure, and
+revalidate after an authorized repair before claiming readiness again. See the
+[Safe Edit recovery runbook](SAFE_EDIT_RUNBOOK.md#interrupted-operation-recovery-administrator-only)
+and [primary-evidence receipt design](investment-os/m551-primary-evidence-receipt-design-2026-10-26.md).
+
 ### Protective boundaries
 
 - Uses the same Railway Production Service, `/data` volume, Vault and OAuth.
