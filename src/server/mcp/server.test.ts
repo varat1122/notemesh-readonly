@@ -63,6 +63,7 @@ const READ_TOOLS = [
   "plan_pdf_extraction_coverage",
   "plan_review_revision",
   "preview_edit",
+  "preview_hybrid_claim_reconciliation",
   "random_note",
   "read_attachment",
   "read_note",

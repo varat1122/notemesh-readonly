@@ -5,6 +5,7 @@ import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
+import { hybridClaimPreview, type HybridInput } from "../vault/investment-hybrid-readonly";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import {planDuplicateSourceLinkM56} from "../vault/event-review-relation-m56";
 import {discoverNearDuplicateSourcesM56,planReviewRevisionM56} from "../vault/review-discovery-m56";
@@ -376,6 +377,41 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     }) => {
       const pack = buildInvestmentContextPack({question,issuers,industry,focus,maxNotes,maxChars});
       return json(withBoundary({...pack,items:fenceEach(pack.items,"excerpt")}));
+    }),
+  );
+  // RI-011 is intentionally read-only. Candidate results cannot authorize source
+  // creation, semantic duplicate adjudication, protected edits, or graph edges.
+  server.registerTool(
+    "preview_hybrid_claim_reconciliation",
+    {
+      title: "RI-011 structured and historical claim candidate preview (read-only)",
+      annotations: READ,
+      description: "Read-only bounded candidate discovery combining existing structured claim matching with full-text Vault search and short note readback. Compares only explicit equivalent units using exact integer scaling and identical original-document URLs. Historical snippets and declared provenance are untrusted text; source URLs and linked paths remain raw, unverified follow-up locators. Returns analyst review/HOLD states only; NEVER saves data, verifies issuer facts, adjudicates semantic duplicates, updates any Thesis/Portfolio or writes Knowledge Graph edges.",
+      inputSchema: {
+        domain:z.enum(["company","industry","macro","asset"]).describe("Claim domain"),
+        entity:z.string().min(1).max(140).describe("Canonical issuer or macro/industry entity"),
+        metric:z.string().min(1).max(140).describe("Exact metric, including relevant accounting basis in its identifier"),
+        period:z.string().min(1).max(120).describe("Exact fiscal/reporting period, not inferred from imported date"),
+        originalSource:z.string().min(1).max(1000).describe("Caller-declared original source URL; not independently authenticated"),
+        statement:z.string().min(8).max(2500).describe("Attributed statement, untrusted until original source verified"),
+        value:z.string().max(150).optional().describe("Original literal numeric value"),
+        unit:z.string().max(80).optional().describe("Explicit measurement unit, no inferred FX or GAAP basis"),
+        eventDate:z.string().nullable().optional().describe("Actual event date or null"),
+        publishedAt:z.string().nullable().optional().describe("Original publication date or null"),
+        searchQueries:z.array(z.string().min(3).max(120)).max(3).optional().describe("Optional bounded historical FTS terms, not evidence of identity"),
+        maxFtsHits:z.number().int().min(1).max(10).optional().describe("Maximum untrusted Vault search candidates (default 6)"),
+      }
+    },
+    safe((args:HybridInput)=>{
+      const preview=hybridClaimPreview(args);
+      // Fence declarations from arbitrary frontmatter, preserving server-derived
+      // states/booleans and raw locator fields for subsequent tool calls.
+      const candidates=preview.historical.candidates.map(candidate=>({...candidate,
+        provenance:fenceEach([candidate.provenance],"recordType","declaredVerification",
+          "declaredSourceType","declaredSourceKind","eventDate","publicationDate",
+          "receivedDate","originalDocumentAccess")[0]}));
+      return json(withBoundary({...preview,historical:{...preview.historical,
+        candidates:fenceEach(candidates,"title","snippet","readExcerpt")}}));
     }),
   );
   server.registerTool(

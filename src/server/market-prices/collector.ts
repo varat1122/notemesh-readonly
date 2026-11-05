@@ -23,6 +23,14 @@ export function scheduledCutoff(now: Date): number {
   return scheduled.getTime();
 }
 
+export function pendingPriceListings(rows: { id: string; barCount: number; lastSuccessfulRefresh: string | null; lastError: string | null }[], watchlist: InstrumentInput[], now: Date) {
+  return watchlist.filter(i => {
+    const row = rows.find(r => r.id === instrument(i).id);
+    const refreshed = row?.lastSuccessfulRefresh ? Date.parse(row.lastSuccessfulRefresh) : NaN;
+    return !row || row.barCount < 1 || !!row.lastError || !Number.isFinite(refreshed) || refreshed < scheduledCutoff(now) || refreshed > now.getTime();
+  }).length;
+}
+
 export interface RefreshOptions {
   filename?: string; watchlist?: InstrumentInput[]; now?: Date; force?: boolean;
   fetcher?: typeof fetchYahooDaily; pause?: (ms: number) => Promise<unknown>;
@@ -74,7 +82,8 @@ export async function collectIntoPriceStore(store: PriceStore, options: RefreshO
         if (["provider_rate_limited", "provider_http_401", "provider_http_403", "insufficient_price_disk_reserve"].includes(code)) break;
       }
     }
-    return { status: results.some(r => r.status === "failed") ? "partial_failure" : "complete", results };
+    const remainingDue = pendingPriceListings(store.instruments() as Parameters<typeof pendingPriceListings>[0], list, now);
+    return { status: results.some(r => r.status === "failed") ? "partial_failure" : remainingDue ? "pending_retry_or_coverage" : "complete", remainingDue, results };
   } finally {
     if (lease) store.releaseLease(lease);
   }
