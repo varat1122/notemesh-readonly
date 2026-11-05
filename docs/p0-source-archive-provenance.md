@@ -65,9 +65,22 @@ usability. Repair/revision requires a separate explicit reviewed workflow. See
 ## One URL identity contract, then eligibility
 
 Source identity, structured event correlation and archive correlation share
-`source-url.ts`. The accepted identity rules trim whitespace, remove literal
-trailing `) , . ;`, remove fragments and tracking parameters (`utm_*`, `fbclid`,
-`gclid`), normalize the host through URL parsing and sort query parameters.
+`source-url.ts`. The identity rules trim surrounding whitespace, remove the
+literal fragment before applying trailing `) , . ;` normalization, parse supported
+HTTP/HTTPS, remove tracking parameters (`utm_*`, `fbclid`, `gclid`), normalize the
+host and sort query parameters. Encoded `%23` is URL data, not a fragment delimiter.
+If stripping would invalidate an otherwise parseable URL, retain its parsed form
+instead of manufacturing an invalid URL. Unsupported schemes/credentials retain
+their trimmed input identity as before.
+
+Normalization reaches a fixed point: `canonical(canonical(x)) = canonical(x)`.
+Tracking removal, query sorting or URL serialization can expose another terminal
+literal punctuation sequence; the same rules run again until stable. This also
+closes formerly unstable cases such as `doc)?utm_source=x` and a query's encoded
+period serialized as a terminal literal `.`. Already-stable plain canonical
+outputs are unchanged. `K` and `K#section` share identity even when K ends in
+punctuation, including `report_(Q3)` and query values. No clock, network or DB
+state participates in URL normalization.
 URLSearchParams normalizes query `%20` and `+` to the same space representation;
 query `%2B` stays literal plus. Path `%20` and path `+`, path case and query value
 case remain distinct. Unsupported/free-text locators retain their trimmed
@@ -77,6 +90,27 @@ Eligibility is checked after canonicalization: standard HTTPS, no credentials
 and no non-default port. HTTP, unsupported schemes/ports and free text return
 `ABSENT / not_archivable`, without attempting archive reads. An eligible lookup
 failure is HOLD, not an assertion that there was no archive.
+
+### Historical N1c identity guard
+
+The pre-N1c single-pass normalizer is retained only for comparison, never for
+creating new IDs/keys. A matching historical Source whose URL meaning changed
+and whose ID differs from the corrected v3 ID fails closed with
+`M56_LEGACY_SOURCE_URL_RECONCILIATION_REQUIRED`. This does not rewrite its bytes,
+ID, path or receipt, issue a duplicate Source, or bypass reconciliation via
+`existingIntakeId`. New receipts already have the corrected ID and replay through
+plain/fragment/canonical aliases as `verified_existing`. Unaffected historical
+Source reuse retains the existing M5.6 behavior.
+
+Archive inspection also checks the known pre-N1c keys of the supplied input's
+plain/fragment forms: at most two distinct exact indexed lookups, excluding the
+current key. A retained old key yields `HOLD / legacy_url_binding`, even when a
+current key also exists. It is not relabeled absent, selected or rebound. This
+is a guard for known prior-key collisions, not a global migration/discovery of
+every malformed historical key. Historical reconciliation remains a separate
+reviewed workflow; no schema, source, archive or receipt migration is performed.
+
+### Bounded trailing-punctuation compatibility
 
 Historical archive keys/IDs are not migrated. Exact canonical-key history is
 checked first. Only when it is absent, compatibility lookup uses the **full

@@ -78,6 +78,60 @@ async function historicalState(){
 }
 
 describe("P0 canonical Review original-source archive provenance",()=>{
+  it.each(["https://example.org/doc",...[ ")",",",".",";"].map(c=>"https://example.org/doc"+c),
+    "https://www.sec.gov/Archives/report_(Q3)","https://example.org/doc?q=value)",
+    "https://example.org/doc?q=value.","https://example.org/doc)?utm_source=x"])(
+    "N1c fragment replay of %s reuses Source/Review and the exact archive",async(target)=>{
+      const alias=target+"#sec",plain=await route({...input,sourceUrl:target});
+      const before=await route({...input,sourceUrl:alias});
+      expect(before.planId).toBe(plain.planId);
+      expect(before.safeEditWorkflow!.steps[0].path).toBe(plain.safeEditWorkflow!.steps[0].path);
+      const snap=await capture({originalSource:alias,retrievedFrom:target});
+      const initial=await route({...input,sourceUrl:alias});await applyRecipe(initial);const saved=await historicalState();
+      const {canonicalSourceUrl}=await import("../source-url");
+      for(const url of [target,alias,canonicalSourceUrl(alias)!]){
+        const repeat=await route({...input,sourceUrl:url});
+        expect(repeat.planId).toBe(initial.planId);
+        expect(repeat.sourceCapture.archiveProvenanceStatus).toBe("ARCHIVED_BYTES_INTACT");
+        expect(repeat.sourceCapture.originalSourceArchive!.snapshotId).toBe(snap.snapshotId);
+        expect(repeat.safeEditWorkflow!.steps.map(x=>x.state)).toEqual(["verified_existing","verified_existing"]);
+        expect(await applyRecipe(repeat)).toHaveLength(0);expect(await historicalState()).toEqual(saved);
+      }
+    });
+  it.each(["https://www.sec.gov/Archives/report_(Q3)#sec","https://example.org/doc?q=value)#sec",
+    "https://example.org/doc)?utm_source=x","https://example.org/doc?a=tail.&Z=x"])(
+    "N1c preserves pre-fix receipts for %s and HOLDs changed historical identity",async(target)=>{
+    const urls=await import("../source-url");
+    const current=await route({...input,sourceUrl:target});
+    const legacy=vi.spyOn(urls,"canonicalSourceUrl").mockImplementation(urls.legacyCanonicalSourceUrlN1c);
+    const old=await route({...input,sourceUrl:target});expect(old.planId).not.toBe(current.planId);
+    await applyRecipe(old);legacy.mockRestore();const saved=await historicalState();
+    for(const sourceUrl of [target,target.split("#")[0],urls.canonicalSourceUrl(target)!])
+      await expect(route({...input,sourceUrl})).rejects.toThrow("M56_LEGACY_SOURCE_URL_RECONCILIATION_REQUIRED");
+    await expect(route({...input,sourceUrl:target,existingIntakeId:old.planId}))
+      .rejects.toThrow("M56_LEGACY_SOURCE_URL_RECONCILIATION_REQUIRED");
+    expect(await historicalState()).toEqual(saved);
+  });
+  it.each(["https://example.org/doc)","https://example.org/doc?q=value)"])(
+    "N1c retains old archive identity for %s and requests reconciliation instead of rebinding",async(target)=>{
+      const raw=target+"#sec",urls=await import("../source-url"),oldKey=urls.legacyCanonicalSourceUrlN1c(raw)!;
+      const snap=await capture({originalSource:raw,retrievedFrom:raw});const {db}=await import("../db");
+      const oldId=createHash("sha256").update(oldKey+"\n"+snap.sha256).digest("hex");
+      db().prepare("UPDATE source_snapshots SET source_key=?,snapshot_id=? WHERE snapshot_id=?").run(oldKey,oldId,snap.snapshotId);
+      const before=db().prepare("SELECT * FROM source_snapshots").all();
+      for(const sourceUrl of [raw,target]){
+        const p=await route({...input,sourceUrl});
+        expect(p.sourceCapture).toMatchObject({archiveProvenanceStatus:"HOLD",archiveProvenanceReason:"legacy_url_binding"});
+        expect(p.safeEditWorkflow!.steps[1].safeEditRequest).toBeNull();
+      }
+      expect(db().prepare("SELECT * FROM source_snapshots").all()).toEqual(before);
+      expect(fs.readFileSync(blob(snap)).equals(bytes)).toBe(true);
+      await capture({originalSource:raw,retrievedFrom:raw});
+      const both=db().prepare("SELECT * FROM source_snapshots ORDER BY snapshot_id").all();
+      expect(both).toHaveLength(2);
+      expect((await route({...input,sourceUrl:raw})).sourceCapture.archiveProvenanceReason).toBe("legacy_url_binding");
+      expect(db().prepare("SELECT * FROM source_snapshots ORDER BY snapshot_id").all()).toEqual(both);
+    });
   it("binds a persisted text Source to intact archived bytes, then writes/reads/indexes its first typed Review and repeats idempotently",async()=>{
     const source=await route({...input,researchReview:undefined,captureOnly:true});
     expect(await applyRecipe(source)).toHaveLength(1);

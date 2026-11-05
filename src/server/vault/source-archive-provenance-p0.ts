@@ -1,6 +1,7 @@
 import {inspectOriginalSourceHistory,inspectOriginalSourceSnapshot,
   normalizedArchiveSource,sha256,type DocumentSnapshot} from "../research-source-archive";
-import {archiveEligibleUrl} from "../source-url";
+import {archiveEligibleUrl,legacyCanonicalSourceUrlN1c} from "../source-url";
+import {db} from "../db";
 
 /** Public summary contains only validated scalars/enums and opaque digests.
  * Raw archive URLs, response headers and arbitrary MIME strings stay internal. */
@@ -50,6 +51,13 @@ export function inspectSourceArchiveProvenance(sourceUrl:string|null|undefined,
   const canonical=archiveEligibleUrl(sourceUrl);
   if(!canonical)return {status:"ABSENT",reason:"not_archivable",snapshot:null};
   try{
+    // Compare only the known pre-N1c keys of this input's plain/fragment forms.
+    // At most two exact indexed reads; never reinterpret or migrate old keys.
+    const legacyKeys=new Set([legacyCanonicalSourceUrlN1c(sourceUrl),
+      legacyCanonicalSourceUrlN1c(sourceUrl.trim().split("#",1)[0]+"#")]);
+    for(const key of legacyKeys)if(key&&key!==canonical&&
+      db().prepare("SELECT 1 FROM source_snapshots WHERE source_key=? LIMIT 1").get(key))
+      return {status:"HOLD",reason:"legacy_url_binding",snapshot:null};
     const history=inspectOriginalSourceHistory(canonical,false);
     if(history.limitReached)return {status:"HOLD",reason:"history_limit",snapshot:null};
     const selected=history.snapshots.at(-1);
