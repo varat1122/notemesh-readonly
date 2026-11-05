@@ -128,6 +128,13 @@ describe("P0 canonical Review original-source archive provenance",()=>{
     const retry=await route();expect(retry.sourceCapture.originalSourceArchive).toEqual(p.sourceCapture.originalSourceArchive);
     expect(retry.safeEditWorkflow!.status).toBe("saved_verified");expect(await historicalState()).toEqual(saved);
   });
+  it("tracking-only URL aliases retain canonical archive binding and Review retry idempotence",async()=>{
+    await capture();const p=await route();await applyRecipe(p);const saved=await historicalState();
+    const retry=await route({...input,sourceUrl:sourceUrl+"?utm_source=retry#section"});
+    expect(retry.planId).toBe(p.planId);
+    expect(retry.sourceCapture.originalSourceArchive).toEqual(p.sourceCapture.originalSourceArchive);
+    expect(retry.safeEditWorkflow!.status).toBe("saved_verified");expect(await historicalState()).toEqual(saved);
+  });
   it("same URL with changed bytes/new capture exposes revision chronology and HOLDs rather than rewriting the old Review",async()=>{
     const first=await capture();const initial=await route();await applyRecipe(initial);const saved=await historicalState();
     const second=await capture({bytes:Buffer.from("<html>Publisher revised the document after the original event.</html>"),

@@ -50,7 +50,7 @@ export function inspectSourceArchiveProvenance(sourceUrl:string|null|undefined,
       return {status:"HOLD",reason:"selected_snapshot_missing_or_corrupt",snapshot:null};
     const captureDay=checked.capturedAt.slice(0,10);
     return {status:"ARCHIVED_BYTES_INTACT",reason:"url_correlated_snapshot",snapshot:{
-      snapshotId:checked.snapshotId,sourceUrl,originalSource:checked.originalSource,
+      snapshotId:checked.snapshotId,sourceUrl:normalizedArchiveSource(sourceUrl),originalSource:checked.originalSource,
       retrievedFrom:checked.retrievedFrom,sha256:checked.sha256,byteLength:checked.byteLength,
       revision:checked.revision,capturedAt:checked.capturedAt,contentType:checked.contentType,
       responseEtag:checked.responseEtag,responseLastModified:checked.responseLastModified,

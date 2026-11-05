@@ -24,7 +24,7 @@ schema cleanup or protected-note write authority.
 
 The read-only planner queries existing archive metadata by the archive's shared
 URL normalization, then validates one snapshot's exact bytes. The output binds
-the intake URL, archived URL, retrieved-from URL, snapshot ID, SHA-256, byte
+the normalized intake URL, archived URL, retrieved-from URL, snapshot ID, SHA-256, byte
 length, archive sequence revision, capture timestamp, content type, ETag and
 Last-Modified hints to the caller-declared event/publication dates. It verifies
 the snapshot ID's URL/digest derivation and stable metadata across readback.
@@ -39,6 +39,7 @@ publication does not establish what the document said when the event occurred.
 Same-day date comparisons cannot establish ordering. Unknown hints remain null;
 `originalEventVersionVerified` is always false in this provenance path.
 
+Tracking-only URL aliases retain the same canonical binding and Review hash.
 The existing archive's URL+bytes retry returns its original snapshot and capture
 metadata, rather than relabelling old bytes with a new capture time. Changed bytes
 at the same URL create a distinct existing-archive revision; neither a new
@@ -73,7 +74,7 @@ validation, Source identity and RI-011 classification retain their baseline code
 ## Regression evidence
 
 `source-archive-provenance-p0.test.ts` covers persisted Source → intact archive →
-first typed Review → idempotent repeat; absent/corrupt/missing archive; same bytes
+first typed Review → idempotent repeat; tracking-only URL retries; absent/corrupt/missing archive; same bytes
 retry; changed bytes and later publisher revision; out-of-order capture;
 forged-primary-receipt HOLD; multiple Reviews/one origin; same-event HOLD;
 Markdown injection; history/byte limits; stale preview rejection; URL/digest and
