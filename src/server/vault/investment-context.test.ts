@@ -124,6 +124,16 @@ describe("RI-001 issuer context resolution",()=>{
 });
 
 describe("RI-001 macro relevance and archive independence",()=>{
+  it.each(["null","[]","42"])("treats non-object legacy index metadata %s as absent, never primary evidence",async metadata=>{
+    const build=await fixture();
+    const note="10_Knowledge/Macro and Markets/Vietnam GDP legacy.md";
+    await addExtra(note,"# Vietnam GDP\nLegacy commentary without primary verification.");
+    const {db}=await import("../db");
+    db().prepare("UPDATE notes SET frontmatter=? WHERE path=?").run(metadata,note);
+    const pack=build({question:"Vietnam GDP",industry:"Vietnam",focus:"macro"});
+    expect(pack.items.map(x=>x.path)).toContain(note);
+    expect(pack.incomplete.join(" ")).toContain("primary macro/statistical");
+  });
   it("does not report a counter-evidence heading that was clipped out of the excerpt",async()=>{
     const build=await fixture();
     await addExtra("05_Thesis/NVDA - Evidence Register.md","# NVDA evidence\n"+"x".repeat(2500)+"\n## Counter-evidence\nRisks not in the selected excerpt.");

@@ -131,7 +131,10 @@ function explicitMacroScope(path: string, topic: string): boolean {
 }
 function indexedMetadata(path:string):Record<string,unknown>{
   const row=db().prepare("SELECT frontmatter FROM notes WHERE path = ?").get(path) as {frontmatter:string|null}|undefined;
-  try{return row?.frontmatter?JSON.parse(row.frontmatter):{};}catch{return {};}
+  try{
+    const fm:unknown=row?.frontmatter?JSON.parse(row.frontmatter):null;
+    return fm&&typeof fm==="object"&&!Array.isArray(fm)?fm as Record<string,unknown>:{};
+  }catch{return {};}
 }
 function historicalOnly(path:string,fm:Record<string,unknown>):boolean{
   const schema=inspectCanonicalKnowledgeMetadata(path,fm);
