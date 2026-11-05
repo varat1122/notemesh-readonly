@@ -79,26 +79,31 @@ and no non-default port. HTTP, unsupported schemes/ports and free text return
 failure is HOLD, not an assertion that there was no archive.
 
 Historical archive keys/IDs are not migrated. Exact canonical-key history is
-checked first. Only when it is absent, compatibility lookup uses the serialized
-canonical **origin + full path**: one exact-key lookup for that prefix, then six
-disjoint binary index ranges for suffixes `# ) , . ; ?`, in that order. Each
-range starts at `prefix + suffix` and ends before `prefix + next ASCII character`.
-The existing `source_key` index seeks directly into each range, including for
-root path `/`; no global/host-wide scan or URL `%`/`_` wildcard matching is used.
-This admits query/fragment variants and legacy trailing punctuation; ordinary
-sibling/child paths outside these suffix ranges do not consume the bound. It is
-a candidate scope, so punctuation-prefixed filenames or differing query values
-may also enter it; only full canonical comparison establishes an alias.
+checked first. Only when it is absent, compatibility lookup uses the **full
+canonical key K, including its query**. Candidates are K followed by one or more
+literal characters from `),.;`. Four disjoint binary ranges start at K plus
+`)`, `,`, `.` and `;`, ending before K plus the next ASCII character. The existing
+`source_key` index locates these ranges; SQL then requires
+`rtrim(source_key, '),.;') = K` **before** DISTINCT/LIMIT. Thus `doc?id=N`,
+`doc.vN.pdf`, `doc,N`, child paths and root `/?p=N` consume no alias slots.
+No `?`/`#` compatibility ranges or path-only prefix lookup remain.
+
+Normal incoming URLs still use the unchanged shared canonicalizer, including
+fragment removal, tracking removal and query sorting, before exact lookup.
+This compatibility path addresses the legacy trailing-punctuation difference;
+it does not reinterpret arbitrary stored query/fragment variants as legacy keys.
 
 At most 100 distinct candidate keys plus one sentinel are returned in total.
 Each query uses the remaining budget, and the ranges do not overlap. Only after
 all ranges complete within the bound are candidates compared using the unchanged
-shared canonicalizer. This adds at most seven indexed compatibility queries;
-it does not canonicalize every key in the archive.
+shared canonicalizer. This adds at most four indexed compatibility queries and
+at most 100 canonical comparisons, with no global distinct-key scan. The returned
+candidate count is bounded; SQLite suffix-filter work within each indexed range
+is data-dependent, not a claimed constant bound on database rows examined.
 
 - `HOLD / history_limit`: more than 100 snapshots for the exact matched source.
-- `HOLD / legacy_alias_scan_limit`: more than 100 plausible distinct alias keys
-  in this origin/path scope. No partial candidate set is selected, even if it
+- `HOLD / legacy_alias_scan_limit`: more than 100 distinct trailing-punctuation
+  candidate keys for this exact K. No partial candidate set is selected, even if it
   already contains a canonical match. Unrelated archive keys do not consume this
   bound. Exact current keys bypass the compatibility lookup.
 - `HOLD / legacy_url_binding`: the complete bounded candidate set contains a
@@ -108,9 +113,9 @@ it does not canonicalize every key in the archive.
   completed compatibility scope. Unrelated archive growth cannot by itself HOLD
   a fresh unarchived URL or make its historical Review drift.
 
-This is compatibility with URL-serialized legacy keys, not exhaustive recovery
-of arbitrary malformed historical values. Leading whitespace, nonserialized
-host spellings or path encodings outside the defined prefix may not be found;
+This is compatibility with the defined legacy punctuation forms, not exhaustive
+recovery of arbitrary malformed historical values. Leading whitespace,
+nonserialized host/path forms or raw stored query/fragment aliases may not be found;
 they require a separately reviewed diagnostic/reconciliation workflow. No
 automatic schema cleanup or archive repair is introduced.
 
@@ -148,7 +153,7 @@ failures can still HOLD a history lookup; this is not a claim about older bytes.
 
 Read at most 100 snapshot metadata rows plus one truncation sentinel, then hash
 one document capped at 8 MiB. The no-canonical-key compatibility scan is limited
-to 100 distinct keys in the defined origin/path candidate scope plus one sentinel,
+to 100 distinct keys in the exact-key trailing-punctuation scope plus one sentinel,
 not the global archive. Actual history truncation and alias-scope truncation have
 separate HOLD reasons. Oversized/inconsistent metadata and selected corruption
 fail closed. Never silently fall back to an

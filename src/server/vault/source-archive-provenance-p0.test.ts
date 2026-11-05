@@ -432,14 +432,47 @@ describe("P0 canonical Review original-source archive provenance",()=>{
       expect(p.safeEditWorkflow!.steps[1].state).toBe("needs_create");
     }
   });
-  it("caps plausible same-path alias candidates with a dedicated reason, without arbitrary selection",async()=>{
-    for(let i=0;i<100;i++){
-      const url=sourceUrl+`?document=${i}`;await capture({originalSource:url,retrievedFrom:url});
+  it.each([
+    ["query values","https://example.org/doc","?id=",""],
+    ["versioned filenames","https://example.org/doc",".v",".pdf"],
+    ["comma filenames","https://example.org/doc",",",""],
+    ["parenthesis filenames","https://example.org/doc",")",""],
+    ["semicolon filenames","https://example.org/doc",";",""],
+    ["root query values","https://example.org/","?p=",""],
+    ["different full queries","https://example.org/doc?id=chosen","?id=",""]
+  ])("excludes 101 unrelated %s from the exact-key legacy alias budget",async(_name,target,prefix,suffix)=>{
+    for(let i=0;i<101;i++){
+      const url=target.split("?")[0]+prefix+i+suffix;
+      await capture({originalSource:url,retrievedFrom:url});
     }
-    expect((await route()).sourceCapture).toMatchObject({archiveProvenanceStatus:"ABSENT",archiveProvenanceReason:"no_archive"});
-    const selected=await capture({originalSource:sourceUrl+"?document=100",retrievedFrom:sourceUrl+"?document=100"});
-    const {db}=await import("../db");
-    db().prepare("UPDATE source_snapshots SET source_key=? WHERE snapshot_id=?").run(sourceUrl+").",selected.snapshotId);
+    const p=await route({...input,sourceUrl:target});
+    expect(p.sourceCapture).toMatchObject({archiveProvenanceStatus:"ABSENT",archiveProvenanceReason:"no_archive"});
+    expect(p.safeEditWorkflow!.steps[1].state).toBe("needs_create");
+    await applyRecipe(p);const saved=await historicalState();
+    expect((await route({...input,sourceUrl:target})).safeEditWorkflow!.status).toBe("saved_verified");
+    expect(await historicalState()).toEqual(saved);
+    // A real alias after the non-alias rows must still be found: filter before
+    // the candidate LIMIT, not by dropping an already-truncated result in JS.
+    const snap=await capture({originalSource:target,retrievedFrom:target});const {db}=await import("../db");
+    db().prepare("UPDATE source_snapshots SET source_key=? WHERE snapshot_id=?").run(target+";",snap.snapshotId);
+    expect((await route({...input,sourceUrl:target})).sourceCapture)
+      .toMatchObject({archiveProvenanceStatus:"HOLD",archiveProvenanceReason:"legacy_url_binding"});
+    expect(await historicalState()).toEqual(saved);
+  });
+  it("caps genuine trailing-punctuation aliases with a dedicated reason, without arbitrary selection",async()=>{
+    const {db}=await import("../db");const {canonicalSourceUrl}=await import("../source-url");
+    async function legacy(i:number){
+      const url=sourceUrl+`?legacy_fixture=${i}`;
+      const snap=await capture({originalSource:url,retrievedFrom:url});
+      const suffix=i.toString(4).replace(/[0-3]/g,n=>[".",")",",",";"][Number(n)]);
+      const key=sourceUrl+suffix;expect(canonicalSourceUrl(key)).toBe(sourceUrl);
+      db().prepare("UPDATE source_snapshots SET source_key=? WHERE snapshot_id=?").run(key,snap.snapshotId);
+    }
+    for(let i=0;i<100;i++){
+      await legacy(i);
+    }
+    expect((await route()).sourceCapture).toMatchObject({archiveProvenanceStatus:"HOLD",archiveProvenanceReason:"legacy_url_binding"});
+    await legacy(100);
     const before=db().prepare("SELECT * FROM source_snapshots ORDER BY source_key").all();
     const archive=await import("../research-source-archive");const read=vi.spyOn(archive,"inspectOriginalSourceSnapshot");
     const p=await route();
@@ -449,10 +482,14 @@ describe("P0 canonical Review original-source archive provenance",()=>{
     expect(read).not.toHaveBeenCalled();
     expect(db().prepare("SELECT * FROM source_snapshots ORDER BY source_key").all()).toEqual(before);
     // Exact current keys bypass the compatibility path even in a busy family.
-    const exact=await route({...input,sourceUrl:sourceUrl+"?document=0"});
+    await capture();
+    const exact=await route();
     expect(exact.sourceCapture.archiveProvenanceStatus).toBe("ARCHIVED_BYTES_INTACT");
+    await applyRecipe(exact);const saved=await historicalState();
+    expect((await route()).safeEditWorkflow!.status).toBe("saved_verified");
+    expect(await historicalState()).toEqual(saved);
   });
-  it.each([")",",",".",";","#legacy","?utm_source=legacy"])("finds plausible legacy suffix %s despite unrelated archive growth, without rebinding it",async(suffix)=>{
+  it.each([")",",",".",";",")),..;;", ".".repeat(120)])("finds plausible legacy suffix %s despite unrelated archive growth, without rebinding it",async(suffix)=>{
     for(let i=0;i<101;i++){
       const url=`https://unrelated-${i}.example.org/doc`;await capture({originalSource:url,retrievedFrom:url});
     }
@@ -461,6 +498,13 @@ describe("P0 canonical Review original-source archive provenance",()=>{
     const before=db().prepare("SELECT * FROM source_snapshots ORDER BY source_key").all();
     expect((await route()).sourceCapture).toMatchObject({archiveProvenanceStatus:"HOLD",archiveProvenanceReason:"legacy_url_binding"});
     expect(db().prepare("SELECT * FROM source_snapshots ORDER BY source_key").all()).toEqual(before);
+  });
+  it("uses the full canonical query key when reconciling a genuine trailing-punctuation alias",async()=>{
+    const target=sourceUrl+"?id=7&z=last";
+    const snap=await capture({originalSource:target,retrievedFrom:target});const {db}=await import("../db");
+    db().prepare("UPDATE source_snapshots SET source_key=? WHERE snapshot_id=?").run(target+"),.;",snap.snapshotId);
+    expect((await route({...input,sourceUrl:target})).sourceCapture)
+      .toMatchObject({archiveProvenanceStatus:"HOLD",archiveProvenanceReason:"legacy_url_binding"});
   });
   it("counts distinct scoped keys rather than revisions of a different same-path source",async()=>{
     const url=sourceUrl+"?document=other";
