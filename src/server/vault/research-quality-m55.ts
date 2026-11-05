@@ -43,7 +43,18 @@ export interface ResearchClassification {
   entityScope?:string[];
 }
 
-const thai=(s:string)=>/[\u0e00-\u0e7f]/u.test(s);
+// Mechanical language screen, not a translation/claim-truth verdict. Quoted
+// originals, code, URLs and numbers do not establish Thai analysis. Require
+// substantive Thai narration in every prose paragraph, allowing technical terms.
+function thai(s:string):boolean{
+  const prose=s.replace(/```[^]*?```|~~~[^]*?~~~/g,"").replace(/^\s*>.*$/gm,"")
+    .replace(/`[^`]*`|"[^"\n]*"|“[^”\n]*”|https?:\/\/\S+/g,"");
+  const paragraphs=prose.split(/\n\s*\n/).map(p=>p.match(/\p{L}/gu)??[]).filter(p=>p.length);
+  return paragraphs.length>0&&paragraphs.every(letters=>{
+    const count=letters.filter(c=>/\p{Script=Thai}/u.test(c)).length;
+    return count>=6&&count/letters.length>=0.35;
+  });
+}
 const nonblank=(s:string|undefined)=>Boolean(s?.trim());
 const validHub=(path:string,prefix:string)=>path.startsWith(prefix)&&path.endsWith(".md")&&!path.includes("..")&&!path.includes("\\");
 
@@ -205,16 +216,19 @@ export function validateResearchM55(classification:ResearchClassification,review
   return [...new Set(issues)];
 }
 
-export function renderThaiResearchM55(review:ThaiResearchReview):string{
+export function renderThaiResearchM55(review:ThaiResearchReview,legacy=false):string{
+  // Legacy rendering is used only to match independently receipted old bytes;
+  // all newly proposed Reviews use Thai headings. Paths/receipt hashing stay put.
+  const heading=(old:string,current:string)=>legacy?old:current;
   return [
     `# ${review.headlineTh.trim()}`,
     ...(review.translationTh?["","## คำแปลจากต้นฉบับ","",review.translationTh.trim()]:[]),
-    "","## What Changed / New vs Known","",review.whatChangedTh.trim(),
-    "","## Fundamental / Macro Mechanism","",review.mechanismTh.trim(),
-    "","## Thesis & Valuation Implication","",review.thesisImplicationTh.trim(),
-    "","## Counter-evidence","",review.counterEvidenceTh.trim(),
-    "","## Required Evidence / What to Watch","",review.requiredEvidenceTh.trim(),"",
-    ...(review.claimAssessments?.length?["## Structured claim assessments (caller-declared; not primary verification)","",
+    "",heading("## What Changed / New vs Known","## สิ่งที่เปลี่ยนแปลงและข้อมูลใหม่เทียบกับข้อมูลเดิม"),"",review.whatChangedTh.trim(),
+    "",heading("## Fundamental / Macro Mechanism","## กลไกพื้นฐานและเศรษฐกิจมหภาค"),"",review.mechanismTh.trim(),
+    "",heading("## Thesis & Valuation Implication","## ผลต่อสมมติฐานการลงทุนและมูลค่า"),"",review.thesisImplicationTh.trim(),
+    "",heading("## Counter-evidence","## หลักฐานโต้แย้งและความเสี่ยง"),"",review.counterEvidenceTh.trim(),
+    "",heading("## Required Evidence / What to Watch","## หลักฐานที่ต้องตรวจสอบและประเด็นติดตาม"),"",review.requiredEvidenceTh.trim(),"",
+    ...(review.claimAssessments?.length?[heading("## Structured claim assessments (caller-declared; not primary verification)","## การประเมินข้ออ้างแบบมีโครงสร้าง (ผู้เรียกระบุ ไม่ใช่การยืนยันจากหลักฐานปฐมภูมิ)"),"",
       ...review.claimAssessments.map(c=>`- ${c.entity??"entity not declared"} | ${c.metric} | ${c.period} | ${c.unit}: ${c.competingValues.join(" vs ")} — ${c.resolution}; conclusion: ${c.conclusion}; selected primary value: ${c.verifiedValue??"none"}; source: ${c.primarySourceUrl??"none"}; server-checkable receipt: ${c.primaryEvidenceReceipt??"none"}`),""]:[])
   ].join("\n");
 }

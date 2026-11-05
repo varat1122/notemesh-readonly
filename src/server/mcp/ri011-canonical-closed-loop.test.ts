@@ -148,7 +148,7 @@ describe("RI-011 E2E Research + Safe Edit real MCP on isolated temporary Vault",
       expect(raw).toContain("verification: not_reverified");
       expect(reviewNote).toContain("original_source_path:");
       expect(reviewNote).toContain(sourcePath);
-      expect(reviewNote).toContain("## Counter-evidence");
+      expect(reviewNote).toContain("## หลักฐานโต้แย้งและความเสี่ยง");
       expect(reviewNote).toContain("[[01_Companies/MU]]");
       const hybrid=unwrapRead(await readClient.callTool({
         name:"preview_hybrid_claim_reconciliation",
@@ -244,10 +244,25 @@ describe("RI-011 E2E Research + Safe Edit real MCP on isolated temporary Vault",
       process.env.M55_REQUIRE_TYPED_REVIEW="0";
       const legacy={...input,researchReview:undefined,
         completedAnalysis:"Synthetic legacy analysis: no source authentication or protected-note change."};
+      // Seed an already accepted legacy receipt via the low-level fixture
+      // writer. Fresh canonical freeform can no longer create this Review.
+      const {planInvestmentWriteback}=await import("../vault/investment-writeback-router");
+      const {renderThaiResearchM55}=await import("../vault/research-quality-m55");
+      const recipe=planInvestmentWriteback(input as Parameters<typeof planInvestmentWriteback>[0]).safeEditWorkflow!;
       const prepared=await prepare(safeClient,legacy);
-      const saved=await apply(safeClient,legacy,prepared);
-      expect(saved.status).toBe("saved_verified");
-      const sourcePath=saved.steps[0].path,reviewPath=saved.steps[1].path;
+      await apply(safeClient,legacy,prepared); // safe Source only
+      const sourcePath=recipe.steps[0].path,reviewPath=recipe.steps[1].path;
+      let content=recipe.steps[1].safeEditRequest!.change.content
+        .replace(/^(?:source_channel|attributed_origin|original_document_access|company_hubs|industry_hubs):.*\n/gm,"")
+        .replace(renderThaiResearchM55(review),legacy.completedAnalysis);
+      for(const [current,old] of [["# บทวิเคราะห์การลงทุน —","# Investment Review —"],["## ที่มาของต้นฉบับ","## Source provenance"],
+        ["## บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)","## Research analysis (AI interpretation; not approved Thesis)"],
+        ["## การเชื่อมโยงความรู้","## Canonical knowledge links"],["## ขอบเขตความปลอดภัยในการบันทึก","## Ingestion safety"]])content=content.replace(current,old);
+      const hash=createHash("sha256").update(content).digest("hex");
+      const operationId="ICW-"+createHash("sha256").update(["canonical_review",reviewPath,hash].join("\n")).digest("hex").slice(0,32);
+      const engine=await import("../safe-edit/engine");
+      const pre=engine.preview({operationId,path:reviewPath,reason:"Historical fixture only",change:{kind:"create",content}},"oauth:ri011-synthetic-actor");
+      engine.apply({operationId,previewToken:pre.previewToken,expectedHash:pre.beforeHash},"oauth:ri011-synthetic-actor");
       if(fault==="missing_backlink"){
         const {db}=await import("../db");
         db().prepare("DELETE FROM links WHERE source_path=? AND resolved_path=?").run(reviewPath,sourcePath);

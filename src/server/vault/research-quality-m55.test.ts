@@ -18,7 +18,7 @@ const memory:ResearchClassification={domain:"industry",subject:"Memory",resolved
 describe("M5.5 pre-write research contract",()=>{
   it("validates an attributed Memory repost without upgrading it to a broker original",()=>{
     expect(validateResearchM55(memory,review)).toEqual([]);
-    expect(renderThaiResearchM55(review)).toContain("## Counter-evidence");
+    expect(renderThaiResearchM55(review)).toContain("## หลักฐานโต้แย้งและความเสี่ยง");
   });
   it("fails closed when the real-world caller omits classification metadata",()=>{
     expect(validateResearchM55({...memory,subject:"Cross Theme",resolvedSubjectPath:undefined,

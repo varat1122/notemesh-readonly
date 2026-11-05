@@ -40,7 +40,7 @@ export function createSafeEditMcpServer(access:McpAccess) {
     annotations:{readOnlyHint:true,openWorldHint:false},...meta
   },async input=>invoke(()=>preflightResearchDecisionV2(input)));
   server.registerTool("prepare_canonical_writeback",{
-    description:"M5.4 canonical Micro/Macro/PDF intake: validate the complete sourceChat + original extractedText + completedAnalysis (or Feed Only captureOnly), route in the EXISTING Investment_OS, and PREVIEW add-only Source and Company/Industry/Macro Review with per-step hashes and OAuth-bound tokens. No Vault notes are written. If metadata is missing, stop rather than falling back to legacy Inbox submission. Protected Thesis/Evidence Register/Timeline/Portfolio are never modified.",
+    description:"M5.4 canonical Micro/Macro/PDF intake: validate sourceChat + original extractedText + typed Thai researchReview (or Feed Only captureOnly), route in the EXISTING Investment_OS, and PREVIEW eligible add-only Source and Company/Industry/Macro Review with per-step hashes and OAuth-bound tokens. Legacy completedAnalysis alone holds the Review but allows safe Source capture. No Vault notes are written. Protected Thesis/Evidence Register/Timeline/Portfolio are never modified.",
     inputSchema:canonicalInputShape,
     annotations:{readOnlyHint:true,openWorldHint:false},...meta
   },async input=>invoke(()=>prepareCanonicalWriteback(input,access.label)));

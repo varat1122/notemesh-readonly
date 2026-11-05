@@ -151,7 +151,7 @@ export function buildCanonicalSafeEditWorkflow(
     attributedOrigin:input.attributedOrigin,
     originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage,
     sourceKind:plan.sourceKind,entityScope:plan.entityScope
-  },input.researchReview,input.extractedText):[];
+  },input.researchReview,input.extractedText):captureOnly?[]:["typed_research_review_required"];
   const sourceArchiveLines=sourceArchiveReviewLines(plan.sourceCapture.originalSourceArchive);
   const broker=input.brokerUpdate;
   const brokerLines=broker?[
@@ -163,7 +163,7 @@ export function buildCanonicalSafeEditWorkflow(
       `- ${row.metric} ${row.period}: ${row.oldValue} → ${row.newValue} ${row.unit} (attributed vintages)`),
     ""
   ]:[];
-  const reviewContent=[
+  const renderReview=(legacy=false)=>[
     "---","type: investment_research_review","source_type: chatgpt_analysis",
     "verification: not_reverified","status: analyst_review_not_user_endorsed",
     `intake_id: ${yaml(plan.planId)}`,`source_chat: ${yaml(sourceChat)}`,
@@ -181,24 +181,25 @@ export function buildCanonicalSafeEditWorkflow(
       `industry_hubs: ${JSON.stringify(plan.routingV2.industryHubs.map(x=>x.path))}`
     ]:[]),
     `original_source_path: ${yaml(rawPath)}`,"---","",
-    `# Investment Review — ${safeSubject(subject)} — ${plan.planId}`,"",
+    (legacy?`# Investment Review — ${safeSubject(subject)} — ${plan.planId}`:`# บทวิเคราะห์การลงทุน — ${safeSubject(subject)} — ${plan.planId}`),"",
     `Source token: ${tag}`,"",
-    "## Source provenance","",
+    (legacy?"## Source provenance":"## ที่มาของต้นฉบับ"),"",
     `- Exact user-supplied source: ${wiki(rawPath)}`,
     `- Original publication/source authentication: not verified by this workflow`,
     ...sourceArchiveLines,
     `- Event date: ${event??"unknown"}; publication date: ${published??"unknown"}`,
-    "","## Research analysis (AI interpretation; not approved Thesis)","",
-    input.researchReview?renderThaiResearchM55(input.researchReview):analysis??"Analysis pending.","",
-    ...brokerLines,
-    "## Canonical knowledge links","",
+    "",(legacy?"## Research analysis (AI interpretation; not approved Thesis)":"## บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)"),"",
+    input.researchReview?renderThaiResearchM55(input.researchReview,legacy):analysis??"Analysis pending.","",
+    ...brokerLines.map(line=>!legacy&&line.startsWith("## ")?"## ข้อมูลโบรกเกอร์ที่อ้างถึง (ยังไม่ได้ตรวจสอบโดยอิสระ)":line),
+    (legacy?"## Canonical knowledge links":"## การเชื่อมโยงความรู้"),"",
     ...companyLinks,...themeLinks,
     ...(companyLinks.length||themeLinks.length?[]:["- No existing Company/Industry Hub was resolved; owner review of entity mapping required."]),
-    "","## Ingestion safety","",
+    "",(legacy?"## Ingestion safety":"## ขอบเขตความปลอดภัยในการบันทึก"),"",
     "- Linked companies are not independent new events or verified customer/supplier relationships.",
     "- This note does not change Current Thesis, Evidence Register, Portfolio or Company Evolution Timeline.",
     "- Duplicate, pricing, market expectation and broker versions still require original-source adjudication.",""
   ].join("\n");
+  const reviewContent=renderReview();
   const sourceStep=toStep("source_intake",rawPath,sourceContent,tag,false);
   // After Source-only capture the original Source receipt itself appears in
   // exact URL/date discovery. Never hold its first linked Research Review merely
@@ -222,7 +223,8 @@ export function buildCanonicalSafeEditWorkflow(
   const reviewStep=captureOnly?null:toStep("canonical_review",reviewPath,reviewContent,tag,hasSourceMatch||legacyConflict);
   const archiveHold=plan.sourceCapture.archiveProvenanceStatus==="HOLD";
   if(reviewStep&&(reviewStep.state==="hold_conflict"||archiveHold&&reviewStep.state==="verified_existing")){
-    const historical=revalidateHistoricalArchive(reviewPath,reviewContent,plan.sourceCapture.originalSourceArchive,archiveHold);
+    const historical=revalidateHistoricalArchive(reviewPath,reviewContent,plan.sourceCapture.originalSourceArchive,archiveHold)??
+      revalidateHistoricalArchive(reviewPath,renderReview(true),plan.sourceCapture.originalSourceArchive,archiveHold);
     if(historical){
       const check=inspect(reviewPath,historical.content,tag);
       reviewStep.state=!check.hashOK?"hold_conflict":!check.indexed||!check.searchable?"hold_index_repair":historical.state;
@@ -278,7 +280,7 @@ export function buildCanonicalSafeEditWorkflow(
     perDeviceSync:"unverified",
     instructions:[
       "For each needs_create step, call the existing Safe Edit preview_edit tool with the exact safeEditRequest, then apply_edit using its token and beforeHash, in source-then-review order; never assume this read-only recipe wrote anything.",
-      "For captureOnly, save and verify just the attributed raw Source. Return source_saved_analysis_pending, not a completed Research Review. Later retry the SAME source with completedAnalysis to create the linked review without duplicating the Source.",
+      "For captureOnly, save and verify just the attributed raw Source. Return source_saved_analysis_pending, not a completed Research Review. Later retry the SAME source with typed researchReview to create the linked review without duplicating the Source.",
       "After each apply, require receipt.write/readback/reindex all verified, plus the indexed canonical Review→Source Obsidian link. Retry by re-running this planner and checking hashes; never overwrite a changed note.",
       "If hold_event_review, reconcile original economic event/source and old broker vintage before a new canonical review. Preserve the raw source independently.",
       "Run this planner again after writes: only saved_verified and readyForNextNews=true prove server file/readback/search index for both required notes. For screenshot/PDF without a hash-verified attachment this is TEXT-ONLY preservation; per-device Obsidian Sync still unverified.",

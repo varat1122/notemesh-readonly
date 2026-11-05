@@ -313,16 +313,16 @@ it("M55 legacy freeform cannot obtain a Review authorization, but Source remains
   }finally{await c.close();}
 });
 
-it("M55 rollout switch preserves old M5.4 freeform behavior until deliberate cutover",async()=>{
+it("M55 old rollout flag cannot bypass the shared typed Review gate",async()=>{
   const original=process.env.M55_REQUIRE_TYPED_REVIEW;
   process.env.M55_REQUIRE_TYPED_REVIEW="0";
   const c=await connect();
   try{
     const input={...news,researchReview:undefined,extractedText:"M55 transition mode source"};
     const p=await prepare(c.client,input);
-    expect(p.workflowStatus).toBe("pending_safe_edit");
-    expect(p.steps.map((x:any)=>x.state)).toEqual(["needs_create","needs_create"]);
-    expect(p.previews).toHaveLength(2);
+    expect(p.workflowStatus).toBe("hold_research_quality");
+    expect(p.steps.map((x:any)=>x.state)).toEqual(["needs_create","hold_quality_gate"]);
+    expect(p.previews).toHaveLength(1);
     // No apply: compatibility test does not create even synthetic Vault notes.
   }finally{
     if(original===undefined)delete process.env.M55_REQUIRE_TYPED_REVIEW;

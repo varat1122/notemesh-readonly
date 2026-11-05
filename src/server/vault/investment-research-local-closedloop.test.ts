@@ -20,6 +20,15 @@ const input={
   sourceLanguage:"en",sourceChat:"RI011_M53_LOCAL_TEST",publisher:"Synthetic user-supplied research",
   sourceUrl,eventDate:"2026-10-15",publicationDate:"2026-10-15",
   extractedText:"Synthetic user excerpt: TSMC 2026 Q3 revenue USD 46.72 billion, Q4 guidance USD 52.3-54.3 billion. No original issuer document was read.",
+  sourceChannel:"news_media",originalDocumentAccess:"excerpt_only" as const,
+  contentTypes:["guidance" as const],
+  researchReview:{claimAssessments:[{entity:"TSMC",metric:"revenue guidance",period:"2026Q4",unit:"USD billions",competingValues:["52.3-54.3"],resolution:"unresolved" as const,conclusion:"conditional" as const}],headlineTh:"ข่าวสมมติกล่าวถึงข้อมูลที่ยังต้องตรวจสอบต้นฉบับ",
+    translationTh:"ข้อความสมมติจากผู้ใช้: TSMC มีรายได้ในไตรมาส 3 ปี 2026 จำนวน 46.72 พันล้านดอลลาร์สหรัฐ และแนวโน้มรายได้ไตรมาส 4 จำนวน 52.3-54.3 พันล้านดอลลาร์สหรัฐ ยังไม่ได้อ่านเอกสารบริษัทต้นฉบับ",
+    whatChangedTh:"เป็นข้อมูลที่ผู้ใช้ส่งมาและยังไม่ได้ตรวจสอบกับหลักฐานต้นฉบับ",
+    mechanismTh:"ความต้องการและกำลังการผลิตอาจส่งผลต่อรายได้และกำไร แต่ยังต้องตรวจสอบข้อมูลจริง",
+    thesisImplicationTh:"ยังไม่เปลี่ยนสมมติฐานการลงทุนหรือประมาณการกำไร",
+    counterEvidenceTh:"ต้นทุนและอัตราผลผลิตจริงอาจแตกต่างจากคาด",
+    requiredEvidenceTh:"ต้องตรวจเอกสารบริษัทและวันที่ประกาศก่อนใช้ข้อมูล"},
   completedAnalysis:"## What Changed\nSynthetic attributed 2026 Q3 revenue; guidance is an expectation, not reported 2026 Q4 revenue.\n\n## Mechanism\nDemand and utilization affect revenue conversion, margin and FCF; customer causality unverified.\n\n## Counter-evidence\nCapacity, FX, 2nm yields and customer allocations still require verified documents.\n\n## Thesis\nNo automatic thesis or portfolio revision."
 };
 const claim={domain:"company" as const,entity:"TSMC",metric:"net_revenue_actual",period,

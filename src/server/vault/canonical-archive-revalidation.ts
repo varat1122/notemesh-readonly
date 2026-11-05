@@ -14,8 +14,9 @@ const prefixes=[
 function parts(content:string){
   // Only the generated provenance section can be excluded from the comparison.
   // Identical quoted text in analysis remains part of the byte-for-byte witness.
-  const section=content.indexOf("\n## Source provenance\n\n");
-  const end=content.indexOf("\n\n## Research analysis (AI interpretation; not approved Thesis)\n",section);
+  const thai=content.includes("\n## ที่มาของต้นฉบับ\n\n");
+  const section=content.indexOf(thai?"\n## ที่มาของต้นฉบับ\n\n":"\n## Source provenance\n\n");
+  const end=content.indexOf(thai?"\n\n## บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)\n":"\n\n## Research analysis (AI interpretation; not approved Thesis)\n",section);
   if(section<0||end<0)return null;
   const start=content.indexOf(anchor,section),duplicate=content.indexOf(anchor,start+1);
   if(start<0||start>=end||(duplicate>=0&&duplicate<end))return null;

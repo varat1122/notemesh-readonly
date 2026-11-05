@@ -15,9 +15,9 @@ notes or the Production volume were lost.
 On the *existing* Safe Edit OAuth endpoint (`vault:read vault:edit`):
 
 1. `prepare_canonical_writeback` takes the exact original text, source/chat
-   metadata, finished source-separated analysis (or `captureOnly:true`) and
+   metadata, typed Thai `researchReview` (or `captureOnly:true`) and
    classification. It recomputes the M5.3 deterministic plan, validates
-   add-only paths, and returns the **two exact Safe Edit diff previews and
+   add-only paths, and returns the **eligible Safe Edit diff previews and
    client-bound tokens** in one call. This performs no Vault note write.
 2. After reviewing the diffs, `apply_canonical_writeback` takes the *same*
    input, `planId`, and exact pending preview authorizations. The existing
@@ -32,6 +32,39 @@ This is **recoverable add-only two-step writeback, not a single atomic file
 transaction or background queue**. A successfully stored Source is retained
 when a Review fails. Interrupted Safe Edit journal operations require operator
 reconciliation; the system never silently overwrites another writer's note.
+
+### Thai persistence quality gate (RI-001 follow-up)
+
+Both `plan_investment_writeback` and canonical prepare/apply use the same workflow
+gate. `completedAnalysis` remains accepted for legacy diagnostics and safe Source
+capture, but cannot authorize a fresh Review: missing `researchReview` produces
+`typed_research_review_required`, Review `hold_quality_gate`, no Review recipe or
+preview, and `readyForNextNews=false`. The former `M55_REQUIRE_TYPED_REVIEW` flag
+cannot bypass this gate. Event, archive, conflict and index HOLD precedence remains.
+
+The read-only planner and Safe Edit expose the same strict `researchReview` wire
+schema plus `sourceChannel`, `attributedOrigin` and `originalDocumentAccess`.
+Callers supply Thai headline, what-changed, mechanism, implication, counter-evidence
+and required-evidence sections. Foreign news requires `translationTh` covering
+the actually read `extractedText`, in order, retaining figures, attribution and
+caveats. `excerpt_only` never means unread pages were translated. Thai news does
+not need a duplicate translation. The exact original text is preserved in Source.
+
+The mechanical language screen checks every nonempty prose paragraph for at least
+six Thai letters and a Thai share of at least 35% of letters. URLs, marked code and
+explicit quotes do not count as narration; numbers/Thai digits cannot satisfy it.
+Financial terms, company names and English quotations remain allowed with Thai
+explanation. This is a conservative format screen, **not** proof of fluent Thai,
+translation completeness/fidelity, claim truth or a Thesis decision. The research
+model/reviewer remains responsible for full read-scope translation; a screen PASS
+alone is not Research Acceptance. No LLM call or new infrastructure is introduced.
+
+New generated Review headings are Thai; filenames, Source identity, receipt hash
+algorithm and claim-evidence gates are unchanged. An identical historical retry
+may match the prior renderer only through the existing independently verified
+create receipt/hash/readback path. Old bytes and receipt IDs are retained; changed
+analysis, broken links or current evidence problems still HOLD. No backfill,
+automatic translation/rewrite or migration of accepted notes occurs.
 
 ### Historical receipts and current revalidation
 
@@ -79,8 +112,8 @@ and [primary-evidence receipt design](investment-os/m551-primary-evidence-receip
 After the Production deployment is `SUCCESS`, **refresh/reconnect the existing
 Safe Edit Chat connection in ChatGPT if its tool catalogue remains stale**.
 Check that `prepare_canonical_writeback` and `apply_canonical_writeback` are
-both discoverable, and that the prepare schema exposes `sourceChat` and
-`completedAnalysis`. Backend deployment does not force a ChatGPT connector
+both discoverable, and that planner/prepare schemas expose `sourceChat`,
+`researchReview` and its classification metadata. Backend deployment does not force a ChatGPT connector
 snapshot to refresh.
 
 In a new Micro chat, send one genuine source and analysis under the standing
