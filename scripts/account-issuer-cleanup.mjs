@@ -11,8 +11,11 @@ import { DatabaseSync } from 'node:sqlite';
 // only reports. --apply drops exactly the index and the column in one
 // transaction, and commits only if integrity, foreign keys, row counts and
 // every other schema object are unchanged. Output names tables and counts,
-// never row values. Rollback is restoring the pre-cleanup backup; commit
-// 71cc417 also re-adds the column itself on boot when it is missing.
+// never row values. Cleanup is manual only, never a boot-time operation.
+// Require a verified pre-cleanup backup and restore rehearsal before --apply.
+// Rollback must restore the compatible pre-cleanup DB/schema with the reviewed
+// application version; never rely on an older app boot to recreate the schema.
+// See docs/SECURITY_BETTER_AUTH_177_STAGING.md for the backup/rollback gate.
 const INDEX = 'account_issuer_accountId_uidx';
 
 export function cleanupAccountIssuer(file, { apply = false } = {}) {

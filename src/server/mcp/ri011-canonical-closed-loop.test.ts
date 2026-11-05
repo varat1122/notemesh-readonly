@@ -94,7 +94,7 @@ type Preview={phase:string;planId:string;workflowStatus:string;
 type Applied={outcome:string;status:string;readyForNextNews:boolean;
   steps:Array<{kind:string;path:string;state:string;readbackVerified:boolean;indexed:boolean;searchable:boolean}>;
   receipts:Array<{receipt?:{write:string;readback:string;reindex:string}}>;
-  protectedNotesTouched:boolean;perDeviceSync:string};
+  protectedNotesTouched:boolean;perDeviceSync:string;qualityIssues:string[]};
 async function prepare(client:{callTool:(args:{name:string;arguments:Record<string,unknown>})=>Promise<unknown>},
   data:Record<string,unknown>):Promise<Preview>{
   return unwrapSafe(await client.callTool({name:"prepare_canonical_writeback",arguments:data})) as unknown as Preview;
@@ -320,12 +320,15 @@ describe("RI-011 E2E Research + Safe Edit real MCP on isolated temporary Vault",
       expect(fs.readFileSync(path.join(vault,reviewPath),"utf8")).toBe(reviewBytes);
     }finally{await close();}
   });
-  it("a separate URL/date-matched Source still HOLDs a Review even if its own Source receipt is valid",async()=>{
+  it("a separate URL/date-matched Source retains event HOLD over simultaneous quality HOLD despite a valid own Source receipt",async()=>{
     await seed("01_Companies/MU.md","# MU synthetic company hub\n");
     const {safeClient,close}=await connect();
     try{
       const invalid={...input,researchReview:{...review,counterEvidenceTh:"not Thai"}};
       const before=await prepare(safeClient,invalid);
+      expect(before.workflowStatus).toBe("hold_research_quality");
+      expect(before.steps[1].state).toBe("hold_quality_gate");
+      expect(before.qualityIssues).toContain("counterEvidenceTh_thai_required");
       expect(before.previews).toHaveLength(1);
       const capture=await apply(safeClient,invalid,before);
       expect(capture.steps[0].state).toBe("verified_existing");
@@ -344,6 +347,13 @@ describe("RI-011 E2E Research + Safe Edit real MCP on isolated temporary Vault",
       expect(combined.steps[1].state).toBe("hold_event_review");
       expect(combined.qualityIssues).toContain("counterEvidenceTh_thai_required");
       expect(combined.previews).toHaveLength(0);
+      // With no preview authorizations, apply only revalidates this held plan.
+      const checked=await apply(safeClient,invalid,combined);
+      expect(checked.status).toBe("hold_source_event_review");
+      expect(checked.steps[1].state).toBe("hold_event_review");
+      expect(checked.qualityIssues).toContain("counterEvidenceTh_thai_required");
+      expect(checked.readyForNextNews).toBe(false);
+      expect(checked.receipts).toHaveLength(0);
       expect(fs.existsSync(path.join(vault,held.steps[1].path))).toBe(false);
       expect(fs.existsSync(path.join(vault,other))).toBe(true);
     }finally{await close();}

@@ -82,6 +82,9 @@ following are evidenced in a release receipt:
   with the old application commit `71cc4178607d717b403ffd143d3a01bff7c94758`,
   validate integrity and authentication, then resume the prior sync state.
   An app-only rollback after a schema change is not sufficient evidence of recovery.
+  Restore the compatible pre-cleanup DB/schema; never rely on the older app's
+  boot to recreate `account.issuer` or its index. Cleanup remains manual only,
+  with verified backup/restore rehearsal, never an automatic startup action.
 
 No Production backup, restore, schema cleanup, deployment, or real ChatGPT
 reconnect is claimed by this document. Those require separate execution evidence.
