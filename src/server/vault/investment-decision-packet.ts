@@ -1,4 +1,4 @@
-import { buildInvestmentContextPack, type Focus, type Role } from "./investment-context";
+import { buildInvestmentContextPack, type Focus, type Role, type Item, type IssuerResolution, type IssuerCoverage } from "./investment-context";
 import type { IncomingClaim, ClaimReview, Domain, ReviewClass } from "./investment-claim-review";
 import { buildEvidenceVerificationLedger, type EvidenceVerificationLedger } from "./evidence-verification-ledger";
 
@@ -18,6 +18,7 @@ type Stage = {
 };
 type ContextRef = {
   path:string;role:Role;declaredVerification:string|null;
+  evidenceUse:Item["evidenceUse"];
   declaredEventDate:string|null;declaredPublishedAt:string|null;
   line:number;truncated:boolean;counterEvidenceExcerptIncluded:boolean;
 };
@@ -35,6 +36,7 @@ export interface InvestmentDecisionPacket {
   };
   historicalContext:{
     retrieval:"bounded_lexical_only";selected:number;considered:number;
+    issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];
     sourcePointers:ContextRef[];
     noteDeclaredPrimaryCandidates:string[];
     protectedThesisPaths:string[];
@@ -144,13 +146,13 @@ export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimRe
     maxNotes:10,maxChars:10000
   });
   const pointers:ContextRef[]=scoped.items.map(x=>({
-    path:x.path,role:x.role,declaredVerification:x.declaredVerification,
+    path:x.path,role:x.role,evidenceUse:x.evidenceUse,declaredVerification:x.declaredVerification,
     declaredEventDate:x.declaredEventDate,declaredPublishedAt:x.declaredPublishedAt,
     line:x.line,truncated:x.truncated,counterEvidenceExcerptIncluded:x.counterEvidenceExcerptIncluded
   }));
   const thesisPaths=input.domain==="company"?pointers.filter(x=>x.role==="thesis").map(x=>x.path):[];
-  const primaryCandidates=pointers.filter(x=>x.role==="source" ||
-    x.declaredVerification==="verified_against_primary").map(x=>x.path);
+  const primaryCandidates=pointers.filter(x=>x.evidenceUse!=="historical_context_only"&&
+    (x.role==="source" || x.declaredVerification==="verified_against_primary")).map(x=>x.path);
   const counterHints=pointers.filter(x=>x.counterEvidenceExcerptIncluded).map(x=>x.path);
   const stages:Stage[]=FRAMEWORKS[input.domain].map(([id,checkpoint,requiredEvidence])=>({
     id,checkpoint,status:"not_assessed",requiredEvidence
@@ -185,6 +187,7 @@ export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimRe
     },
     historicalContext:{
       retrieval:"bounded_lexical_only",selected:scoped.selected,considered:scoped.considered,
+      issuerResolution:scoped.issuerResolution,issuerCoverage:scoped.issuerCoverage,
       sourcePointers:pointers,noteDeclaredPrimaryCandidates:primaryCandidates,
       protectedThesisPaths:thesisPaths,historicalThesisOwnerApproval:"not_established",
       missing,truncatedOrOmitted:scoped.omitted.length>0 || pointers.some(p=>p.truncated)

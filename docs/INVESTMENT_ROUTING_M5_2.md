@@ -87,3 +87,53 @@ See `src/server/vault/investment-writeback-router.test.ts` fixtures F01–F12:
 multi-issuer Memory, broker PT reiteration/raise/cut/vintage, issuer guidance,
 social repost, macro policy, broker PDF estimate, protected portfolio capture,
 missing hubs, stable receipt IDs and duplicate source/event candidate.
+
+## RI-001 read-only research retrieval
+
+`investment_context_pack` now uses the existing Company Hub title and explicit
+`aliases`, `alias`, `company_name`, `ticker` metadata vocabulary. It adds no
+hard-coded TSM/TSMC or security-master mapping. A unique indexed Hub must be
+readable and its alias set must agree with current Markdown readback. Title/alias
+collisions, missing/changed readback, and a Company Hub index over the 3,000-row
+bound HOLD alias expansion; the sentinel is never a partial uniqueness result.
+This is indexed metadata plus readback, not external legal-issuer verification;
+an unindexed Hub/alias cannot be discovered by this bounded contract.
+
+`issuerResolution` preserves the requested label and exposes the Hub/path and
+resolution status. Without a mapping, plain tickers retain literal historical
+discovery with `unresolved` status, but are never expanded by similarity or body
+co-mentions. Qualified identifiers require an explicit matching Hub declaration;
+no market prefix, ADR/DR suffix, or exchange code is stripped. A Hub alias provides
+company-context linkage only. It never substitutes a security, listing, price
+series, claim entity, Source ID, event identity or canonical write authority.
+The canonical routing/writeback resolver's behavior is unchanged.
+
+`issuerCoverage` reports selected and missing roles separately per request. A
+complete NVDA result cannot conceal missing MRVL Thesis/Evidence/Timeline/Source
+roles. Missing material stays missing; this code creates no Hub or protected note.
+Decision packets carry this resolution/coverage without rewriting the incoming
+claim entity or inferring verification, independence, owner approval or valuation.
+
+For macro queries, explicit country/topic scope is kept separate from subject
+terms. Matching macro-folder searches supplement the existing global FTS window.
+When subject matches exist, unrelated country-only results do not fill the pack;
+otherwise country-only fallback is explicitly marked incomplete. Filename and
+FTS cutoffs are reported, not treated as exhaustive absence. Multiword explicit
+scope is matched as a whole; no geographic alias table is inferred.
+
+The existing read-time schema adapter identifies archived AI and derivative
+summaries. Raw ChatGPT paths are historical even if metadata declares primary.
+Macro recaps are de-ranked and share a one-note fallback cap unless historical
+archives were explicitly requested. Company historical research and protected
+drafts stay discoverable, including their existing reconciliation scores.
+`evidenceUse=historical_context_only` prevents archived verification labels from
+filling primary-evidence gaps or a decision packet's primary candidate list.
+Other results remain `unverified_candidate`; multiple notes never establish
+independence. Counter-evidence flags require the section heading to survive the
+excerpt budget; full-note review remains necessary.
+
+Fixtures in `investment-context.test.ts` and `investment-decision-packet.test.ts`
+cover explicit aliases, ambiguity, stale/missing readback, bounds, qualified
+identifiers, missing roles, NVDA control, macro relevance, archive non-promotion,
+counter-evidence clipping and byte/index invariance. Synthetic alias declarations
+are not evidence of a mapping in the live Vault; live validation is separate.

@@ -84,6 +84,9 @@ function indexedAliases(frontmatter:string|null):string[]{
       .flatMap(x=>Array.isArray(x)?x:[x]).filter((x):x is string=>typeof x==="string"&&x.length>1);
   }catch{return [];}
 }
+// Reuse the existing explicit Hub vocabulary for read-only retrieval. This is
+// not a security master, and does not change canonical writeback resolution.
+export {key as hubIdentityKey,indexedAliases as indexedHubAliases};
 function findHub(label:string, indexed:ReturnType<typeof stems>, allowCurated:boolean){
   const wanted=key(label);
   const exact=indexed.filter(x=>key(x.title)===wanted);
