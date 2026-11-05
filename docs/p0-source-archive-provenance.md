@@ -44,6 +44,8 @@ create's durable successful write/readback/reindex receipt, including operation
 ID, path, payload and hashes. The non-archive part must still match the proposed
 Review. Actual edits, changed analysis, missing/incomplete receipts or unknown
 rendering cannot be excused as archive drift; content/integrity HOLD remains.
+Only the generated provenance section is excluded from the byte comparison;
+unchanged quotations in analysis do not create another provenance section.
 Missing index or Review-to-Source backlink still requires index repair. Event
 and quality blockers remain visible; a quality gate cannot erase archive HOLD.
 

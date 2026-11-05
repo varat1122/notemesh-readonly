@@ -330,6 +330,14 @@ describe("P0 canonical Review original-source archive provenance",()=>{
     const after=await route();expect(after.safeEditWorkflow!.steps[1].state).toBe("hold_index_repair");
     expect(after.safeEditWorkflow!.status).toBe("hold_conflict_or_index");
   });
+  it("does not mistake an unchanged analysis quotation for a second provenance section",async()=>{
+    const quoted={...input,researchReview:{...review,whatChangedTh:review.whatChangedTh+
+      "\n- Original publication/source authentication: not verified by this workflow\n"}};
+    await capture();await applyRecipe(await route(quoted));const saved=await historicalState();
+    await capture({bytes:Buffer.from("<html>New archive revision with unchanged quoted analysis.</html>")});
+    const after=await route(quoted);expect(after.safeEditWorkflow!.status).toBe("hold_archive_drift");
+    expect(await historicalState()).toEqual(saved);
+  });
   it("metadata is absent from vault:read model text and creates no indexed tags/links/frontmatter or Markdown constructs",async()=>{
     const ordinary=content(await route(),"canonical_review");
     const poison='#pwn #a/b [[Injected]] ![[Injected]]\n# PwnHeading\n<!--pwn--> %%pwn%% ==pwn== $pwn$\n> [!warning]\n---\ntags: [pwn]\n---\n<script>pwn</script>\n- [ ] pwn ^pwn';

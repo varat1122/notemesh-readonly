@@ -12,15 +12,20 @@ const prefixes=[
     "- Archive chronology:","- Archive association:","- Archive limitation:"]
 ];
 function parts(content:string){
-  const start=content.indexOf(anchor);
-  if(start<0||content.indexOf(anchor,start+1)>=0)return null;
+  // Only the generated provenance section can be excluded from the comparison.
+  // Identical quoted text in analysis remains part of the byte-for-byte witness.
+  const section=content.indexOf("\n## Source provenance\n\n");
+  const end=content.indexOf("\n\n## Research analysis (AI interpretation; not approved Thesis)\n",section);
+  if(section<0||end<0)return null;
+  const start=content.indexOf(anchor,section),duplicate=content.indexOf(anchor,start+1);
+  if(start<0||start>=end||(duplicate>=0&&duplicate<end))return null;
   const from=start+anchor.length;
-  const lines=content.slice(from).split("\n");
+  const lines=content.slice(from,end).split("\n");
   const length=lines[0].startsWith("- Event date:")?0:
     prefixes.some(p=>p.every((prefix,i)=>lines[i]?.startsWith(prefix))&&lines[7]?.startsWith("- Event date:"))?7:-1;
   if(length<0)return null;
   const archive=lines.slice(0,length).join("\n");
-  return {archive,body:content.slice(0,from)+lines.slice(length).join("\n")};
+  return {archive,body:content.slice(0,from)+lines.slice(length).join("\n")+content.slice(end)};
 }
 
 /** Classify only archive differences in an independently receipted historical
