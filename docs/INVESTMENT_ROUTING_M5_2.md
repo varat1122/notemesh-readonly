@@ -218,5 +218,27 @@ An unbound but readable Review can still be discovered as note-declared
 research, with its binding HOLD visible. No historical bytes/receipts are
 rewritten, no repair is attempted, and primary evidence or independence is not
 inferred. Decision packets carry these coverage and bundle results unchanged.
+
+Legacy Reviews with absent/null `review_scope` have a narrow compatibility path:
+the exact `investment_research_review` type, valid filename-matching `intake_id`,
+unambiguous existing Hub scope and indexed/frontmatter readback must agree.
+Conflicting issuer declarations, wrong scope, malformed metadata and stale
+readback remain rejected. An admitted legacy Review is selected only as
+`historical_context_only`; canonical coverage is `SCAN_INCOMPLETE` and its bundle
+is `HOLD / legacy_review_scope_missing`, even if historical create receipts exist.
+It cannot become `BOUND_SOURCE_REVIEW` or a primary candidate, and a same-intake
+Source is not automatically paired. An explicit `intakeId` still isolates the
+requested Review.
+
+Filename discovery includes the resolved Hub title/requested label and up to
+twelve sorted, explicit Hub aliases, each checked through the existing identity
+collision and readback resolver. All subject prefixes share the same 100-row
+plus sentinel/eight-readback bounds. Unchecked or ambiguous aliases cannot
+authorize discovery; `legacy_subject_alias_limit` and
+`legacy_subject_alias_unresolved` report incomplete scope rather than confident
+absence. This does not discover every historical filename or establish a live
+instrument-to-issuer mapping. No metadata repair, receipt rewrite or migration
+occurs.
+
 `investment-research-context.test.ts` exercises real receipts in temporary
 fixtures, not live mutation or live instrument-identity acceptance.

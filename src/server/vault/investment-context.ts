@@ -249,7 +249,24 @@ export function buildInvestmentContextPack(req: Input): Pack {
   const budget = Math.min(18000,Math.max(4500,req.maxChars??12000));
   const pool = new Map<string,number>();
   const limits=new Set<string>();
-  const researchScans=contextKeys.map(key=>discoverCanonicalResearch(key,req.intakeId));
+  const subjectScopes=contextKeys.map(key=>{
+    const resolved=issuerResolution.filter(r=>r.contextKey===key);
+    const aliases=resolved[0]?.hubPath?[...new Set(indexedHubAliases(JSON.stringify(indexedMetadata(resolved[0].hubPath)))
+      .map(alias=>alias.trim().normalize("NFC")))].sort():[];
+    return {key,resolved,aliases};
+  });
+  // Reuse the same collision/readback checks for filename aliases. A Hub's
+  // declaration alone cannot authorize an alias also claimed by another Hub.
+  const aliasResolution=resolveIssuers([...new Set(subjectScopes.flatMap(scope=>scope.aliases.slice(0,12)))]);
+  const researchScans=subjectScopes.map(({key,resolved,aliases})=>{
+    const checked=aliasResolution.filter(r=>aliases.slice(0,12).includes(r.requested));
+    const subjects=resolved.length?[...resolved.flatMap(scopeKeys),...checked.filter(r=>r.contextKey===key).map(r=>r.requested)]:undefined;
+    const scan=discoverCanonicalResearch(key,req.intakeId,subjects);
+    if(aliases.length>12){scan.complete=false;scan.reasons.push("legacy_subject_alias_limit");}
+    if(checked.some(r=>r.contextKey!==key)){scan.complete=false;scan.reasons.push("legacy_subject_alias_unresolved");}
+    if(!scan.complete){scan.chronology="SCAN_INCOMPLETE";scan.latestReviewPaths=[];}
+    return scan;
+  });
   const canonicalReviews=new Map(researchScans.flatMap(scan=>scan.reviews.map(review=>[review.path,review] as const)));
   const boundSources=new Map(researchScans.flatMap(scan=>scan.reviews.flatMap(review=>review.bundle.status==="BOUND_SOURCE_REVIEW"&&review.bundle.sourcePath
     ?[[review.bundle.sourcePath,scan.contextKey] as const]:[])));
@@ -520,7 +537,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
       if(macroScope&&row.role!=="rules"&&!matchedMacroScopes.some(scope=>explicitMacroScope(row.path,scope,current)))throw Error("macro_scope_readback");
       const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining,macroScope?Math.floor(budget/Math.max(2,macroScopes.length*2)):2000),row.role);
       if(!excerpt.excerpt.trim())continue;
-      const historical=row.historical||historicalOnly(row.path,splitFrontmatter(raw).data);
+      const historical=canonicalReviews.get(row.path)?.legacy||row.historical||historicalOnly(row.path,splitFrontmatter(raw).data);
       items.push({path:row.path,role:row.role,matchedMacroScopes:matchedMacroScopes.filter(scope=>explicitMacroScope(row.path,scope,current)),evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
       if(archivalSelection)historicalCount++;
       if(background)for(const scope of matchedMacroScopes)macroBackgroundCounts.set(scope,(macroBackgroundCounts.get(scope)||0)+1);
@@ -557,8 +574,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
   const researchCoverage:ResearchCoverage[]=issuerResolution.map(r=>{
     const key=r.contextKey??scopeKeys(r)[0];
     const scan=researchScans.find(s=>s.contextKey===key);
-    const scopedItems=items.filter(x=>namedIssuers(x.path).some(t=>scopeKeys(r).map(k=>k.toUpperCase()).includes(t)));
-    const selectedReviews=scan?.reviews.filter(review=>items.some(item=>item.path===review.path))??[];
+    const scopedItems=items.filter(x=>scan?.reviews.some(review=>review.path===x.path)||namedIssuers(x.path).some(t=>scopeKeys(r).map(k=>k.toUpperCase()).includes(t)));
+    const selectedReviews=scan?.reviews.filter(review=>!review.legacy&&items.some(item=>item.path===review.path))??[];
     const omittedReviews=scan?.reviews.some(review=>!items.some(item=>item.path===review.path))??false;
     const canonicalComplete=!!r.contextKey&&!!scan?.complete&&!omittedReviews;
     const reasons=[...(scan?.reasons??[]),...(!r.contextKey?["issuer_scope_unresolved"]:[]),...(omittedReviews?["selection_budget"]:[])];

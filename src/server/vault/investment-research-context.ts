@@ -19,7 +19,7 @@ export interface ContextBundle {
   economicEventEquivalence:"not_established";primaryVerification:"not_performed";
 }
 export interface CanonicalReview {
-  path:string;intakeId:string;publishedAt:string|null;bundle:ContextBundle;
+  path:string;intakeId:string;publishedAt:string|null;legacy:boolean;bundle:ContextBundle;
 }
 export interface CanonicalResearchScan {
   contextKey:string;reviews:CanonicalReview[];complete:boolean;reasons:string[];
@@ -73,6 +73,7 @@ function assemble(path:string,id:string,note:ReturnType<typeof indexedRead>):Con
     eventDate:null,publishedAt:null,reviewSha256:sha(note.raw),sourceSha256:null,
     reviewReceiptId:null,sourceReceiptId:null,economicEventEquivalence:"not_established",primaryVerification:"not_performed"};
   try{
+    if(note.fm.review_scope!=="company")throw Error("legacy_review_scope_missing");
     result.eventDate=declaredDate(note.fm,"event_date");result.publishedAt=declaredDate(note.fm,"published_at");
     const sourcePath=`00_Inbox/ChatGPT/Investment Intake - ${id}.md`;
     // No arbitrary path following, fallback Source, or issuer-wide bundling.
@@ -93,35 +94,43 @@ function assemble(path:string,id:string,note:ReturnType<typeof indexedRead>):Con
   }catch(e){
     const known=new Set(["index_missing","read_limit","index_readback_mismatch","invalid_chronology","receipt_store_missing",
       "create_receipt_unverified","source_path_binding_mismatch","intake_binding_mismatch","chronology_binding_mismatch",
-      "fts_binding_missing","review_source_link_missing"]);
+      "fts_binding_missing","review_source_link_missing","legacy_review_scope_missing"]);
     result.reason=e instanceof Error&&known.has(e.message)?e.message:"binding_read_unavailable";
   }
   return result;
 }
 export function isCanonicalResearchPath(path:string):boolean{return path.startsWith(folder)&&/ - IN-[A-F0-9]{16}\.md$/.test(path);}
 
-export function discoverCanonicalResearch(contextKey:string,intakeId?:string):CanonicalResearchScan{
+export function discoverCanonicalResearch(contextKey:string,intakeId?:string,resolvedSubjects?:string[]):CanonicalResearchScan{
   const result:CanonicalResearchScan={contextKey,reviews:[],complete:true,reasons:[],chronology:"NOT_FOUND",latestReviewPaths:[]};
-  const prefix=folder+contextKey+" - ";
+  // Only subjects already resolved to this Hub may extend filename discovery:
+  // its title, requested labels and bounded explicit aliases checked by caller.
+  const subjects=[...new Set([contextKey,...resolvedSubjects??[]])];
+  const prefixes=subjects.map(subject=>folder+subject+" - ");
   // Bound the actual requested subject family, never a global Review universe.
   // Include malformed metadata in this scope so it cannot masquerade as absence.
-  const rows=db().prepare("SELECT path,frontmatter FROM notes WHERE path>=? AND path<? ORDER BY path LIMIT 101")
-    .all(prefix,prefix.slice(0,-1)+"!") as {path:string;frontmatter:string|null}[];
+  const rows=db().prepare(`SELECT path,frontmatter FROM notes WHERE ${prefixes.map(()=>"(path>=? AND path<?)").join(" OR ")} ORDER BY path LIMIT 101`)
+    .all(...prefixes.flatMap(prefix=>[prefix,prefix.slice(0,-1)+"!"])) as {path:string;frontmatter:string|null}[];
   if(rows.length>100){result.complete=false;result.reasons.push("canonical_scope_scan_limit");}
   const candidates=rows.slice(0,100).flatMap(row=>{
     const fm=metadata(row.frontmatter),id=fm?.intake_id;
-    if(!fm||fm.type!=="investment_research_review"||fm.review_scope!=="company"||typeof id!=="string"||!intake.test(id)||row.path!==prefix+id+".md"||
+    const legacy=!!fm&&fm.review_scope==null;
+    const conflictingSubject=legacy&&[fm?.company,fm?.issuer,fm?.entity,fm?.ticker].some(value=>value!==undefined&&
+      (Array.isArray(value)?value:[value]).some(label=>typeof label!=="string"||!subjects.some(subject=>subject.toUpperCase()===label.trim().toUpperCase())));
+    if(!fm||fm.type!=="investment_research_review"||(fm.review_scope!=="company"&&!(legacy&&resolvedSubjects))||conflictingSubject||
+      typeof id!=="string"||!intake.test(id)||!prefixes.some(prefix=>row.path===prefix+id+".md")||
       fm.company_hubs!==undefined&&(!Array.isArray(fm.company_hubs)||!fm.company_hubs.includes(`01_Companies/${contextKey}.md`))){
       result.complete=false;result.reasons.push("canonical_metadata_unresolved");return [];
     }
-    try{return [{...row,intakeId:id,publishedAt:declaredDate(fm,"published_at")}];}
+    if(legacy&&(!intakeId||intakeId===id)){result.complete=false;result.reasons.push("legacy_review_scope_missing");}
+    try{return [{...row,intakeId:id,publishedAt:declaredDate(fm,"published_at"),legacy}];}
     catch{result.complete=false;result.reasons.push("invalid_chronology");return [];}
   }).filter(x=>!intakeId||x.intakeId===intakeId)
     .sort((a,b)=>(publicationWindow(b.publishedAt)?.[0]??-Infinity)-(publicationWindow(a.publishedAt)?.[0]??-Infinity)||a.path.localeCompare(b.path));
   if(candidates.length>8){result.complete=false;result.reasons.push("canonical_read_limit");}
   for(const c of candidates.slice(0,8))try{
     const note=indexedRead(c.path);
-    result.reviews.push({path:c.path,intakeId:c.intakeId,publishedAt:c.publishedAt,bundle:assemble(c.path,c.intakeId,note)});
+    result.reviews.push({path:c.path,intakeId:c.intakeId,publishedAt:c.publishedAt,legacy:c.legacy,bundle:assemble(c.path,c.intakeId,note)});
   }catch{result.complete=false;result.reasons.push("canonical_readback_unavailable");}
   result.reasons=[...new Set(result.reasons)];
   if(!result.complete)result.chronology="SCAN_INCOMPLETE";

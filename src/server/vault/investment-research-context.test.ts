@@ -25,13 +25,13 @@ async function seed(p:string,raw:string){
 }
 // Real Safe Edit receipts in an isolated Vault; the IDs mirror the dispatch,
 // but all prose and claimed facts are synthetic, not a copy of live research.
-async function saved(issuer:string,id:string,published:string|null,event:string|null=null){
+async function saved(issuer:string,id:string,published:string|null,event:string|null=null,legacy=false){
   const sourcePath=`00_Inbox/ChatGPT/Investment Intake - ${id}.md`;
   const reviewPath=`10_Knowledge/Company Research/Investment Review - ${issuer} - ${id}.md`;
   const chronology=`event_date: ${JSON.stringify(event)}\npublished_at: ${JSON.stringify(published)}`;
   const tag=`Source token: InvestmentIntake${id.slice(3)}`;
   const source=`---\ntype: investment_source_intake\nintake_id: ${id}\nsource_type: user_supplied\nsource_url: https://example.org/unchanged-url\nsource_text_sha256: ${sha(id)}\n${chronology}\n---\n${tag}\nSynthetic submitted text ${id}.`;
-  const review=`---\ntype: investment_research_review\nreview_scope: company\nintake_id: ${id}\ncompany_hubs: ["01_Companies/${issuer}.md"]\noriginal_source_path: "${sourcePath}"\nsource_type: chatgpt_analysis\nverification: not_reverified\n${chronology}\n---\n# Investment Review — ${issuer}\n${tag}\n[[${sourcePath.slice(0,-3)}]]\n## Research analysis\nSynthetic unverified cash conversion discussion.\n## Counter-evidence\nSynthetic capacity and margin risks require original evidence.`;
+  const review=`---\ntype: investment_research_review\n${legacy?"":"review_scope: company\n"}intake_id: ${id}\ncompany_hubs: ["01_Companies/${issuer}.md"]\noriginal_source_path: "${sourcePath}"\nsource_type: chatgpt_analysis\nverification: not_reverified\n${chronology}\n---\n# Investment Review — ${issuer}\n${tag}\n[[${sourcePath.slice(0,-3)}]]\n## Research analysis\nSynthetic unverified cash conversion discussion.\n## Counter-evidence\nSynthetic capacity and margin risks require original evidence.`;
   const {preview,apply}=await import("../safe-edit/engine");
   for(const [kind,p,content] of [["source_intake",sourcePath,source],["canonical_review",reviewPath,review]]){
     const operationId="ICW-"+sha([kind,p,sha(content)].join("\n")).slice(0,32);
@@ -194,5 +194,100 @@ describe("RI-001 canonical Review discovery and intake-bound assembly",()=>{
       expect(result.items.some((x:{path:string})=>x.path.includes(OLD))).toBe(false);
       expect((await client.callTool({name:"investment_context_pack",arguments:{question:"TSMC research",issuers:["TSMC"],intakeId:"../unsafe"}})).isError).toBe(true);
     }finally{await client.close();await server.close();}
+  });
+});
+
+describe("RI-001 minimal legacy Review compatibility",()=>{
+  const id="IN-539504749F0D4BEA";
+  const reviewPath=`10_Knowledge/Company Research/Investment Review - SMTC - ${id}.md`;
+  const sourcePath=`00_Inbox/ChatGPT/Investment Intake - ${id}.md`;
+  async function legacy(hub="SMTC",fields:Record<string,unknown>={}){
+    await seed(`01_Companies/${hub}.md`,hub==="SMTC"?"# SMTC":"---\naliases: [SMTC]\n---\n# Synthetic explicit alias");
+    await seed(sourcePath,`---\ntype: investment_source_intake\nintake_id: ${id}\n---\nSource token: InvestmentIntake${id.slice(3)}\nSynthetic submitted source.`);
+    const fm={type:"investment_research_review",intake_id:id,company_hubs:[`01_Companies/${hub}.md`],original_source_path:sourcePath,...fields};
+    await seed(reviewPath,"---\n"+Object.entries(fm).map(([k,v])=>`${k}: ${JSON.stringify(v)}`).join("\n")+"\n---\n# SMTC synthetic legacy research\nNo primary verification claimed.");
+  }
+  it("returns the reported SMTC legacy shape as historical context, with incomplete coverage and no receipt/primary promotion",async()=>{
+    await legacy("SMTC",{source_type:"primary",verification:"verified_against_primary"});
+    const protectedPath="05_Thesis/SMTC - Current Thesis.md";
+    await seed(protectedPath,"# Protected fixture\nKeep these historical bytes unchanged.");
+    const {db}=await import("../db");
+    const before=db().prepare("SELECT total_changes() AS n").get();
+    const paths=[reviewPath,sourcePath,protectedPath];
+    const bytes=paths.map(p=>fs.readFileSync(path.join(vault,p)));
+    const p=await pack("SMTC");
+    expect(p.items.find(x=>x.path===reviewPath)).toMatchObject({role:"research",evidenceUse:"historical_context_only"});
+    expect(p.items.map(x=>x.path)).not.toContain(sourcePath);
+    expect(p.contextBundles).toEqual([expect.objectContaining({reviewPath,status:"HOLD",reason:"legacy_review_scope_missing",sourcePath:null,primaryVerification:"not_performed"})]);
+    expect(p.researchCoverage[0].canonicalReview).toMatchObject({status:"SCAN_INCOMPLETE",scanComplete:false,reasons:expect.arrayContaining(["legacy_review_scope_missing"])});
+    const {reviewInvestmentClaim}=await import("./investment-claim-review");
+    const {buildInvestmentDecisionPacket}=await import("./investment-decision-packet");
+    const claim={domain:"company" as const,entity:"SMTC",metric:"revenue",period:"2026",statement:"SMTC synthetic research statement",originalSource:"https://example.org/fixture"};
+    const decision=buildInvestmentDecisionPacket(claim,reviewInvestmentClaim(claim));
+    expect(decision.historicalContext.sourcePointers.map(x=>x.path)).toContain(reviewPath);
+    expect(decision.historicalContext.noteDeclaredPrimaryCandidates).not.toContain(reviewPath);
+    expect(db().prepare("SELECT 1 FROM sqlite_master WHERE name='safe_edit_operations'").get()).toBeUndefined();
+    expect(db().prepare("SELECT total_changes() AS n").get()).toEqual(before);
+    expect(paths.map(p=>fs.readFileSync(path.join(vault,p)))).toEqual(bytes);
+  });
+  it("does not bind missing review_scope even when create receipts, FTS and readback exist",async()=>{
+    await seed("01_Companies/SMTC.md","# SMTC");
+    await saved("SMTC",id,"2026-11-02",null,true);
+    const {db}=await import("../db");const receipts=db().prepare("SELECT * FROM safe_edit_operations ORDER BY id").all();
+    expect((await pack("SMTC")).contextBundles[0]).toMatchObject({status:"HOLD",reason:"legacy_review_scope_missing",reviewReceiptId:null,sourceReceiptId:null});
+    expect(db().prepare("SELECT * FROM safe_edit_operations ORDER BY id").all()).toEqual(receipts);
+  });
+  it.each(["SMTC","Semtech"])("accepts an alias-subject filename through existing unambiguous Hub readback for %s",async query=>{
+    await legacy("Semtech");
+    const p=await pack(query);
+    expect(p.issuerResolution[0].contextKey).toBe("Semtech");
+    expect(p.items.find(x=>x.path===reviewPath)?.evidenceUse).toBe("historical_context_only");
+    expect(p.researchCoverage[0].canonicalReview.status).toBe("SCAN_INCOMPLETE");
+    expect((await pack("NVDA")).items.map(x=>x.path)).not.toContain(reviewPath);
+  });
+  it("does not admit a filename alias that collides with a second Hub even when the requested Hub title is unique",async()=>{
+    await legacy("Semtech");await seed("01_Companies/OTHER.md","---\naliases: [SMTC]\n---\n# OTHER");
+    const p=await pack("Semtech");
+    expect(p.items.map(x=>x.path)).not.toContain(reviewPath);
+    expect(p.researchCoverage[0].canonicalReview.status).toBe("SCAN_INCOMPLETE");
+  });
+  it("reports bounded alias discovery as incomplete instead of implying a missing legacy Review",async()=>{
+    await legacy("Semtech");
+    await seed("01_Companies/Semtech.md","---\naliases: "+JSON.stringify([...Array.from({length:12},(_,i)=>`A${i}`),"SMTC"])+"\n---\n# Semtech");
+    const p=await pack("Semtech");
+    expect(p.items.map(x=>x.path)).not.toContain(reviewPath);
+    expect(p.researchCoverage[0].canonicalReview).toMatchObject({status:"SCAN_INCOMPLETE",scanComplete:false,reasons:expect.arrayContaining(["legacy_subject_alias_limit"])});
+  });
+  it.each(["missing_hub","ambiguous","stale_hub","stale_review"])("does not use compatibility to bypass %s",async fault=>{
+    await legacy();
+    if(fault==="missing_hub"){
+      fs.unlinkSync(path.join(vault,"01_Companies/SMTC.md"));
+      (await import("../db")).db().prepare("DELETE FROM notes WHERE path=?").run("01_Companies/SMTC.md");
+    }
+    if(fault==="ambiguous")await seed("01_Companies/OTHER.md","---\naliases: [SMTC]\n---\n# Other");
+    if(fault==="stale_hub")fs.writeFileSync(path.join(vault,"01_Companies/SMTC.md"),"---\naliases: [OTHER]\n---\n# Changed without reindex");
+    if(fault==="stale_review")fs.writeFileSync(path.join(vault,reviewPath),"---\ntype: investment_research_review\nintake_id: IN-0000000000000000\n---\n# Changed without reindex");
+    const p=await pack("SMTC");
+    expect(p.items.map(x=>x.path)).not.toContain(reviewPath);
+    expect(p.researchCoverage[0].canonicalReview.status).toBe("SCAN_INCOMPLETE");
+    expect(p.contextBundles.some(x=>x.status==="BOUND_SOURCE_REVIEW")).toBe(false);
+  });
+  it.each([
+    {review_scope:"industry"},{review_scope:["company"]},{type:["investment_research_review"]},
+    {intake_id:OLD},{company_hubs:["01_Companies/NVDA.md"]},{company_hubs:"../../outside"},{company:"NVDA"}
+  ])("rejects conflicting or malformed legacy metadata %j without a false NOT_FOUND",async fields=>{
+    await legacy("SMTC",fields);
+    const p=await pack("SMTC");
+    expect(p.items.map(x=>x.path)).not.toContain(reviewPath);
+    expect(p.researchCoverage[0].canonicalReview.status).toBe("SCAN_INCOMPLETE");
+  });
+  it("preserves intakeId selection and valid canonical receipt binding alongside the legacy Review",async()=>{
+    await legacy();const valid=await saved("SMTC",OLD,"2026-11-01");
+    const a=await pack("SMTC",{intakeId:id});
+    expect(a.items.map(x=>x.path)).toContain(reviewPath);
+    expect(a.items.map(x=>x.path)).not.toContain(valid.reviewPath);
+    const b=await pack("SMTC",{intakeId:OLD});
+    expect(b.items.map(x=>x.path)).not.toContain(reviewPath);
+    expect(b.contextBundles).toEqual([expect.objectContaining({reviewPath:valid.reviewPath,status:"BOUND_SOURCE_REVIEW"})]);
   });
 });
