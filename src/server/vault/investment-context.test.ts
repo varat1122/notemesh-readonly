@@ -14,6 +14,183 @@ beforeEach(() => {
   vi.resetModules();
 });
 afterEach(()=>{fs.rmSync(root,{recursive:true,force:true});delete process.env.DATA_DIR;});
+
+// Synthetic, explicitly declared mappings only; these fixtures are not a
+// production security master or evidence that any live Hub has these aliases.
+async function tsmcHub(aliases="[TSM]"){
+  await addExtra("01_Companies/TSMC.md",`---\naliases: ${aliases}\n---\n# TSMC issuer context`);
+  await addExtra("05_Thesis/TSMC - Current Thesis.md","# TSMC draft\nNot owner endorsed.");
+  await addExtra("05_Thesis/TSMC - Evidence Register.md","# TSMC evidence\n## Counter-evidence\nCapacity assumptions require validation.");
+  await addExtra("08_Daily_Weekly/Research Indexes/Company Evolution - TSMC.md","# TSMC chronology");
+  await addExtra("08_Daily_Weekly/Research Indexes/Primary Evidence - TSMC Q3.md",
+    "---\nverification: not_reverified\n---\n# TSMC original-source candidate");
+}
+describe("RI-001 issuer context resolution",()=>{
+  it("reuses the existing indexed Hub alias contract to retrieve TSMC context for TSM",async()=>{
+    const build=await fixture();await tsmcHub();
+    const {planCanonicalRoutingV2}=await import("./investment-routing-v2");
+    expect(planCanonicalRoutingV2({domain:"company",entities:["TSM"],topic:"earnings"}).companyHubs[0].resolution).toBe("indexed_alias");
+    const pack=build({question:"TSM earnings",issuers:["TSM"],maxNotes:14});
+    expect(pack.items.map(x=>x.path)).toContain("08_Daily_Weekly/Research Indexes/Primary Evidence - TSMC Q3.md");
+    expect(pack.issuerResolution).toEqual([expect.objectContaining({requested:"TSM",status:"indexed_alias",contextKey:"TSMC",hubPath:"01_Companies/TSMC.md"})]);
+    expect(pack.issuers).toEqual(["TSM"]);
+    expect(pack.incomplete).not.toContain("05_Thesis/TSM - Current Thesis.md");
+    expect(pack.items.find(x=>x.role==="evidence_register")?.counterEvidenceExcerptIncluded).toBe(true);
+    expect(pack.status).toBe("retrieval_only_not_verified");
+  });
+  it("does not guess TSM→TSMC from names, prose, broker mentions or prefix similarity",async()=>{
+    const build=await fixture();await tsmcHub("[]");
+    await addExtra("01_Companies/TSMX.md","# TSMX\nTSM is a casual mention, not an alias.");
+    const pack=build({question:"TSM earnings",issuers:["TSM"]});
+    expect(pack.issuerResolution[0].status).toBe("unresolved");
+    expect(pack.items.some(x=>/TSMC|TSMX/.test(x.path))).toBe(false);
+    expect(pack.incomplete.join(" ")).toContain("unresolved");
+  });
+  it.each([false,true])("fails closed on ambiguous alias, including exact-title collision=%s",async exact=>{
+    const build=await fixture();await tsmcHub();
+    await addExtra(`01_Companies/${exact?"TSM":"OTHER"}.md`,"---\naliases: [TSM]\n---\n# Another issuer");
+    const pack=build({question:"TSM earnings",issuers:["TSM"]});
+    expect(pack.issuerResolution[0].status).toBe("ambiguous_hold");
+    expect(pack.items.every(x=>x.role==="rules")).toBe(true);
+  });
+  it.each(["changed","missing"])("refuses %s Hub alias readback",async mode=>{
+    const build=await fixture();await tsmcHub();
+    const file=path.join(vault,"01_Companies/TSMC.md");
+    if(mode==="missing")fs.unlinkSync(file);else fs.writeFileSync(file,"---\naliases: []\n---\n# Changed without reindex");
+    const pack=build({question:"TSM earnings",issuers:["TSM"]});
+    expect(pack.issuerResolution[0].status).toBe("readback_hold");
+    expect(pack.items.every(x=>x.role==="rules")).toBe(true);
+  });
+  it("does not silently strip market/exchange/DR qualifiers or substitute a price instrument",async()=>{
+    const build=await fixture();await tsmcHub();
+    for(const id of ["US:TSM","NYSE:TSM","TH:TSM80","2330.TW","TSM80"]){
+      const pack=build({question:id+" earnings",issuers:[id]});
+      expect(pack.issuers).toEqual([id]);
+      expect(pack.items.some(x=>x.path.includes("TSMC"))).toBe(false);
+      expect(pack.issuerResolution[0].status).toBe("unresolved");
+    }
+  });
+  it("allows only an explicit qualified alias as company-context linkage, not security equivalence",async()=>{
+    const build=await fixture();await tsmcHub('["US:TSM"]');
+    const pack=build({question:"TSM issuer earnings",issuers:["US:TSM"]});
+    expect(pack.items.map(x=>x.path)).toContain("01_Companies/TSMC.md");
+    expect(pack.issuers).toEqual(["US:TSM"]);
+    expect(pack.warnings.join(" ")).toContain("not security/listing equivalence");
+  });
+  it("keeps MRVL missing roles visible even alongside the complete NVDA control",async()=>{
+    const build=await fixture();
+    await addExtra("10_Knowledge/Company Research/MRVL historical.md","---\ncompany: MRVL\nsource_type: chatgpt_history\n---\n# MRVL historical earnings");
+    const before=fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"));
+    const pack=build({question:"NVDA MRVL historical earnings",issuers:["NVDA","MRVL"],maxNotes:16,maxChars:18000});
+    expect(pack.items.some(x=>x.path.includes("MRVL historical"))).toBe(true);
+    expect(pack.issuerCoverage.find(x=>x.requested==="MRVL")?.missingRoles).toEqual(expect.arrayContaining(["thesis","evidence_register","timeline","source"]));
+    expect(pack.issuerCoverage.find(x=>x.requested==="NVDA")?.missingRoles).toEqual([]);
+    expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"))).toEqual(before);
+  });
+  it("never drops invalid issuer scope into an unscoped or macro query",async()=>{
+    const build=await fixture();
+    const pack=build({question:"NVDA earnings",issuers:["../NVDA"],focus:"macro"});
+    expect(pack.issuerResolution[0].status).toBe("invalid_hold");
+    expect(pack.items.every(x=>x.role==="rules")).toBe(true);
+  });
+  it.each(["aliases","alias","company_name","ticker"])("reuses explicit %s metadata without adding a curated TSM alias",async field=>{
+    const build=await fixture();await tsmcHub("[]");
+    await addExtra("01_Companies/TSMC.md",`---\n${field}: TSM\n---\n# TSMC issuer context`);
+    expect(build({question:"TSM results",issuers:["TSM"]}).issuerResolution[0].status).toBe("indexed_alias");
+  });
+  it("does not establish uniqueness from a truncated Hub scan",async()=>{
+    const build=await fixture();await tsmcHub();
+    const {db}=await import("../db");
+    const insert=db().prepare("INSERT INTO notes(path,title,mtime,size,frontmatter) VALUES (?,?,0,0,'{}')");
+    db().transaction(()=>{for(let i=0;i<3001;i++)insert.run(`01_Companies/Fixture-${i}.md`,"Fixture");})();
+    const pack=build({question:"TSM earnings",issuers:["TSM"]});
+    expect(pack.issuerResolution[0].status).toBe("index_limit_hold");
+    expect(pack.items.every(x=>x.role==="rules")).toBe(true);
+  });
+  it("preserves protected bytes, index rows and auth state across read-only retrieval",async()=>{
+    const build=await fixture();await tsmcHub();
+    const protectedPaths=["05_Thesis/NVDA - Current Thesis.md","05_Thesis/TSMC - Evidence Register.md",
+      "08_Daily_Weekly/Research Indexes/Company Evolution - TSMC.md","06_Portfolio/Account.md","06_Portfolio/Trade.md"];
+    for(const p of protectedPaths.slice(3))await addExtra(p,"# Protected synthetic fixture\nNever infer an execution.");
+    const bytes=protectedPaths.map(p=>fs.readFileSync(path.join(vault,p)));
+    const {db}=await import("../db");
+    const before=db().prepare("SELECT * FROM notes ORDER BY path").all();
+    const changes=db().prepare("SELECT total_changes() AS n").get();
+    for(const issuers of [["TSM"],["NVDA"],["MRVL"],["TH:TSM80"]])build({question:"company earnings and risks",issuers});
+    expect(db().prepare("SELECT total_changes() AS n").get()).toEqual(changes);
+    expect(db().prepare("SELECT * FROM notes ORDER BY path").all()).toEqual(before);
+    protectedPaths.forEach((p,i)=>expect(fs.readFileSync(path.join(vault,p))).toEqual(bytes[i]));
+  });
+});
+
+describe("RI-001 macro relevance and archive independence",()=>{
+  it.each(["null","[]","42"])("treats non-object legacy index metadata %s as absent, never primary evidence",async metadata=>{
+    const build=await fixture();
+    const note="10_Knowledge/Macro and Markets/Vietnam GDP legacy.md";
+    await addExtra(note,"# Vietnam GDP\nLegacy commentary without primary verification.");
+    const {db}=await import("../db");
+    db().prepare("UPDATE notes SET frontmatter=? WHERE path=?").run(metadata,note);
+    const pack=build({question:"Vietnam GDP",industry:"Vietnam",focus:"macro"});
+    expect(pack.items.map(x=>x.path)).toContain(note);
+    expect(pack.incomplete.join(" ")).toContain("primary macro/statistical");
+  });
+  it("does not report a counter-evidence heading that was clipped out of the excerpt",async()=>{
+    const build=await fixture();
+    await addExtra("05_Thesis/NVDA - Evidence Register.md","# NVDA evidence\n"+"x".repeat(2500)+"\n## Counter-evidence\nRisks not in the selected excerpt.");
+    const item=build({question:"NVDA evidence",issuers:["NVDA"]}).items.find(x=>x.role==="evidence_register")!;
+    expect(item.excerpt).not.toContain("## Counter-evidence");
+    expect(item.counterEvidenceExcerptIncluded).toBe(false);
+  });
+  it("reports bounded recall when many archive hits compete for the lexical window",async()=>{
+    const build=await fixture();
+    for(let i=0;i<105;i++)await addExtra(`07_Sources/ChatGPT/Vietnam GDP ${i}.md`,"# Vietnam GDP\nVietnam GDP recap.");
+    const pack=build({question:"Vietnam GDP",industry:"Vietnam",focus:"macro"});
+    expect(pack.incomplete.join(" ")).toContain("Search window truncated");
+    expect(pack.items.filter(x=>x.evidenceUse==="historical_context_only")).toHaveLength(1);
+    expect(pack.incomplete.join(" ")).toContain("primary macro/statistical");
+  });
+  it("supports a multiword explicit macro scope without broadening to similarly named countries",async()=>{
+    const build=await fixture();
+    await addExtra("10_Knowledge/Macro and Markets/United States GDP.md","# United States GDP\nUnited States GDP release.");
+    await addExtra("10_Knowledge/Macro and Markets/United Kingdom GDP.md","# United Kingdom GDP\nUnited Kingdom GDP release.");
+    const pack=build({question:"What is the latest United States GDP",industry:"United States macro and markets",focus:"macro"});
+    expect(pack.items.some(x=>x.path.includes("United States"))).toBe(true);
+    expect(pack.items.some(x=>x.path.includes("United Kingdom"))).toBe(false);
+  });
+  it("retrieves subject-scoped official candidates ahead of unrelated country releases and AI recaps",async()=>{
+    const build=await fixture();
+    const target="10_Knowledge/Macro and Markets/Vietnam GDP original.md";
+    await addExtra(target,"---\ncountry: Vietnam\nsource_type: primary\nsource_url: https://example.gov/gdp\nverification: not_reverified\n---\n# Vietnam GDP\nVietnam GDP output release.\n## Counter-evidence\nPrior estimates may be revised.");
+    for(let i=0;i<12;i++){
+      await addExtra(`10_Knowledge/Macro and Markets/Vietnam GDP recap ${i}.md`,"---\ncountry: Vietnam\nsource_type: chatgpt_history\nverification: verified_against_primary\n---\n# Vietnam GDP GDP GDP\nVietnam GDP archived AI recap.");
+      await addExtra(`10_Knowledge/Macro and Markets/Vietnam fisheries ${i}.md`,"---\ncountry: Vietnam\nsource_type: primary\nsource_url: https://example.gov/fish\n---\n# Vietnam fisheries\nUnrelated fish landings report.");
+    }
+    const pack=build({question:"Vietnam GDP",industry:"Vietnam macro and markets",focus:"macro",maxNotes:5});
+    expect(pack.items.map(x=>x.path)).toContain(target);
+    // H2: country context remains eligible even without subject vocabulary.
+    // It has a bounded background slot and cannot displace the requested release.
+    const background=pack.items.filter(x=>x.path.includes("fisheries"));
+    expect(background.length).toBeLessThanOrEqual(1);
+    for(const item of background)expect(pack.items.findIndex(x=>x.path===target)).toBeLessThan(pack.items.indexOf(item));
+    expect(pack.items.filter(x=>x.evidenceUse==="historical_context_only").length).toBeLessThanOrEqual(1);
+    expect(pack.items.find(x=>x.path===target)?.counterEvidenceExcerptIncluded).toBe(true);
+    expect(pack.status).toBe("retrieval_only_not_verified");
+  });
+  it("does not use an archived primary declaration to fill the macro primary-evidence gap",async()=>{
+    const build=await fixture();
+    await addExtra("07_Sources/ChatGPT/Vietnam GDP.md","---\ncountry: Vietnam\nsource_type: primary\nsource_url: https://example.gov/gdp\nverification: verified_against_primary\n---\n# Vietnam GDP\nHistorical AI recap only.");
+    const pack=build({question:"Vietnam GDP",industry:"Vietnam",focus:"macro"});
+    expect(pack.items.find(x=>x.path.includes("Vietnam GDP"))?.evidenceUse).toBe("historical_context_only");
+    expect(pack.incomplete.join(" ")).toContain("primary macro/statistical");
+  });
+  it("retains explicitly requested archive history without treating copies as independent evidence",async()=>{
+    const build=await fixture();
+    for(let i=0;i<7;i++)await addExtra(`10_Knowledge/Macro and Markets/Vietnam GDP archive ${i}.md`,"---\ncountry: Vietnam\nsource_type: chatgpt_export\n---\n# Vietnam GDP historical summary");
+    const pack=build({question:"Vietnam GDP historical archive",industry:"Vietnam",focus:"macro"});
+    expect(pack.items.filter(x=>x.evidenceUse==="historical_context_only").length).toBeGreaterThan(0);
+    expect(pack.incomplete.join(" ")).toContain("primary macro/statistical");
+  });
+});
 async function fixture(){
   const { reindexPath }=await import("./indexer");
   const add=(p:string,raw:string)=>{

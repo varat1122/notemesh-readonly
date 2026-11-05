@@ -366,16 +366,17 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       inputSchema: {
         question: z.string().min(3).max(1200).describe("Investment question to retrieve bounded, dated historical evidence for"),
         issuers: z.array(z.string().min(1).max(12)).max(6).optional().describe("Up to six company tickers or issuer identifiers; omit for industry or macro questions"),
+        intakeId: z.string().regex(/^IN-[A-F0-9]{16}$/).optional().describe("Optional exact intake ID within issuer scope; preserves separate Source/Review bundles without inferring a shared economic event"),
         industry: z.string().max(140).optional().describe("Industry or thematic context, such as optical networking or banking"),
         focus: z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Prioritize sources for earnings, broker research, TAM, macro, thesis, or general review"),
         maxNotes: z.number().int().min(5).max(16).optional().describe("Maximum retrieved notes in this context pack, from 5 to 16"),
         maxChars: z.number().int().min(4500).max(18000).optional().describe("Maximum excerpt characters returned, from 4500 to 18000"),
       },
     },
-    safe(({question,issuers,industry,focus,maxNotes,maxChars}: {
-      question:string;issuers?:string[];industry?:string;focus?:Focus;maxNotes?:number;maxChars?:number
+    safe(({question,issuers,intakeId,industry,focus,maxNotes,maxChars}: {
+      question:string;issuers?:string[];intakeId?:string;industry?:string;focus?:Focus;maxNotes?:number;maxChars?:number
     }) => {
-      const pack = buildInvestmentContextPack({question,issuers,industry,focus,maxNotes,maxChars});
+      const pack = buildInvestmentContextPack({question,issuers,intakeId,industry,focus,maxNotes,maxChars});
       return json(withBoundary({...pack,items:fenceEach(pack.items,"excerpt")}));
     }),
   );
