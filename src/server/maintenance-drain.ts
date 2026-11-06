@@ -23,6 +23,9 @@ import {
 // workers through the first-request hooks in the middleware.
 let admitted = false;
 let draining: Promise<MaintenanceRecord> | null = null;
+// Admin entry requests waiting on the drain are in flight themselves; a second
+// concurrent entry joins the drain and must not be waited for by it.
+let ownWaiting = 0;
 
 /**
  * The first thing every request meets. Outside maintenance it counts the
@@ -86,9 +89,9 @@ export function drainReport(ownRequests: number): { quiescent: boolean; report: 
  * Idempotent: a second call joins the drain already in progress.
  */
 export function enterMaintenanceAndDrain(opts: { timeoutMs?: number; ownRequests?: number } = {}): Promise<MaintenanceRecord> {
+  ownWaiting += opts.ownRequests ?? 0;
   if (draining) return draining;
   const timeoutMs = opts.timeoutMs ?? 30_000;
-  const ownRequests = opts.ownRequests ?? 0;
   draining = (async () => {
     beginMaintenance();
     gitBackend().stop();
@@ -98,7 +101,7 @@ export function enterMaintenanceAndDrain(opts: { timeoutMs?: number; ownRequests
     await indexer().stopForMaintenance();
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-      const { quiescent, report } = drainReport(ownRequests);
+      const { quiescent, report } = drainReport(ownWaiting);
       if (quiescent) return settleMaintenance("active", report);
       if (Date.now() >= deadline) {
         console.error("[maintenance] drain timed out; maintenance stays active:", JSON.stringify(report));
@@ -114,4 +117,5 @@ export function enterMaintenanceAndDrain(opts: { timeoutMs?: number; ownRequests
 export function resetMaintenanceDrainForTests() {
   admitted = false;
   draining = null;
+  ownWaiting = 0;
 }

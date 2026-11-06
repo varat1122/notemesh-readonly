@@ -165,6 +165,16 @@ describe("drain", () => {
     expect(enterMaintenanceAndDrain()).toBeInstanceOf(Promise);
     expect((await enterMaintenanceAndDrain()).id).toBe(settled.id);
   });
+  it("two concurrent admin entries join one drain and neither waits for the other", async () => {
+    const { maintenanceGate, enterMaintenanceAndDrain } = await import("./maintenance-drain");
+    const a = new EventEmitter(), b = new EventEmitter();
+    maintenanceGate(event(a));
+    maintenanceGate(event(b));
+    const first = enterMaintenanceAndDrain({ ownRequests: 1, timeoutMs: 2_000 });
+    const second = enterMaintenanceAndDrain({ ownRequests: 1, timeoutMs: 2_000 });
+    expect(second).toBe(first);
+    expect((await first).state).toBe("active");
+  });
   it.each([
     ["an in-flight request that never finishes", () => {}],
     ["a held Safe Edit lock", () => fs.writeFileSync(path.join(root, "safe-edit.lock"), "")],
