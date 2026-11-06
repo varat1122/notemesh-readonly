@@ -87,3 +87,80 @@ describe("M5.5 pre-write research contract",()=>{
       thesisImplicationTh:"ยืนยันแล้วว่าต้องปรับเพิ่ม EPS ทันที"})).toContain("unresolved_claim_asserted_as_verified");
   });
 });
+
+const languageFields=["headlineTh","translationTh","whatChangedTh","mechanismTh","thesisImplicationTh","counterEvidenceTh","requiredEvidenceTh"] as const;
+const untranslated="The company's revenue improves as demand recovers. Margins remain uncertain and the cash flow forecast requires independent verification.";
+const wrappers=[
+  ["straight quotes",(s:string)=>`"${s}"`],
+  ["curly quotes",(s:string)=>`“${s}”`],
+  ["single quotes",(s:string)=>`'${s}'`],
+  ["blockquote",(s:string)=>`> ${s}`],
+  ["backtick fence",(s:string)=>`\x60\x60\x60text\n${s}\n\x60\x60\x60`],
+  ["tilde fence",(s:string)=>`~~~text\n${s}\n~~~`],
+  ["inline code",(s:string)=>`\x60${s}\x60`]
+] as const;
+const languageIssue=(field:typeof languageFields[number])=>field==="translationTh"?"translation_not_thai":`${field}_thai_required`;
+
+describe("RI-001 final mechanical Thai language calibration",()=>{
+  it.each(wrappers)("rejects short Thai prefix + English-only %s in every prose field",(_name,wrap)=>{
+    for(const field of languageFields){
+      const issues=validateResearchM55(memory,{...review,[field]:`สรุปเป็นภาษาไทย\n\n${wrap(untranslated)}`});
+      expect(issues,field).toContain(languageIssue(field));
+    }
+  });
+  it.each([
+    "Revenue, EBITDA, Margin, Guidance, FCF, ROIC ดีขึ้นแต่ยังต้องติดตาม",
+    "Revenue เพิ่ม แต่ EBITDA Margin ลด ขณะที่ Guidance ชี้ว่า FCF และ ROIC ยังอ่อน",
+    "MU Backlog และ FCF เพิ่ม แต่ ROIC ยังต่ำกว่า WACC",
+    "NVIDIA Corporation และ Advanced Micro Devices ยังต้องตรวจผลต่อ operating leverage และ free cash flow ก่อนสรุป"
+  ])("accepts mixed Thai finance narration without a term/name allowlist: %s",text=>{
+    for(const field of languageFields)expect(validateResearchM55(memory,{...review,[field]:text}),field).not.toContain(languageIssue(field));
+  });
+  it.each(wrappers)("allows genuine supporting %s with substantive Thai narration",(_name,wrap)=>{
+    const explanation="ข้อความนี้เป็นเพียงข้ออ้างของบริษัทที่ยังต้องตรวจสอบกับเอกสารต้นฉบับและงวดบัญชี โดยความต้องการซื้ออาจเปลี่ยนแปลงได้และไม่ควรใช้ข้อความที่อ้างมาแทนคำอธิบายผลกระทบด้านรายได้ ต้นทุน และความเสี่ยงทั้งหมด";
+    expect(validateResearchM55(memory,{...review,mechanismTh:explanation+"\n\n"+wrap("Orders can be cancelled and shipment is not guaranteed.")})).toEqual([]);
+  });
+  it("allows formulas, numbers, inline terms, company names and actual code with Thai explanation",()=>{
+    const text='NVIDIA ใช้ "FCF" ประกอบการประเมิน แต่ต้องแยกผลจากการลงทุนและเงินทุนหมุนเวียนออกจากการเติบโตของรายได้ก่อนสรุป\n\n```js\nconst fcf = operatingCashFlow - capex;\n```\n\nสูตร `ROIC = NOPAT / investedCapital` ช่วยเปรียบเทียบผลตอบแทน แต่ยังต้องตรวจสอบนิยามและช่วงเวลาของตัวเลข';
+    expect(validateResearchM55(memory,{...review,mechanismTh:text})).toEqual([]);
+  });
+  it("rejects untranslated dominance, a standalone English paragraph and unclosed fences",()=>{
+    const padded="คำอธิบายภาษาไทยมีความยาวพอสมควร แต่ไม่ใช่คำแปลหรือการวิเคราะห์เนื้อหาทั้งหมด";
+    for(const text of [padded+'\n\n"'+untranslated.repeat(12)+'"',padded+"\n\n"+untranslated,
+      "สรุปเป็นภาษาไทย\n```text\n"+untranslated]){
+      expect(validateResearchM55(memory,{...review,translationTh:text})).toContain("translation_not_thai");
+    }
+  });
+  it("treats Thai marks as parts of words, not extra votes; isolated Thai letters/digits cannot establish narration",()=>{
+    for(const text of ["ก English analysis with only one Thai letter.","๑๒๓ Revenue and EBITDA improve.","่่่่่่ Revenue and EBITDA improve.","กกกกกกกก \""+untranslated+'"'])
+      expect(validateResearchM55(memory,{...review,mechanismTh:text})).toContain("mechanismTh_thai_required");
+  });
+  it("does not claim semantic translation fidelity from a mechanical language PASS",()=>{
+    // Deliberately unrelated Thai: semantic adequacy belongs to LLM/reviewer.
+    expect(validateResearchM55(memory,{...review,translationTh:"ต้นไม้ในสวนเติบโตและต้องได้รับน้ำอย่างเพียงพอทุกวัน"},"Revenue was reported by the company.")).not.toContain("translation_not_thai");
+  });
+});
+
+
+describe("Thai supporting-text boundary edge cases",()=>{
+  it("cannot split foreign prose into short quoted/code pieces or put it in a fence info string",()=>{
+    const prefix="คำแปลภาษาไทยมีดังนี้";
+    for(const payload of [
+      '"Revenue" "is" "expected" "to" "increase" "next" "year"',
+      "```text\nRevenue is\nexpected to\nincrease next\nyear\n```",
+      "```"+untranslated+"\n```"
+    ])expect(validateResearchM55(memory,{...review,translationTh:prefix+"\n\n"+payload})).toContain("translation_not_thai");
+  });
+  it("keeps contractions, nested code delimiters and display formulas as supporting text",()=>{
+    const explanation="ข้อความที่อ้างจากบริษัทนี้ยังต้องตรวจสอบกับเอกสารต้นฉบับก่อนสรุปผลต่อรายได้และต้นทุน โดยสูตรเป็นเพียงวิธีคำนวณและไม่ได้ยืนยันว่าตัวเลขตั้งต้นถูกต้อง";
+    for(const supporting of ["'The company's orders remain uncertain.'","‘The company’s orders remain uncertain.’",
+      "````js\nconst label = `company`;\n`````","$$ROIC = NOPAT / investedCapital$$"])
+      expect(validateResearchM55(memory,{...review,mechanismTh:explanation+"\n\n"+supporting})).toEqual([]);
+  });
+});
+
+
+it.each(wrappers)("rejects a Thai label even when its %s English payload is short",(_name,wrap)=>{
+  for(const field of languageFields)for(const english of ["Revenue","Revenue grew.","Growth remains uncertain."])
+    expect(validateResearchM55(memory,{...review,[field]:"คำแปลภาษาไทยมีดังนี้\n\n"+wrap(english)}),field).toContain(languageIssue(field));
+});
