@@ -19,7 +19,7 @@ beforeEach(()=>{
 });
 afterEach(()=>{
   fs.rmSync(root,{recursive:true,force:true});
-  for(const key of ["DATA_DIR","PRIMARY_EVIDENCE_SIGNERS_JSON","PRIMARY_EVIDENCE_ISSUANCE_ENABLED"])
+  for(const key of ["DATA_DIR","PRIMARY_EVIDENCE_SIGNERS_JSON","PRIMARY_EVIDENCE_ISSUANCE_ENABLED","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])
     delete process.env[key];
 });
 async function fixture(manual=false){
@@ -82,10 +82,23 @@ describe("M5.5.1 signed original-source evidence and read-only claim gate",()=>{
         competingValues:["+20%","-20%"],resolution:"verified_primary" as const,
         conclusion:"confirmed" as const,primarySourceUrl:sourceUrl,
         verifiedValue:"+20%",primaryEvidenceReceipt:f.receiptId}]};
-    expect(validateResearchM55({domain:"company",subject:"MU",entityScope:["MU"],
-      contentTypes:["guidance"],companyHubPaths:["01_Companies/MU.md"],industryHubPaths:[],
-      sourceChannel:"news_media",sourceKind:"news_media",originalDocumentAccess:"excerpt_only",
-      sourceLanguage:"en"},review)).toEqual([]);
+    const classification={domain:"company" as const,subject:"MU",entityScope:["MU"],
+      contentTypes:["guidance" as const],companyHubPaths:["01_Companies/MU.md"],industryHubPaths:[],
+      sourceChannel:"news_media" as const,sourceKind:"news_media" as const,originalDocumentAccess:"excerpt_only" as const,
+      sourceLanguage:"en"};
+    expect(validateResearchM55(classification,review)).toEqual([]);
+    // A valid scoped PEV authorizes this assessment, not arbitrary generic
+    // metadata promotion. No generic receipt-binding contract exists.
+    process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
+    const {preview}=await import("../safe-edit/engine");
+    const generic={operationId:"valid-pev-generic-denied",path:"Primary.md",reason:"Synthetic scope separation",
+      change:{kind:"create",content:`---\nverification: verified_against_primary\nprimary_evidence_receipt: ${f.receiptId}\n---\n# Caller metadata\n`}};
+    expect(()=>preview(generic,"oauth:synthetic-client")).toThrow(/primary/);
+    const {revokePrimaryEvidenceReceipt}=await import("./primary-evidence-attestation-m551");
+    revokePrimaryEvidenceReceipt(f.receiptId,"Synthetic later revocation",operator);
+    expect(validatePrimaryEvidenceReceipt(scope(f.receiptId)).valid).toBe(false);
+    expect(validateResearchM55(classification,review)).toContain("primary_evidence_receipt_validation_pending");
+    expect(()=>preview(generic,"oauth:synthetic-client")).toThrow(/primary/);
     expect(fs.readdirSync(path.join(root,"vault"))).toHaveLength(0);
   });
   it("rejects forged ID, mismatched entity, period, unit, value or original URL",async()=>{

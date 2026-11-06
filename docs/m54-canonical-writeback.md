@@ -246,6 +246,35 @@ reasoning remain explicit LLM/reviewer acceptance, not CI claims.
 
 ### Historical receipts and current revalidation
 
+Generic Safe Edit is not a primary-verification authority. Its `evidence`,
+primary URL, `verified_at`, diff approval and caller-written receipt IDs cannot
+grant `verified_against_primary` (including nested claim metadata). The generic
+route has no contract to validate exact PEV Source/claim scope and revocation,
+so it rejects that promotion at preview, preview renewal and apply, including
+old previews and rollback. A historical declaration may remain unchanged on a
+body-only edit; changing its metadata requires removing the declaration first.
+It is never freshly certified by that edit. Already-written receipts remain
+readable/idempotent, without changing historical bytes or receipt contents.
+Context Pack, Decision Packet and Evidence Ledger expose such legacy metadata
+as declared/unverified candidates, not server-verified primary facts.
+
+The existing canonical claim-assessment gate remains the primary authority:
+it validates the independently signed, exact-scope server PEV receipt, current
+revocation state and archived source bytes. Even a valid PEV cannot authorize
+arbitrary generic note promotion. Canonical Source/Claim/Review persistence
+and the Safe Edit write receipt remain separate from primary verification.
+
+Structured claim values must occur literally as complete numeric tokens in
+the received excerpt, both when planned and on cold readback. `13.5` cannot
+match `113.5`, `-13.5`, a longer decimal, grouped number or exponent. Sentence
+punctuation and currency/percent annotations around a complete value are
+allowed. No rounding, numeric-format conversion, unit conversion or investment
+semantics are inferred. This observation matcher deliberately differs from the
+stricter primary-attestation matcher; primary receipt semantics are unchanged.
+An invalid historical anchor produces a current claim-binding HOLD without
+rewriting its Source, claim or successful historical write receipt. Unit/quote
+semantic fidelity remains a separate reviewer gate.
+
 A durable successful Safe Edit write receipt records that the named operation's
 write, readback and index verification passed **at that time**, for its recorded
 path/hash. It is historical execution evidence, not a promise that the current

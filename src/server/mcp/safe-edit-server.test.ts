@@ -47,6 +47,27 @@ async function connected(a:McpAccess) {
  const {createSafeEditMcpServer}=await import("./safe-edit-server");const server=createSafeEditMcpServer(a),client=new Client({name:"test",version:"1"});const [l,r]=InMemoryTransport.createLinkedPair();await server.connect(r);await client.connect(l);return {client,close:async()=>{await client.close();await server.close();}};
 }
 function unpack(result:any){const b=JSON.parse(result.content[0].text);return JSON.parse(b.result.split("\n").slice(1,-1).join("\n"));}
+it("generic MCP routes reject fully populated caller primary declarations before issuing tokens",async()=>{
+ const c=await connected(access),before=fs.readFileSync(path.join(root,"vault","Synthetic.md"));
+ const evidence={entity:"SYNTH",event:"Revenue",period:"FY2026",originalSource:"https://example.org/issuer",
+   classification:"new_event",delta:"Caller assertion",independent:false,verification:"verified_against_primary",
+   sourceType:"primary",primaryUrl:"https://example.org/issuer",event_date:null,published_at:null,received_at:null,
+   imported_at:null,verified_at:"2026-11-01",relatedPaths:[]};
+ const base={operationId:"D2-MCP-forgery",path:"Synthetic.md",reason:"Isolated authority regression",evidence};
+ try{
+  for(const request of [
+   {name:"preview_edit",arguments:{...base,change:args.change}},
+   {name:"update_frontmatter",arguments:{...base,properties:{verification:"verified_against_primary"}}},
+   {name:"create_note",arguments:{...base,path:"Forged.md",content:"---\nverification: verified_against_primary\n---\n# Forged"}},
+   {name:"append_section",arguments:{...base,heading:"Synthetic",content:"Forged authority",date:"2026-11-01"}}
+  ]){
+   const r=await c.client.callTool(request);expect(r.isError).toBe(true);
+   expect(JSON.stringify(r.content)).toContain("generic Safe Edit cannot grant primary authority");
+  }
+  expect(fs.readFileSync(path.join(root,"vault","Synthetic.md"))).toEqual(before);
+  expect(fs.existsSync(path.join(root,"vault","Forged.md"))).toBe(false);
+ }finally{await c.close();}
+});
 it("discovers fifteen scoped tools with accurate write annotations",async()=>{
  const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="apply_canonical_writeback"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment");}}finally{await c.close();}
 });

@@ -121,6 +121,33 @@ describe("RI-001 source-scoped multi-claim persistence",()=>{
     expect(p.previews.map(x=>x.kind)).not.toContain("canonical_review");
     const r=await apply(data,p);expect(r.readyForNextNews).toBe(false);expect(r.steps[0].state).toBe("verified_existing");assertProtected();
   });
+  it.each(["113.5","-13.5"])("D1 rejects numeric substring 13.5 inside %s before claim persistence",async value=>{
+    const text=`Synthetic revenue was $${value} billion.`;
+    const data={...input,extractedText:text,claims:[{...claims[0],value:"13.5",sourceExcerpt:text,qualification:undefined}]};
+    const p=await prepare(data);
+    expect(p.claimIssues).toContain("claim_literal_source_anchor_missing");
+    expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+    expect(p.readyForNextNews).toBe(false);assertProtected();
+  });
+  it.each(["113.5","-13.5"])("historical invalid anchor %s holds cold readback without repairing original bytes/receipts",async value=>{
+    const text=`Synthetic revenue was $${value} billion.`;
+    const data={...input,researchReview:undefined,captureOnly:true,extractedText:text,
+      claims:[{...claims[0],value:"13.5",sourceExcerpt:text,qualification:undefined}]};
+    // Reproduce historical admission with the old literal-substring policy.
+    // All Source/claim writes and receipts still come from the real Safe Edit.
+    const anchors=await import("../vault/claim-value-anchor");
+    const old=vi.spyOn(anchors,"claimValueAppearsInAnchor").mockImplementation((s,v)=>s.includes(v));
+    const saved=await apply(data,await prepare(data));old.mockRestore();
+    const before=await journal(),bytes=saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)));
+    const claim=saved.steps.find(s=>s.kind==="structured_claim")!;
+    const {readPersistedClaim}=await import("../vault/canonical-claims");
+    expect(()=>readPersistedClaim(claim.path)).toThrow("claim_source_anchor_invalid");
+    const cold=await retrieve(data.claims[0]);expect(cold.matchingClaims).toEqual([]);
+    expect(cold.claimBindingHolds.some(x=>x.path===claim.path)).toBe(true);
+    const next=await prepare(data);expect(next.readyForNextNews).toBe(false);expect(next.previews).toEqual([]);
+    expect(next.steps[0].state).toBe("verified_existing");
+    expect(await journal()).toEqual(before);expect(saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)))).toEqual(bytes);assertProtected();
+  });
   it("a changed value in the same Source/metric/period/class conflicts without rewriting any historical note or receipt",async()=>{
     const p=await prepare(),saved=await apply(input,p),before=await journal();const bytes=saved.steps.map(x=>fs.readFileSync(path.join(vault,x.path)));
     const changed={...input,claims:[{...claims[0],value:"106"},claims[1]]};const next=await prepare(changed);

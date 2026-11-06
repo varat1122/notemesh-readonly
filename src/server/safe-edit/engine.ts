@@ -13,6 +13,7 @@ import { audit } from "../audit";
 import { previewSchema, applySchema, operationId as idSchema, type PreviewInput } from "./schema";
 
 import {assertReviewChronology,assertReviewPreviewAdmission,hasRuntimeReviewLineage} from "./research-lineage";
+import {assertDeclaredEvidenceAuthority,assertPrimaryMetadataAuthority} from "./primary-authority";
 
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
 const MAX_BYTES = 100_000;
@@ -90,19 +91,16 @@ function document(s:string) {
 function eventKey(e:NonNullable<PreviewInput["evidence"]>) {
   return sha256(JSON.stringify([e.entity,e.event,e.period,e.originalSource].map(x=>x.trim().normalize("NFC").toLowerCase())));
 }
-function checkEvidence(input:PreviewInput,before:string) {
+function checkEvidence(input:PreviewInput) {
   const e=input.evidence;
   if(input.path.startsWith("05_Thesis/")&&!e&&input.change.kind!=="rollback") throw Error("Thesis edits require a structured evidence review");
   if(!e) return;
+  assertDeclaredEvidenceAuthority(e);
   if(e.classification==="duplicate") throw Error("Duplicate evidence cannot mutate living knowledge");
   if(e.classification==="confirmation"&&(!e.independent||e.sourceType==="archived_ai")) throw Error("Confirmation requires independent evidence; archived AI is not independent");
-  if(e.verification==="verified_against_primary"&&(!e.primaryUrl||!e.verified_at||e.sourceType!=="primary")) throw Error("Primary verification requires a dated primary source actually reviewed");
-  if(e.sourceType==="archived_ai"&&e.verification==="verified_against_primary") throw Error("Archived AI cannot be upgraded to verified fact");
   const previous=store().prepare("SELECT verification,delta_hash FROM safe_edit_claims WHERE event_key=? AND path=?").all(eventKey(e),input.path) as {verification:string;delta_hash:string}[];
   if(previous.some(r=>r.delta_hash===sha256(e.delta.trim()))) throw Error("Duplicate event and delta already recorded");
   if(previous.length&&e.classification==="new_event") throw Error("Known event: classify as added_detail, correction, contradiction or unresolved");
-  const fm=splitFrontmatter(before).data;
-  if(fm.verification==="not_reverified"&&input.change.kind==="frontmatter"&&input.change.properties.verification==="verified_against_primary"&&e.verification!=="verified_against_primary") throw Error("Not-reverified evidence cannot be promoted without primary verification");
   for(const rel of e.relatedPaths) {
     const resolved=resolveNotePath(rel);
     if(!fs.existsSync(resolved)) throw Error("Related evidence path does not exist");
@@ -136,8 +134,6 @@ function calculate(input:PreviewInput,before:string,actor:string):string {
   const c=input.change;
   if(c.kind==="replace") return exactReplace(before,c.oldText,c.newText);
   if(c.kind==="frontmatter") {
-    const current=document(before).data.verification;
-    if(c.properties.verification==="verified_against_primary"&&current!=="verified_against_primary"&&input.evidence?.verification!=="verified_against_primary") throw Error("Verification upgrade requires primary evidence review");
     return frontmatter(before,c.properties);
   }
   if(c.kind==="create") return c.content;
@@ -221,6 +217,8 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
     if(existing.actor!==actor||existing.payload!==JSON.stringify(p)) throw Error("Operation ID reused for different input or actor");
     if(existing.status==="preview") {
       checkStoredReviewLineage(existing);
+      assertDeclaredEvidenceAuthority(p.evidence);
+      assertPrimaryMetadataAuthority(document(existing.before_text).data,document(existing.after_text).data);
       // A lost response must not strand a canonical source forever. Rotate the
       // one-use token for the SAME actor and payload; invalidate prior tokens
       // and any approval so the exact diff must be reviewed again. Never
@@ -236,13 +234,11 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
   }
   const size=store().prepare("SELECT count(*) AS n,coalesce(sum(length(CAST(before_text||after_text AS BLOB))),0) AS bytes FROM safe_edit_operations").get() as {n:number;bytes:number};
   if(size.n>=1000||size.bytes+200_000>20_000_000) throw Error("Safe Edit journal quota reached; administrator archival required");
-  document(before??"");checkEvidence(p,before??"");
+  document(before??"");checkEvidence(p);
   const after=calculate(p,before??"",actor);
   const afterMetadata=document(after).data,beforeMetadata=document(before??"").data;
   if(p.change.kind==="create")assertReviewPreviewAdmission(after,canonical);
-  if(afterMetadata.verification==="verified_against_primary"&&beforeMetadata.verification!=="verified_against_primary") {
-    if(p.evidence?.verification!=="verified_against_primary" || ["archived_ai","chatgpt_analysis"].includes(String(afterMetadata.source_type))) throw Error("Primary verification cannot be asserted by note content without a primary evidence review");
-  }
+  assertPrimaryMetadataAuthority(beforeMetadata,afterMetadata);
   warnings(before??"",after);
   // Body operations cannot silently introduce metadata or rewrite provenance.
   if(p.change.kind==="replace"||p.change.kind==="append") {
@@ -330,8 +326,9 @@ export function apply(input:unknown,actor:string) {
   try {
     const {abs}=target(p.path),current=read(abs);
     if((p.change.kind==="create"?current!==null:current===null)||sha256(current??"")!==r.before_hash) throw Error("Version conflict: re-preview; another writer changed this note");
-    checkEvidence(p,current??"");
-    document(r.after_text);assertHeadroom(Buffer.byteLength(r.before_text)*2+Buffer.byteLength(r.after_text)+64_000);
+    checkEvidence(p);
+    assertPrimaryMetadataAuthority(document(current??"").data,document(r.after_text).data);
+    assertHeadroom(Buffer.byteLength(r.before_text)*2+Buffer.byteLength(r.after_text)+64_000);
     backup(r,p);
     const receipt={operationId:r.id,path:p.path,beforeHash:r.before_hash,afterHash:r.after_hash,
       writtenAt:null as string|null,write:"pending",readback:"pending",reindex:"pending",
