@@ -29,7 +29,7 @@ export interface CanonicalResearchScan {
 function metadata(value:string|null):Metadata|null{
   try{const x:unknown=JSON.parse(value??"null");return x&&typeof x==="object"&&!Array.isArray(x)?x as Metadata:null;}catch{return null;}
 }
-function indexedRead(path:string){
+export function indexedRead(path:string){
   const row=db().prepare("SELECT frontmatter FROM notes WHERE path=?").get(path) as {frontmatter:string|null}|undefined;
   if(!row)throw Error("index_missing");
   const raw=readNote(path).content;
@@ -53,7 +53,7 @@ export function publicationWindow(date:string|null):[number,number]|null{
   if(!Number.isFinite(time))return null;
   return date.length===10?[time-14*3600000,time+38*3600000]:[time,time];
 }
-function createReceipt(kind:"source_intake"|"canonical_review",path:string,content:string):string{
+export function createReceipt(kind:"source_intake"|"canonical_review"|"structured_claim",path:string,content:string):string{
   const hash=sha(content),empty=sha("");
   const id="ICW-"+sha([kind,path,hash].join("\n")).slice(0,32);
   // Never call Safe Edit status/store: it initializes tables. SELECT only.

@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import {intakeClaimsSchema,researchLineageSchema,evidenceClassSchema} from "../vault/canonical-claims";
 import {researchReviewSchema} from "./research-review-schema";
 import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
@@ -473,6 +474,8 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional().describe("M5.6 optional existing Source receipt ID; accepted only when exact original text, channel, format, URL and chronology match the indexed and readback-verified Source"),
         completedAnalysis:z.string().min(1).max(30000).optional().describe("Legacy freeform input retained for diagnostics/Source capture. A fresh canonical Review requires typed researchReview; completedAnalysis alone cannot issue a Review recipe"),
         researchReview:researchReviewSchema,
+        claims:intakeClaimsSchema,
+        researchLineage:researchLineageSchema,
         sourceChannel:z.string().max(80).optional().describe("Actual attributed source channel; repost is not an authenticated original"),
         attributedOrigin:z.string().max(160).optional().describe("Attributed origin, not independently verified"),
         originalDocumentAccess:z.enum(["full_original","excerpt_only","not_obtained"]).optional().describe("Actual reading scope; never claim access to unread original pages"),
@@ -548,6 +551,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         domain: z.enum(["company","industry","macro","asset"]).describe("Investment evidence domain, distinct from a company ticker"),
         entity: z.string().min(1).max(140).describe("Company ticker, macro geography, industry name or asset identifier (e.g. NVDA, Vietnam, Optical)"),
         metric: z.string().min(1).max(140).describe("Canonical claim metric, such as revenue or operating_cash_flow"),
+        evidenceClass:evidenceClassSchema.optional().describe("Exact evidence class for persisted observations: actual is not management guidance. Omit only for unclassified historical discovery; no cross-class duplicate verdict."),
         period: z.string().min(1).max(120).describe("Explicit source reporting period or event period, never a chat import date"),
         originalSource: z.string().min(1).max(1000).describe("Canonical primary/original source URL or archival identifier; do not invent"),
         statement: z.string().min(8).max(2500).describe("Incoming factual claim text to compare, with definition and period"),
@@ -561,7 +565,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     },
     safe((args:{
       domain:Domain;entity:string;metric:string;period:string;originalSource:string;
-      statement:string;value?:string;unit?:string;eventDate?:string|null;publishedAt?:string|null;
+      statement:string;value?:string;unit?:string;evidenceClass?:"reported_actual"|"management_guidance"|"analyst_estimate"|"unverified_claim";eventDate?:string|null;publishedAt?:string|null;
       focus?:Focus;maxCandidates?:number;
     })=>{
       const reviewed=reviewInvestmentClaim(args);
@@ -570,8 +574,8 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       const packet=buildInvestmentDecisionPacket(args,reviewed);
       return json(withBoundary({
         ...reviewed,
-        matchingClaims:fenceEach(reviewed.matchingClaims,"claimId","value","unit","metric","period"),
-        relatedEventClaims:fenceEach(reviewed.relatedEventClaims,"claimId","value","unit","metric","period"),
+        matchingClaims:fenceEach(reviewed.matchingClaims,"claimId","value","unit","metric","period","sourceLocator","sourceExcerpt","statement","qualification"),
+        relatedEventClaims:fenceEach(reviewed.relatedEventClaims,"claimId","value","unit","metric","period","sourceLocator","sourceExcerpt","statement","qualification"),
         decisionPacket:packet
       }));
     }),

@@ -14,6 +14,7 @@ import { inspectUserAttachment, type AttachmentType } from "../user-attachment-v
 import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTag,
   type BrokerUpdate } from "./investment-routing-v2";
 import { buildCanonicalSafeEditWorkflow, type CanonicalSafeEditWorkflow } from "./canonical-writeback-workflow";
+import type {IntakeClaim,ResearchLineage} from "./canonical-claims";
 import type { ThaiResearchReview } from "./research-quality-m55";
 import {resolveSourceIdentityM56, type SourceIdentityResolution} from "./source-identity-m56";
 import {inspectSourceArchiveProvenance,type SourceArchiveProvenance} from "./source-archive-provenance-p0";
@@ -35,6 +36,8 @@ export interface WritebackInput {
   rawAttachmentPath?:string|null;
   rawAttachmentSha256?:string|null;
   rawAttachmentContentType?:AttachmentType|null;
+  claims?:IntakeClaim[];
+  researchLineage?:ResearchLineage;
   claim?:{metric:string;period:string;statement:string;value?:string;unit?:string};
   focus?:Focus;
   /** Optional M5.2 caller-declared labels; never silently treat them as verified facts. */
@@ -198,6 +201,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     throw Error("Entity roles must refer to explicitly declared entities (maximum 12)");
   if(input.brokerUpdate?.estimateChanges && input.brokerUpdate.estimateChanges.length>12)
     throw Error("At most 12 attributed broker estimate changes per plan");
+  if(input.claims&&!input.captureOnly&&!input.completedAnalysis&&!input.researchReview)
+    throw Error("claim_persistence_requires_capture_only_or_research_review");
   if((input.completedAnalysis!==undefined||input.researchReview!==undefined||input.captureOnly===true) && (!input.sourceChat?.trim()||input.sourceChat.length>120))
     throw Error("M5.3 captureOnly/completedAnalysis requires sourceChat (1-120)");
   if(input.captureOnly===true&&(input.completedAnalysis!==undefined||input.researchReview!==undefined))
@@ -317,7 +322,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   else routes.push({kind:"industry_context_candidate",action:"link_existing_or_hold",
     path:routingV2.industryHubs.length===1?routingV2.industryHubs[0].path:null,requiresReview:true,
     reason:"Multi-issuer, non-ticker or macro item: use existing indexed Industry/Macro hubs only after dated source/event review; this is a link candidate, not an auto-append."});
-  if(claimReady&&!duplicates)
+  if(claimReady&&!duplicates&&!input.claims)
     routes.push({kind:"claim_registry_candidate",action:"candidate_create",path:null,requiresReview:true,
       reason:"Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
   const needed=[
@@ -368,5 +373,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   };
   if(input.completedAnalysis!==undefined||input.researchReview!==undefined||input.captureOnly===true)
     plan.safeEditWorkflow=buildCanonicalSafeEditWorkflow(input,plan);
+  for(const step of plan.safeEditWorkflow?.steps??[])if(step.kind==="structured_claim")
+    plan.routes.push({kind:"claim_registry_candidate",action:step.state==="needs_create"?"candidate_create":"link_existing_or_hold",
+      path:step.path,requiresReview:true,reason:"Source-scoped unverified observation; use the exact Safe Edit recipe and receipt/readback/index/link checks. No primary verification or additional origin independence."});
   return plan;
 }

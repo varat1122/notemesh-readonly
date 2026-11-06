@@ -10,6 +10,7 @@ import { searchVault } from "./queries";
 import type { WritebackInput, WritebackPlan } from "./investment-writeback-router";
 import {renderThaiResearchM55,validateResearchM55} from "./research-quality-m55";
 import {sourceArchiveReviewLines} from "./source-archive-provenance-p0";
+import {planClaimNotes,lineageMetadata,readPersistedClaim} from "./canonical-claims";
 import {revalidateHistoricalArchive} from "./canonical-archive-revalidation";
 
 const sha=(s:string)=>createHash("sha256").update(s,"utf8").digest("hex");
@@ -26,11 +27,11 @@ function originalFence(original:string){
   return `${fence}text\n${original}${original.endsWith("\n")?"":"\n"}${fence}\n`;
 }
 export interface CanonicalSafeEditStep {
-  kind:"source_intake"|"canonical_review";
+  kind:"source_intake"|"canonical_review"|"structured_claim";
   path:string;
   expectedSha256:string;
   receiptKey:string;
-  state:"needs_create"|"verified_existing"|"hold_conflict"|"hold_event_review"|"hold_index_repair"|"hold_quality_gate"|"hold_archive_provenance"|"hold_archive_drift";
+  state:"needs_create"|"verified_existing"|"hold_conflict"|"hold_event_review"|"hold_index_repair"|"hold_quality_gate"|"hold_archive_provenance"|"hold_archive_drift"|"hold_claim_gate";
   readbackVerified:boolean;
   indexed:boolean;
   searchable:boolean;
@@ -43,7 +44,7 @@ export interface CanonicalSafeEditWorkflow {
   version:"M5.3-recipe";
   status:"pending_safe_edit"|"saved_verified"|"pending_source_capture"|
     "source_saved_analysis_pending"|"hold_source_event_review"|
-    "hold_conflict_or_index"|"hold_research_quality"|"hold_archive_provenance"|"hold_archive_drift";
+    "hold_conflict_or_index"|"hold_research_quality"|"hold_archive_provenance"|"hold_archive_drift"|"hold_claim_persistence";
   sourceChat:string;
   steps:CanonicalSafeEditStep[];
   readyForNextNews:boolean;
@@ -54,6 +55,7 @@ export interface CanonicalSafeEditWorkflow {
   perDeviceSync:"unverified";
   instructions:string[];
   qualityIssues:string[];
+  claimIssues:string[];
   archiveProvenanceStatus:WritebackPlan["sourceCapture"]["archiveProvenanceStatus"];
   archiveProvenanceReason:WritebackPlan["sourceCapture"]["archiveProvenanceReason"];
 }
@@ -110,6 +112,9 @@ export function buildCanonicalSafeEditWorkflow(
       "10_Knowledge/Industry and Concepts";
   const reviewPath=`${folder}/Investment Review - ${safeSubject(subject)} - ${plan.planId}.md`;
   const tag="InvestmentIntake"+plan.planId.slice(3);
+  const claimNotes=planClaimNotes(input,plan.planId,rawPath);
+  const researchLineage=captureOnly?{}:lineageMetadata(input,reviewPath,rawPath,claimNotes);
+  const claimIssues=[...new Set(claimNotes.flatMap(c=>c.issues))];
   const event=plan.chronology.eventDate,published=plan.chronology.publicationDate;
   const attachment=plan.sourceCapture.attachmentVerified?"hash_readback_verified_user_bytes":"not_verified";
   const proposedSourceContent=[
@@ -180,7 +185,9 @@ export function buildCanonicalSafeEditWorkflow(
       `company_hubs: ${JSON.stringify(plan.routingV2.companyHubs.map(x=>x.path))}`,
       `industry_hubs: ${JSON.stringify(plan.routingV2.industryHubs.map(x=>x.path))}`
     ]:[]),
-    `original_source_path: ${yaml(rawPath)}`,"---","",
+    `original_source_path: ${yaml(rawPath)}`,
+    ...(claimNotes.length?[`claim_ids: ${JSON.stringify(claimNotes.map(c=>c.id))}`,`claim_paths: ${JSON.stringify(claimNotes.map(c=>c.path))}`,"origin_independence_increment: 0"]:[]),
+    ...Object.entries(researchLineage).map(([k,v])=>`${k}: ${JSON.stringify(v)}`),"---","",
     (legacy?`# Investment Review — ${safeSubject(subject)} — ${plan.planId}`:`# บทวิเคราะห์การลงทุน — ${safeSubject(subject)} — ${plan.planId}`),"",
     `Source token: ${tag}`,"",
     (legacy?"## Source provenance":"## ที่มาของต้นฉบับ"),"",
@@ -193,6 +200,7 @@ export function buildCanonicalSafeEditWorkflow(
     ...brokerLines.map(line=>!legacy&&line.startsWith("## ")?"## ข้อมูลโบรกเกอร์ที่อ้างถึง (ยังไม่ได้ตรวจสอบโดยอิสระ)":line),
     (legacy?"## Canonical knowledge links":"## การเชื่อมโยงความรู้"),"",
     ...companyLinks,...themeLinks,
+    ...claimNotes.map(c=>`- ${wiki(c.path)} — ${c.id} (ข้ออ้างที่ยังไม่ยืนยัน ไม่ใช่หลักฐานอิสระเพิ่ม)`),
     ...(companyLinks.length||themeLinks.length?[]:["- No existing Company/Industry Hub was resolved; owner review of entity mapping required."]),
     "",(legacy?"## Ingestion safety":"## ขอบเขตความปลอดภัยในการบันทึก"),"",
     "- Linked companies are not independent new events or verified customer/supplier relationships.",
@@ -208,7 +216,10 @@ export function buildCanonicalSafeEditWorkflow(
   // must still be reviewed. No semantic duplicate is auto-adjudicated here.
   const ownSourceReceipt=plan.sourceIdentity.existingSourcePath===rawPath&&
     sourceStep.state==="verified_existing";
-  const otherSourceCandidate=plan.sourceEventReview.candidatePaths.some(p=>p!==rawPath);
+  const ownClaimPaths=new Set(claimNotes.flatMap(c=>{try{
+    const saved=readPersistedClaim(c.path);return saved.intakeId===plan.planId&&saved.sourcePath===rawPath?[c.path]:[];
+  }catch{return [];}}));
+  const otherSourceCandidate=plan.sourceEventReview.candidatePaths.some(p=>p!==rawPath&&!ownClaimPaths.has(p));
   const hasSourceMatch=(plan.sourceEventReview.status==="possible_same_source_event_candidates"&&
       (!ownSourceReceipt||otherSourceCandidate||plan.sourceEventReview.scanTruncated))||
     plan.exactClaimReview.classification==="duplicate_candidate";
@@ -216,8 +227,8 @@ export function buildCanonicalSafeEditWorkflow(
   // reconciled before adding a second canonically located review.
   const legacy=plan.routes.find(x=>x.kind==="research_review")?.path;
   const otherCanonical=db().prepare(`SELECT path FROM notes WHERE json_valid(frontmatter)=1
-    AND json_extract(frontmatter,'$.intake_id')=? AND path<>? AND path<>? LIMIT 1`)
-    .get(plan.planId,rawPath,reviewPath) as {path:string}|undefined;
+    AND json_extract(frontmatter,'$.intake_id')=? AND path<>? AND path<>? ${claimNotes.map(()=>"AND path<>?").join(" ")} LIMIT 1`)
+    .get(plan.planId,rawPath,reviewPath,...claimNotes.map(c=>c.path)) as {path:string}|undefined;
   const legacyConflict=Boolean(legacy&&legacy!==reviewPath&&
     db().prepare("SELECT 1 FROM notes WHERE path=? LIMIT 1").get(legacy))||Boolean(otherCanonical);
   const reviewStep=captureOnly?null:toStep("canonical_review",reviewPath,reviewContent,tag,hasSourceMatch||legacyConflict);
@@ -259,7 +270,20 @@ export function buildCanonicalSafeEditWorkflow(
       reviewStep.state="hold_quality_gate";
     reviewStep.safeEditRequest=null;
   }
-  const steps=reviewStep?[sourceStep,reviewStep]:[sourceStep];
+  const claimSteps=claimNotes.map(c=>{
+    const step=toStep("structured_claim",c.path,c.content,tag,false);
+    if((c.issues.length||!["needs_create","verified_existing"].includes(sourceStep.state))&&(step.state==="needs_create"||step.state==="verified_existing")){step.state="hold_claim_gate";step.safeEditRequest=null;}
+    if(step.state==="verified_existing")try{readPersistedClaim(c.path);}catch{step.state="hold_index_repair";step.safeEditRequest=null;claimIssues.push("claim_receipt_readback_index_link_unverified");}
+    return step;
+  });
+  const claimHeld=claimSteps.some(s=>s.state!=="needs_create"&&s.state!=="verified_existing");
+  if(reviewStep&&claimHeld){if(reviewStep.state==="needs_create"||reviewStep.state==="verified_existing")reviewStep.state="hold_claim_gate";reviewStep.safeEditRequest=null;}
+  if(reviewStep?.state==="verified_existing")for(const c of claimNotes){
+    if(!db().prepare("SELECT 1 FROM links WHERE source_path=? AND resolved_path=?").get(reviewPath,c.path)){
+      reviewStep.state="hold_index_repair";reviewStep.safeEditRequest=null;claimIssues.push("review_claim_link_missing");
+    }
+  }
+  const steps=reviewStep?[sourceStep,...claimSteps,reviewStep]:[sourceStep,...claimSteps];
   const saved=steps.every(x=>x.state==="verified_existing");
   const blocked=steps.some(x=>x.state==="hold_conflict"||x.state==="hold_index_repair");
   const reviewHeld=reviewStep?.state==="hold_event_review";
@@ -267,23 +291,23 @@ export function buildCanonicalSafeEditWorkflow(
   const archiveState=reviewStep?.state==="hold_archive_drift"||reviewStep?.state==="hold_archive_provenance"?reviewStep.state:null;
   return {
     version:"M5.3-recipe",status:blocked?"hold_conflict_or_index":
-      captureOnly?(saved?"source_saved_analysis_pending":"pending_source_capture"):
+      reviewHeld&&claimHeld?"hold_source_event_review":claimHeld?"hold_claim_persistence":captureOnly?(saved?"source_saved_analysis_pending":"pending_source_capture"):
       archiveState??(qualityHeld?"hold_research_quality":
       saved?"saved_verified":
       reviewHeld?"hold_source_event_review":"pending_safe_edit"),
-    sourceChat,steps,readyForNextNews:saved&&!qualityHeld&&!archiveHold&&!archiveState,analysisComplete:!captureOnly&&saved&&!qualityHeld&&!archiveHold&&!archiveState,writesPerformedByPlanner:false,
-    qualityIssues,archiveProvenanceStatus:plan.sourceCapture.archiveProvenanceStatus,
+    sourceChat,steps,readyForNextNews:saved&&!(captureOnly&&claimNotes.length)&&!qualityHeld&&!archiveHold&&!archiveState,analysisComplete:!captureOnly&&saved&&!qualityHeld&&!archiveHold&&!archiveState,writesPerformedByPlanner:false,
+    qualityIssues,claimIssues:[...new Set(claimIssues)],archiveProvenanceStatus:plan.sourceCapture.archiveProvenanceStatus,
     archiveProvenanceReason:plan.sourceCapture.archiveProvenanceReason,
     protectedNotesTouched:false,
     sourcePreservation:plan.inputFormat==="text"?"text_input":
       plan.sourceCapture.attachmentVerified?"text_plus_verified_user_attachment":"text_only_binary_not_verified",
     perDeviceSync:"unverified",
     instructions:[
-      "For each needs_create step, call the existing Safe Edit preview_edit tool with the exact safeEditRequest, then apply_edit using its token and beforeHash, in source-then-review order; never assume this read-only recipe wrote anything.",
-      "For captureOnly, save and verify just the attributed raw Source. Return source_saved_analysis_pending, not a completed Research Review. Later retry the SAME source with typed researchReview to create the linked review without duplicating the Source.",
+      "For each needs_create step, call the existing Safe Edit preview_edit tool with the exact safeEditRequest, then apply_edit using its token and beforeHash, in Source → requested Claims → Review order; never assume this read-only recipe wrote anything.",
+      "For captureOnly, save and verify the attributed raw Source and any explicitly requested unverified Claims. Return source_saved_analysis_pending, not a completed Research Review. Later retry the SAME source with typed researchReview to create the linked review without duplicating the Source.",
       "After each apply, require receipt.write/readback/reindex all verified, plus the indexed canonical Review→Source Obsidian link. Retry by re-running this planner and checking hashes; never overwrite a changed note.",
       "If hold_event_review, reconcile original economic event/source and old broker vintage before a new canonical review. Preserve the raw source independently.",
-      "Run this planner again after writes: only saved_verified and readyForNextNews=true prove server file/readback/search index for both required notes. For screenshot/PDF without a hash-verified attachment this is TEXT-ONLY preservation; per-device Obsidian Sync still unverified.",
+      "Run this planner again after writes: only saved_verified and readyForNextNews=true prove server file/readback/search index for all requested notes. For screenshot/PDF without a hash-verified attachment this is TEXT-ONLY preservation; per-device Obsidian Sync still unverified.",
       "Existing Company/Industry Hub links are bidirectional Obsidian backlinks; this workflow does not imply a material Company Timeline update or revise protected files."
     ]
   };
