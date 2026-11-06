@@ -26,6 +26,25 @@ async function tsmcHub(aliases="[TSM]"){
     "---\nverification: not_reverified\n---\n# TSMC original-source candidate");
 }
 describe("RI-001 issuer context resolution",()=>{
+  it.each(["source_type","source_tier"])("RC4 caller %s primary and URL never fill macro primary-verification gap or add ranking bonus",async key=>{
+    const build=await fixture();
+    const rel="10_Knowledge/Macro and Markets/Vietnam GDP declaration.md";
+    const body="# Vietnam GDP declaration\nVietnam GDP release candidate, not verified.\n";
+    await addExtra(rel,"---\ncountry: Vietnam\n---\n"+body);
+    const request={question:"Vietnam GDP",industry:"Vietnam",focus:"macro" as const,maxNotes:16};
+    const before=build(request),score=before.items.find(x=>x.path===rel)!.score;
+    await addExtra(rel,`---\ncountry: Vietnam\n${key}: primary\nsource_url: https://example.gov/gdp\n---\n`+body);
+    const after=build(request);
+    expect(after.incomplete.join(" ")).toMatch(/primary.*verif/i);
+    expect(after.items.find(x=>x.path===rel)!.score).toBe(score);
+    expect(after.items.find(x=>x.path===rel)!.evidenceUse).toBe("unverified_candidate");
+  });
+  it("RC4 a Primary Evidence filename never fills the issuer primary-verification gap",async()=>{
+    const build=await fixture();
+    const pack=build({question:"NVDA earnings",issuers:["NVDA"]});
+    expect(pack.items.some(x=>x.path.includes("Primary Evidence"))).toBe(true);
+    expect(pack.incomplete.join(" ")).toContain("Server-verified primary evidence not established");
+  });
   it("reuses the existing indexed Hub alias contract to retrieve TSMC context for TSM",async()=>{
     const build=await fixture();await tsmcHub();
     const {planCanonicalRoutingV2}=await import("./investment-routing-v2");
@@ -342,7 +361,7 @@ Official-file source candidate (no verified numeric facts in this synthetic test
     const paths=p.items.map(x=>x.path);
     expect(paths.indexOf("10_Knowledge/Macro and Markets/2026-10-07 - Vietnam official GDP 2026Q3.md"))
       .toBeLessThan(paths.indexOf("10_Knowledge/Macro and Markets/2026-10-08 - Vietnam GDP Bot recap.md"));
-    expect(p.incomplete.some(x=>x.includes("primary macro/statistical"))).toBe(false);
+    expect(p.incomplete.some(x=>x.includes("primary macro/statistical"))).toBe(true);
     expect(p.status).toBe("retrieval_only_not_verified");
     expect(p.items.find(x=>x.path.includes("official GDP"))?.declaredVerification).toBe("not_reverified");
   });

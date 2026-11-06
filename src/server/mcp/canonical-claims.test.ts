@@ -5,6 +5,7 @@ import path from "node:path";
 import {Client} from "@modelcontextprotocol/sdk/client/index.js";
 import {InMemoryTransport} from "@modelcontextprotocol/sdk/inMemory.js";
 import {createHash} from "node:crypto";
+import {execFileSync} from "node:child_process";
 import type {WritebackInput} from "../vault/investment-writeback-router";
 import type {IntakeClaim} from "../vault/canonical-claims";
 
@@ -129,6 +130,56 @@ describe("RI-001 source-scoped multi-claim persistence",()=>{
     expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
     expect(p.readyForNextNews).toBe(false);assertProtected();
   });
+  it.each([
+    ["RC1 digit clipping", "Revenue of $96.2 billion, up 106%", "6.2 billion, up 10", "6.2", undefined],
+    ["RC1 sign clipping", "Revenue of -13.5 billion", "13.5 billion", "13.5", undefined],
+    ["RC1 decimal clipping", "Revenue of 13.50 billion", "Revenue of 13.5", "13.5", undefined],
+    ["RC1 exponent clipping", "Revenue of 13.5e2 billion", "Revenue of 13.5", "13.5", undefined],
+    ["RC1 group clipping", "Revenue of 1,013.5 billion", "13.5 billion", "13.5", undefined],
+    ["RC2 qualification clipping", "Revenue of 96.2 billion, up 106%", "Revenue of 96.2 billion, up 106%", "96.2", "up 10"],
+    ["RC3 unicode sign", "Revenue of \u201013.5 billion", "Revenue of \u201013.5 billion", "13.5", undefined],
+    ["RC3 accounting negative", "Revenue of (13.5) billion", "Revenue of (13.5) billion", "13.5", undefined]
+  ])("%s holds claim and Review but leaves safe Source capture",async(_name,full,quote,value,qualification)=>{
+    const data={...input,extractedText:full!,claims:[{...claims[0],value:value!,sourceExcerpt:quote!,qualification}]};
+    const p=await prepare(data);expect(p.claimIssues.length).toBeGreaterThan(0);
+    expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);expect(p.readyForNextNews).toBe(false);assertProtected();
+  });
+  it.each([
+    ["Revenue of $96.2 billion, up 106%","6.2 billion, up 10","6.2",undefined,"claim_excerpt_numeric_boundary_invalid"],
+    ["Revenue of 96.2 billion, up 106%","Revenue of 96.2 billion, up 106%","96.2","up 10","claim_qualification_source_anchor_invalid"],
+    ["Revenue of (13.5) billion","Revenue of (13.5) billion","13.5",undefined,"claim_literal_source_anchor_missing"],
+    ["Revenue of \u201413.5 billion","Revenue of \u201413.5 billion","13.5",undefined,"claim_literal_source_anchor_missing"],
+    ["Revenue of 13.5bn","Revenue of 13.5bn","13.5",undefined,"claim_literal_source_anchor_missing"]
+  ])("RC5 historical anchor HOLD retains receipts and is visible in the read-only compatibility scan (%s)",async(full,quote,value,qualification,reason)=>{
+    const data={...input,researchReview:undefined,captureOnly:true,extractedText:full!,
+      claims:[{...claims[0],value:value!,sourceExcerpt:quote!,qualification}]};
+    const anchors=await import("../vault/claim-value-anchor");
+    // Only emulate historical admission. All writes/receipts use Safe Edit.
+    const old=vi.spyOn(anchors,"claimSourceAnchorIssues").mockImplementation(()=>[]);
+    const saved=await apply(data,await prepare(data));old.mockRestore();
+    const before=await journal(),bytes=saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)));
+    const c=saved.steps.find(s=>s.kind==="structured_claim")!;
+    const {readPersistedClaim}=await import("../vault/canonical-claims");
+    expect(()=>readPersistedClaim(c.path)).toThrow("claim_source_anchor_invalid");
+    const p=await prepare(data);expect(p.claimIssues).toContain(reason);expect(p.previews).toEqual([]);
+    expect(p.steps[0].state).toBe("verified_existing");expect(p.readyForNextNews).toBe(false);
+    const {scanClaimAnchors}=await import("../../../scripts/check-claim-anchor-compatibility");
+    const scan=scanClaimAnchors(vault);expect(scan).toMatchObject({status:"HOLD",scanComplete:true,scanned:1,held:1,writesPerformed:false});
+    expect(scan.rows[0]).toMatchObject({path:c.path,status:"HOLD",reasons:[reason]});
+    expect(scan.rows[0].proposedResolution).toContain("No automatic repair");
+    expect(JSON.stringify(scan)).not.toContain(full!);
+    expect(await journal()).toEqual(before);expect(saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)))).toEqual(bytes);assertProtected();
+  });
+  it("RC5 compatibility CLI reads actual Safe Edit Source/claims without DB/bootstrap/write side effects",async()=>{
+    const capture={...input,researchReview:undefined,captureOnly:true};
+    const saved=await apply(capture,await prepare(capture)),before=await journal();
+    const bytes=saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path))),absent=path.join(root,"must-not-initialize");
+    const output=execFileSync(process.execPath,["scripts/check-claim-anchor-compatibility.ts","--vault",vault],{
+      cwd:process.cwd(),encoding:"utf8",env:{...process.env,DATA_DIR:absent}});
+    expect(JSON.parse(output)).toMatchObject({status:"ANCHOR_COMPATIBLE",scanComplete:true,scanned:2,held:0,writesPerformed:false,receiptIndexPrimaryValidity:"not_assessed"});
+    expect(fs.existsSync(absent)).toBe(false);expect(await journal()).toEqual(before);
+    expect(saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)))).toEqual(bytes);assertProtected();
+  });
   it.each(["113.5","-13.5"])("historical invalid anchor %s holds cold readback without repairing original bytes/receipts",async value=>{
     const text=`Synthetic revenue was $${value} billion.`;
     const data={...input,researchReview:undefined,captureOnly:true,extractedText:text,
@@ -136,7 +187,7 @@ describe("RI-001 source-scoped multi-claim persistence",()=>{
     // Reproduce historical admission with the old literal-substring policy.
     // All Source/claim writes and receipts still come from the real Safe Edit.
     const anchors=await import("../vault/claim-value-anchor");
-    const old=vi.spyOn(anchors,"claimValueAppearsInAnchor").mockImplementation((s,v)=>s.includes(v));
+    const old=vi.spyOn(anchors,"claimSourceAnchorIssues").mockImplementation(()=>[]);
     const saved=await apply(data,await prepare(data));old.mockRestore();
     const before=await journal(),bytes=saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)));
     const claim=saved.steps.find(s=>s.kind==="structured_claim")!;
