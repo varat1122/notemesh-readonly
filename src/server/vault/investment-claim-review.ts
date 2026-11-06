@@ -36,6 +36,7 @@ interface StructuredRecord {
   evidenceClass?:string;sourceLocator?:string;sourceExcerpt?:string;statement?:string;qualification?:string|null;
   sourcePath?:string;receiptKey?:string;sourceReceiptKey?:string;reviewReferences?:string[];reviewScanComplete?:boolean;
   persistence?:"receipt_readback_index_link_verified";originIndependenceIncrement?:0;
+  interpretationBoundary?:ReturnType<typeof readPersistedClaim>["interpretationBoundary"];
 }
 export interface ClaimReview {
   status:"review_only_not_verified";
@@ -141,7 +142,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
         Object.assign(v,{evidenceClass:c.evidence_class,sourceLocator:c.source_locator,sourceExcerpt:c.source_excerpt,
           statement:c.statement,qualification:c.qualification,sourcePath:persisted.sourcePath,receiptKey:persisted.receiptKey,sourceReceiptKey:persisted.sourceReceiptKey,
           reviewReferences:persisted.reviewReferences,reviewScanComplete:persisted.reviewScanComplete,
-          persistence:persisted.bindingStatus,originIndependenceIncrement:0});
+          persistence:persisted.bindingStatus,originIndependenceIncrement:0,interpretationBoundary:persisted.interpretationBoundary});
         if(input.evidenceClass&&v.evidenceClass!==input.evidenceClass)continue;
       }
       if(!v||norm(v.period)!==norm(period))continue;

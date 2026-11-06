@@ -165,10 +165,37 @@ runtime time of **canonical Review proposal creation**, not economic event time,
 publication/import time or an inferred LLM generation time. Identical prepared
 retries retain that timestamp only from the same input digest and Safe Edit
 journal content/hash/runtime preview event; it cannot be supplied/backdated by
-clients. The journal read is bounded to sixteen proposals per Review path plus a
-sentinel and fails closed on ambiguity/overflow/unverified chronology. The
-runtime event must follow generation within one minute; a delayed raw recipe
-needs fresh planning. A cutoff later than creation is rejected. This MCP runtime
+clients. Runtime-lineage Review creation must use `prepare_canonical_writeback`;
+`preview_edit`/`create_note` reject those raw recipes with
+`canonical_review_requires_prepare`, before creating a journal operation or note.
+Prepare generates fresh chronology and admits the preview immediately. An
+already admitted valid preview keeps its original creation time while the owner
+reviews it; the one-minute generation-to-preview check is **not** an owner
+approval deadline. The existing 30-minute token expiry remains: prepare again to
+rotate an expired token without changing proposal bytes, time or operation ID.
+Apply also refuses an older invalid-chronology preview before writing.
+
+Re-planning first verifies the exact on-disk Review's written create receipt,
+then its original runtime preview event. Abandoned previews cannot invalidate a
+valid written version. If no matching written version exists, lookup filters by
+exact Review path **and input fingerprint** before returning at most sixteen
+matching proposals plus a sentinel; unrelated input proposals do not consume this
+bound. The existing journal quota still applies. Ambiguous times, matching-scope
+overflow, an invalid receipt or unverifiable chronology return
+`hold_review_lineage` with `lineageIssues` (including
+`review_runtime_chronology_ambiguous`, `review_lineage_scan_limit`, or
+`review_runtime_chronology_unverified`), never a planner exception that hides the
+valid Source/Claims. There is no arbitrary first/last proposal selection.
+
+A historical delayed generic write can have a valid persistence receipt but
+invalid current chronology. Preserve that receipt and every note byte; current
+Review usability HOLDs, cold Claim retrieval excludes that Review and reports
+`reviewScanComplete=false`, while independently verified Source/Claim persistence
+remains readable. Actual competing proposals or invalid historical chronology
+require separate reviewed reconciliation; neither retries nor this patch edit,
+delete, backdate or repair the journal automatically. New input with a cutoff
+later than creation is rejected; the same defect in historical lineage is an
+explicit HOLD. This MCP runtime
 does not expose the originating LLM model version: persist `model_version=null`,
 `model_version_status=not_exposed`. Existing inputs without claims/lineage retain
 their prior rendering and receipt identity.
@@ -184,6 +211,38 @@ cutoff: `2026-08-26T20:36:00Z`. SEC corroboration supplied by the user is
 it is not fetched or counted as independently verified evidence by these tests.
 Fixture persistence is only in temporary test Vaults. CI acceptance is not live
 Vault persistence, remote Git/Sync delivery or Runtime/LLM Research Acceptance.
+
+### Same-event appearances and claim interpretation
+
+Source identity still binds exact received bytes, canonical URL and explicit
+chronology. Exact retry reuses the immutable Source/Claims/Review. A formatting
+change (including extra newline) is a new Source appearance, not an exact retry;
+it does not automatically become a new economic event or independent evidence.
+Existing same-URL/event candidates or an incomplete candidate scan HOLD **new
+Claims as well as Review**, including Feed Only claim requests. Safe raw Source
+capture remains possible. Already-persisted Claims are not deleted or relabelled.
+Validated Claims belonging to the same intake/Source do not block incremental
+C1 then C2 capture. Different explicit event dates are not silently collapsed.
+
+Materiality, added detail, correction and contradiction need LLM/reviewer
+adjudication. Backend value comparison can flag a possible correction; it cannot
+confirm one or turn a new appearance into independent corroboration. This patch
+adds no semantic deduplication or investment-reasoning regex.
+
+`sourceExcerpt` must literally occur in the received Source, with the submitted
+value/qualification. That proves an anchor in supplied text, **not** that the
+analyst's `statement` follows from it or that the supplied evidence-class label
+is correct. Planner/prepare/apply and cold Claim retrieval expose
+`claimInterpretationBoundary` / `interpretationBoundary`: statement and class are
+caller-attributed/unverified, semantic fidelity is `not_assessed`, fact usability
+is `not_verified_fact`, and excerpt binding is `literal_received_source_only`.
+These read-time qualifications do not rewrite historical Claim bytes/receipts.
+A Thai Review HOLD can retain a literal-anchored unverified observation; it never
+promotes English AI opinion, Actual/Guidance labels or a Safe Edit receipt into
+verified issuer facts. Claim-level primary verification still requires its
+separate server-validated evidence receipt. All same-origin Claims/Reviews add
+zero independence. Semantic fidelity, translation completeness and investment
+reasoning remain explicit LLM/reviewer acceptance, not CI claims.
 
 ### Historical receipts and current revalidation
 
@@ -223,7 +282,8 @@ and [primary-evidence receipt design](investment-os/m551-primary-evidence-receip
   from a PDF is not the original PDF.
 - Remote Obsidian Sync and any mobile/desktop delivery are *unverified* by a
   server-side SHA/FTS receipt.
-- Existing M5.3 planner + per-file Safe Edit remain available as fallback.
+- Existing M5.3 planner + per-file Safe Edit remain available for eligible notes;
+  runtime-lineage Review creation requires canonical prepare/apply.
   Do not use legacy `submit_investment_notes` for canonical research.
 
 ## Connection metadata and acceptance
