@@ -1,4 +1,6 @@
+import {canonicalHttpSourceUrl} from "../source-url";
 import { db } from "../db";
+import {readPersistedClaim,type IntakeClaim} from "./canonical-claims";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 
 /**
@@ -24,12 +26,16 @@ export interface IncomingClaim {
   unit?: string;
   focus?: Focus;
   maxCandidates?: number;
+  evidenceClass?:IntakeClaim["evidenceClass"];
 }
 interface IndexedRow { path:string; frontmatter:string|null }
 interface StructuredRecord {
   path:string; claimId:string|null; originalSource:string|null;
   metric:string; period:string; value:string|null; unit:string|null;
   verification:string|null; explicit:boolean;
+  evidenceClass?:string;sourceLocator?:string;sourceExcerpt?:string;statement?:string;qualification?:string|null;
+  sourcePath?:string;receiptKey?:string;sourceReceiptKey?:string;reviewReferences?:string[];reviewScanComplete?:boolean;
+  persistence?:"receipt_readback_index_link_verified";originIndependenceIncrement?:0;
 }
 export interface ClaimReview {
   status:"review_only_not_verified";
@@ -38,6 +44,7 @@ export interface ClaimReview {
   eventDate:string|null; publishedAt:string|null;
   originalSource:string;
   matchingClaims:StructuredRecord[];
+  claimBindingHolds:{path:string;reason:"claim_receipt_readback_index_link_unverified"}[];
   relatedEventClaims:StructuredRecord[];
   sourceLinkedUnstructuredPaths:string[];
   metadataScan:{indexedNotesWithMetadata:number;notesScanned:number;truncated:boolean;eligibleEntityNotes:number};
@@ -51,16 +58,7 @@ const trim=(x:string)=>x.trim().normalize("NFC");
 const norm=(x:string)=>trim(x).toLowerCase().replace(/\s+/g," ");
 function sourceKey(src:string){
   const value=trim(src);
-  try {
-    const u=new URL(value);
-    if(!["https:","http:"].includes(u.protocol)) return norm(value);
-    u.hash="";
-    for(const k of [...u.searchParams.keys()]) if(/^utm_|^(?:fbclid|gclid)$/i.test(k))u.searchParams.delete(k);
-    // URL paths and query values may be case-sensitive. Only the host and
-    // scheme are case-insensitive; URL already normalizes those fields.
-    u.searchParams.sort();
-    return u.toString();
-  } catch {return norm(value);}
+  return canonicalHttpSourceUrl(value)??norm(value);
 }
 function stringOrNull(x:unknown):string|null {
   return typeof x==="string" && x.trim()?trim(x):typeof x==="number" && Number.isFinite(x)?String(x):null;
@@ -104,6 +102,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   }
   const limit=Math.min(12,Math.max(1,input.maxCandidates??8));
   const selected:StructuredRecord[]=[];
+  const claimBindingHolds:ClaimReview["claimBindingHolds"]=[];
   const sourceLinkedUnstructuredPaths:string[]=[];
   const MAX_METADATA_SCAN=25000;
   const indexedNotesWithMetadata=(db().prepare("SELECT COUNT(*) AS n FROM notes WHERE frontmatter IS NOT NULL").get() as {n:number}).n;
@@ -119,6 +118,10 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
     if(fm?.type==="primary_source_verification_receipt")continue;
     if(!fm||typeof fm!=="object"||Array.isArray(fm)||!sameEntity(fm,input))continue;
     eligibleEntityNotes++;
+    let persisted:ReturnType<typeof readPersistedClaim>|null=null;
+    if(fm.claim_persistence_version==="RI001-1")try{persisted=readPersistedClaim(row.path);}catch{
+      if(claimBindingHolds.length<12)claimBindingHolds.push({path:row.path,reason:"claim_receipt_readback_index_link_unverified"});continue;
+    }
     const noteSource=stringOrNull(fm.original_source)||stringOrNull(fm.source_url)||stringOrNull(fm.primary_url);
     const claims=Array.isArray(fm.claims)?fm.claims:[fm];
     let hasComparableStructuredRecord=false;
@@ -133,6 +136,14 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
       const merged={...fm,...child};
       if(!sameEntity(merged,input))continue;
       const v=record(merged,row.path,stringOrNull(merged.verification));
+      if(v&&persisted){
+        const c=persisted.claim;
+        Object.assign(v,{evidenceClass:c.evidence_class,sourceLocator:c.source_locator,sourceExcerpt:c.source_excerpt,
+          statement:c.statement,qualification:c.qualification,sourcePath:persisted.sourcePath,receiptKey:persisted.receiptKey,sourceReceiptKey:persisted.sourceReceiptKey,
+          reviewReferences:persisted.reviewReferences,reviewScanComplete:persisted.reviewScanComplete,
+          persistence:persisted.bindingStatus,originIndependenceIncrement:0});
+        if(input.evidenceClass&&v.evidenceClass!==input.evidenceClass)continue;
+      }
       if(!v||norm(v.period)!==norm(period))continue;
       hasComparableStructuredRecord=true;
       if(norm(v.metric)!==norm(metric)&&(!v.originalSource||sourceKey(v.originalSource)!==sourceKey(originalSource)))continue;
@@ -151,7 +162,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   const otherSource=strict.filter(x=>x.originalSource&&sourceKey(x.originalSource)!==sourceKey(originalSource));
   // Numerical equality/conflict requires explicit, identical unit strings
   // on both sides. Missing unit is never proof of an equivalent metric.
-  const comparable=(a:StructuredRecord)=>!!input.unit&&!!a.unit&&norm(a.unit)===norm(input.unit);
+  const comparable=(a:StructuredRecord)=>(a.evidenceClass===input.evidenceClass)&&!!input.unit&&!!a.unit&&norm(a.unit)===norm(input.unit);
   const exact=sameSource.filter(comparable).map(a=>amountEqual(a.value,input.value??null));
   let classification:ReviewClass="unresolved";
   // A single conflicting same-source record prevents a misleading 'duplicate'
@@ -183,6 +194,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
     "Check independent counter-evidence and date/vintage; do not promote archived AI or repeat issuer press releases.",
     "Use a separate human-reviewed Safe Edit preview and Change Log before any Protected Thesis modification."
   ];
+  if(claimBindingHolds.length)evidenceNeeded.unshift("Generated claim records failed current receipt/readback/index/link checks; historical claim completeness is not established.");
   if(classification==="unresolved")evidenceNeeded.unshift("No conclusive structured claim match; do not infer this is a new event or a novel claim.");
   if(sourceLinkedUnstructuredPaths.length)
     evidenceNeeded.unshift("A prior note cites the same original source but lacks a comparable structured claim; read the whole note before deciding novelty.");
@@ -191,7 +203,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   return {
     status:"review_only_not_verified",classification,domain:input.domain,
     entity,metric,period,eventDate:input.eventDate??null,publishedAt:input.publishedAt??null,
-    originalSource,matchingClaims:strict.slice(0,limit),
+    originalSource,claimBindingHolds,matchingClaims:strict.slice(0,limit),
     relatedEventClaims:matchedSourceSamePeriodOtherMetric.slice(0,limit),
     sourceLinkedUnstructuredPaths,
     metadataScan:{indexedNotesWithMetadata,notesScanned:rows.length,

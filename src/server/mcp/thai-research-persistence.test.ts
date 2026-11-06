@@ -131,3 +131,69 @@ describe("RI-001 Thai persistence quality boundary",()=>{
     expect(changed.steps[1].state).toBe("hold_conflict");expect(changed.previews).toEqual([]);
   });
 });
+
+
+describe("RI-001 calibrated language gate across persistence modes",()=>{
+  const english="MU reported backlog that has not been independently verified. Orders can be cancelled and shipment is not guaranteed.";
+  const attacks=[
+    `คำแปลภาษาไทย: "${english}"`,
+    `สรุปเป็นภาษาไทย\n\n> ${english}`,
+    `คำอธิบายภาษาไทย\n\n\x60\x60\x60text\n${english}\n\x60\x60\x60`,
+    `คำอธิบายภาษาไทย\n\n~~~text\n${english}\n~~~`
+  ];
+  it.each(["text","pdf"] as const)("holds quote/code substitutions for English %s while retaining exact source-only capture",async inputFormat=>{
+    for(const text of attacks){
+      const data={...input,inputFormat,researchReview:{...review,translationTh:text,mechanismTh:text}};
+      const p=await prepare(data);expect(p.qualityIssues).toEqual(expect.arrayContaining(["translation_not_thai","mechanismTh_thai_required"]));
+      expect(p.steps[1].state).toBe("hold_quality_gate");expect(p.previews.every(x=>x.kind==="source_intake")).toBe(true);
+      expect(p.readyForNextNews).toBe(false);
+    }
+    const data={...input,inputFormat,researchReview:{...review,translationTh:attacks[0]}};
+    const p=await prepare(data),saved=await apply(data,p);expect(saved.readyForNextNews).toBe(false);
+    expect(saved.steps[0].state).toBe("verified_existing");expect(saved.steps[1].state).toBe("hold_quality_gate");
+    expect(fs.readFileSync(path.join(vault,saved.steps[0].path),"utf8")).toContain(input.extractedText);
+    expect(fs.existsSync(path.join(vault,saved.steps[1].path))).toBe(false);
+    const retry={...input,inputFormat,researchReview:{...review,mechanismTh:"Revenue เพิ่ม แต่ EBITDA Margin ลด ขณะที่ Guidance ชี้ว่า FCF และ ROIC ยังอ่อน"}};
+    const fixed=await prepare(retry);expect(fixed.planId).toBe(saved.planId);expect(fixed.qualityIssues).toEqual([]);
+    expect(fixed.previews.map(x=>x.kind)).toEqual(["canonical_review"]);expect((await apply(retry,fixed)).status).toBe("saved_verified");
+  });
+  it.each(["th","en"])("retains translation policy, technical terms and exact bytes for %s news",async sourceLanguage=>{
+    const extractedText=sourceLanguage==="th"?"บริษัทอ้างคำสั่งซื้อเพิ่มแต่ยังต้องตรวจต้นฉบับ และคำสั่งซื้ออาจถูกยกเลิก":input.extractedText;
+    const data={...input,sourceLanguage,extractedText,researchReview:{...review,translationTh:sourceLanguage==="th"?undefined:review.translationTh,
+      mechanismTh:"Revenue, EBITDA, Margin, Guidance, FCF, ROIC ดีขึ้นแต่ยังต้องติดตาม"}};
+    const p=await prepare(data);expect(p.qualityIssues).toEqual([]);const saved=await apply(data,p);expect(saved.status).toBe("saved_verified");
+    expect(fs.readFileSync(path.join(vault,saved.steps[0].path),"utf8")).toContain(extractedText);
+    const content=fs.readFileSync(path.join(vault,saved.steps[1].path),"utf8");expect(content.includes("## คำแปลจากต้นฉบับ")).toBe(sourceLanguage!=="th");
+    const before=(await import("../db")).db().prepare("SELECT * FROM safe_edit_operations ORDER BY id").all(),bytes=saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)));
+    const again=await prepare(data);expect(again.previews).toEqual([]);expect(again.workflowStatus).toBe("saved_verified");
+    expect((await import("../db")).db().prepare("SELECT * FROM safe_edit_operations ORDER BY id").all()).toEqual(before);
+    expect(saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)))).toEqual(bytes);
+    for(const pathName of ["05_Thesis/MU - Current Thesis.md","06_Portfolio/Positions.md"])expect(fs.readFileSync(path.join(vault,pathName),"utf8")).toBe("# Protected fixture\n");
+  });
+  it("Feed Only still captures an untranslated English PDF excerpt without proposing a Review",async()=>{
+    const data={...input,inputFormat:"pdf" as const,researchReview:undefined,captureOnly:true};const p=await prepare(data),saved=await apply(data,p);
+    expect(p.qualityIssues).toEqual([]);expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+    expect(saved.status).toBe("source_saved_analysis_pending");expect(saved.steps).toHaveLength(1);
+    expect(fs.readFileSync(path.join(vault,saved.steps[0].path),"utf8")).toContain(input.extractedText);
+    expect((await plan(data)).safeEditWorkflow!.sourcePreservation).toBe("text_only_binary_not_verified");
+  });
+  it("revalidation holds an old quote bypass without rewriting its accepted bytes or receipts",async()=>{
+    const data={...input,researchReview:{...review,translationTh:attacks[0]}};
+    const w=(await plan()).safeEditWorkflow!,{preview,apply:write}=await import("../safe-edit/engine");
+    const accepted:string[]=[];
+    // Reconstruct a previously accepted pre-calibration create through the real
+    // Safe Edit engine, never by inserting a fabricated DB receipt.
+    for(const step of w.steps){
+      const req=step.safeEditRequest!;let content=req.change.content;
+      if(step.kind==="canonical_review")content=content.replace(review.translationTh,attacks[0]);
+      const operationId="ICW-"+sha([step.kind,step.path,sha(content)].join("\n")).slice(0,32);
+      const p=preview({...req,operationId,change:{kind:"create",content}},actor);
+      write({operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor);accepted.push(content);
+    }
+    const {db}=await import("../db"),before=db().prepare("SELECT * FROM safe_edit_operations ORDER BY id").all();
+    const repeat=await prepare(data);expect(repeat.qualityIssues).toContain("translation_not_thai");expect(repeat.previews).toEqual([]);expect(repeat.readyForNextNews).toBe(false);
+    expect(repeat.steps.map(s=>fs.readFileSync(path.join(vault,s.path),"utf8"))).toEqual(accepted);
+    expect(db().prepare("SELECT * FROM safe_edit_operations ORDER BY id").all()).toEqual(before);
+    for(const p of ["05_Thesis/MU - Current Thesis.md","06_Portfolio/Positions.md"])expect(fs.readFileSync(path.join(vault,p),"utf8")).toBe("# Protected fixture\n");
+  });
+});

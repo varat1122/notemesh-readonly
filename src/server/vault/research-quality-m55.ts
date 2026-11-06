@@ -43,17 +43,54 @@ export interface ResearchClassification {
   entityScope?:string[];
 }
 
-// Mechanical language screen, not a translation/claim-truth verdict. Quoted
-// originals, code, URLs and numbers do not establish Thai analysis. Require
-// substantive Thai narration in every prose paragraph, allowing technical terms.
+// Mechanical language composition, NOT translation fidelity or meaningfulness.
+// Thai word segmentation includes combining marks without letting a long Latin
+// financial term outweigh several Thai words. No ticker/finance-word allowlist.
+const thaiSegmenter=new Intl.Segmenter("th",{granularity:"word"});
+function languageUnits(s:string){
+  let thai=0,other=0,thaiLetters=0;
+  for(const word of thaiSegmenter.segment(s)){
+    if(!word.isWordLike)continue;
+    const letters=word.segment.match(/\p{L}/gu)??[];
+    if(!letters.length)continue; // Numbers/isolated marks are not narration.
+    if(letters.every(c=>/\p{Script=Thai}/u.test(c))){thai++;thaiLetters+=letters.length;}
+    else other++; // A mixed-script token cannot hide foreign prose as Thai.
+  }
+  return {thai,other,thaiLetters};
+}
 function thai(s:string):boolean{
-  const prose=s.replace(/```[^]*?```|~~~[^]*?~~~/g,"").replace(/^\s*>.*$/gm,"")
-    .replace(/`[^`]*`|"[^"\n]*"|“[^”\n]*”|https?:\/\/\S+/g,"");
-  const paragraphs=prose.split(/\n\s*\n/).map(p=>p.match(/\p{L}/gu)??[]).filter(p=>p.length);
-  return paragraphs.length>0&&paragraphs.every(letters=>{
-    const count=letters.filter(c=>/\p{Script=Thai}/u.test(c)).length;
-    return count>=6&&count/letters.length>=0.35;
-  });
+  let quotedForeign=0;
+  const supporting=(text:string)=>{
+    const units=languageUnits(text);quotedForeign+=units.other;
+    // Preserve paragraph/word boundaries; do not join narration across quotes.
+    return text.replace(/[^\n]/g," ");
+  };
+  let fence:{mark:string;size:number}|null=null;
+  const prose=s.normalize("NFC").replace(/https?:\/\/[^\s<>]+/g," ").split("\n").map(line=>{
+    if(fence){
+      const close=/^ {0,3}(`+|~+)\s*$/.exec(line);
+      if(close&&close[1][0]===fence.mark&&close[1].length>=fence.size)fence=null;
+      else supporting(line);
+      return "";
+    }
+    const open=/^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if(open){fence={mark:open[1][0],size:open[1].length};supporting(line.slice(open[0].length));return "";}
+    if(/^\s*>/.test(line))return supporting(line);
+    return line;
+  }).join("\n")
+    .replace(/(`+)[^]*?\1/g,supporting)
+    .replace(/"[^"\n]*"|“[^“”]*”|(?<!\p{L})'(?:[^'\n]|'(?=\p{L}))*'(?!\p{L})|‘(?:[^‘’]|’(?=\p{L}))*’/gu,supporting)
+    .replace(/\$\$[^]*?\$\$|\$[A-Za-z\\][^\n$]*\$/g,supporting);
+  if(fence)return false; // Do not silently drop the tail of malformed code.
+  const paragraphs=prose.split(/\n\s*\n/).map(languageUnits).filter(p=>p.thai+p.other);
+  if(!paragraphs.length||paragraphs.some(p=>p.thai<2||p.thaiLetters<6||p.thai/(p.thai+p.other)<0.35))return false;
+  const narration=languageUnits(prose);
+  // Quoted/code text remains a foreign-language burden, never a source of Thai
+  // narration credit. Any supporting foreign text needs >=8 Thai words outside;
+  // all supporting foreign words together cannot outweigh that Thai narration.
+  // Short quoted names/terms remain possible; semantics still need a reviewer.
+  return (quotedForeign===0||narration.thai>=8)&&narration.thai>=quotedForeign&&
+    narration.thai/(narration.thai+narration.other+quotedForeign)>=0.35;
 }
 const nonblank=(s:string|undefined)=>Boolean(s?.trim());
 const validHub=(path:string,prefix:string)=>path.startsWith(prefix)&&path.endsWith(".md")&&!path.includes("..")&&!path.includes("\\");

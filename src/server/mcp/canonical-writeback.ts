@@ -2,10 +2,11 @@
  * M5.4: one scoped Safe Edit handoff for a complete canonical intake.
  * Preview is read-only to the Vault. Apply uses the existing per-note Safe Edit
  * CAS journal, OAuth actor, lock, backup, sync pause, and SHA verification.
- * A pair is intentionally recoverable, not falsely advertised as atomic:
+ * A Source/optional Claims/Review sequence is intentionally recoverable, not falsely advertised as atomic:
  * a failed review never rolls back or overwrites a successfully saved source.
  */
 import { z } from "zod";
+import {intakeClaimsSchema,researchLineageSchema} from "../vault/canonical-claims";
 import {researchReviewSchema} from "./research-review-schema";
 import { planInvestmentWriteback } from "../vault/investment-writeback-router";
 import { apply, preview, status } from "../safe-edit/engine";
@@ -37,6 +38,8 @@ const canonicalBaseSchema = z.object({
   rawAttachmentSha256: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(),
   rawAttachmentContentType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]).nullable().optional(),
   focus: z.enum(["earnings", "broker", "tam", "macro", "thesis", "general"]).optional(),
+  claims:intakeClaimsSchema,
+  researchLineage:researchLineageSchema,
   claim: z.object({metric: nonempty.max(140), period: nonempty.max(120), statement: z.string().min(8).max(2500),
     value: z.string().max(150).optional(), unit: z.string().max(80).optional()}).optional(),
   contentTypes: z.array(z.enum(["reported_fact", "earnings", "guidance", "industry_data", "macro_data",
@@ -72,7 +75,7 @@ export const canonicalAuthorizationSchema = z.object({
 export const canonicalApplySchema = z.object({
   input: canonicalInputSchema,
   planId: z.string().regex(/^IN-[A-F0-9]{16}$/),
-  authorizations: z.array(canonicalAuthorizationSchema).max(2),
+  authorizations: z.array(canonicalAuthorizationSchema).max(10),
 }).strict();
 
 function planned(input: z.infer<typeof canonicalInputSchema>) {
@@ -83,6 +86,7 @@ function planned(input: z.infer<typeof canonicalInputSchema>) {
   // an environment-variable bypass for untyped completedAnalysis.
   for(const step of workflow.steps){
     const allowed = step.kind === "source_intake" ? /^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/ :
+      step.kind==="structured_claim" ? /^10_Knowledge\/Company Research\/Investment Claim - ICL-[A-F0-9]{32}\.md$/ :
       /^10_Knowledge\/(Company Research|Industry and Concepts|Macro and Markets)\/Investment Review - [^/]+\.md$/;
     if(!allowed.test(step.path) || (step.safeEditRequest &&
       (step.safeEditRequest.path !== step.path || step.safeEditRequest.change.kind !== "create")))
@@ -103,7 +107,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
     previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p});
   }
   return {phase:"preview_only",planId:plan.planId,workflowStatus:workflow.status,
-    qualityIssues:workflow.qualityIssues,readyForNextNews:workflow.readyForNextNews,
+    qualityIssues:workflow.qualityIssues,claimIssues:workflow.claimIssues,readyForNextNews:workflow.readyForNextNews,
     archiveProvenanceStatus:workflow.archiveProvenanceStatus,archiveProvenanceReason:workflow.archiveProvenanceReason,
     steps:workflow.steps.map(({kind,path,state,expectedSha256,receiptKey})=>({kind,path,state,expectedSha256,receiptKey})),
     previews,protectedNotesTouched:false,perDeviceSync:"unverified",writesPerformed:false,
@@ -138,7 +142,7 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
             // Sync pause is asynchronous: archive state may have changed since
             // admission. Revalidate immediately before each canonical write.
             // A safe Source may survive; never use a stale Review authorization.
-            const current=planned(args.input).workflow.steps.find(s=>s.kind===step.kind);
+            const current=planned(args.input).workflow.steps.find(s=>s.kind===step.kind&&s.path===step.path);
             if(current?.state!=="needs_create"||current.receiptKey!==step.receiptKey||
               current.expectedSha256!==step.expectedSha256)
               throw Error("Canonical state or archive provenance changed; prepare again");
@@ -154,7 +158,7 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   const after=planned(args.input).workflow;
   return {phase:"apply_verified_or_pending",planId:plan.planId,
     status:after.status,readyForNextNews:after.readyForNextNews,
-    qualityIssues:after.qualityIssues,
+    qualityIssues:after.qualityIssues,claimIssues:after.claimIssues,
     archiveProvenanceStatus:after.archiveProvenanceStatus,archiveProvenanceReason:after.archiveProvenanceReason,
     steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable})=>
       ({kind,path,state,receiptKey,readbackVerified,indexed,searchable})),
