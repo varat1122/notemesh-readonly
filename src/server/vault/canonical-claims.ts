@@ -8,6 +8,7 @@ import {readNote} from "./notes";
 import {canonicalHttpSourceUrl} from "../source-url";
 import {splitFrontmatter} from "./markdown";
 import {indexedRead,createReceipt} from "./investment-research-context";
+import {claimSourceAnchorIssues} from "./claim-value-anchor";
 import type {WritebackInput} from "./investment-writeback-router";
 
 const text=(max:number)=>z.string().trim().min(1).max(max);
@@ -96,7 +97,7 @@ export function planClaimNotes(input:WritebackInput,intakeId:string,sourcePath:s
   for(const c of parsed){
     if(!input.entities.some(e=>norm(e)===norm(c.entity)))throw Error("claim_entity_outside_source_scope");
     const id=idFor(intakeId,c),path=claimPath(id),issues:string[]=[];
-    if(!input.extractedText.includes(c.sourceExcerpt)||!c.sourceExcerpt.includes(c.value)||c.qualification&&!c.sourceExcerpt.includes(c.qualification))issues.push("claim_literal_source_anchor_missing");
+    issues.push(...claimSourceAnchorIssues(input.extractedText,c.sourceExcerpt,c.value,c.qualification));
     const row={claim_id:id,entity:c.entity,metric:c.metric,value:c.value,unit:c.unit,period:c.period,
       evidence_class:c.evidenceClass,qualification:c.qualification??null,statement:c.statement,
       source_locator:c.sourceLocator,source_excerpt:c.sourceExcerpt,original_source:url,
@@ -132,8 +133,8 @@ export function readPersistedClaim(path:string){
   if(source.fm.intake_id!==intakeId||source.fm.type!=="investment_source_intake"||source.fm.source_text_sha256!==fm.source_text_sha256||
     canonicalHttpSourceUrl(String(source.fm.source_url))!==c.original_source)throw Error("claim_source_binding_invalid");
   const block=/^(`{3,})text\n([^]*?)\n\1(?:\n|$)/m.exec(source.body);
-  if(!block||![block[2],block[2]+"\n"].some(s=>sha(s)===fm.source_text_sha256)||!block[2].includes(input.sourceExcerpt)||
-    !input.sourceExcerpt.includes(input.value)||input.qualification&&!input.sourceExcerpt.includes(input.qualification))throw Error("claim_source_anchor_invalid");
+  const original=block&&[block[2],block[2]+"\n"].find(s=>sha(s)===fm.source_text_sha256);
+  if(!original||claimSourceAnchorIssues(original,input.sourceExcerpt,input.value,input.qualification).length)throw Error("claim_source_anchor_invalid");
   if(!db().prepare("SELECT 1 FROM notes_fts WHERE path=? AND notes_fts MATCH ?").get(sourcePath,"InvestmentIntake"+intakeId.slice(3)))throw Error("claim_source_index_missing");
   const receiptKey=createReceipt("structured_claim",path,note.raw),sourceReceiptKey=createReceipt("source_intake",sourcePath,source.raw);
   if(!db().prepare("SELECT 1 FROM notes_fts WHERE path=? AND notes_fts MATCH ?").get(path,`"${c.claim_id}"`)||

@@ -30,7 +30,7 @@ export interface IdentityHoldDiscovery {
 export interface MacroCoverage {scope:string;subjectEvidence:Coverage;counterEvidence:Coverage}
 type DeclaredDate={status:"DECLARED"|"UNKNOWN";value:string|null};
 export interface ResearchChronology {eventDate:DeclaredDate;publicationDate:DeclaredDate;analysisDate:DeclaredDate;importDate:DeclaredDate}
-export interface Item { path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
+export interface Item { path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
 export interface Pack { status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
 function resolveIssuers(requested:string[]):IssuerResolution[]{
@@ -173,13 +173,6 @@ function historicalOnly(path:string,fm:Record<string,unknown>):boolean{
   return path.startsWith("07_Sources/ChatGPT/")||schema.role==="archive"||
     schema.independenceAssessment!=="not_assessed";
 }
-function hasDeclaredMacroPrimary(path:string):boolean {
-    const fm=indexedMetadata(path);
-    if(historicalOnly(path,fm))return false;
-    const tier=(typeof fm.source_type==="string"?fm.source_type:typeof fm.source_tier==="string"?fm.source_tier:"").toLowerCase();
-    const source=[fm.original_source,fm.primary_url,fm.source_url].find(x=>typeof x==="string"&&/^https:\/\//.test(x));
-    return tier==="primary"&&typeof source==="string";
-}
 function exists(path: string): boolean {
   try { return fs.existsSync(resolveNotePath(path)); } catch { return false; }
 }
@@ -232,6 +225,7 @@ function declared(raw: string, notePath: string) {
   const schema=inspectCanonicalKnowledgeMetadata(notePath,f);
   const date=(value:string|null):DeclaredDate=>({status:value?"DECLARED":"UNKNOWN",value});
   return {declaredVerification:typeof f.verification==="string"?f.verification:null,declaredEventDate:schema.eventDate,declaredPublishedAt:schema.publishedAt,
+    declaredSourceType:typeof f.source_type==="string"?f.source_type.slice(0,80):typeof f.source_tier==="string"?f.source_tier.slice(0,80):null,
     chronology:{eventDate:date(schema.eventDate),publicationDate:date(schema.publishedAt),analysisDate:date(schema.analysisDate),importDate:date(schema.importedAt)},schemaCompatibility:schema};
 }
 export function buildInvestmentContextPack(req: Input): Pack {
@@ -477,10 +471,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
       (macroScopes.some(scope=>explicitMacroScope(path,scope))?25:0) +
       (path.startsWith("10_Knowledge/Macro and Markets/")?25:0) +
       (macroSubjectPaths.has(path)?32:0) +
-      (macroRiskPaths.has(path)?85:0) +
-      // Ranking priority only: this note DECLARES a primary original URL.
-      // It is not an independent or fresh verification of the claim.
-      (hasDeclaredMacroPrimary(path)?65:0):0;
+      (macroRiskPaths.has(path)?85:0):0;
     const focusBonus=focus==="tam"&&/TAM|Industries|Concepts/.test(path)?20:
       focus==="broker"&&/Broker|Evolution|Research/.test(path)?17:
       focus==="earnings"&&/Primary Evidence|Event_Lineage/.test(path)?20:0;
@@ -605,14 +596,14 @@ export function buildInvestmentContextPack(req: Input): Pack {
     if(!roles.has("thesis"))incomplete.push("No Current Thesis selected; owner-endorsed thesis is unknown.");
     if(!roles.has("evidence_register"))incomplete.push("No Evidence Register selected; prior claims may be missing.");
     if(!roles.has("source"))incomplete.push("No original issuer/filing source selected; primary claim verification required.");
+    incomplete.push("Server-verified primary evidence not established by retrieval; source filenames, roles and metadata cannot replace exact-scope PEV validation.");
     if(!roles.has("industry"))incomplete.push("No industry/TAM source selected; supply-chain effects may be incomplete.");
   }else if(macroScope){
     if(macroSubjectRequested&&!macroSubjectPaths.size)
       incomplete.push("No subject-matched macro evidence found within the retrieval bound; country-only context is not subject coverage.");
     if(!items.some(x=>x.role!=="rules" && x.role!=="timeline"))
       incomplete.push("No country/theme-specific macro evidence selected; research coverage is incomplete.");
-    if(!items.some(x=>x.evidenceUse!=="historical_context_only"&&hasDeclaredMacroPrimary(x.path)))
-      incomplete.push("No source-declared primary macro/statistical evidence selected; verify the official data release before analysis.");
+    incomplete.push("Server-verified primary macro/statistical evidence not established by retrieval; verify the official data release and exact-scope PEV before analysis.");
   }
   if(failed.length)incomplete.push("Search failed on terms: "+failed.join(", "));
   return {

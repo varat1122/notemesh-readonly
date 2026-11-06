@@ -19,6 +19,7 @@ type Stage = {
 };
 type ContextRef = {
   path:string;role:Role;declaredVerification:string|null;
+  declaredSourceType:string|null;
   evidenceUse:Item["evidenceUse"];
   declaredEventDate:string|null;declaredPublishedAt:string|null;
   chronology:Item["chronology"];matchedMacroScopes:string[];
@@ -43,6 +44,7 @@ export interface InvestmentDecisionPacket {
     identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];
     sourcePointers:ContextRef[];
     noteDeclaredPrimaryCandidates:string[];
+    primaryVerification:{status:"not_performed";serverVerifiedPrimaryPaths:string[];gap:"exact_scope_pev_validation_required"};
     protectedThesisPaths:string[];
     historicalThesisOwnerApproval:"not_established";
     missing:string[];
@@ -151,13 +153,14 @@ export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimRe
   });
   const pointers:ContextRef[]=scoped.items.map(x=>({
     path:x.path,role:x.role,evidenceUse:x.evidenceUse,declaredVerification:x.declaredVerification,
+    declaredSourceType:x.declaredSourceType,
     declaredEventDate:x.declaredEventDate,declaredPublishedAt:x.declaredPublishedAt,
     chronology:x.chronology,matchedMacroScopes:x.matchedMacroScopes,
     line:x.line,truncated:x.truncated,counterEvidenceExcerptIncluded:x.counterEvidenceExcerptIncluded
   }));
   const thesisPaths=input.domain==="company"?pointers.filter(x=>x.role==="thesis").map(x=>x.path):[];
   const primaryCandidates=pointers.filter(x=>x.evidenceUse!=="historical_context_only"&&
-    (x.role==="source" || x.declaredVerification==="verified_against_primary")).map(x=>x.path);
+    (x.role==="source" || x.declaredVerification==="verified_against_primary" || x.declaredSourceType?.toLowerCase()==="primary")).map(x=>x.path);
   const counterHints=pointers.filter(x=>x.counterEvidenceExcerptIncluded).map(x=>x.path);
   const stages:Stage[]=FRAMEWORKS[input.domain].map(([id,checkpoint,requiredEvidence])=>({
     id,checkpoint,status:"not_assessed",requiredEvidence
@@ -196,6 +199,7 @@ export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimRe
       researchCoverage:scoped.researchCoverage,contextBundles:scoped.contextBundles,
       identityHoldDiscovery:scoped.identityHoldDiscovery,macroCoverage:scoped.macroCoverage,
       sourcePointers:pointers,noteDeclaredPrimaryCandidates:primaryCandidates,
+      primaryVerification:{status:"not_performed",serverVerifiedPrimaryPaths:[],gap:"exact_scope_pev_validation_required"},
       protectedThesisPaths:thesisPaths,historicalThesisOwnerApproval:"not_established",
       missing,truncatedOrOmitted:scoped.omitted.length>0 || pointers.some(p=>p.truncated)
     },

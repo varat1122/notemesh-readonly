@@ -246,6 +246,62 @@ reasoning remain explicit LLM/reviewer acceptance, not CI claims.
 
 ### Historical receipts and current revalidation
 
+Generic Safe Edit is not a primary-verification authority. Its `evidence`,
+primary URL, `verified_at`, diff approval and caller-written receipt IDs cannot
+grant `verified_against_primary` (including nested claim metadata). The generic
+route has no contract to validate exact PEV Source/claim scope and revocation,
+so it rejects that promotion at preview, preview renewal and apply, including
+old previews and rollback. A historical declaration may remain unchanged on a
+body-only edit; changing its metadata requires removing the declaration first.
+It is never freshly certified by that edit. Already-written receipts remain
+readable/idempotent, without changing historical bytes or receipt contents.
+Context Pack, Decision Packet and Evidence Ledger expose such legacy metadata
+as declared/unverified candidates, not server-verified primary facts.
+
+The existing canonical claim-assessment gate remains the primary authority:
+it validates the independently signed, exact-scope server PEV receipt, current
+revocation state and archived source bytes. Even a valid PEV cannot authorize
+arbitrary generic note promotion. Canonical Source/Claim/Review persistence
+and the Safe Edit write receipt remain separate from primary verification.
+
+Structured claim values must occur literally as complete numeric tokens in
+the received excerpt, both when planned and on cold readback. `13.5` cannot
+match `113.5`, `-13.5`, a longer decimal, grouped number or exponent. Sentence
+punctuation and currency/percent annotations around a complete value are
+allowed. No rounding, numeric-format conversion, unit conversion or investment
+semantics are inferred. This observation matcher deliberately differs from the
+stricter primary-attestation matcher; primary receipt semantics are unchanged.
+An invalid historical anchor produces a current claim-binding HOLD without
+rewriting its Source, claim or successful historical write receipt. Unit/quote
+semantic fidelity remains a separate reviewer gate.
+
+Numeric boundary validation uses the preserved **full Source**, not just the
+caller-selected excerpt. Every occurrence of that excerpt must preserve numeric
+boundaries; ambiguous safe/clipped occurrences HOLD rather than trusting the
+free-text locator to select one. Numeric qualifications use the same boundary
+rule (`up 10` does not match `up 106%`). Unicode minus/dash variants and literal
+accounting parentheses are retained as part of the token, never converted to an
+unsigned value or a different sign. Attached ambiguous unit/suffix forms stay
+HOLD. These are lexical integrity checks, not semantic equivalence judgments.
+
+Retrieval keeps legacy source candidates discoverable, but neither a `Primary
+Evidence` filename nor `source_type`/`source_tier: primary` grants authority or a
+primary ranking bonus. Company/macro primary-verification gaps remain open in
+Context/Decision Packet. The packet separates declared candidates from its empty
+`serverVerifiedPrimaryPaths` with `status: not_performed`; exact-scope PEV checks
+remain the separate canonical assessment gate, unchanged.
+
+Before staging acceptance, WORK must run the **read-only anchor compatibility**
+scan on an authorized stable snapshot/read window using Node 24:
+`node scripts/check-claim-anchor-compatibility.ts --vault /authorized/snapshot`.
+There is no default live path or app/DB bootstrap. It returns JSON with scanned
+and held counts, relative claim paths, reasons and a separate reviewed-resolution
+proposal. It checks RI001-1 claim anchors and preserved Source-text hashes, not
+full receipt/index/primary validity. Exit 2 means HOLD or scan unavailable/partial;
+an overflow (1,000 claims / 5,000 directory entries) is `SCAN_INCOMPLETE`, not a
+whole-Vault PASS. No repair, rebind, receipt mutation or historical rewrite occurs.
+Live historical impact counts remain pending until WORK supplies that report.
+
 A durable successful Safe Edit write receipt records that the named operation's
 write, readback and index verification passed **at that time**, for its recorded
 path/hash. It is historical execution evidence, not a promise that the current
