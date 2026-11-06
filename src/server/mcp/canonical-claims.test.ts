@@ -138,7 +138,15 @@ describe("RI-001 source-scoped multi-claim persistence",()=>{
     ["RC1 group clipping", "Revenue of 1,013.5 billion", "13.5 billion", "13.5", undefined],
     ["RC2 qualification clipping", "Revenue of 96.2 billion, up 106%", "Revenue of 96.2 billion, up 106%", "96.2", "up 10"],
     ["RC3 unicode sign", "Revenue of \u201013.5 billion", "Revenue of \u201013.5 billion", "13.5", undefined],
-    ["RC3 accounting negative", "Revenue of (13.5) billion", "Revenue of (13.5) billion", "13.5", undefined]
+    ["RC3 accounting negative", "Revenue of (13.5) billion", "Revenue of (13.5) billion", "13.5", undefined],
+    ["N1 Thai digit clipping", "รายได้๙๖.๒ล้านบาท", "๖.๒ล้านบาท", "๖.๒", undefined],
+    ["N1 Thai sign clipping", "ลดลง-๑๓.๕ล้านบาท", "๑๓.๕ล้านบาท", "๑๓.๕", undefined],
+    ["N1 fullwidth clipping", "Revenue ９６.２ billion", "６.２ billion", "６.２", undefined],
+    ["N1 qualification clipping", "Revenue ๙๖.๒, up ๑๐๖%", "Revenue ๙๖.๒, up ๑๐๖%", "๙๖.๒", "up ๑๐"],
+    ["N2 thin-space clipping", "Revenue 13\u2009500", "500", "500", undefined],
+    ["N3 currency sign clipping", "Revenue -S$13.5", "S$13.5", "S$13.5", undefined],
+    ["N3 currency accounting clipping", "Revenue (S$13.5)", "13.5", "13.5", undefined],
+    ["RC5 Thai adjacent larger number", "รายได้113.5ล้านบาท", "13.5ล้านบาท", "13.5", undefined]
   ])("%s holds claim and Review but leaves safe Source capture",async(_name,full,quote,value,qualification)=>{
     const data={...input,extractedText:full!,claims:[{...claims[0],value:value!,sourceExcerpt:quote!,qualification}]};
     const p=await prepare(data);expect(p.claimIssues.length).toBeGreaterThan(0);
@@ -149,7 +157,14 @@ describe("RI-001 source-scoped multi-claim persistence",()=>{
     ["Revenue of 96.2 billion, up 106%","Revenue of 96.2 billion, up 106%","96.2","up 10","claim_qualification_source_anchor_invalid"],
     ["Revenue of (13.5) billion","Revenue of (13.5) billion","13.5",undefined,"claim_literal_source_anchor_missing"],
     ["Revenue of \u201413.5 billion","Revenue of \u201413.5 billion","13.5",undefined,"claim_literal_source_anchor_missing"],
-    ["Revenue of 13.5bn","Revenue of 13.5bn","13.5",undefined,"claim_literal_source_anchor_missing"]
+    ["Revenue of 13.5bn","Revenue of 13.5bn","13.5",undefined,"claim_literal_source_anchor_missing"],
+    ["รายได้๙๖.๒ล้านบาท","๖.๒ล้านบาท","๖.๒",undefined,"claim_excerpt_numeric_boundary_invalid"],
+    ["ลดลง-๑๓.๕ล้านบาท","๑๓.๕ล้านบาท","๑๓.๕",undefined,"claim_excerpt_numeric_boundary_invalid"],
+    ["Revenue ９６.２ billion","６.２ billion","６.２",undefined,"claim_excerpt_numeric_boundary_invalid"],
+    ["Revenue 13\u2009500","500","500",undefined,"claim_excerpt_numeric_boundary_invalid"],
+    ["Revenue -S$13.5","S$13.5","S$13.5",undefined,"claim_excerpt_numeric_boundary_invalid"],
+    ["Revenue (S$13.5)","13.5","13.5",undefined,"claim_excerpt_numeric_boundary_invalid"],
+    ["Revenue ๙๖.๒, up ๑๐๖%","Revenue ๙๖.๒, up ๑๐๖%","๙๖.๒","up ๑๐","claim_qualification_source_anchor_invalid"]
   ])("RC5 historical anchor HOLD retains receipts and is visible in the read-only compatibility scan (%s)",async(full,quote,value,qualification,reason)=>{
     const data={...input,researchReview:undefined,captureOnly:true,extractedText:full!,
       claims:[{...claims[0],value:value!,sourceExcerpt:quote!,qualification}]};
@@ -179,6 +194,31 @@ describe("RI-001 source-scoped multi-claim persistence",()=>{
     expect(JSON.parse(output)).toMatchObject({status:"ANCHOR_COMPATIBLE",scanComplete:true,scanned:2,held:0,writesPerformed:false,receiptIndexPrimaryValidity:"not_assessed"});
     expect(fs.existsSync(absent)).toBe(false);expect(await journal()).toEqual(before);
     expect(saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)))).toEqual(bytes);assertProtected();
+  });
+  it.each([
+    ["รายได้13.5ล้านบาท เพิ่มขึ้นร้อยละ106\n","13.5","เพิ่มขึ้นร้อยละ106"],
+    ["รายได้๙๖.๒ล้านบาท เพิ่มขึ้นร้อยละ๑๐๖\n","๙๖.๒","เพิ่มขึ้นร้อยละ๑๐๖"],
+    ["รายได้９６.２ล้านบาท\n","９６.２",undefined],
+    ["รายได้13\u2009500ล้านบาท\n","13\u2009500",undefined],
+    ["ขาดทุน-S$13.5 ตามข้อความที่ได้รับ\n","-S$13.5",undefined]
+  ])("RC5 complete literal numeric form persists, cold-reads and scans without semantic promotion: %s",async(full,value,qualification)=>{
+    const data={...input,researchReview:undefined,captureOnly:true,sourceLanguage:"th",extractedText:full!,
+      claims:[{...claims[0],value:value!,sourceExcerpt:full!.trimEnd(),qualification,unit:"caller-declared, not semantically validated"}]};
+    const p=await prepare(data);expect(p.claimIssues).toEqual([]);expect(p.qualityIssues).toEqual([]);
+    const saved=await apply(data,p);expect(saved.interrupted).toBeNull();
+    expect(saved.status).toBe("source_saved_analysis_pending");expect(saved.receipts).toHaveLength(2);
+    for(const receipt of saved.receipts)expect(receipt).toMatchObject({receipt:{write:"written",readback:"verified",reindex:"verified"}});
+    const before=await journal(),bytes=saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)));
+    expect(bytes[0].toString()).toContain(full!);
+    vi.resetModules();
+    const found=(await retrieve(data.claims[0])).matchingClaims;
+    expect(found).toHaveLength(1);expect(found[0]).toMatchObject({value,verification:"unverified",originIndependenceIncrement:0,
+      persistence:"receipt_readback_index_link_verified",interpretationBoundary:{semanticFidelity:"not_assessed",factUsability:"not_verified_fact"}});
+    const absent=path.join(root,"must-not-initialize"),output=execFileSync(process.execPath,["scripts/check-claim-anchor-compatibility.ts","--vault",vault],{
+      cwd:process.cwd(),encoding:"utf8",env:{...process.env,DATA_DIR:absent}});
+    expect(JSON.parse(output)).toMatchObject({status:"ANCHOR_COMPATIBLE",scanComplete:true,scanned:1,held:0,writesPerformed:false});
+    expect(fs.existsSync(absent)).toBe(false);expect((await prepare(data)).previews).toEqual([]);
+    expect(await journal()).toEqual(before);expect(saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)))).toEqual(bytes);assertProtected();
   });
   it.each(["113.5","-13.5"])("historical invalid anchor %s holds cold readback without repairing original bytes/receipts",async value=>{
     const text=`Synthetic revenue was $${value} billion.`;

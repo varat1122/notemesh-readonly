@@ -59,3 +59,64 @@ it.each(["13.5bn","13.5USD","13.5x","USD13.5"])("RC5 ambiguous attached unit/suf
 it.each(["Revenue 13.5.","Revenue $13.5 billion.","Margin 13.5%.","Revenue 13.5, subject to review."])("E5 full-source positive control: %s",full=>{
   expect(issues(full,full,"13.5")).toEqual([]);
 });
+
+it.each([
+  ["๙๖.๒","๖.๒"],["-๑๓.๕","๑๓.๕"],["๙๖.๒","๙๖"],
+  ["９６.２","６.２"],["-１３.５","１３.５"],["９６.２","９６"],
+  ["๑,๕๐๐","๕๐๐"],["１,５００","５００"],["๑.๕e-๒","๑.๕"]
+])("N1 rejects Unicode number clipping in preserved source %s",(full,clipped)=>{
+  expect(matches(full,clipped)).toBe(false);
+  expect(issues(full,clipped,clipped)).toEqual(["claim_excerpt_numeric_boundary_invalid"]);
+  expect(issues(full,full,full)).toEqual([]);
+});
+it("N1 applies Unicode boundaries to qualifications and never transliterates digits",()=>{
+  const full="Revenue ๙๖.๒, up ๑๐๖%";
+  expect(issues(full,full,"๙๖.๒","up ๑๐")).toEqual(["claim_qualification_source_anchor_invalid"]);
+  expect(issues(full,full,"๙๖.๒","up ๑๐๖%")).toEqual([]);
+  for(const source of ["๙๖.๒","９６.２"])expect(issues(source,source,"96.2")).toEqual(["claim_literal_source_anchor_missing"]);
+});
+it.each(["\u2007","\u2008","\u2009","\u200a","\u202f"])("N2 grouping separator %j preserves the entire number",separator=>{
+  for(const [a,b] of [["13","500"],["๑๓","๕๐๐"],["１３","５００"]]){
+    const full=a+separator+b;
+    expect(matches(full,b)).toBe(false);
+    expect(issues(full,b,b)).toEqual(["claim_excerpt_numeric_boundary_invalid"]);
+    expect(issues(full,a,a)).toEqual(["claim_excerpt_numeric_boundary_invalid"]);
+    expect(issues(full,full,full)).toEqual([]);
+    expect(issues(`-${separator}${full}`,full,full)).toEqual(["claim_excerpt_numeric_boundary_invalid"]);
+  }
+});
+it.each(["S$","A$","C$","R$","NZ$","HK$","US$"])("N3 preserves signs/accounting with currency prefix %s",prefix=>{
+  for(const value of ["13.5","๑๓.๕","１３.５"]){
+    for(const full of [`-${prefix}${value}`,`(${prefix}${value})`,`−${prefix}${value}`,`${prefix}-${value}`]){
+      expect(matches(full,value)).toBe(false);
+      expect(issues(full,value,value)).toEqual(["claim_excerpt_numeric_boundary_invalid"]);
+      expect(issues(full,full,value)).toEqual(["claim_literal_source_anchor_missing"]);
+      expect(issues(full,full,full)).toEqual([]);
+    }
+    expect(issues(`-${prefix}${value}`,`${prefix}${value}`,`${prefix}${value}`)).toEqual(["claim_excerpt_numeric_boundary_invalid"]);
+  }
+});
+it.each([
+  ["รายได้13.5ล้านบาท","13.5"],["เพิ่มขึ้นร้อยละ13.5","13.5"],
+  ["ลดลง-13.5ล้านบาท","-13.5"],["กำไร๙๖.๒ล้านบาท","๙๖.๒"],
+  ["รายได้９６.２ล้านบาท","９６.２"],["มูลค่า13\u2009500บาท","13\u2009500"]
+])("RC5 Thai prose adjacent to a complete literal number: %s",(full,value)=>{
+  expect(matches(full,value)).toBe(true);
+  expect(issues(full,full,value)).toEqual([]);
+  expect(issues(full,value,value)).toEqual([]);
+});
+it.each([
+  ["รายได้113.5ล้านบาท","13.5"],["ลดลง-13.5ล้านบาท","13.5"],
+  ["รายได้๙๖.๒ล้านบาท","๖.๒"],["ลดลง-๑๓.๕ล้านบาท","๑๓.๕"],
+  ["รายได้13\u2009500บาท","500"],["กำไร(S$13.5)ล้านบาท","13.5"]
+])("RC5 Thai adjacency never permits numeric/sign clipping: %s",(full,value)=>{
+  expect(matches(full,value)).toBe(false);
+  expect(issues(full,value,value)).toEqual(["claim_excerpt_numeric_boundary_invalid"]);
+});
+it("RC5 Thai adjacency is numeric-only, not word/identifier or semantic unit validation",()=>{
+  for(const [full,value] of [["ภาษาไทย","ภาษา"],["ไทย13.5USD","13.5"],["A13.5ล้าน","13.5"],["ไทย13.5_","13.5"]])
+    expect(issues(full,full,value)).toEqual(["claim_literal_source_anchor_missing"]);
+  const full="รายได้96.2ล้านบาท เพิ่มขึ้นร้อยละ106";
+  expect(issues(full,full,"96.2","เพิ่มขึ้นร้อยละ10")).toEqual(["claim_qualification_source_anchor_invalid"]);
+  expect(issues(full,full,"96.2","เพิ่มขึ้นร้อยละ106")).toEqual([]);
+});
