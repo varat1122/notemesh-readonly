@@ -66,6 +66,100 @@ create receipt/hash/readback path. Old bytes and receipt IDs are retained; chang
 analysis, broken links or current evidence problems still HOLD. No backfill,
 automatic translation/rewrite or migration of accepted notes occurs.
 
+### RI-001 optional multi-claim persistence (CI-only follow-up)
+
+Existing capability audit: `review_investment_claim` already reads the
+`investment_structured_claim_register` / `claims[]` Markdown contract, and Safe
+Edit already provides add-only writes, receipts, readback and indexing. The old
+singular `claim` input only produced a `claim_registry_candidate` with `path=null`;
+it did not persist a claim. Primary-evidence attestation receipts and guarded
+Source/Review event relations are different contracts, not claim/event registries.
+This follow-up uses those existing Note/index/journal mechanisms; no new database,
+schema, migration, writer, verification issuer or event registry is introduced.
+
+The optional strict `claims[]` contract accepts 1–8 **company-scoped, unverified
+observations**. Every row names entity, metric, value, unit, period, evidence class,
+statement, source locator and exact source excerpt; an optional qualification
+preserves ranges/YoY caveats. The entity must match an explicitly supplied intake
+entity. `sourceExcerpt` must occur literally in `extractedText`, and its value and
+qualification must occur literally in that excerpt. This is a mechanical anchor,
+not confirmation of publisher authenticity, period/entity interpretation, fact
+truth, relationship or an independently verified claim. A full primary URL and a
+CORE-LEAD fixture do not issue primary-evidence receipts.
+
+Use `reported_actual` separately from `management_guidance`; guidance is neither
+realized revenue nor consensus. `analyst_estimate` and `unverified_claim` are also
+explicit classes. Unclassified historical records remain discoverable but cannot
+produce an Actual/Guidance duplicate verdict by inferred class. Callers cannot submit a verification upgrade, relationship
+edge, arbitrary destination, model-version assertion or analysis timestamp.
+The legacy singular `claim` and new `claims[]` cannot be mixed. Claims require a
+canonical capture/Review mode; the read-only planner does not silently promise
+persistence from an incomplete triage-only request.
+
+Each Source-scoped identity hashes intake ID, normalized entity/metric/period/unit
+and evidence class, excluding value. One immutable Note is created at
+`10_Knowledge/Company Research/Investment Claim - ICL-<digest>.md`, using the existing
+structured-register type with one `claims[]` entry. A changed value or qualifier
+at that identity is a conflict requiring a separate reviewed correction; it does
+not overwrite the Note or receipt. A changed Source can have a different intake
+identity; that is a separate unverified observation, not automatic correction or
+independent confirmation. This is not a universal cross-Source economic-event ID.
+
+Canonical prepare/apply now processes **Source → requested Claims → optional
+Thai Review**. All pending operations require their exact OAuth-bound tokens;
+each operation is re-planned by both kind and path immediately before writing.
+A failing later operation retains prior successful receipts and bytes. Retry
+prepares only pending operations, never replays successful ones. Unanchored or
+conflicting Claims block Review admission. Source capture can remain eligible;
+valid observations can be saved without a Review. `captureOnly` with claims
+returns `source_saved_analysis_pending`, never a completed research cycle.
+The existing Thai, event, archive, primary-receipt and protected-state gates remain.
+
+Reviews include all requested claim IDs/paths and indexed wikilinks. Claims link
+to their immutable Source. Cold `review_investment_claim` retrieval rechecks
+current disk/index metadata, source text hash/excerpt, create receipts, FTS and
+Claim→Source links before returning generated claims. Review references are
+resolved from both explicit Review metadata and backlinks and require the same
+intake, Review receipt/readback/FTS and Review→Claim/Source links. Missing current
+binding yields `claimBindingHolds`, or `reviewScanComplete=false` for incomplete
+Review lineage; it cannot become a verified fact or confidently absent history.
+Review-reference scanning is capped at eight plus a sentinel. The existing
+25,000-note claim metadata scan still reports truncation. Adding claims to an
+already saved Review does not rewrite it: Review revision needs a separate
+reviewed workflow. No historical receipt is backfilled, replaced or synthesized.
+
+All observations from one Source share its `origin_family` and have
+`origin_independence_increment=0`; Review links do not add independent sources.
+Untrusted descriptive claim data is JSON-quoted in frontmatter and dynamically
+code-fenced in the body; it cannot create additional indexed tags, headings or
+wikilinks. MCP claim text is returned within the existing untrusted-data boundary.
+
+Optional `researchLineage.knowledgeCutoffAsOf` is an offset-aware, caller-declared
+historical information cutoff (null if unknown). `analysis_created_at` is the
+runtime time of **canonical Review proposal creation**, not economic event time,
+publication/import time or an inferred LLM generation time. Identical prepared
+retries retain that timestamp only from the same input digest and Safe Edit
+journal content/hash/runtime preview event; it cannot be supplied/backdated by
+clients. The journal read is bounded to sixteen proposals per Review path plus a
+sentinel and fails closed on ambiguity/overflow/unverified chronology. The
+runtime event must follow generation within one minute; a delayed raw recipe
+needs fresh planning. A cutoff later than creation is rejected. This MCP runtime
+does not expose the originating LLM model version: persist `model_version=null`,
+`model_version_status=not_exposed`. Existing inputs without claims/lineage retain
+their prior rendering and receipt identity.
+
+The isolated oracle `FX-RI001-NVDA-Q2FY27-EN-PRIMARY-01` is supplied in CORE-LEAD
+chat: the exact two-line UTF-8/LF excerpt (trailing LF) is 110 bytes, SHA-256
+`fcb27d2199b77c5f9461a27db3daa8319f441fdb0d9a3ebc1213a80c794a5de9`.
+It reports Q2 FY2027 revenue USD96.2bn (+106% YoY) and Q3 FY2027 management
+guidance USD108.0bn ±2%, from one NVIDIA IR release. Declared publication/event:
+2026-08-26; reporting-period end: 2026-07-26; supplied SEC acceptance: 16:36 ET;
+cutoff: `2026-08-26T20:36:00Z`. SEC corroboration supplied by the user is
+`https://www.sec.gov/Archives/edgar/data/1045810/000104581026000075/0001045810-26-000075-index.htm`;
+it is not fetched or counted as independently verified evidence by these tests.
+Fixture persistence is only in temporary test Vaults. CI acceptance is not live
+Vault persistence, remote Git/Sync delivery or Runtime/LLM Research Acceptance.
+
 ### Historical receipts and current revalidation
 
 A durable successful Safe Edit write receipt records that the named operation's
