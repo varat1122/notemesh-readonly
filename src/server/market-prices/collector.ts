@@ -3,6 +3,7 @@ import { z } from "zod";
 import { instrumentSchema, instrument, PILOT_INSTRUMENTS, BENCHMARKS, MAX_PRICE_INSTRUMENTS, PriceError, type InstrumentInput } from "./model.ts";
 import { PriceStore, priceDbPath } from "./store.ts";
 import { fetchYahooDaily } from "./yahoo.ts";
+import { maintenanceActive } from "../maintenance.ts";
 
 export function priceWatchlist(): InstrumentInput[] {
   try {
@@ -92,9 +93,9 @@ export async function collectIntoPriceStore(store: PriceStore, options: RefreshO
 let timer: ReturnType<typeof setInterval> | undefined;
 let busy = false;
 export function ensurePriceCollectorStarted(): void {
-  if (process.env.MARKET_PRICES_ENABLED !== "1" || timer) return;
+  if (process.env.MARKET_PRICES_ENABLED !== "1" || timer || maintenanceActive()) return;
   const tick = async () => {
-    if (busy) return;
+    if (busy || maintenanceActive()) return;
     busy = true;
     try {
       const result = await refreshPrices();
@@ -108,4 +109,13 @@ export function ensurePriceCollectorStarted(): void {
   timer = setInterval(() => { void tick(); }, 60 * 1000);
   timer.unref();
   void tick();
+}
+
+export function stopPriceCollector(): void {
+  if (timer) clearInterval(timer);
+  timer = undefined;
+}
+
+export function priceCollectorBusy(): boolean {
+  return busy;
 }

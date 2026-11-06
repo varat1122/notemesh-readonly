@@ -1,4 +1,5 @@
 import { acquireGitMutationLock } from "./mutation-lock";
+import { maintenanceActive } from "../maintenance";
 import { redactRemote, remoteHasCredentials, validateRemoteUrl } from "./remote";
 import { fenceInline } from "../mcp/boundary";
 import { postNotice } from "../notices";
@@ -123,6 +124,11 @@ export class GitBackend implements SyncBackend {
 
   isEditPaused(): boolean { return this.editPaused; }
 
+  /** Nothing scheduled, running or paused; observed, not inferred from stop(). */
+  isQuiescent(): boolean {
+    return !this.inFlight && !this.busy && !this.editPaused && !this.pullTimer && !this.pushTimer;
+  }
+
   private clearTimers() {
     if (this.pullTimer) clearInterval(this.pullTimer);
     if (this.pushTimer) clearTimeout(this.pushTimer);
@@ -141,6 +147,7 @@ export class GitBackend implements SyncBackend {
   // Admission is synchronous. Every source of Git work checks this gate again
   // when it actually wakes up; cancelling timers alone is not exclusion.
   async withPausedForEdit<T>(run: () => T | Promise<T>): Promise<T> {
+    if (maintenanceActive()) throw Error("Maintenance is active; no edit applied");
     if (this.editPaused || this.state !== "running" || !this.pullTimer || this.stopping)
       throw Error("Git must be running and healthy before Safe Edit");
     const cfg = gitConfig();
@@ -254,6 +261,10 @@ export class GitBackend implements SyncBackend {
   }
 
   start() {
+    if (maintenanceActive()) {
+      this.note("[git] maintenance is active; sync not started", "warn");
+      return;
+    }
     if (this.editPaused) throw Error("Git is paused for Safe Edit");
     if (this.pullTimer || this.inFlight || this.state === "needs-reauth") return;
     this.stopping = false;
@@ -319,6 +330,7 @@ export class GitBackend implements SyncBackend {
   }
 
   async syncNow(): Promise<{ ok: boolean; output: string }> {
+    if (maintenanceActive()) return { ok: false, output: "Maintenance is active; sync is disabled until the owner resumes" };
     if (this.editPaused || this.inFlight || this.state === "needs-reauth")
       return { ok: false, output: "Git is busy, paused or requires re-authentication" };
     const before = this.ring.all().length;
@@ -349,7 +361,9 @@ export class GitBackend implements SyncBackend {
   // One full reconcile: publish local work, take remote work, push.
   // Serialized — overlapping cycles would race on the index and the ref.
   private cycle(reason: string): Promise<boolean> {
-    if (this.editPaused || this.state === "needs-reauth" || (this.stopping && reason !== "manual")) return Promise.resolve(false);
+    // Maintenance refuses every reason, manual included: a manual cycle after
+    // Stop is otherwise still admitted below.
+    if (maintenanceActive() || this.editPaused || this.state === "needs-reauth" || (this.stopping && reason !== "manual")) return Promise.resolve(false);
     if (this.inFlight) return this.inFlight;
     const cfg = gitConfig();
     if (!cfg) return Promise.resolve(false);

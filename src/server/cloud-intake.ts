@@ -5,6 +5,7 @@ import { env } from "./env";
 import { getSetting } from "./db";
 import { nextIntake, acknowledge } from "./intake";
 import { syncBackend, syncKind } from "./sync";
+import { maintenanceActive } from "./maintenance";
 
 export const cloudIntakeEnabled = () => process.env.CLOUD_INTAKE === "1";
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -23,7 +24,7 @@ export function cloudIntakeStatus() {
 // One synchronous consumer in this single-replica deployment. The old worker
 // endpoint is disabled in cloud mode, so a desktop cannot race this importer.
 export function processCloudIntake() {
-  if (!cloudIntakeEnabled() || busy || getSetting("vault_configured") !== "true" || syncKind() !== "obsidian") return;
+  if (maintenanceActive() || !cloudIntakeEnabled() || busy || getSetting("vault_configured") !== "true" || syncKind() !== "obsidian") return;
   const sync = syncBackend();
   const status = sync.status();
   // Do not dequeue or acknowledge while a guarded mutation is admitted.
@@ -57,8 +58,17 @@ export function processCloudIntake() {
 }
 
 export function ensureCloudIntakeStarted() {
-  if (!cloudIntakeEnabled() || timer) return;
+  if (!cloudIntakeEnabled() || timer || maintenanceActive()) return;
   const tick = () => { try { processCloudIntake(); } catch { lastResult = "retrying"; } };
   timer = setInterval(tick, 5000);
   timer.unref();
+}
+
+export function stopCloudIntake() {
+  if (timer) clearInterval(timer);
+  timer = undefined;
+}
+
+export function cloudIntakeBusy(): boolean {
+  return busy;
 }

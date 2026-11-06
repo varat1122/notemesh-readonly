@@ -62,6 +62,7 @@ const PROTECTED_RPC = [
   "acknowledgeNotifications",
   "syncNow",
   "stopSync",
+  "enterMaintenance",
   "restartSync",
   "rebuildIndex",
   "reauth",

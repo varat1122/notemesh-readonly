@@ -8,6 +8,7 @@ import { applySecurityHeaders } from "./server/headers";
 import { protectedResourceMetadata } from "./server/mcp/endpoint";
 import { ensureCloudIntakeStarted } from "./server/cloud-intake";
 import { ensurePriceCollectorStarted } from "./server/market-prices/collector";
+import { maintenanceGate } from "./server/maintenance-drain";
 
 function redirectTo(path: string): Response {
   return new Response(null, { status: 302, headers: { Location: path } });
@@ -66,6 +67,10 @@ export default createMiddleware({
   ],
   onRequest: [
     async (event) => {
+      // First, before any hook below can open the DB or start a worker. In
+      // maintenance only a DB-free health/status answer is served.
+      const maintenance = maintenanceGate(event);
+      if (maintenance) return maintenance;
       // Idempotent: restarts the sync daemon after a server (re)boot, and warms
       // the vault index in the background so the first MCP call doesn't pay for
       // a full-vault scan.

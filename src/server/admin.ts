@@ -323,6 +323,22 @@ export async function stopSync() {
   return { ok: true, state: sup.status().state };
 }
 
+/**
+ * Enter restart-persistent maintenance: durable record first, then stop every
+ * worker and wait (bounded) for admitted work to finish. Resume is not an HTTP
+ * action; see server/maintenance.ts.
+ */
+export async function enterMaintenance() {
+  "use server";
+  const session = await requireAdmin();
+  audit("maintenance.enter", { user: session.user.id });
+  const { enterMaintenanceAndDrain } = await import("./maintenance-drain");
+  // This request itself is in flight until its response closes.
+  const record = await enterMaintenanceAndDrain({ ownRequests: 1 });
+  audit("maintenance.settled", { id: record.id, state: record.state });
+  return { id: record.id, state: record.state, settledAt: record.settledAt, drain: record.drain };
+}
+
 export async function restartSync() {
   "use server";
   await requireAdmin();

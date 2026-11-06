@@ -4,6 +4,7 @@ import path from "node:path";
 import { env } from "../env";
 import { obIsAuthenticated, obSyncConfigured, obSyncOnce } from "./cli";
 import { enableSettingsSync } from "./settings-sync";
+import { maintenanceActive } from "../maintenance";
 import {
   MAX_LOG_LINES,
   appendLogLine,
@@ -158,6 +159,12 @@ export class SyncSupervisor implements SyncBackend {
   }
 
   start() {
+    // Also covers the restart in withPausedForEdit's finally and the backoff
+    // timer: neither may bring the daemon back during maintenance.
+    if (maintenanceActive()) {
+      this.note("[supervisor] maintenance is active; sync not started", "warn");
+      return;
+    }
     if (this.editPaused || this.child || this.state === "running") return;
     this.stopping = false;
     this.state = "running";
@@ -297,8 +304,14 @@ export class SyncSupervisor implements SyncBackend {
 
   private hasChild(): boolean { return this.child !== null; }
 
+  /** No daemon, one-shot sync, pause or pending restart; observed, not inferred from stop(). */
+  isQuiescent(): boolean {
+    return !this.child && !this.manualSyncActive && !this.editPaused && !this.restartTimer;
+  }
+
   /** Await daemon exit before a guarded atomic edit; no polling or forced kill. */
   async withPausedForEdit<T>(run: () => T): Promise<T> {
+    if (maintenanceActive()) throw Error("Maintenance is active; no edit applied");
     if (this.editPaused || this.manualSyncActive || !this.child || this.state !== "running") throw Error("Sync cannot be paused safely now");
     this.editPaused = true;
     const child = this.child;
@@ -341,6 +354,7 @@ export class SyncSupervisor implements SyncBackend {
   // One-shot sync, reported into the same log the operator is watching rather
   // than back through the button that triggered it.
   async syncNow(): Promise<{ ok: boolean; output: string }> {
+    if (maintenanceActive()) return { ok: false, output: "Maintenance is active; sync is disabled until the owner resumes" };
     // `ob sync` takes a lock on the vault, so a one-shot run started while the
     // continuous daemon holds it fails with "Another sync instance is already
     // running for this vault" — an error for doing something that was never

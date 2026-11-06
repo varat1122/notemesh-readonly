@@ -81,6 +81,7 @@ const HANDLERS: Record<string, () => Promise<Handler>> = {
   syncNow: async () => (await import("~/server/admin")).syncNow,
   stopSync: async () => (await import("~/server/admin")).stopSync,
   restartSync: async () => (await import("~/server/admin")).restartSync,
+  enterMaintenance: async () => (await import("~/server/admin")).enterMaintenance,
   rebuildIndex: async () => (await import("~/server/admin")).rebuildIndex,
   reauth: async () => (await import("~/server/admin")).reauth,
 
