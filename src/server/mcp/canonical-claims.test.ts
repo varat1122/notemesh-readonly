@@ -49,13 +49,13 @@ beforeEach(async()=>{
     (await import("../vault/indexer")).reindexPath(p);
   }
 });
-afterEach(()=>{fs.rmSync(root,{recursive:true,force:true});for(const k of ["DATA_DIR","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];});
+afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();fs.rmSync(root,{recursive:true,force:true});for(const k of ["DATA_DIR","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];});
 async function plan(data:WritebackInput=input){return (await import("../vault/investment-writeback-router")).planInvestmentWriteback(data);}
 async function prepare(data:WritebackInput=input){return (await import("./canonical-writeback")).prepareCanonicalWriteback(data,actor);}
 async function apply(data:WritebackInput,p:Awaited<ReturnType<typeof prepare>>){return (await import("./canonical-writeback")).applyCanonicalWriteback({input:data,planId:p.planId,
   authorizations:p.previews.map(x=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}))},actor);}
 async function retrieve(c:IntakeClaim){return (await import("../vault/investment-claim-review")).reviewInvestmentClaim({domain:"company",entity:c.entity,metric:c.metric,period:c.period,unit:c.unit,value:c.value,evidenceClass:c.evidenceClass,statement:c.statement,originalSource:url});}
-async function journal(){return (await import("../db")).db().prepare("SELECT * FROM safe_edit_operations ORDER BY id").all();}
+async function journal(){return (await import("../db")).db().prepare("SELECT * FROM safe_edit_operations ORDER BY id").all() as {id:string;status:string;after_text:string}[];}
 function assertProtected(){for(const p of protectedPaths)expect(fs.readFileSync(path.join(vault,p),"utf8")).toBe("# Isolated protected fixture\n");}
 
 describe("RI-001 source-scoped multi-claim persistence",()=>{
@@ -325,5 +325,165 @@ describe("RI-001 integrated multi-claim and Thai language workflow",()=>{
     vi.resetModules();
     for(const c of claims){const r=await retrieve(c);expect(r.matchingClaims[0].reviewReferences).toEqual([saved.steps.at(-1)!.path]);expect(r.matchingClaims[0].originIndependenceIncrement).toBe(0);}
     assertProtected();
+  });
+});
+
+
+describe("RI-001 persistence reliability closure",()=>{
+  it("rejects delayed generic Review recipes before journal/write, then prepares at the real runtime time",async()=>{
+    vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-11-06T10:00:00Z"));
+    const old=(await plan()).safeEditWorkflow!.steps.at(-1)!;
+    vi.setSystemTime(new Date("2026-11-06T10:02:00Z"));
+    const engine=await import("../safe-edit/engine");
+    expect(()=>engine.preview(old.safeEditRequest,actor)).toThrow("canonical_review_requires_prepare");
+    expect(await journal()).toEqual([]);
+    const p=await prepare();expect((await apply(input,p)).status).toBe("saved_verified");
+    const fm=(await import("../vault/markdown")).splitFrontmatter(fs.readFileSync(path.join(vault,old.path),"utf8")).data;
+    expect(fm.analysis_created_at).toBe("2026-11-06T10:02:00.000Z");assertProtected();
+  });
+  it("supports delayed owner authorization and expired-token renewal without changing analysis time or bytes",async()=>{
+    vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-11-06T10:00:00Z"));
+    const p=await prepare();const before=await journal();
+    vi.setSystemTime(new Date("2026-11-06T10:05:00Z"));
+    expect((await apply(input,p)).status).toBe("saved_verified");
+    expect((await journal()).map((r)=>r.after_text)).toEqual(before.map((r)=>r.after_text));
+    expect((await prepare()).workflowStatus).toBe("saved_verified");assertProtected();
+  });
+  it("more than sixteen unrelated Review proposals do not strand the current intake",async()=>{
+    for(let i=0;i<20;i++)await prepare({...input,researchReview:{...review,requiredEvidenceTh:review.requiredEvidenceTh+` (รอบที่ ${i})`}});
+    const p=await prepare();expect(p.previews).toHaveLength(4);
+    const saved=await apply(input,p);expect(saved.status).toBe("saved_verified");
+    vi.resetModules();expect((await prepare()).workflowStatus).toBe("saved_verified");assertProtected();
+  });
+  it.each(["\n","  "])("retains a new Source appearance but gates same-event Claims and Review (%j)",async(extra)=>{
+    const saved=await apply(input,await prepare()),before=await journal();
+    const bytes=saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)));
+    const data={...input,extractedText:excerpt+extra};const p=await prepare(data);
+    expect(p.planId).not.toBe(saved.planId);expect(p.previews.map(s=>s.kind)).toEqual(["source_intake"]);
+    expect(p.claimIssues).toContain("claim_source_event_reconciliation_required");
+    expect(p.steps.filter(s=>s.kind==="structured_claim").every(s=>s.state==="hold_event_review")).toBe(true);
+    expect((await apply(data,p)).status).toBe("hold_source_event_review");
+    const feed={...data,captureOnly:true,researchReview:undefined};expect((await prepare(feed)).previews).toEqual([]);
+    expect((await journal()).filter((r)=>r.status==="written")).toHaveLength(5);
+    expect((await journal()).filter((r)=>before.some((b)=>b.id===r.id))).toEqual(before);
+    expect(saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)))).toEqual(bytes);
+    expect((await prepare()).workflowStatus).toBe("saved_verified");assertProtected();
+  });
+  it("never promotes analyst opinion or evidence-class labels through a Thai Review HOLD",async()=>{
+    const data={...input,researchReview:undefined,completedAnalysis:"This stock is guaranteed to outperform.",
+      claims:[{...claims[0],statement:"Revenue of 96.2 proves the stock is guaranteed to outperform."}]};
+    const p=await prepare(data);expect(p.qualityIssues).toContain("typed_research_review_required");
+    expect((await apply(data,p)).readyForNextNews).toBe(false);vi.resetModules();
+    const c=(await retrieve(data.claims[0])).matchingClaims[0];
+    expect(c.verification).toBe("unverified");
+    expect(c.interpretationBoundary).toEqual({statementStatus:"caller_attributed_unverified",evidenceClassStatus:"caller_declared_unverified",
+      semanticFidelity:"not_assessed",factUsability:"not_verified_fact",sourceExcerptBinding:"literal_received_source_only"});
+    expect(c.reviewReferences).toEqual([]);expect(c.originIndependenceIncrement).toBe(0);assertProtected();
+  });
+});
+
+
+describe("RI-001 journal recovery and historical compatibility",()=>{
+  it("retains exact input chronology after token expiry and renews only authorization",async()=>{
+    vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-11-06T10:00:00Z"));
+    const p=await prepare();const old=await journal();
+    vi.setSystemTime(new Date("2026-11-06T12:00:00Z"));
+    const expired=await apply(input,p);expect(expired.interrupted).toContain("Preview expired");
+    expect(expired.receipts).toEqual([]);expect(expired.readyForNextNews).toBe(false);
+    const fresh=await prepare();expect(fresh.previews.map(r=>r.operationId)).toEqual(p.previews.map(r=>r.operationId));
+    expect(fresh.previews.map(r=>r.previewToken)).not.toEqual(p.previews.map(r=>r.previewToken));
+    expect((await apply(input,fresh)).status).toBe("saved_verified");
+    expect((await journal()).map(r=>r.after_text)).toEqual(old.map(r=>r.after_text));assertProtected();
+  });
+  it.each([2,17])("returns explicit bounded HOLD for %i competing same-input proposals without blocking Source/Claim verification",async(count)=>{
+    vi.useFakeTimers({toFake:["Date"]});const start=Date.parse("2026-11-06T10:00:00Z");
+    const requests=[];
+    // Simulate concurrent planners before any has admitted a preview. All
+    // proposals have real runtime times, no journal/receipt manipulation.
+    for(let i=0;i<count;i++){vi.setSystemTime(start+i*100);requests.push((await plan()).safeEditWorkflow!.steps.at(-1)!.safeEditRequest!);}
+    const engine=await import("../safe-edit/engine");
+    for(const request of requests)engine.previewCanonicalReview(request,actor);
+    const p=await prepare();expect(p.workflowStatus).toBe("hold_review_lineage");
+    expect(p.lineageIssues).toContain(count>16?"review_lineage_scan_limit":"review_runtime_chronology_ambiguous");
+    expect(p.previews.map(r=>r.kind)).toEqual(["source_intake","structured_claim","structured_claim"]);
+    expect((await apply(input,p)).status).toBe("hold_review_lineage");
+    expect((await prepare()).previews).toEqual([]);
+    for(const c of claims){const found=(await retrieve(c)).matchingClaims[0];expect(found.persistence).toBe("receipt_readback_index_link_verified");expect(found.reviewReferences).toEqual([]);}
+    assertProtected();
+  });
+  it("keeps a legacy delayed generic write receipt immutable while reporting chronology HOLD and usable Source/Claims",async()=>{
+    vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-11-06T10:00:00Z"));
+    const w=(await plan()).safeEditWorkflow!;
+    vi.setSystemTime(new Date("2026-11-06T10:02:00Z"));
+    // Reproduce pre-fix admission policy ONLY while seeding this historical
+    // fixture. The real engine performs every write/readback/index and issues
+    // every receipt; no fabricated receipt or direct journal mutation.
+    const guard=await import("../safe-edit/research-lineage");
+    const admission=vi.spyOn(guard,"assertReviewPreviewAdmission").mockImplementation(()=>{});
+    const chronology=vi.spyOn(guard,"assertReviewChronology").mockImplementation(()=>{});
+    const engine=await import("../safe-edit/engine");
+    try{for(const step of w.steps){const p=engine.preview(step.safeEditRequest,actor);
+      expect(engine.apply({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor).receipt).toMatchObject({write:"written",readback:"verified",reindex:"verified"});
+    }}finally{admission.mockRestore();chronology.mockRestore();}
+    const rows=await journal(),bytes=w.steps.map(s=>fs.readFileSync(path.join(vault,s.path)));
+    vi.resetModules();const p=await prepare();expect(p.workflowStatus).toBe("hold_review_lineage");
+    expect(p.lineageIssues).toEqual(["review_runtime_chronology_unverified"]);expect(p.previews).toEqual([]);
+    expect(p.steps.slice(0,3).map(s=>s.state)).toEqual(Array(3).fill("verified_existing"));
+    const after=await apply(input,p);expect(after.status).toBe("hold_review_lineage");expect(after.receipts).toEqual([]);
+    for(const c of claims){const r=(await retrieve(c)).matchingClaims[0];expect(r.persistence).toBe("receipt_readback_index_link_verified");expect(r.reviewScanComplete).toBe(false);expect(r.reviewReferences).toEqual([]);}
+    expect(await journal()).toEqual(rows);expect(w.steps.map(s=>fs.readFileSync(path.join(vault,s.path)))).toEqual(bytes);assertProtected();
+  });
+  it("refuses to apply an old invalid preview even with a valid token; partial Source remains recoverable",async()=>{
+    vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-11-06T10:00:00Z"));
+    const w=(await plan()).safeEditWorkflow!;vi.setSystemTime(new Date("2026-11-06T10:02:00Z"));
+    const guard=await import("../safe-edit/research-lineage"),engine=await import("../safe-edit/engine");
+    const admission=vi.spyOn(guard,"assertReviewPreviewAdmission").mockImplementation(()=>{});
+    let p;try{p=engine.preview(w.steps.at(-1)!.safeEditRequest,actor);}finally{admission.mockRestore();}
+    expect(()=>engine.apply({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor)).toThrow("review_runtime_chronology_unverified");
+    const next=await prepare();expect(next.lineageIssues).toEqual(["review_runtime_chronology_unverified"]);
+    expect((await apply(input,next)).status).toBe("hold_review_lineage");expect(fs.existsSync(path.join(vault,w.steps.at(-1)!.path))).toBe(false);assertProtected();
+  });
+  it("same-event material/correction candidates hold Claims; a separately dated event is not collapsed",async()=>{
+    await apply(input,await prepare());
+    const changedText=excerpt.replace("96.2","97.2");
+    const changed={...input,extractedText:changedText,claims:[{...claims[0],value:"97.2",sourceExcerpt:changedText.split("\n")[0]}]};
+    const p=await prepare(changed);expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+    expect(p.claimIssues).toContain("claim_source_event_reconciliation_required");
+    expect((await retrieve(changed.claims[0])).classification).toBe("possible_correction_or_contradiction");
+    const separate={...changed,eventDate:"2026-08-27",publicationDate:"2026-08-27"};
+    const other=await prepare(separate);expect(other.previews.map(x=>x.kind)).toContain("structured_claim");
+    expect(other.planId).not.toBe(p.planId);assertProtected();
+  });
+});
+
+
+describe("RI-001 canonical lineage admission boundary",()=>{
+  it("generic MCP preview_edit/create_note cannot mint runtime lineage or accept a wire bypass",async()=>{
+    const step=(await plan()).safeEditWorkflow!.steps.at(-1)!,request=step.safeEditRequest!;
+    const {createSafeEditMcpServer}=await import("./safe-edit-server");
+    const server=createSafeEditMcpServer({read:true,write:false,label:actor,scopes:["vault:read","vault:edit"]});
+    const [a,b]=InMemoryTransport.createLinkedPair(),client=new Client({name:"lineage-boundary",version:"1"});
+    try{await server.connect(b);await client.connect(a);
+      for(const [name,args] of [["preview_edit",request],["create_note",{operationId:request.operationId,path:request.path,reason:request.reason,content:request.change.content}]] as const){
+        const r=await client.callTool({name,arguments:{...args,canonical:true}});expect(r.isError).toBe(true);
+        expect(JSON.stringify(r.content)).toContain("canonical_review_requires_prepare");
+      }
+      expect(await journal()).toEqual([]);
+      const prepared=await client.callTool({name:"prepare_canonical_writeback",arguments:{...input}});expect(prepared.isError).not.toBe(true);
+      expect(await journal()).toHaveLength(4);assertProtected();
+    }finally{await client.close();await server.close();}
+  });
+  it("uses an exact written receipt ahead of abandoned same-input preview history",async()=>{
+    vi.useFakeTimers({toFake:["Date"]});const start=Date.parse("2026-11-06T10:00:00Z");
+    const requests=[];
+    for(let i=0;i<18;i++){vi.setSystemTime(start+i*100);requests.push((await plan()).safeEditWorkflow!.steps.at(-1)!.safeEditRequest!);}
+    const engine=await import("../safe-edit/engine");const previews=requests.map(r=>engine.previewCanonicalReview(r,actor));
+    // This is an already issued exact authorization, not automatic selection by
+    // the planner. Write Source/Claims normally, then its authorized Review.
+    const capture={...input,researchReview:undefined,captureOnly:true};await apply(capture,await prepare(capture));
+    const chosen=previews[5];engine.apply({operationId:chosen.operationId,previewToken:chosen.previewToken,expectedHash:chosen.beforeHash},actor);
+    const old=await journal();vi.resetModules();
+    const p=await prepare();expect(p.workflowStatus).toBe("saved_verified");expect(p.lineageIssues).toEqual([]);expect(p.previews).toEqual([]);
+    expect(await journal()).toEqual(old);for(const c of claims)expect((await retrieve(c)).matchingClaims[0].reviewScanComplete).toBe(true);assertProtected();
   });
 });

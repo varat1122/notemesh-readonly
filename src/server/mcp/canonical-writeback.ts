@@ -9,7 +9,7 @@ import { z } from "zod";
 import {intakeClaimsSchema,researchLineageSchema} from "../vault/canonical-claims";
 import {researchReviewSchema} from "./research-review-schema";
 import { planInvestmentWriteback } from "../vault/investment-writeback-router";
-import { apply, preview, status } from "../safe-edit/engine";
+import { apply, preview, previewCanonicalReview, status } from "../safe-edit/engine";
 import { withPausedSync } from "../safe-edit/sync";
 
 const nonempty = z.string().min(1);
@@ -102,12 +102,12 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
   for(const step of workflow.steps) {
     if(step.state!=="needs_create")continue;
     if(!step.safeEditRequest) throw Error("Missing add-only recipe");
-    const p=preview(step.safeEditRequest,actor);
+    const p=(step.kind==="canonical_review"?previewCanonicalReview:preview)(step.safeEditRequest,actor);
     if(!p.previewToken) throw Error("Safe Edit did not issue a fresh preview token");
     previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p});
   }
   return {phase:"preview_only",planId:plan.planId,workflowStatus:workflow.status,
-    qualityIssues:workflow.qualityIssues,claimIssues:workflow.claimIssues,readyForNextNews:workflow.readyForNextNews,
+    qualityIssues:workflow.qualityIssues,claimIssues:workflow.claimIssues,lineageIssues:workflow.lineageIssues,claimInterpretationBoundary:workflow.claimInterpretationBoundary,readyForNextNews:workflow.readyForNextNews,
     archiveProvenanceStatus:workflow.archiveProvenanceStatus,archiveProvenanceReason:workflow.archiveProvenanceReason,
     steps:workflow.steps.map(({kind,path,state,expectedSha256,receiptKey})=>({kind,path,state,expectedSha256,receiptKey})),
     previews,protectedNotesTouched:false,perDeviceSync:"unverified",writesPerformed:false,
@@ -158,7 +158,7 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   const after=planned(args.input).workflow;
   return {phase:"apply_verified_or_pending",planId:plan.planId,
     status:after.status,readyForNextNews:after.readyForNextNews,
-    qualityIssues:after.qualityIssues,claimIssues:after.claimIssues,
+    qualityIssues:after.qualityIssues,claimIssues:after.claimIssues,lineageIssues:after.lineageIssues,claimInterpretationBoundary:after.claimInterpretationBoundary,
     archiveProvenanceStatus:after.archiveProvenanceStatus,archiveProvenanceReason:after.archiveProvenanceReason,
     steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable})=>
       ({kind,path,state,receiptKey,readbackVerified,indexed,searchable})),

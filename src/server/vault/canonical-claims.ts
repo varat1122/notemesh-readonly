@@ -3,6 +3,8 @@
 import {createHash} from "node:crypto";
 import {z} from "zod";
 import {db} from "../db";
+import {assertReviewChronology,type ReviewLineageRecord} from "../safe-edit/research-lineage";
+import {readNote} from "./notes";
 import {canonicalHttpSourceUrl} from "../source-url";
 import {splitFrontmatter} from "./markdown";
 import {indexedRead,createReceipt} from "./investment-research-context";
@@ -15,7 +17,7 @@ export const intakeClaimsSchema=z.array(z.object({
   evidenceClass:evidenceClassSchema,statement:text(2500),
   sourceLocator:text(500),sourceExcerpt:text(3000),qualification:text(200).optional(),
   verification:z.literal("unverified").default("unverified")
-}).strict()).min(1).max(8).optional().describe("Up to 8 source-anchored claim observations, persisted through existing Safe Edit only. Actual and management guidance are different identities. sourceExcerpt must occur verbatim in extractedText; values/qualifications must appear literally. All remain unverified; this does not issue primary receipts or relationship edges. Do not combine with legacy singular claim.");
+}).strict()).min(1).max(8).optional().describe("Up to 8 source-anchored claim observations, persisted through existing Safe Edit only. Actual and management guidance are different identities. sourceExcerpt must occur verbatim in extractedText; values/qualifications must appear literally. Statements and evidence-class labels are caller-attributed/unverified; literal excerpt anchoring does not validate semantic fidelity, issuer authenticity or investment conclusions. Semantic fidelity requires a reviewer. This does not issue primary receipts or relationship edges. Do not combine with legacy singular claim.");
 const date=z.string().datetime({offset:true}).nullable();
 export const researchLineageSchema=z.object({knowledgeCutoffAsOf:date}).strict().optional()
   .describe("Caller-declared historical knowledge cutoff, nullable when unknown. Review creation time is runtime-generated and retained on an identical prepared retry. Caller timestamps/model-version assertions are not accepted; the originating LLM version is not exposed by this runtime.");
@@ -26,40 +28,63 @@ const norm=(s:string)=>s.trim().normalize("NFC").toLowerCase().replace(/\s+/g," 
 export const claimPath=(id:string)=>`10_Knowledge/Company Research/Investment Claim - ${id}.md`;
 const idFor=(intakeId:string,c:IntakeClaim)=>"ICL-"+sha(JSON.stringify([intakeId,norm(c.entity),norm(c.metric),norm(c.period),norm(c.unit),c.evidenceClass])).slice(0,32).toUpperCase();
 const fence=(value:string)=>{const ticks="`".repeat(Math.max(2,...(value.match(/`+/g)??[]).map(s=>s.length))+1);return `${ticks}text\n${value}\n${ticks}`;};
-/** The runtime creates the canonical Review proposal, not the historical event.
- * Recover only the same proposal's timestamp from the existing Safe Edit journal
- * and its runtime preview event. No writes, cache table or client clock trust. */
-export function lineageMetadata(input:WritebackInput,reviewPath:string,sourcePath:string,claims:{content:string}[]){
-  if(!input.researchLineage&&!input.claims)return {};
+/** Public read-time boundary, deliberately not added to immutable claim bytes. */
+export const claimInterpretationBoundary={statementStatus:"caller_attributed_unverified",
+  evidenceClassStatus:"caller_declared_unverified",semanticFidelity:"not_assessed",
+  factUsability:"not_verified_fact",sourceExcerptBinding:"literal_received_source_only"} as const;
+
+/** Recover chronology from the exact written receipt first, or at most sixteen
+ * matching-input previews plus a sentinel. Unrelated proposal history cannot
+ * exhaust this bound. No journal writes or arbitrary first/last selection. */
+export function lineageMetadata(input:WritebackInput,reviewPath:string,sourcePath:string,claims:{content:string}[]):{
+  metadata:Record<string,unknown>;issues:string[];
+}{
+  if(!input.researchLineage&&!input.claims)return {metadata:{},issues:[]};
   const l=researchLineageSchema.parse(input.researchLineage)??{knowledgeCutoffAsOf:null};
   const fingerprint=sha(JSON.stringify([sourcePath,input.researchReview??input.completedAnalysis,l,
     claims.map(c=>sha(c.content))]));
-  let created=new Date().toISOString();
+  let created=new Date().toISOString(),historical=false;const issues:string[]=[];
   if(db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_operations'").get()){
-    const rows=db().prepare("SELECT id,payload,after_text,after_hash,status FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? ORDER BY id LIMIT 17")
-      .all(reviewPath) as {id:string;payload:string;after_text:string;after_hash:string;status:string}[];
-    if(rows.length>16)throw Error("review_lineage_scan_limit");
-    const times=new Set<string>();
-    for(const r of rows){
-      const fm=splitFrontmatter(r.after_text).data;
-      if(fm.analysis_input_sha256!==fingerprint)continue;
-      const p=JSON.parse(r.payload),time=fm.analysis_created_at;
-      const event=db().prepare("SELECT at FROM safe_edit_events WHERE operation_id=? AND event='preview' ORDER BY at LIMIT 1").get(r.id) as {at:string}|undefined;
-      if(!["preview","written"].includes(r.status)||r.after_hash!==sha(r.after_text)||p.path!==reviewPath||
-        p.change?.kind!=="create"||p.change.content!==r.after_text||p.operationId!==r.id||
-        r.id!=="ICW-"+sha(["canonical_review",reviewPath,r.after_hash].join("\n")).slice(0,32)||
-        typeof time!=="string"||!event||!Number.isFinite(Date.parse(time))||
-        Date.parse(time)>Date.parse(event.at)||Date.parse(event.at)-Date.parse(time)>60000)
-        throw Error("review_runtime_chronology_unverified");
-      times.add(time);
+    let written:string|null=null;
+    try{const raw=readNote(reviewPath).content;
+      if(splitFrontmatter(raw).data.analysis_input_sha256===fingerprint)written=raw;
+    }catch{/* File/index absence is classified by the workflow's normal readback. */}
+    let rows:ReviewLineageRecord[]=[];
+    if(written!==null){
+      // A valid historical write wins over abandoned previews. A bad current
+      // receipt is an explicit HOLD, never a replacement proposal.
+      const fm=splitFrontmatter(written).data;
+      if(typeof fm.analysis_created_at==="string")created=fm.analysis_created_at;
+      try{
+        const id=createReceipt("canonical_review",reviewPath,written);
+        rows=[db().prepare("SELECT * FROM safe_edit_operations WHERE id=?").get(id) as ReviewLineageRecord];
+      }catch{issues.push("review_lineage_written_receipt_unverified");}
+    }else{
+      rows=db().prepare(`SELECT id,actor,payload,after_text,after_hash,status FROM safe_edit_operations
+        WHERE json_valid(payload) AND json_extract(payload,'$.path')=? AND instr(after_text,?)>0
+        ORDER BY id LIMIT 17`).all(reviewPath,`\nanalysis_input_sha256: "${fingerprint}"\n`) as ReviewLineageRecord[];
     }
-    if(times.size>1)throw Error("review_runtime_chronology_ambiguous");
-    if(times.size)created=[...times][0];
+    historical=written!==null||rows.length>0;
+    if(rows.length>16)issues.push("review_lineage_scan_limit");
+    else{
+      const times=new Set<string>();
+      for(const r of rows){
+        const fm=splitFrontmatter(r.after_text).data;
+        if(fm.analysis_input_sha256!==fingerprint){issues.push("review_lineage_input_unverified");continue;}
+        const event=db().prepare("SELECT at FROM safe_edit_events WHERE operation_id=? AND actor=? AND event='preview' ORDER BY at LIMIT 1").get(r.id,r.actor) as {at:string}|undefined;
+        try{assertReviewChronology(r,event?.at);times.add(String(fm.analysis_created_at));}
+        catch{issues.push("review_runtime_chronology_unverified");}
+      }
+      if(times.size>1)issues.push("review_runtime_chronology_ambiguous");
+      if(times.size===1)created=[...times][0];
+    }
   }
-  if(l.knowledgeCutoffAsOf&&Date.parse(l.knowledgeCutoffAsOf)>Date.parse(created))throw Error("knowledge_cutoff_after_analysis");
-  return {knowledge_cutoff_as_of:l.knowledgeCutoffAsOf,analysis_created_at:created,
+  if(l.knowledgeCutoffAsOf&&Date.parse(l.knowledgeCutoffAsOf)>Date.parse(created)){
+    if(historical)issues.push("knowledge_cutoff_after_analysis");else throw Error("knowledge_cutoff_after_analysis");
+  }
+  return {metadata:{knowledge_cutoff_as_of:l.knowledgeCutoffAsOf,analysis_created_at:created,
     analysis_input_sha256:fingerprint,knowledge_cutoff_provenance:"caller_declared",
-    analysis_created_at_provenance:"runtime_canonical_review_proposal",model_version:null,model_version_status:"not_exposed"};
+    analysis_created_at_provenance:"runtime_canonical_review_proposal",model_version:null,model_version_status:"not_exposed"},issues:[...new Set(issues)]};
 }
 export function planClaimNotes(input:WritebackInput,intakeId:string,sourcePath:string){
   const parsed=intakeClaimsSchema.parse(input.claims);
@@ -123,12 +148,15 @@ export function readPersistedClaim(path:string){
     const r=indexedRead(link.source_path);
     if(r.fm.type!=="investment_research_review")continue;
     if(!/^10_Knowledge\/Company Research\/Investment Review - [^/]+ - IN-[A-F0-9]{16}\.md$/.test(link.source_path)||r.fm.review_scope!=="company"||r.fm.intake_id!==intakeId||r.fm.original_source_path!==sourcePath||!Array.isArray(r.fm.claim_ids)||!r.fm.claim_ids.includes(c.claim_id))throw Error("review_claim_binding_invalid");
-    createReceipt("canonical_review",link.source_path,r.raw);
+    const reviewReceipt=createReceipt("canonical_review",link.source_path,r.raw);
+    const journal=db().prepare("SELECT * FROM safe_edit_operations WHERE id=?").get(reviewReceipt) as ReviewLineageRecord;
+    const event=db().prepare("SELECT at FROM safe_edit_events WHERE operation_id=? AND actor=? AND event='preview' ORDER BY at LIMIT 1").get(reviewReceipt,journal.actor) as {at:string}|undefined;
+    assertReviewChronology(journal,event?.at);
     if(!db().prepare("SELECT 1 FROM links WHERE source_path=? AND resolved_path=?").get(link.source_path,sourcePath)||
       !db().prepare("SELECT 1 FROM links WHERE source_path=? AND resolved_path=?").get(link.source_path,path)||
       !db().prepare("SELECT 1 FROM notes_fts WHERE path=? AND notes_fts MATCH ?").get(link.source_path,"InvestmentIntake"+intakeId.slice(3)))throw Error("review_index_link_missing");
     reviewReferences.push(link.source_path);
   }catch{reviewScanComplete=false;}
   return {claim:c,receiptKey,sourceReceiptKey,sourcePath,intakeId,reviewReferences,reviewScanComplete,
-    bindingStatus:"receipt_readback_index_link_verified" as const,originIndependenceIncrement:0 as const};
+    bindingStatus:"receipt_readback_index_link_verified" as const,originIndependenceIncrement:0 as const,interpretationBoundary:claimInterpretationBoundary};
 }

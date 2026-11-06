@@ -12,6 +12,8 @@ import { splitFrontmatter, extractStructure } from "../vault/markdown";
 import { audit } from "../audit";
 import { previewSchema, applySchema, operationId as idSchema, type PreviewInput } from "./schema";
 
+import {assertReviewChronology,assertReviewPreviewAdmission,hasRuntimeReviewLineage} from "./research-lineage";
+
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
 const MAX_BYTES = 100_000;
 const TTL = 30 * 60_000;
@@ -200,7 +202,16 @@ function requiresApproval(r:RecordRow) {
     return data.user_endorsed===true || data.user_endorsed==="true" || data.status==="user_endorsed";
   });
 }
-export function preview(input:unknown,actor:string) {
+export function preview(input:unknown,actor:string) {return previewWithLineage(input,actor,false);}
+/** Server-internal entrypoint: only canonical prepare supplies the freshly
+ * planned Review. It is not an MCP argument, environment switch or wire flag. */
+export function previewCanonicalReview(input:unknown,actor:string) {return previewWithLineage(input,actor,true);}
+function checkStoredReviewLineage(r:RecordRow){
+  if(JSON.parse(r.payload).change?.kind!=="create"||!hasRuntimeReviewLineage(r.after_text))return;
+  const event=store().prepare("SELECT at FROM safe_edit_events WHERE operation_id=? AND actor=? AND event='preview' ORDER BY at LIMIT 1").get(r.id,r.actor) as {at:string}|undefined;
+  assertReviewChronology(r,event?.at);
+}
+function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
   assertEnabled();const p=previewSchema.parse(input);const t=target(p.path);p.path=t.rel;
   if(store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND status='writing' LIMIT 1").get(p.path)) throw Error("This path has an interrupted operation; administrator recovery required");
   const before=read(t.abs);
@@ -209,6 +220,7 @@ export function preview(input:unknown,actor:string) {
   if(existing) {
     if(existing.actor!==actor||existing.payload!==JSON.stringify(p)) throw Error("Operation ID reused for different input or actor");
     if(existing.status==="preview") {
+      checkStoredReviewLineage(existing);
       // A lost response must not strand a canonical source forever. Rotate the
       // one-use token for the SAME actor and payload; invalidate prior tokens
       // and any approval so the exact diff must be reviewed again. Never
@@ -227,6 +239,7 @@ export function preview(input:unknown,actor:string) {
   document(before??"");checkEvidence(p,before??"");
   const after=calculate(p,before??"",actor);
   const afterMetadata=document(after).data,beforeMetadata=document(before??"").data;
+  if(p.change.kind==="create")assertReviewPreviewAdmission(after,canonical);
   if(afterMetadata.verification==="verified_against_primary"&&beforeMetadata.verification!=="verified_against_primary") {
     if(p.evidence?.verification!=="verified_against_primary" || ["archived_ai","chatgpt_analysis"].includes(String(afterMetadata.source_type))) throw Error("Primary verification cannot be asserted by note content without a primary evidence review");
   }
@@ -305,6 +318,7 @@ export function apply(input:unknown,actor:string) {
   assertEnabled();const args=applySchema.parse(input),r=owned(args.operationId,actor);
   if(!crypto.timingSafeEqual(Buffer.from(sha256(args.previewToken),"hex"),Buffer.from(r.token_hash,"hex"))||args.expectedHash!==r.before_hash) throw Error("Invalid preview token or expected hash");
   if(r.status==="written") return status(r.id,actor);
+  checkStoredReviewLineage(r);
   if(Date.now()>r.expires) throw Error("Preview expired; review a fresh diff");
   if(requiresApproval(r)&&!r.approval) throw Error("Explicit admin approval of this exact thesis diff is required; open approvalUrl");
   const p=JSON.parse(r.payload) as PreviewInput;
