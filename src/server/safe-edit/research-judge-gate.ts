@@ -4,6 +4,7 @@ import {db} from "../db";
 import {splitFrontmatter} from "../vault/markdown";
 import {judgeHash,judgeHistoryCurrent} from "../vault/research-judge";
 import {m2VaultReadDeps} from "../vault/research-decision-v2";
+import {createReceipt} from "../vault/investment-research-context";
 export interface JudgeGate {
   intakeId:string;actor:string;decision:"PASS"|"HOLD"|"FAIL";packetDigest:string;resultDigest:string|null;expiresAt:number;
   history:{path:string;sha256:string}[];
@@ -36,9 +37,10 @@ export function assertResearchJudgeWrite(path:string,before:string,after:string,
   if(target.kind==="source_intake")return;
   if(g.decision!=="PASS"||Date.now()>g.expiresAt||!judgeHistoryCurrent(g.history))throw Error("research_judge_semantic_or_stale_hold");
   if(stage==="apply")for(const prerequisite of g.targets.filter(t=>t.kind==="source_intake"||target.kind==="canonical_review"&&t.kind==="structured_claim")){
-    const receipt=db().prepare("SELECT status,after_hash FROM safe_edit_operations WHERE id=?").get(prerequisite.operationId) as {status:string;after_hash:string}|undefined;
     const read=m2VaultReadDeps.readIndexed(prerequisite.path);
-    if(receipt?.status!=="written"||receipt.after_hash!==prerequisite.sha256||!read?.indexed||!read.searchable||judgeHash(read.content)!==prerequisite.sha256)
+    let receiptVerified=false;
+    if(read)try{receiptVerified=createReceipt(prerequisite.kind,prerequisite.path,read.content)===prerequisite.operationId;}catch{/* Exact existing receipt contract, never repair. */}
+    if(!receiptVerified||!read?.indexed||!read.searchable||judgeHash(read.content)!==prerequisite.sha256)
       throw Error("research_judge_prerequisite_readback_hold");
   }
 }

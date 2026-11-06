@@ -180,6 +180,21 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     expect(()=>engine.apply({operationId:r.operationId,previewToken:r.previewToken,expectedHash:r.beforeHash},actor)).toThrow("research_judge_prerequisite_readback_hold");
     expect((await apply(data,p)).status).toBe("saved_verified");assertProtected();
   });
+  it("generic apply requires all durable prerequisite receipt stages, not only written/hash/index existence",async()=>{
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine"),indexer=await import("../vault/indexer");
+    const source=p.previews.find(x=>x.kind==="source_intake")!,claim=p.previews.find(x=>x.kind==="structured_claim")!;
+    const reindex=indexer.reindexPath;
+    // A real Safe Edit write/index followed by an observed mtime race makes
+    // the engine issue reindex=unverified. No fabricated receipt or SQL edit.
+    const fault=vi.spyOn(indexer,"reindexPath").mockImplementation(file=>{
+      reindex(file);if(file===source.path){const later=new Date(Date.now()+10000);fs.utimesSync(path.join(vault,file),later,later);}
+    });
+    let saved;try{saved=engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);}finally{fault.mockRestore();}
+    expect(saved.receipt).toMatchObject({write:"written",readback:"verified",reindex:"unverified"});
+    const before=await journal();
+    expect(()=>engine.apply({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge_prerequisite/);
+    expect(await journal()).toEqual(before);expect(fs.existsSync(path.join(vault,claim.path))).toBe(false);assertProtected();
+  });
   it("Judge PASS never overrides D1 or Thai quality HOLD, including reconstructed generic recipes",async()=>{
     const data=await judged({...input,claims:[{...claims[0],value:"6.2",sourceExcerpt:"6.2 billion, up 10",qualification:undefined}],
       researchReview:{...review,translationTh:"Revenue increases. The outlook is positive."}});
