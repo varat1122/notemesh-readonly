@@ -22,16 +22,16 @@ On the *existing* Safe Edit OAuth endpoint (`vault:read vault:edit`):
 2. After reviewing the diffs, `apply_canonical_writeback` takes the *same*
    input, `planId`, and exact pending preview authorizations. The existing
    Safe Edit engine pauses verified idle Sync, protects each path with CAS,
-   journals a receipt/backup, writes source before review, and independently
-   checks SHA/readback/index. The response re-plans from the actual Vault.
+   journals a receipt/backup, writes Source before requested Claims and Review,
+   and independently checks SHA/readback/index. The response re-plans from the actual Vault.
 3. Only `outcome:saved_verified` / `readyForNextNews:true` confirms a finished
-   Source + Canonical Review cycle. `source_saved_analysis_pending` is valid
-   only for Feed Only. Inspect `interrupted` and individual `steps` when pending.
+   Source + requested Claims + Canonical Review cycle.
+   `source_saved_analysis_pending` is valid only for Feed Only. Inspect `interrupted` and individual `steps` when pending.
 
-This is **recoverable add-only two-step writeback, not a single atomic file
-transaction or background queue**. A successfully stored Source is retained
-when a Review fails. Interrupted Safe Edit journal operations require operator
-reconciliation; the system never silently overwrites another writer's note.
+This is **recoverable add-only writeback (Source, optional Claims, Review), not
+a single atomic file transaction or background queue**. Successfully stored
+Source/Claim notes are retained when a later step or the Review fails. Interrupted
+Safe Edit journal operations require operator reconciliation; the system never silently overwrites another writer's note.
 
 ### Thai persistence quality gate (RI-001 follow-up)
 
@@ -50,14 +50,39 @@ the actually read `extractedText`, in order, retaining figures, attribution and
 caveats. `excerpt_only` never means unread pages were translated. Thai news does
 not need a duplicate translation. The exact original text is preserved in Source.
 
-The mechanical language screen checks every nonempty prose paragraph for at least
-six Thai letters and a Thai share of at least 35% of letters. URLs, marked code and
-explicit quotes do not count as narration; numbers/Thai digits cannot satisfy it.
-Financial terms, company names and English quotations remain allowed with Thai
-explanation. This is a conservative format screen, **not** proof of fluent Thai,
-translation completeness/fidelity, claim truth or a Thesis decision. The research
-model/reviewer remains responsible for full read-scope translation; a screen PASS
-alone is not Research Acceptance. No LLM call or new infrastructure is introduced.
+The mechanical language screen uses the Node 24 runtime's Thai word segmentation
+(`Intl.Segmenter`), not Latin-versus-Thai character length. Each unquoted prose
+paragraph needs at least two Thai word units, six Thai letters and a Thai word
+share of at least 35%. Combining marks remain part of words; standalone marks,
+digits, URLs and quoted/code text cannot supply Thai narration credit. A mixed
+script token is not credited as Thai. No financial-term or company allowlist is
+used, so ordinary Revenue/EBITDA/Margin/Guidance/FCF/ROIC prose can pass alongside
+Thai explanation without long English names dominating a character ratio.
+
+Quoted English, blockquotes, code and formulas are **counted as supporting foreign
+words**, not silently removed from the language decision. Their aggregate count
+cannot exceed the field's unquoted Thai word count, and the whole field must
+retain at least 35% Thai word units. Any supporting foreign text also
+requires at least eight Thai words outside those spans, including short quoted
+phrases; a Thai label cannot authorize even a one-word untranslated payload. This prevents a short
+Thai label plus an otherwise English quote/code payload from replacing the
+translation or analysis. Splitting it into tiny quotes or putting prose in a
+fence info string does not evade the aggregate check. Standard backtick/tilde
+fences preserve their boundary; an unclosed block fence is rejected. Genuine
+quotations, formulas, code, figures and company/financial terms remain allowed
+when supported by sufficient Thai narration. These are bounded mechanical
+composition checks, not a Markdown parser or a semantic language proof.
+
+A PASS does **not** prove substantive meaning, fluent Thai, faithful/complete
+translation, numerical fidelity, fact truth or a Thesis decision. An unrelated
+but mechanically Thai translation can still pass; regression explicitly records
+that limitation. LLM/reviewer acceptance must compare all actually read Source
+text against the translation, including scope, attribution, figures and caveats.
+Long quoted originals belong in the preserved Source, with the Review's Thai
+translation/explanation written separately. No LLM call, schema or infrastructure
+is introduced by this calibration. A historical bypass can now HOLD on current
+revalidation, but its accepted note bytes/receipt remain intact; the gate does
+not translate, overwrite, replay or repair it automatically.
 
 New generated Review headings are Thai; filenames, Source identity, receipt hash
 algorithm and claim-evidence gates are unchanged. An identical historical retry

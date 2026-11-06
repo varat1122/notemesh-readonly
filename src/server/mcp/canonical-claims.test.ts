@@ -263,3 +263,67 @@ describe("RI-001 source-scoped multi-claim persistence",()=>{
     expect(found.matchingClaims[0].evidenceClass).toBeUndefined();assertProtected();
   });
 });
+
+// Combined PR156 + PR157 boundary: no additional runtime behavior.
+describe("RI-001 integrated multi-claim and Thai language workflow",()=>{
+  const mixed="Revenue, EBITDA, Margin, Guidance, FCF, ROIC ดีขึ้นแต่ยังต้องติดตาม";
+  it.each(["en-text","en-pdf","th-text"])("Source-only → Actual/Guidance → mixed Thai Review → cold retrieval and duplicate: %s",async mode=>{
+    const thai=mode==="th-text",inputFormat=mode==="en-pdf"?"pdf" as const:"text" as const;
+    const original=thai?"บริษัทอ้างรายได้ 96.2 พันล้านดอลลาร์ เพิ่มขึ้น 106% จากปีก่อน\nคาดว่ารายได้จะอยู่ที่ 108.0 พันล้านดอลลาร์ บวกลบ 2%\n":excerpt;
+    const observed=claims.map((c,i)=>({...c,sourceExcerpt:original.split("\n")[i],
+      qualification:thai?(i===0?"เพิ่มขึ้น 106% จากปีก่อน":"บวกลบ 2%"):c.qualification}));
+    const data={...input,inputFormat,sourceLanguage:thai?"th":"en",extractedText:original,claims:observed,
+      researchReview:{...review,translationTh:thai?undefined:review.translationTh,mechanismTh:mixed}};
+    const capture={...data,researchReview:undefined,captureOnly:true};
+    const first=await prepare(capture),captured=await apply(capture,first);
+    expect(first.qualityIssues).toEqual([]);expect(captured.interrupted).toBeNull();
+    expect(captured.status).toBe("source_saved_analysis_pending");expect(captured.steps).toHaveLength(3);
+    expect(captured.readyForNextNews).toBe(false);
+    const preserved=captured.steps.map(s=>fs.readFileSync(path.join(vault,s.path))),captureReceipts=await journal();
+    const next=await prepare(data);expect(next.planId).toBe(first.planId);expect(next.qualityIssues).toEqual([]);
+    expect(next.previews.map(p=>p.kind)).toEqual(["canonical_review"]);
+    const saved=await apply(data,next);expect(saved.status).toBe("saved_verified");expect(saved.readyForNextNews).toBe(true);
+    expect(captured.steps.map(s=>fs.readFileSync(path.join(vault,s.path)))).toEqual(preserved);
+    for(const row of captureReceipts)expect(await journal()).toContainEqual(row);
+    const {splitFrontmatter}=await import("../vault/markdown");
+    const source=splitFrontmatter(fs.readFileSync(path.join(vault,saved.steps[0].path),"utf8"));
+    expect(source.data.source_text_sha256).toBe(sha(original));expect(source.body).toContain(original);
+    const rev=saved.steps.at(-1)!,reviewBytes=fs.readFileSync(path.join(vault,rev.path),"utf8");
+    expect(reviewBytes).toContain(mixed);expect(reviewBytes.includes("## คำแปลจากต้นฉบับ")).toBe(!thai);
+    expect(splitFrontmatter(reviewBytes).data.claim_ids).toHaveLength(2);
+    if(inputFormat==="pdf")expect((await plan(data)).safeEditWorkflow!.sourcePreservation).toBe("text_only_binary_not_verified");
+    vi.resetModules();
+    const found=await Promise.all(observed.map(retrieve));
+    expect(found.map(r=>r.matchingClaims.length)).toEqual([1,1]);
+    expect(found.map(r=>r.matchingClaims[0].evidenceClass)).toEqual(["reported_actual","management_guidance"]);
+    for(const r of found){const c=r.matchingClaims[0];expect(c.persistence).toBe("receipt_readback_index_link_verified");
+      expect(c.verification).toBe("unverified");expect(c.reviewReferences).toEqual([rev.path]);expect(c.reviewScanComplete).toBe(true);expect(c.originIndependenceIncrement).toBe(0);}
+    const before=await journal(),bytes=saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path))),repeat=await prepare(data);
+    expect(repeat.previews).toEqual([]);expect((await apply(data,repeat)).receipts).toEqual([]);
+    expect(await journal()).toEqual(before);expect(saved.steps.map(s=>fs.readFileSync(path.join(vault,s.path)))).toEqual(bytes);assertProtected();
+  });
+  it.each([
+    'คำแปลภาษาไทยมีดังนี้\n\n"Revenue"',
+    "สรุปเป็นภาษาไทย\n\n> Revenue improves but future demand remains uncertain.",
+    "คำแปลภาษาไทย\n\n```text\nRevenue improves but future demand remains uncertain.\n```"
+  ])("language HOLD preserves Source/Claims; partial authorization failure and corrected retry never replay them: %s",async attack=>{
+    const blocked={...input,researchReview:{...review,translationTh:attack}};
+    const p=await prepare(blocked);expect(p.qualityIssues).toContain("translation_not_thai");
+    expect(p.steps.at(-1)!.state).toBe("hold_quality_gate");expect(p.previews.map(x=>x.kind)).toEqual(["source_intake","structured_claim","structured_claim"]);
+    const partial=await apply(blocked,p);expect(partial.readyForNextNews).toBe(false);expect(partial.receipts).toHaveLength(3);
+    const originals=partial.steps.slice(0,3).map(s=>fs.readFileSync(path.join(vault,s.path))),receipts=await journal();
+    for(const c of claims)expect((await retrieve(c)).matchingClaims[0].reviewReferences).toEqual([]);
+    const corrected={...input,researchReview:{...review,mechanismTh:mixed}},preview=await prepare(corrected);
+    expect(preview.previews.map(p=>p.kind)).toEqual(["canonical_review"]);
+    const interrupted=await (await import("./canonical-writeback")).applyCanonicalWriteback({input:corrected,planId:p.planId,
+      authorizations:preview.previews.map(x=>({operationId:x.operationId,expectedHash:x.beforeHash,previewToken:"0".repeat(64)}))},actor);
+    expect(interrupted.interrupted).toMatch(/Invalid preview token/);expect(interrupted.receipts).toEqual([]);expect(interrupted.readyForNextNews).toBe(false);
+    expect(fs.existsSync(path.join(vault,partial.steps.at(-1)!.path))).toBe(false);
+    const retry=await prepare(corrected),saved=await apply(corrected,retry);expect(saved.status).toBe("saved_verified");expect(saved.receipts).toHaveLength(1);
+    expect(partial.steps.slice(0,3).map(s=>fs.readFileSync(path.join(vault,s.path)))).toEqual(originals);
+    for(const row of receipts)expect(await journal()).toContainEqual(row);
+    vi.resetModules();
+    for(const c of claims){const r=await retrieve(c);expect(r.matchingClaims[0].reviewReferences).toEqual([saved.steps.at(-1)!.path]);expect(r.matchingClaims[0].originIndependenceIncrement).toBe(0);}
+    assertProtected();
+  });
+});
