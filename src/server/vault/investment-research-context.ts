@@ -1,3 +1,4 @@
+import {judgeExclusionSql,type JudgeSelectionPolicy} from "./queries";
 /** Read-only adapters for existing canonical Review/Source/receipt contracts.
  * No new identities, tables, writes, or economic-event equivalence inference. */
 import {RetrievalObserver} from "./investment-retrieval-coverage";
@@ -102,7 +103,7 @@ function assemble(path:string,id:string,note:ReturnType<typeof indexedRead>,obse
 }
 export function isCanonicalResearchPath(path:string):boolean{return path.startsWith(folder)&&/ - IN-[A-F0-9]{16}\.md$/.test(path);}
 
-export function discoverCanonicalResearch(contextKey:string,intakeId?:string,resolvedSubjects?:string[],observer=new RetrievalObserver()):CanonicalResearchScan{
+export function discoverCanonicalResearch(contextKey:string,intakeId?:string,resolvedSubjects?:string[],observer=new RetrievalObserver(),judgePolicy?:JudgeSelectionPolicy):CanonicalResearchScan{
   const result:CanonicalResearchScan={contextKey,reviews:[],complete:true,reasons:[],chronology:"NOT_FOUND",latestReviewPaths:[]};
   // Only subjects already resolved to this Hub may extend filename discovery:
   // its title, requested labels and bounded explicit aliases checked by caller.
@@ -110,8 +111,8 @@ export function discoverCanonicalResearch(contextKey:string,intakeId?:string,res
   const prefixes=subjects.map(subject=>folder+subject+" - ");
   // Bound the actual requested subject family, never a global Review universe.
   // Include malformed metadata in this scope so it cannot masquerade as absence.
-  const rows=db().prepare(`SELECT path,frontmatter FROM notes WHERE ${prefixes.map(()=>"(path>=? AND path<?)").join(" OR ")} ORDER BY path LIMIT 101`)
-    .all(...prefixes.flatMap(prefix=>[prefix,prefix.slice(0,-1)+"!"])) as {path:string;frontmatter:string|null}[];
+  const rows=db().prepare(`SELECT path,frontmatter FROM notes WHERE (${prefixes.map(()=>"(path>=? AND path<?)").join(" OR ")})${judgeExclusionSql(judgePolicy)} ORDER BY path LIMIT 101`)
+    .all(...prefixes.flatMap(prefix=>[prefix,prefix.slice(0,-1)+"!"]),...judgePolicy?.excludedPaths??[]) as {path:string;frontmatter:string|null}[];
   if(rows.length>100){result.complete=false;result.reasons.push("canonical_scope_scan_limit");}
   const candidates=rows.slice(0,100).flatMap(row=>{
     const fm=metadata(row.frontmatter),id=fm?.intake_id;

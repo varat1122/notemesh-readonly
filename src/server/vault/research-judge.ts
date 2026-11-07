@@ -3,13 +3,13 @@
 import {createHash,createHmac,timingSafeEqual} from "node:crypto";
 import {z} from "zod";
 import {env} from "../env";
-import {buildInvestmentContextPack} from "./investment-context";
+import {judgeContext,judgeScopeWitness,judgeScopeCurrent,judgeTargets,type JudgeScope} from "./research-judge-scope";
 import {retrievalOperationallyComplete,type RetrievalCoverage} from "./investment-retrieval-coverage";
 import {M2_POLICY,m2VaultReadDeps} from "./research-decision-v2";
 import {splitFrontmatter} from "./markdown";
 import {planInvestmentWriteback,type WritebackInput} from "./investment-writeback-router";
 
-export const JUDGE_VERSION="RI001-JUDGE-3";
+export const JUDGE_VERSION="RI001-JUDGE-4";
 export const judgeHash=(s:string)=>createHash("sha256").update(s).digest("hex");
 export function stableJudgeJson(value:unknown):string {
   if(Array.isArray(value))return "["+value.map(stableJudgeJson).join(",")+"]";
@@ -51,7 +51,7 @@ interface PacketBody {
     inputFormat:string;declaredAccess:string|null;brokerVintage:unknown;attachment:unknown;authority:string};
   claims:{key:string;candidate:unknown}[];relationships:{key:string;candidate:unknown}[];
   proposedThaiReview:unknown;dates:{event:string|null;publication:string|null;analysisAsOf:string|null;analysisCreatedAt:null};
-  history:History[];coverage:{retrieval:RetrievalCoverage;status:string;incomplete:string[];omitted:string[];issuerResolution:unknown;researchCoverage:unknown;macroCoverage:unknown;
+  scopeWitness:JudgeScope|null;history:History[];coverage:{retrieval:RetrievalCoverage;status:string;incomplete:string[];omitted:string[];issuerResolution:unknown;researchCoverage:unknown;macroCoverage:unknown;
     selectedHistory:{status:"readback_complete"|"readback_hold";selected:number;read:number;failures:HistoryFailure[]}};
   citationContract:{format:string;offsets:string;authority:string;declaredLocators:string};
   constraints:string[];trust:{actorLabelSha256:string;actorProvenance:string;session:string;modelVersion:string;judgeIdentity:string};
@@ -63,18 +63,18 @@ function seal(envelope:Omit<z.infer<typeof judgeEnvelopeSchema>,"seal">){
 }
 export function buildResearchJudgePacket(input:WritebackInput,actor:string){
   const clean=unjudged(input),plan=planInvestmentWriteback(clean);
-  const context=buildInvestmentContextPack({question:clean.entities.join(" / ")+": "+clean.topic,
+  const context=judgeContext({question:clean.entities.join(" / ")+": "+clean.topic,
     issuers:clean.domain==="company"?clean.entities:undefined,industry:clean.domain==="industry"?clean.entities.join(" / "):undefined,
-    focus:clean.domain==="macro"?"macro":clean.focus??"general",maxNotes:8,maxChars:12000});
+    focus:clean.domain==="macro"?"macro":clean.focus??"general",maxNotes:8,maxChars:12000},judgeTargets(plan),plan.planId,actor);
   const history:History[]=[],incomplete=[...context.incomplete],failures:HistoryFailure[]=[];
-  const selected=context.items.filter(i=>!i.path.includes(plan.planId)).slice(0,8);
+  const selected=context.items.slice(0,8);
   for(const [index,item] of selected.entries()){
     const key=`history_${index}`;
     let reason="readback_failed";
     try{
       const note=m2VaultReadDeps.readIndexed(item.path);
       reason=!note?"missing_or_unreadable":!note.indexed?"not_indexed":!note.searchable?"not_searchable":
-        Buffer.byteLength(note.content)>100000?"selected_note_read_limit":"";
+        Buffer.byteLength(note.content)>100000?"selected_note_read_limit":judgeHash(note.content)!==item.contentSha256?"selection_changed":"";
       if(!note||reason)throw Error("unavailable");
       // Read the actual indexed note, not search snippets or caller digests.
       const fm=splitFrontmatter(note.content).data;
@@ -88,7 +88,10 @@ export function buildResearchJudgePacket(input:WritebackInput,actor:string){
         dates:{event:fm.event_date??null,publication:fm.published_at??null,analysis:fm.analysis_created_at??null,provenance:"declared_not_verified"}});
     }catch{incomplete.push("historical_readback_unavailable");failures.push({key,path:item.path,reason:reason||"readback_failed"});}
   }
+  let scopeWitness:JudgeScope|null=null;
+  try{scopeWitness=judgeScopeWitness(context);}catch{/* Explicit HOLD below, never erase coverage. */}
   const constraints:string[]=[];
+  if(!scopeWitness)constraints.push("historical_scope_witness_unavailable");
   if(!retrievalOperationallyComplete(context.retrieval))constraints.push("historical_retrieval_operational_hold");
   if(failures.length)constraints.push("selected_history_readback_unavailable");
   if(clean.domain==="company"&&context.issuerResolution.some(r=>!["exact_existing_title","indexed_alias"].includes(r.status)))constraints.push("issuer_identity_resolution_hold");
@@ -108,7 +111,7 @@ export function buildResearchJudgePacket(input:WritebackInput,actor:string){
     claims:(clean.claims??[]).map((candidate,i)=>({key:`claim_${i}`,candidate})),
     relationships:(clean.entityRoles??[]).map((candidate,i)=>({key:`relationship_${i}`,candidate})),
     proposedThaiReview:clean.researchReview??null,dates:{event:clean.eventDate??null,publication:clean.publicationDate??null,
-      analysisAsOf:cutoff??null,analysisCreatedAt:null},history,
+      analysisAsOf:cutoff??null,analysisCreatedAt:null},scopeWitness,history,
     coverage:{retrieval:context.retrieval,status:"bounded_not_exhaustive",incomplete:incomplete.slice(0,30),omitted:context.omitted.slice(0,30),
       issuerResolution:context.issuerResolution,researchCoverage:context.researchCoverage,macroCoverage:context.macroCoverage,
       selectedHistory:{status:failures.length?"readback_hold":"readback_complete",selected:selected.length,read:history.length,failures}},
@@ -132,14 +135,6 @@ export function verifyResearchJudgePacket(input:WritebackInput,submission:JudgeS
 export function judgeHistoryCurrent(history:Pick<History,"path"|"sha256">[]){
   return history.every(h=>{try{const r=m2VaultReadDeps.readIndexed(h.path);return !!r?.indexed&&r.searchable&&judgeHash(r.content)===h.sha256;}catch{return false;}});
 }
-/** Recheck operational availability at admission, including generic apply.
- * Ordinary bounds/missing roles are not errors. This does not re-attest unseen
- * evidence or change the sealed analyst inputs; historical hashes still bind. */
-export function judgeRetrievalCurrent(retrieval:unknown):boolean {
-  if(!retrievalOperationallyComplete(retrieval))return false;
-  try{return retrievalOperationallyComplete(buildInvestmentContextPack(retrieval.scope).retrieval);}
-  catch{return false;}
-}
 function exactTextReference(ref:z.infer<typeof reference>,text:string|undefined,sha256:string|undefined):boolean {
   if(!text||!sha256||ref.sourceSha256!==sha256||!ref.quote.replace(/[\s\p{Cf}]/gu,""))return false;
   const span=/^utf16:(0|[1-9]\d*):(0|[1-9]\d*)$/.exec(ref.locator);
@@ -152,7 +147,9 @@ function exactTextReference(ref:z.infer<typeof reference>,text:string|undefined,
 export function evaluateResearchJudge(input:WritebackInput,submission:JudgeSubmission,actor:string){
   const body=verifyResearchJudgePacket(input,submission,actor),r=submission.result,reasons=[...body.constraints];
   let decision:"PASS"|"HOLD"|"FAIL"="HOLD",criticRequired=false;
-  if(!judgeRetrievalCurrent(body.coverage.retrieval))reasons.push("historical_retrieval_operational_hold");
+  if(!retrievalOperationallyComplete(body.coverage.retrieval))reasons.push("historical_retrieval_operational_hold");
+  const plan=planInvestmentWriteback(unjudged(input));
+  if(!judgeScopeCurrent(body.scopeWitness,body.coverage.retrieval,judgeTargets(plan),plan.planId,actor))reasons.push("historical_scope_changed_or_unavailable_hold");
   if(body.coverage.selectedHistory.status!=="readback_complete")reasons.push("selected_history_readback_unavailable");
   if(!judgeHistoryCurrent(body.history))reasons.push("historical_readback_changed_hold");
   if(!r)reasons.push("judge_result_missing");
@@ -187,6 +184,6 @@ export function evaluateResearchJudge(input:WritebackInput,submission:JudgeSubmi
   if(reasons.length&&decision!=="FAIL")decision="HOLD";
   return {decision,reasons:[...new Set(reasons)],criticRequired,criticStatus:criticRequired?"not_independently_verified":"not_required",
     packetId:submission.packet.packetId,packetDigest:submission.packet.digest,resultDigest:r?judgeHash(stableJudgeJson(r)):null,
-    history:body.history.map(h=>({path:h.path,sha256:h.sha256})),retrieval:body.coverage.retrieval as RetrievalCoverage|null,expiresAt:submission.packet.expiresAt,
+    scopeWitness:body.scopeWitness,history:body.history.map(h=>({path:h.path,sha256:h.sha256})),retrieval:body.coverage.retrieval as RetrievalCoverage|null,expiresAt:submission.packet.expiresAt,
     trust:body.trust,semanticTruthVerified:false,primaryAuthority:false};
 }

@@ -2,7 +2,8 @@
  * Only canonical prepare records it; no wire caller can insert a gate event. */
 import {db} from "../db";
 import {splitFrontmatter} from "../vault/markdown";
-import {JUDGE_VERSION,judgeHash,judgeHistoryCurrent,judgeRetrievalCurrent} from "../vault/research-judge";
+import {JUDGE_VERSION,judgeHash,judgeHistoryCurrent} from "../vault/research-judge";
+import {judgeScopeCurrent,type JudgeScope} from "../vault/research-judge-scope";
 import type {RetrievalCoverage} from "../vault/investment-retrieval-coverage";
 import {m2VaultReadDeps} from "../vault/research-decision-v2";
 import {createReceipt} from "../vault/investment-research-context";
@@ -11,6 +12,7 @@ export interface JudgeGate {
   intakeId:string;actor:string;decision:"PASS"|"HOLD"|"FAIL";packetDigest:string;resultDigest:string|null;expiresAt:number;
   history:{path:string;sha256:string}[];
   retrieval:RetrievalCoverage|null;
+  scopeWitness:JudgeScope|null;
   targets:{path:string;sha256:string;operationId:string;kind:"source_intake"|"structured_claim"|"canonical_review";eligible:boolean}[];
 }
 export function currentJudgeGate(intakeId:string):JudgeGate|null {
@@ -38,11 +40,12 @@ export function assertResearchJudgeWrite(path:string,before:string,after:string,
   if(!target?.eligible||before!==""||g.actor!==actor)throw Error("research_judge_exact_bytes_or_actor_hold");
   // Source preservation is independent of semantic outcome and packet expiry.
   if(target.kind==="source_intake")return;
-  // Earlier gates lacked upstream retrieval completeness (v2) or exact citation
+  // Earlier gates lacked current identity/selection binding (v3), upstream
+  // completeness (v2) or exact citation
   // spans (v1). Preserve their journal/receipts, but never reuse that authority for
   // a pending Claim/Review write after the contract upgrade.
   if(g.version!==JUDGE_VERSION)throw Error("research_judge_contract_version_hold");
-  if(g.decision!=="PASS"||Date.now()>g.expiresAt||!judgeHistoryCurrent(g.history)||!judgeRetrievalCurrent(g.retrieval))throw Error("research_judge_semantic_or_stale_hold");
+  if(g.decision!=="PASS"||Date.now()>g.expiresAt||!judgeHistoryCurrent(g.history)||!judgeScopeCurrent(g.scopeWitness,g.retrieval,g.targets,g.intakeId,g.actor))throw Error("research_judge_semantic_or_stale_hold");
   if(stage==="apply")for(const prerequisite of g.targets.filter(t=>t.kind==="source_intake"||target.kind==="canonical_review"&&t.kind==="structured_claim")){
     const read=m2VaultReadDeps.readIndexed(prerequisite.path);
     let receiptVerified=false;

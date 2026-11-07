@@ -1,6 +1,7 @@
 import fs from "node:fs";
+import {createHash} from "node:crypto";
 import {RetrievalObserver,type RetrievalCoverage} from "./investment-retrieval-coverage";
-import { searchVault } from "./queries";
+import { searchVault, judgeExclusionSql, type JudgeSelectionPolicy } from "./queries";
 import { db } from "../db";
 import { readNote } from "./notes";
 import { resolveNotePath, resolveFolderPath } from "./paths";
@@ -31,7 +32,7 @@ export interface IdentityHoldDiscovery {
 export interface MacroCoverage {scope:string;subjectEvidence:Coverage;counterEvidence:Coverage}
 type DeclaredDate={status:"DECLARED"|"UNKNOWN";value:string|null};
 export interface ResearchChronology {eventDate:DeclaredDate;publicationDate:DeclaredDate;analysisDate:DeclaredDate;importDate:DeclaredDate}
-export interface Item { path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
+export interface Item { contentSha256:string; path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
 export interface Pack { retrieval:RetrievalCoverage; status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
 function resolveIssuers(requested:string[],observer:RetrievalObserver):IssuerResolution[]{
@@ -68,7 +69,7 @@ function scopeKeys(r:IssuerResolution):string[]{
   // unresolved. Qualified/invalid identifiers never become unscoped queries.
   return r.status==="unresolved"&&/^[A-Z][A-Z0-9.-]{0,11}$/.test(r.requested)?[r.requested]:[];
 }
-function discoverDuringIdentityHold(resolutions:IssuerResolution[],observer:RetrievalObserver):IdentityHoldDiscovery[]{
+function discoverDuringIdentityHold(resolutions:IssuerResolution[],observer:RetrievalObserver,policy?:JudgeSelectionPolicy):IdentityHoldDiscovery[]{
   return resolutions.filter(r=>["ambiguous_hold","readback_hold","index_limit_hold"].includes(r.status)&&
     /^[A-Z][A-Z0-9.-]{0,11}$/.test(r.requested)).map(r=>{
     const result:IdentityHoldDiscovery={requested:r.requested,resolutionStatus:r.status,mappingVerified:false,
@@ -78,7 +79,7 @@ function discoverDuringIdentityHold(resolutions:IssuerResolution[],observer:Retr
       result.scanComplete=false;result.reasons.push("literal_folder_unavailable");return result;
     }
     try{
-      const found=observer.search("literal_discovery",r.requested,folder,()=>searchVault(r.requested,{folder,limit:31}));
+      const found=observer.search("literal_discovery",r.requested,folder,()=>searchVault(r.requested,{folder,limit:31},policy));
       if(found.total>30){result.scanComplete=false;result.reasons.push("literal_search_limit");}
       const candidates=found.hits.slice(0,30).filter(h=>namedIssuers(h.path).includes(r.requested));
       if(candidates.length>12){result.scanComplete=false;result.reasons.push("literal_read_limit");}
@@ -233,14 +234,15 @@ function declared(raw: string, notePath: string) {
     declaredSourceType:typeof f.source_type==="string"?f.source_type.slice(0,80):typeof f.source_tier==="string"?f.source_tier.slice(0,80):null,
     chronology:{eventDate:date(schema.eventDate),publicationDate:date(schema.publishedAt),analysisDate:date(schema.analysisDate),importDate:date(schema.importedAt)},schemaCompatibility:schema};
 }
-export function buildInvestmentContextPack(req: Input): Pack {
+export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectionPolicy): Pack {
+  const exclusion=judgeExclusionSql(judgePolicy),excluded=judgePolicy?.excludedPaths??[];
   const question = req.question.trim().slice(0,1200);
   if (question.length<3) throw new Error("Question must contain at least 3 characters");
   const requestedIssuers = [...new Set((req.issuers||[]).map(s=>s.trim().toUpperCase()))].slice(0,6);
   if(req.intakeId&&(!/^IN-[A-F0-9]{16}$/.test(req.intakeId)||!requestedIssuers.length))throw Error("Intake scope requires a valid intake ID and issuer scope");
   const observer=new RetrievalObserver();
   const issuerResolution=resolveIssuers(requestedIssuers,observer);
-  const identityHoldDiscovery=discoverDuringIdentityHold(issuerResolution,observer);
+  const identityHoldDiscovery=discoverDuringIdentityHold(issuerResolution,observer,judgePolicy);
   const issuers=[...new Set(issuerResolution.flatMap(scopeKeys).map(x=>x.toUpperCase()))];
   const contextKeys=[...new Set(issuerResolution.flatMap(r=>r.contextKey?[r.contextKey]:scopeKeys(r)))];
   const issuerScoped=requestedIssuers.length>0;
@@ -261,7 +263,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
   const researchScans=subjectScopes.map(({key,resolved,aliases})=>{
     const checked=aliasResolution.filter(r=>aliases.slice(0,12).includes(r.requested));
     const subjects=resolved.length?[...resolved.flatMap(scopeKeys),...checked.filter(r=>r.contextKey===key).map(r=>r.requested)]:undefined;
-    const scan=discoverCanonicalResearch(key,req.intakeId,subjects,observer);
+    const scan=discoverCanonicalResearch(key,req.intakeId,subjects,observer,judgePolicy);
     if(aliases.length>12){scan.complete=false;scan.reasons.push("legacy_subject_alias_limit");}
     if(checked.some(r=>r.contextKey!==key)){scan.complete=false;scan.reasons.push("legacy_subject_alias_unresolved");}
     if(!scan.complete){scan.chronology="SCAN_INCOMPLETE";scan.latestReviewPaths=[];}
@@ -280,7 +282,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
     }
   }
   const search=(query:string,opts:Parameters<typeof searchVault>[1])=>{
-    const result=observer.search("search",query,opts?.folder,()=>searchVault(query,opts));
+    const result=observer.search("search",query,opts?.folder,()=>searchVault(query,opts,judgePolicy));
     if(result.total>result.hits.length)limits.add("Search window truncated: "+query);
     return result;
   };
@@ -304,7 +306,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
     ]),
   ];
   const absent: string[] = [];
-  const available=(p:string)=>exists(p)||!!db().prepare("SELECT 1 FROM notes WHERE path=?").get(p);
+  const available=(p:string)=>!excluded.includes(p)&&(exists(p)||!!db().prepare("SELECT 1 FROM notes WHERE path=?").get(p));
   for (const p of needed) { if (available(p)) pool.set(p,120); else absent.push(p); }
   // Historical Company indexes exist in two legacy locations. Neither is a
   // current/approved Thesis, but both provide routes back to dated prior
@@ -347,8 +349,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
   // let search-result popularity determine whether primary documents exist.
   for (const ticker of contextKeys) {
     const prefix = "08_Daily_Weekly/Research Indexes/Primary Evidence - "+ticker+" ";
-    const matches = db().prepare("SELECT path FROM notes WHERE substr(path,1,?)=? ORDER BY path DESC LIMIT 13")
-      .all(prefix.length,prefix) as {path:string}[];
+    const matches = db().prepare(`SELECT path FROM notes WHERE substr(path,1,?)=?${exclusion} ORDER BY path DESC LIMIT 13`)
+      .all(prefix.length,prefix,...excluded) as {path:string}[];
     if(matches.length>12)limits.add("Primary-source filename window truncated: "+ticker);
     for (const note of matches.slice(0,12)) if(available(note.path)) pool.set(note.path,115);
   }
@@ -377,8 +379,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
           if(h.path.startsWith(folder+"/"))pool.set(h.path,60);
         }
       }catch{failed.push(scope+" "+word);}
-      const candidatePaths=db().prepare("SELECT path FROM notes WHERE instr(upper(path),?)>0 ORDER BY path DESC LIMIT 151")
-        .all(scope) as {path:string}[];
+      const candidatePaths=db().prepare(`SELECT path FROM notes WHERE instr(upper(path),?)>0${exclusion} ORDER BY path DESC LIMIT 151`)
+        .all(scope,...excluded) as {path:string}[];
       if(candidatePaths.length>150)limits.add("Macro filename window truncated: "+scope);
       for(const r of candidatePaths.slice(0,150))if((r.path.startsWith(folder+"/")||r.path.startsWith("02_Industries_Themes/"))&&
         explicitMacroScope(r.path,scope)&&available(r.path))pool.set(r.path,Math.max(pool.get(r.path)||0,macroSubjectPaths.has(r.path)?60:22));
@@ -539,7 +541,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
         const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining,macroScope?Math.floor(budget/Math.max(2,macroScopes.length*2)):2000),row.role);
         if(!excerpt.excerpt.trim()){omitted.push(row.path);return;}
         const historical=canonicalReviews.get(row.path)?.legacy||row.historical||historicalOnly(row.path,splitFrontmatter(raw).data);
-        items.push({path:row.path,role:row.role,matchedMacroScopes:matchedMacroScopes.filter(scope=>explicitMacroScope(row.path,scope,current)),evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
+        items.push({contentSha256:createHash("sha256").update(raw).digest("hex"),path:row.path,role:row.role,matchedMacroScopes:matchedMacroScopes.filter(scope=>explicitMacroScope(row.path,scope,current)),evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
         if(archivalSelection)historicalCount++;
         if(background)for(const scope of matchedMacroScopes)macroBackgroundCounts.set(scope,(macroBackgroundCounts.get(scope)||0)+1);
         roleCounts.set(row.role,n+1);remaining-=excerpt.excerpt.length;

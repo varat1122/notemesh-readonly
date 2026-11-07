@@ -74,8 +74,162 @@ async function judged(data:WritebackInput=input){
     event:{...assessment("event"),classification:"new_event"},review:assessment("review"),materialRisk:false};
   return {...normalized,researchJudge:{packet,result}};
 }
+async function addHistory(file:string,content:string,id="judge-history-delta-001"){
+  const engine=await import("../safe-edit/engine");
+  const p=engine.preview({operationId:id,path:file,reason:"Disposable scope fixture",change:{kind:"create",content}},actor);
+  engine.apply({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor);
+}
 
 describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluation",()=>{
+  it.each(["issuer/generic","history/generic","history/canonical"])("F1 current-scope drift %s invalidates PASS after preview",async probe=>{
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
+    expect(p.researchJudge?.decision).toBe("PASS");
+    const sealed=JSON.parse(data.researchJudge.packet.body);
+    expect(sealed.history).toHaveLength(4);
+    const source=p.previews.find(x=>x.kind==="source_intake")!;
+    engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    const file=probe.startsWith("issuer")?"01_Companies/Other.md":"10_Knowledge/Company Research/NVDA adverse earnings.md";
+    const content=probe.startsWith("issuer")?"---\naliases: [NVDA]\n---\n# Other issuer\n":
+      "# NVDA earnings\n## Counter-evidence\nNVDA demand may decline despite revenue guidance.\n";
+    const extra=engine.preview({operationId:"scope-drift-external-001",path:file,reason:"Isolated drift reproduction",change:{kind:"create",content}},actor);
+    engine.apply({operationId:extra.operationId,previewToken:extra.previewToken,expectedHash:extra.beforeHash},actor);
+    for(const h of sealed.history)expect(sha(fs.readFileSync(path.join(vault,h.path)))).toBe(h.sha256);
+    const context=(await import("../vault/investment-context")).buildInvestmentContextPack(sealed.coverage.retrieval.scope);
+    if(probe.startsWith("issuer"))expect(context.issuerResolution[0].status).toBe("ambiguous_hold");
+    else expect(context.items).toHaveLength(5);
+    if(probe.endsWith("canonical")){
+      await expect(apply(data,{...p,previews:p.previews.filter(x=>x.kind!=="source_intake")})).rejects.toThrow(/Authorization/);
+      expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");
+    }
+    else{
+      const claim=p.previews.find(x=>x.kind==="structured_claim")!;
+      expect(()=>engine.apply({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge/);
+    }
+    expect((await journal()).filter(x=>x.status==="written"&&/type: investment_claim/.test(x.after_text))).toHaveLength(0);
+    assertProtected();
+  });
+  it.each(["hub context","hub mapping","hub readback","selected removed","selected replaced","order","scope","spoof intake"])("F1 v4 %s requires fresh assessment at both admissions",async change=>{
+    const history="10_Knowledge/Company Research/NVDA old adverse.md";
+    await addHistory(history,"# NVDA earnings\n## Risk\nNVDA demand is uncertain.\n");
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
+    expect(p.researchJudge?.decision).toBe("PASS");
+    const source=p.previews.find(x=>x.kind==="source_intake")!;
+    engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    if(change==="hub context"||change==="hub mapping"||change==="hub readback"){
+      const hub="01_Companies/NVDA.md";
+      if(change==="hub mapping"){
+        fs.unlinkSync(path.join(vault,hub));(await import("../vault/indexer")).reindexPath(hub);
+        await addHistory("01_Companies/NewHub.md","---\naliases: [NVDA]\n---\n# New issuer context\n","judge-remap-001");
+      }else{
+        fs.writeFileSync(path.join(vault,hub),"---\naliases: [OTHER]\n---\n# Changed hub context\n");
+        if(change==="hub context")(await import("../vault/indexer")).reindexPath(hub);
+      }
+    }else if(change.startsWith("selected")){
+      if(change==="selected removed")fs.unlinkSync(path.join(vault,history));
+      else fs.writeFileSync(path.join(vault,history),"# NVDA earnings\n## Risk\nReplaced evidence.\n");
+      (await import("../vault/indexer")).reindexPath(history);
+    }else if(change==="spoof intake"){
+      // External evidence may carry the same caller-declared ID AND include it
+      // in the path. It is not one of the server's exact receipt-bound targets.
+      const file=`10_Knowledge/Company Research/NVDA adverse ${p.planId}.md`;
+      fs.writeFileSync(path.join(vault,file),`---\nintake_id: ${p.planId}\n---\n# NVDA earnings\n## Counter-evidence\nNew external adverse evidence.\n`);
+      (await import("../vault/indexer")).reindexPath(file);
+    }else{
+      const context=await import("../vault/investment-context"),original=context.buildInvestmentContextPack;
+      vi.spyOn(context,"buildInvestmentContextPack").mockImplementation((...args)=>{
+        const pack=original(...args);
+        if(change==="order")pack.items.reverse();else pack.retrieval.scope.question+=" changed scope";
+        return pack;
+      });
+    }
+    const before=await journal(),claim=p.previews.find(x=>x.kind==="structured_claim")!;
+    expect(()=>engine.apply({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge/);
+    const recipe=(await plan(data)).safeEditWorkflow!.steps.find(x=>x.kind==="structured_claim")!;
+    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/research_judge/);
+    await expect(apply(data,{...p,previews:p.previews.filter(x=>x.kind!=="source_intake")})).rejects.toThrow();
+    expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");
+    for(const row of before)expect(await journal()).toContainEqual(row);
+    expect(fs.existsSync(path.join(vault,claim.path))).toBe(false);assertProtected();
+  });
+  it("F1 v4 revalidates under the write lock before EACH non-Source write",async()=>{
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
+    const source=p.previews[0],first=p.previews[1];
+    for(const x of [source,first])engine.apply({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor);
+    await addHistory("10_Knowledge/Company Research/NVDA late adverse.md","# NVDA earnings\n## Counter-evidence\nNew adverse evidence after first Claim.\n");
+    const before=await journal();
+    for(const x of p.previews.slice(2))expect(()=>engine.apply({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor)).toThrow(/research_judge/);
+    expect(await journal()).toEqual(before);
+    const current=await prepare(data);expect(current.researchJudge?.decision).toBe("HOLD");expect(current.previews).toEqual([]);
+    expect(fs.readFileSync(path.join(vault,source.path),"utf8")).toContain(excerpt);assertProtected();
+  });
+  it("F1 v4 generic non-Source apply checks the scope while holding the existing cross-process write lock",async()=>{
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
+    const scope=await import("../vault/research-judge-scope"),original=scope.judgeScopeCurrent;
+    const check=vi.spyOn(scope,"judgeScopeCurrent").mockImplementation((...args)=>{
+      expect(fs.existsSync(path.join(root,"safe-edit.lock"))).toBe(true);return original(...args);
+    });
+    for(const x of p.previews)engine.apply({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor);
+    expect(check).toHaveBeenCalledTimes(3);expect(fs.existsSync(path.join(root,"safe-edit.lock"))).toBe(false);assertProtected();
+  });
+  it("F1 v4 canonical apply detects drift across the asynchronous sync-pause boundary; Source survives",async()=>{
+    const data=await judged(),p=await prepare(data);
+    vi.spyOn(await import("../safe-edit/sync"),"withPausedSync").mockImplementation(async run=>{
+      await addHistory("10_Knowledge/Company Research/NVDA concurrent adverse.md","# NVDA earnings\n## Risk\nNew evidence during sync pause.\n");
+      return run();
+    });
+    const result=await apply(data,p);
+    expect(result.status).toBe("hold_research_judge");expect(result.receipts).toHaveLength(1);
+    for(const x of p.previews.slice(1))expect(fs.existsSync(path.join(vault,x.path))).toBe(false);
+    expect(fs.readFileSync(path.join(vault,p.previews[0].path),"utf8")).toContain(excerpt);assertProtected();
+  });
+  it("F1 v4 a fresh packet and fresh simulated assessment recover pending writes after external history drift",async()=>{
+    const data=await judged(),p=await prepare(data);
+    await addHistory("10_Knowledge/Company Research/NVDA reassessment.md","# NVDA earnings\n## Counter-evidence\nReassessment must see this new note.\n");
+    expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");
+    const fresh=await judged(),next=await prepare(fresh);
+    expect(fresh.researchJudge.packet.digest).not.toBe(data.researchJudge.packet.digest);
+    expect(JSON.parse(fresh.researchJudge.packet.body).history).toHaveLength(5);
+    expect(next.researchJudge?.decision).toBe("PASS");
+    await expect(apply(data,p)).rejects.toThrow();
+    expect((await apply(fresh,next)).status).toBe("saved_verified");assertProtected();
+  });
+  it("F1 v4 own authorized writes preserve scope/receipts while later unselected evidence is a bounded omission",async()=>{
+    for(let i=0;i<12;i++)await addHistory(`10_Knowledge/Company Research/NVDA comparator ${String(i).padStart(2,"0")}.md`,
+      `# NVDA earnings ${i}\n## Counter-evidence\nNVDA historical comparator ${i} demand and guidance.\n`,`judge-bounded-${i}`);
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
+    const body=JSON.parse(data.researchJudge.packet.body);
+    expect(body.coverage.retrieval.selection.omitted).toBeGreaterThan(0);
+    await addHistory("10_Knowledge/Company Research/NVDA zzz omitted.md","# NVDA earnings\nNVDA bounded background.\n","judge-late-omitted");
+    const scope=await import("../vault/research-judge-scope"),gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
+    for(const x of p.previews){
+      expect(scope.judgeScopeCurrent(body.scopeWitness,body.coverage.retrieval,gate.targets,p.planId,actor)).toBe(true);
+      engine.apply({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor);
+    }
+    expect(scope.judgeOwnWrites(gate.targets,p.planId,actor)).toHaveLength(4);
+    expect(()=>scope.judgeOwnWrites(gate.targets,p.planId,"another actor")).toThrow(/receipt_hold/);
+    expect(()=>scope.judgeOwnWrites(gate.targets.map(t=>({...t,operationId:"ICW-"+"0".repeat(32)})),p.planId,actor)).toThrow(/receipt_hold/);
+    const before=await journal(),retry=await prepare(data);expect(retry.previews).toEqual([]);expect(retry.workflowStatus).toBe("saved_verified");
+    expect(await journal()).toEqual(before);assertProtected();
+  });
+  it.each(["missing","truncated","policy","role","issuer","scope"])("F1 v4 %s witness cannot authorize pending previews",async defect=>{
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
+    const gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
+    const corrupt=(w:NonNullable<typeof gate.scopeWitness>)=>{
+      if(defect==="missing")return null;
+      if(defect==="truncated")w.selection.pop();
+      if(defect==="policy")return {...w,policy:"old_unsealed_policy"};
+      if(defect==="role")w.selection[0].role="archive";
+      if(defect==="issuer")w.issuerResolution[0].hubPath="01_Companies/Other.md";
+      if(defect==="scope")w.scope.question+=" forged";
+      return w;
+    };
+    // Emulate malformed historical internal events; never fabricate a receipt.
+    engine.recordResearchJudgeGate(p.previews[0].operationId,actor,{...gate,scopeWitness:corrupt(structuredClone(gate.scopeWitness!))} as typeof gate);
+    for(const x of p.previews.slice(1))expect(()=>engine.apply({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor)).toThrow(/research_judge/);
+    const body=JSON.parse(data.researchJudge.packet.body);body.scopeWitness=corrupt(body.scopeWitness);
+    data.researchJudge.packet.body=JSON.stringify(body);
+    expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");assertProtected();
+  });
   it.each(["deleted", "symlink", "read error", "search error"])("F1 residual upstream %s cannot disappear before Judge selection",async failure=>{
     const file="10_Knowledge/Company Research/NVDA adverse earnings.md";
     const engine=await import("../safe-edit/engine");
@@ -297,16 +451,16 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     data.researchJudge.result.review.references[0].quote="[Source lines 1-2]";
     expect((await prepare(data)).researchJudge?.reasons).toContain("judge_locator_quote_unbound");assertProtected();
   });
-  it("F1/F2 old sealed packets and legacy gate events cannot authorize pending writes after contract upgrade",async()=>{
+  it.each(["RI001-JUDGE-2","RI001-JUDGE-3"])("F1/F2 %s packets/gates cannot authorize pending writes after upgrade",async version=>{
     const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine"),gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
     // Existing internal journal API, not SQL/receipt fabrication: emulate an
     // old server's admission contract while retaining the real preview rows.
     const {version:_,...legacy}=gate;void _;
-    engine.recordResearchJudgeGate(p.previews[0].operationId,actor,{...legacy,version:"RI001-JUDGE-2"} as typeof gate);
+    engine.recordResearchJudgeGate(p.previews[0].operationId,actor,{...legacy,version} as typeof gate);
     await expect(apply(data,p)).rejects.toThrow(/prepare_required_or_superseded/);
     for(const old of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow("research_judge_contract_version_hold");
     const {stableJudgeJson,verifyResearchJudgePacket}=await import("../vault/research-judge"),{seal:__,...envelope}=data.researchJudge.packet;void __;
-    const body=JSON.parse(envelope.body);body.version="RI001-JUDGE-2";delete body.coverage.retrieval;
+    const body=JSON.parse(envelope.body);body.version=version;delete body.scopeWitness;
     envelope.body=stableJudgeJson(body);envelope.digest=sha(envelope.body);envelope.packetId="RJP-"+envelope.digest.slice(0,32).toUpperCase();
     const key=(await import("../env")).env.encryptionKey;
     const packet={...envelope,seal:createHmac("sha256",key).update("research-judge-packet-v1\0"+stableJudgeJson(envelope)).digest("hex")};
@@ -430,7 +584,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     let saved;try{saved=engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);}finally{fault.mockRestore();}
     expect(saved.receipt).toMatchObject({write:"written",readback:"verified",reindex:"unverified"});
     const before=await journal();
-    expect(()=>engine.apply({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge_prerequisite/);
+    expect(()=>engine.apply({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge_(prerequisite|semantic_or_stale)/);
     expect(await journal()).toEqual(before);expect(fs.existsSync(path.join(vault,claim.path))).toBe(false);assertProtected();
   });
   it("Judge PASS never overrides D1 or Thai quality HOLD, including reconstructed generic recipes",async()=>{
