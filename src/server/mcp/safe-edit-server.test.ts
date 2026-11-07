@@ -13,7 +13,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),"safe-edit-mcp-"));
 process.env.DATA_DIR=root;process.env.BASE_URL="https://safe-fixture.test";
 process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
 const access:McpAccess={read:true,write:false,label:"oauth:edit-fixture",scopes:["vault:read","vault:edit"]};
-const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","prepare_canonical_writeback","apply_canonical_writeback","preflight_research_decision_v2","get_edit_status","rollback_edit","archive_original_source","inspect_original_source_archive","get_sync_delivery_evidence","store_user_attachment","inspect_user_attachment"];
+const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","prepare_canonical_writeback","apply_canonical_writeback","prepare_research_judge_packet","research_judge_result_contract","preflight_research_decision_v2","get_edit_status","rollback_edit","archive_original_source","inspect_original_source_archive","get_sync_delivery_evidence","store_user_attachment","inspect_user_attachment"];
 const args={operationId:"mcp-synthetic-01",path:"Synthetic.md",reason:"Synthetic MCP test",change:{kind:"replace",oldText:"Old data",newText:"New data"}};
 
 const digest=(value:string)=>createHash("sha256").update(value,"utf8").digest("hex");
@@ -68,7 +68,7 @@ it("generic MCP routes reject fully populated caller primary declarations before
   expect(fs.existsSync(path.join(root,"vault","Forged.md"))).toBe(false);
  }finally{await c.close();}
 });
-it("discovers fifteen scoped tools with accurate write annotations",async()=>{
+it("discovers seventeen scoped tools with accurate write annotations",async()=>{
  const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="apply_canonical_writeback"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment");}}finally{await c.close();}
 });
 it("M3d MCP preflight binds existing indexed original quotes but neither verifies issuer truth nor writes notes",async()=>{
@@ -130,7 +130,13 @@ it.each([
 ])("enforces OAuth scopes again inside handlers: %j",async a=>{
  const c=await connected(a);try{for(const name of toolsList){
  const canonical={domain:"company",entities:["NVDA"],topic:"Synthetic",inputFormat:"text",sourceKind:"archived_chat",extractedText:"Synthetic",sourceChat:"test",completedAnalysis:"Synthetic analysis"};
- const params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="prepare_canonical_writeback"?canonical:name==="preflight_research_decision_v2"?m2Fixture():name==="apply_canonical_writeback"?{input:canonical,planId:"IN-0000000000000000",authorizations:[]}:name==="get_edit_status"?{operationId:args.operationId}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="inspect_original_source_archive"?{url:"https://www.sec.gov/Archives/sample"}:name==="get_sync_delivery_evidence"?{}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
+ let params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="prepare_canonical_writeback"?canonical:name==="preflight_research_decision_v2"?m2Fixture():name==="apply_canonical_writeback"?{input:canonical,planId:"IN-0000000000000000",authorizations:[]}:name==="get_edit_status"?{operationId:args.operationId}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="inspect_original_source_archive"?{url:"https://www.sec.gov/Archives/sample"}:name==="get_sync_delivery_evidence"?{}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
+ if(name==="prepare_research_judge_packet")params={input:canonical};
+ if(name==="research_judge_result_contract"){
+   const decision=(key:string)=>({key,verdict:"PASS",rationale:"Simulated result for authorization test",references:[{key:"received_source",quote:"Synthetic",locator:"line 1"}],
+     checks:{entailment:"PASS",numbersUnits:"PASS",periodRoleAttributionVintage:"PASS",identityRelationships:"PASS",pointInTime:"PASS",independenceCounterEvidence:"PASS",injectionCoverage:"PASS"}});
+   params={packetId:"RJP-"+"A".repeat(32),packetDigest:"0".repeat(64),reviewDigest:"0".repeat(64),claims:[],relationships:[],event:{...decision("event"),classification:"new_event"},review:decision("review"),materialRisk:false};
+ }
  if(name==="preview_edit")params.change=args.change;
  const result=await c.client.callTool({name,arguments:params});expect(result.isError,name).toBe(true);expect(JSON.stringify(result._meta),name).toContain("insufficient_scope");
  }expect(fs.readFileSync(path.join(root,"vault","Synthetic.md"),"utf8")).toContain("Old data");}finally{await c.close();}

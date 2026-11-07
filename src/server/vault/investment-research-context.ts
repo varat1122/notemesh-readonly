@@ -1,5 +1,7 @@
+import {judgeExclusionSql,type JudgeSelectionPolicy} from "./queries";
 /** Read-only adapters for existing canonical Review/Source/receipt contracts.
  * No new identities, tables, writes, or economic-event equivalence inference. */
+import {RetrievalObserver} from "./investment-retrieval-coverage";
 import {createHash} from "node:crypto";
 import {db} from "../db";
 import {readNote} from "./notes";
@@ -68,7 +70,7 @@ export function createReceipt(kind:"source_intake"|"canonical_review"|"structure
     r.write!=="written"||r.readback!=="verified"||r.reindex!=="verified")throw Error("create_receipt_unverified");
   return id;
 }
-function assemble(path:string,id:string,note:ReturnType<typeof indexedRead>):ContextBundle{
+function assemble(path:string,id:string,note:ReturnType<typeof indexedRead>,observer:RetrievalObserver):ContextBundle{
   const result:ContextBundle={intakeId:id,reviewPath:path,sourcePath:null,status:"HOLD",reason:null,
     eventDate:null,publishedAt:null,reviewSha256:sha(note.raw),sourceSha256:null,
     reviewReceiptId:null,sourceReceiptId:null,economicEventEquivalence:"not_established",primaryVerification:"not_performed"};
@@ -78,7 +80,7 @@ function assemble(path:string,id:string,note:ReturnType<typeof indexedRead>):Con
     const sourcePath=`00_Inbox/ChatGPT/Investment Intake - ${id}.md`;
     // No arbitrary path following, fallback Source, or issuer-wide bundling.
     if(note.fm.original_source_path!==sourcePath)throw Error("source_path_binding_mismatch");
-    const source=indexedRead(sourcePath);
+    const source=observer.read("bound_source",sourcePath,()=>indexedRead(sourcePath));
     if(source.fm.type!=="investment_source_intake"||source.fm.intake_id!==id)throw Error("intake_binding_mismatch");
     if(declaredDate(source.fm,"event_date")!==result.eventDate||declaredDate(source.fm,"published_at")!==result.publishedAt)
       throw Error("chronology_binding_mismatch");
@@ -101,7 +103,7 @@ function assemble(path:string,id:string,note:ReturnType<typeof indexedRead>):Con
 }
 export function isCanonicalResearchPath(path:string):boolean{return path.startsWith(folder)&&/ - IN-[A-F0-9]{16}\.md$/.test(path);}
 
-export function discoverCanonicalResearch(contextKey:string,intakeId?:string,resolvedSubjects?:string[]):CanonicalResearchScan{
+export function discoverCanonicalResearch(contextKey:string,intakeId?:string,resolvedSubjects?:string[],observer=new RetrievalObserver(),judgePolicy?:JudgeSelectionPolicy):CanonicalResearchScan{
   const result:CanonicalResearchScan={contextKey,reviews:[],complete:true,reasons:[],chronology:"NOT_FOUND",latestReviewPaths:[]};
   // Only subjects already resolved to this Hub may extend filename discovery:
   // its title, requested labels and bounded explicit aliases checked by caller.
@@ -109,8 +111,8 @@ export function discoverCanonicalResearch(contextKey:string,intakeId?:string,res
   const prefixes=subjects.map(subject=>folder+subject+" - ");
   // Bound the actual requested subject family, never a global Review universe.
   // Include malformed metadata in this scope so it cannot masquerade as absence.
-  const rows=db().prepare(`SELECT path,frontmatter FROM notes WHERE ${prefixes.map(()=>"(path>=? AND path<?)").join(" OR ")} ORDER BY path LIMIT 101`)
-    .all(...prefixes.flatMap(prefix=>[prefix,prefix.slice(0,-1)+"!"])) as {path:string;frontmatter:string|null}[];
+  const rows=db().prepare(`SELECT path,frontmatter FROM notes WHERE (${prefixes.map(()=>"(path>=? AND path<?)").join(" OR ")})${judgeExclusionSql(judgePolicy)} ORDER BY path LIMIT 101`)
+    .all(...prefixes.flatMap(prefix=>[prefix,prefix.slice(0,-1)+"!"]),...judgePolicy?.excludedPaths??[]) as {path:string;frontmatter:string|null}[];
   if(rows.length>100){result.complete=false;result.reasons.push("canonical_scope_scan_limit");}
   const candidates=rows.slice(0,100).flatMap(row=>{
     const fm=metadata(row.frontmatter),id=fm?.intake_id;
@@ -129,8 +131,8 @@ export function discoverCanonicalResearch(contextKey:string,intakeId?:string,res
     .sort((a,b)=>(publicationWindow(b.publishedAt)?.[0]??-Infinity)-(publicationWindow(a.publishedAt)?.[0]??-Infinity)||a.path.localeCompare(b.path));
   if(candidates.length>8){result.complete=false;result.reasons.push("canonical_read_limit");}
   for(const c of candidates.slice(0,8))try{
-    const note=indexedRead(c.path);
-    result.reviews.push({path:c.path,intakeId:c.intakeId,publishedAt:c.publishedAt,legacy:c.legacy,bundle:assemble(c.path,c.intakeId,note)});
+    const note=observer.read("canonical_review",c.path,()=>indexedRead(c.path));
+    result.reviews.push({path:c.path,intakeId:c.intakeId,publishedAt:c.publishedAt,legacy:c.legacy,bundle:assemble(c.path,c.intakeId,note,observer)});
   }catch{result.complete=false;result.reasons.push("canonical_readback_unavailable");}
   result.reasons=[...new Set(result.reasons)];
   if(!result.complete)result.chronology="SCAN_INCOMPLETE";
