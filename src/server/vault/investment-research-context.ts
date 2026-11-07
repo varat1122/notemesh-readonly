@@ -57,6 +57,56 @@ export function publicationWindow(date:string|null):[number,number]|null{
   if(!Number.isFinite(time))return null;
   return date.length===10?[time-14*3600000,time+38*3600000]:[time,time];
 }
+/** Validate a bounded, linear Safe Edit history of an add-only canonical Review.
+ * This is a read-only compatibility check, not a new receipt or evidence tier.
+ * Source/Claim receipt admission intentionally remains strict create-only. */
+type ChainRow={id:string;payload:string;before_text:string;after_text:string;before_hash:string;
+  after_hash:string;receipt:string|null;status:string};
+function verifiedJournalRow(row:ChainRow,path:string):"create"|"append"{
+  const payload=metadata(row.payload),receipt=metadata(row.receipt);
+  const change=payload?.change as {kind?:unknown;content?:unknown}|undefined;
+  if(row.status!=="written"||!payload||!receipt||payload.path!==path||payload.operationId!==row.id||
+    receipt.path!==path||receipt.operationId!==row.id||
+    receipt.beforeHash!==row.before_hash||receipt.afterHash!==row.after_hash||
+    receipt.write!=="written"||receipt.readback!=="verified"||receipt.reindex!=="verified"||
+    sha(row.before_text)!==row.before_hash||sha(row.after_text)!==row.after_hash)
+    throw Error("create_receipt_unverified");
+  if(change?.kind==="create"){
+    const expected="ICW-"+sha(["canonical_review",path,row.after_hash].join("\n")).slice(0,32);
+    if(row.id!==expected||row.before_text!==""||row.before_hash!==sha("")||change.content!==row.after_text)
+      throw Error("create_receipt_unverified");
+    return "create";
+  }
+  if(change?.kind!=="append")throw Error("create_receipt_unverified");
+  const marker=`<!-- safe-edit:${row.id} -->`;
+  if(row.before_text.includes(marker)||!row.after_text.includes(marker)||
+    JSON.stringify(splitFrontmatter(row.before_text).data)!==
+      JSON.stringify(splitFrontmatter(row.after_text).data))
+    throw Error("create_receipt_unverified");
+  return "append";
+}
+function verifiedReviewAppendChain(path:string,content:string):string{
+  // A writing/interrupted record, fork or unrelated mutation must not be
+  // masked by a matching older creation. Read with bounded SELECTs only.
+  const rows=db().prepare(`SELECT id,payload,before_text,after_text,before_hash,after_hash,receipt,status
+    FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND status IN ('written','writing')
+    ORDER BY id LIMIT 17`).all(path) as ChainRow[];
+  if(rows.length<2||rows.length>16)throw Error("create_receipt_unverified");
+  const journal=rows.map(row=>({...row,kind:verifiedJournalRow(row,path)}));
+  const origins=journal.filter(row=>row.kind==="create");
+  if(origins.length!==1)throw Error("create_receipt_unverified");
+  let current=origins[0];
+  const seen=new Set([current.id]);
+  while(current.after_text!==content){
+    const next=journal.filter(row=>row.kind==="append"&&!seen.has(row.id)&&
+      row.before_hash===current.after_hash&&row.before_text===current.after_text);
+    if(next.length!==1)throw Error("create_receipt_unverified");
+    current=next[0];seen.add(current.id);
+  }
+  if(seen.size!==journal.length)throw Error("create_receipt_unverified");
+  return origins[0].id;
+}
+
 export function createReceipt(kind:"source_intake"|"canonical_review"|"structured_claim",path:string,content:string):string{
   const hash=sha(content),empty=sha("");
   const id="ICW-"+sha([kind,path,hash].join("\n")).slice(0,32);
@@ -64,7 +114,11 @@ export function createReceipt(kind:"source_intake"|"canonical_review"|"structure
   if(!db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_operations'").get())throw Error("receipt_store_missing");
   const row=db().prepare("SELECT payload,after_text,after_hash,before_hash,receipt FROM safe_edit_operations WHERE id=? AND status='written'")
     .get(id) as {payload:string;after_text:string;after_hash:string;before_hash:string;receipt:string|null}|undefined;
-  if(!row||row.after_text!==content||row.after_hash!==hash||row.before_hash!==empty)throw Error("create_receipt_unverified");
+  if(!row){
+    if(kind==="canonical_review")return verifiedReviewAppendChain(path,content);
+    throw Error("create_receipt_unverified");
+  }
+  if(row.after_text!==content||row.after_hash!==hash||row.before_hash!==empty)throw Error("create_receipt_unverified");
   const p=metadata(row.payload),r=metadata(row.receipt);
   const change=p?.change as {kind?:unknown;content?:unknown}|undefined;
   if(!p||!r||p.path!==path||p.operationId!==id||change?.kind!=="create"||change.content!==content||
