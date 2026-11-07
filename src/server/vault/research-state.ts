@@ -2,8 +2,14 @@
  * No database, model call, date inference or historical metadata rewrite. */
 import {z} from "zod";
 
-export const RESEARCH_STATE_POLICY="RI001-DRAFT-1";
-export const draftMetadata={research_state_version:RESEARCH_STATE_POLICY,
+export const RESEARCH_STATE_POLICY="RI001-DRAFT-2";
+// Retrieval/authorization policy advances without rewriting existing Draft bytes.
+export const DRAFT_METADATA_VERSION="RI001-DRAFT-1";
+const researchReviewTypes=new Set(["investment_research_review","news_thesis_review","investment_review",
+  "research_note","preferred_research_note","research_update","macro_research_note","dated_evidence_review",
+  "research_synthesis","research_map","import_review"]);
+export const isResearchReviewType=(value:unknown)=>typeof value==="string"&&researchReviewTypes.has(value.trim());
+export const draftMetadata={research_state_version:DRAFT_METADATA_VERSION,
   research_status:"draft",usage_tier:"historical_analysis_only",
   independent_evidence_increment:0,comparator_eligible:false,
   critic_independence:"not_verified"} as const;
@@ -17,6 +23,8 @@ export interface ResearchTrust {
   comparator_eligible:false;
   critic_independence:"not_verified";
   primary_authority:false;
+  source_authentication:"not_established";
+  source_label_basis:"note_type_declaration_not_receipt"|"not_applicable";
   owner_thesis_authority:false;
   persistence_verification:"not_assessed_by_trust_projection";
   metadata_status:"conservative_declaration"|"legacy_unclassified"|"unsupported_declaration_hold";
@@ -31,8 +39,7 @@ export function researchTrust(path:string,metadata:unknown):ResearchTrust|null {
   const fm:Metadata=metadata&&typeof metadata==="object"&&!Array.isArray(metadata)
     ?metadata as Metadata:{research_state_version:"invalid_metadata"};
   const source=fm.type==="investment_source_intake";
-  const review=["investment_research_review","investment_review","news_thesis_review","research_note",
-    "preferred_research_note","research_update","macro_research_note","research_synthesis"].includes(typeof fm.type==="string"?fm.type:"");
+  const review=isResearchReviewType(fm.type);
   const historical=["chatgpt_analysis","chatgpt_history","chatgpt_export","archived_ai"].includes(typeof fm.source_type==="string"?fm.source_type:"")||path.startsWith("07_Sources/ChatGPT/");
   const claim=fm.type==="investment_structured_claim_register";
   const hasState=Object.keys(draftMetadata).some(key=>key in fm);
@@ -46,7 +53,7 @@ export function researchTrust(path:string,metadata:unknown):ResearchTrust|null {
   return {policy_version:RESEARCH_STATE_POLICY,research_status:validSource?"source_only":draft?"draft":"unclassified",
     declared_research_status:declared,usage_tier:validSource?"attributed_source_only":"historical_analysis_only",
     independent_evidence_increment:0,comparator_eligible:false,critic_independence:"not_verified",
-    primary_authority:false,owner_thesis_authority:false,persistence_verification:"not_assessed_by_trust_projection",
+    primary_authority:false,source_authentication:"not_established",source_label_basis:source?"note_type_declaration_not_receipt":"not_applicable",owner_thesis_authority:false,persistence_verification:"not_assessed_by_trust_projection",
     metadata_status:draft||validSource?"conservative_declaration":hasState?"unsupported_declaration_hold":"legacy_unclassified",
     analysis_as_of:timestamp(fm.knowledge_cutoff_as_of),analysis_created_at:timestamp(fm.analysis_created_at),
     dates_provenance:"note_declared_not_reverified"};

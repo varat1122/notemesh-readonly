@@ -171,7 +171,7 @@ does **not** certify the installed ChatGPT Web host against a deployed M5.3
 endpoint or any real device's Obsidian Sync.
 
 
-## C1 Research Draft trust contract — RI001-DRAFT-1
+## C1 Research Draft trust contract — RI001-DRAFT-2
 
 This additive contract follows IOS Master 2.0.0 §09 and the accepted C1 Draft
 policy in IOS-ORCH-RI-001. It uses existing Markdown, indexed frontmatter and
@@ -185,11 +185,25 @@ not a semantic assessment, verified fact, independent critic attestation or
 Owner-approved Thesis. `saved_verified` continues to describe persistence
 (write/readback/index/links), never Research Reviewed.
 
+The stored Draft metadata format remains `RI001-DRAFT-1`; this projection-policy
+upgrade does not change historical bytes, identities or receipts.
+
 The typed `researchTrust` projection accompanies canonical steps, Search hits,
 paged note reads, Context Pack items/Source-Review bundles, claim-review pointers,
 Decision Packet references and the next Judge packet's historical evidence.
+`preview_hybrid_claim_reconciliation` exposes trust for structured candidates
+and historical readbacks, explicitly distinguishing `note_readback` from
+`indexed_metadata_only` when a read fails. These labels grant no write authority.
 Source artifacts project as `source_only` / `attributed_source_only`; this does
-not assert that an associated Review is missing. Historical unlabeled Reviews
+not assert that an associated Review is missing. The label is derived from note
+type, **not** from a canonical Source receipt: `source_authentication=not_established`,
+`source_label_basis=note_type_declaration_not_receipt`, and
+`persistence_verification=not_assessed_by_trust_projection` are explicit even when
+a caller declares primary metadata. Receipt/readback and primary-evidence
+validation remain separate server contracts.
+
+The shared Review taxonomy includes `dated_evidence_review`, `research_map` and
+`import_review`, with or without archived-AI metadata. Historical unlabeled Reviews
 remain `unclassified` / `historical_analysis_only`. Neither repeat retrieval nor
 multiple Claims/Reviews grants independent evidence or comparator eligibility.
 `analysis_as_of` comes only from a valid declared `knowledge_cutoff_as_of`;
@@ -211,8 +225,8 @@ failed required assessment, stale scope or changed content still HOLD. There is
 no Draft fallback exception. Source preservation remains subject to existing
 rights, identity/provenance, writer and maintenance controls. A fresh packet and
 assessment are required when content changes. The sealed packet and journal gate
-also bind `RI001-DRAFT-1`; earlier pending Judge-5 authority without this policy
-stamp cannot authorize new Claims/Review. Re-prepare with a fresh assessment;
+also bind projection policy `RI001-DRAFT-2`; earlier pending Judge-5 authority
+with a missing or `RI001-DRAFT-1` policy stamp cannot authorize new Claims/Review. Re-prepare with a fresh assessment;
 do not edit old journals or receipts. Deliberate bounded omissions remain
 explicit and are not automatically a HOLD.
 

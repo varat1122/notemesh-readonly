@@ -3,6 +3,7 @@
  * structured claims and vault full-text search. It is not a source verifier,
  * semantic deduplicator, writeback recipe, authorization, or thesis engine.
  */
+import {researchTrust,type ResearchTrust} from "./research-state";
 import { reviewInvestmentClaim, type IncomingClaim } from "./investment-claim-review";
 import { searchVault } from "./queries";
 import { readNoteRange } from "./notes";
@@ -51,6 +52,7 @@ export function comparableSource(s:unknown):string|null{
 
 /** Untrusted indexed frontmatter: provenance hints, NOT source authentication. */
 type Provenance = {
+  researchTrust:ResearchTrust|null;
   metadataState:"indexed"|"indexed_no_frontmatter"|"invalid_metadata"|"not_indexed";
   recordType:string|null; declaredVerification:string|null;
   declaredSourceType:string|null; declaredSourceKind:string|null;
@@ -64,7 +66,7 @@ type Provenance = {
 function provenanceFor(notePath:string):Provenance{
   const q=db().prepare("SELECT frontmatter FROM notes WHERE path=?");
   const row=q.get(notePath) as {frontmatter:string|null}|undefined;
-  const result:Provenance={
+  const result:Provenance={researchTrust:null,
     metadataState:!row?"not_indexed":"indexed_no_frontmatter",
     recordType:null,declaredVerification:null,declaredSourceType:null,declaredSourceKind:null,
     eventDate:null,publicationDate:null,receivedDate:null,originalDocumentAccess:null,
@@ -82,6 +84,7 @@ function provenanceFor(notePath:string):Provenance{
   // Preserve declared text exactly (bounded); never treat labels as verified.
   const val=(x:unknown,max=300)=>typeof x==="string"&&x.trim()&&x.length<=max?x.trim():null;
   result.metadataState="indexed";
+  result.researchTrust=researchTrust(notePath,fm);
   result.recordType=val(fm.type);
   result.declaredVerification=val(fm.verification);
   result.declaredSourceType=val(fm.source_type);
@@ -203,7 +206,7 @@ export function hybridClaimPreview(input:HybridInput){
     `${input.entity} ${input.metric}`
   ]).map(q=>q.trim()).filter(q=>q.length>=3&&q.length<=120))].slice(0,5);
   const requestedLimit=Math.min(10,Math.max(1,input.maxFtsHits??6));
-  const results:{path:string;title:string;query:string;snippet:string;readExcerpt:string;modified:string;readbackMatchFound:boolean;readbackTruncated:boolean;readbackStartLine:number|null;readbackEndLine:number|null;provenance:Provenance}[]=[];
+  const results:{path:string;title:string;query:string;snippet:string;readExcerpt:string;modified:string;readbackMatchFound:boolean;readbackTruncated:boolean;readbackStartLine:number|null;readbackEndLine:number|null;provenance:Provenance;researchTrust:ResearchTrust|null;trustBasis:"note_readback"|"indexed_metadata_only"}[]=[];
   const seen=new Set<string>();
   const coverage:{query:string;total:number;selected:number;represented:number;error?:string}[]=[];
   // A single broad query previously monopolized the global candidate budget:
@@ -238,8 +241,10 @@ export function hybridClaimPreview(input:HybridInput){
     let readExcerpt=hit.snippet.slice(0,800),readbackMatchFound=false,readbackTruncated=true;
     let readbackStartLine:number|null=null,readbackEndLine:number|null=null;
     let bodyLabeledSourceUrls:string[]=[],bodyUrlLookupTruncated=true;
+    let currentTrust:ResearchTrust|null=hit.researchTrust,trustReadback=false;
     try{
       const chunk=readNoteRange(hit.path,{limit:2000});
+      currentTrust=chunk.researchTrust;trustReadback=true;
       readbackTruncated=chunk.hasMore||!!chunk.truncatedForSize;
       bodyUrlLookupTruncated=readbackTruncated||chunk.content.length>12000;
       bodyLabeledSourceUrls=labeledSourceUrls(chunk.content);
@@ -262,7 +267,7 @@ export function hybridClaimPreview(input:HybridInput){
     }catch{/* stale index or unreadable note; retain the FTS candidate only */}
     results.push({path:hit.path,title:hit.title,query,snippet:hit.snippet.slice(0,320),readExcerpt,modified:hit.modified,
       readbackMatchFound,readbackTruncated,readbackStartLine,readbackEndLine,
-      provenance:{...provenanceFor(hit.path),bodyLabeledSourceUrls,bodyUrlLookupTruncated}});
+      provenance:{...provenanceFor(hit.path),researchTrust:currentTrust,bodyLabeledSourceUrls,bodyUrlLookupTruncated},researchTrust:currentTrust,trustBasis:trustReadback?"note_readback":"indexed_metadata_only"});
   }
   // These are deterministic integrity warnings, not a broker/issuer truth verdict.
   type LineageWarning={path:string;reason:"linked_intake_id_mismatch"|"linked_source_not_indexed"};
@@ -280,7 +285,8 @@ export function hybridClaimPreview(input:HybridInput){
     query:{domain:input.domain,entity:input.entity,metric:input.metric,period:input.period,source:input.originalSource},
     indexed:{exactMatches,normalizedMatches,conflicts,unknown,totalSameDocument:sameDocument.length,
       candidateCapReached,metadataCapReached,
-      candidatePaths:[...new Set(existing.matchingClaims.concat(existing.relatedEventClaims).map(r=>r.path))]},
+      candidatePaths:[...new Set(existing.matchingClaims.concat(existing.relatedEventClaims).map(r=>r.path))],
+      candidateTrust:existing.matchingClaims.concat(existing.relatedEventClaims).map(r=>({path:r.path,researchTrust:r.researchTrust}))},
     historical:{queries:coverage,candidates:results,notExhaustive:true,readExcerptMaxChars:800,
       // A query can return hits while all its unique candidates are omitted
       // by the shared limit; surface that lost coverage explicitly.

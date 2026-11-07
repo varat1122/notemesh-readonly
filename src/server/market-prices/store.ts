@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import Database from "better-sqlite3";
+import {preparedPricePragma,readOnlyPricePragma} from "./read-only-pragma.ts";
 import { instrument, isoDate, PRICE_POLICY, PriceError, type InstrumentInput, type PriceBar, type PriceSnapshot } from "./model.ts";
 import { announceWriter, type WriterHandle } from "../maintenance.ts";
 
@@ -128,20 +129,34 @@ export class PriceStore {
 
   /** Structural fence: a statement that can write runs only inside write(). */
   private guard(db: Database.Database): void {
-    const inside = () => { if (!this.writing) throw new PriceError("unfenced_price_write"); };
+    const inside = () => {
+      if (!this.writing || !db.inTransaction) throw new PriceError("unfenced_price_write");
+      try { this.writer!.verify(); } catch (error) { throw refusal(error); }
+    };
     const prepare = db.prepare.bind(db), exec = db.exec.bind(db), pragma = db.pragma.bind(db);
     db.prepare = ((source: string) => {
+      const sqlPragma=preparedPricePragma(source);
+      const fencedPragma=sqlPragma!==null&&!readOnlyPricePragma(sqlPragma);
+      if(fencedPragma)inside(); // Some PRAGMAs mutate during preparation.
       const statement = prepare(source);
-      if (statement.readonly) return statement;
+      if (!fencedPragma && (statement.readonly || sqlPragma!==null)) return statement;
       for (const method of ["run", "get", "all", "iterate"] as const) {
         const original = (statement[method] as (...args: unknown[]) => unknown).bind(statement);
-        (statement as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => { inside(); return original(...args); };
+        (statement as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => {
+          inside();const result=original(...args);
+          if(method!=="iterate")return result;
+          const iterator=result as IterableIterator<unknown>;
+          // Iteration is lazy: do not let a fenced iterator escape and execute
+          // its writes after the transaction/maintenance admission has ended.
+          return { [Symbol.iterator](){return this;},next(){inside();return iterator.next();},
+            return(){return iterator.return?iterator.return():{done:true,value:undefined};} };
+        };
       }
       return statement;
     }) as typeof db.prepare;
     db.exec = ((source: string) => { inside(); return exec(source); }) as typeof db.exec;
     db.pragma = ((source: string, options?: { simple?: boolean }) => {
-      if (source.includes("=")) inside();
+      if (!readOnlyPricePragma(source)) inside();
       return pragma(source, options);
     }) as typeof db.pragma;
   }
