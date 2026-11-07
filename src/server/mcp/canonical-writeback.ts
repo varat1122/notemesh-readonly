@@ -11,7 +11,7 @@ import {researchReviewSchema} from "./research-review-schema";
 import { planInvestmentWriteback } from "../vault/investment-writeback-router";
 import { apply, preview, previewCanonicalReview, recordResearchJudgeGate, status } from "../safe-edit/engine";
 import { withPausedSync } from "../safe-edit/sync";
-import {judgeSubmissionSchema,evaluateResearchJudge} from "../vault/research-judge";
+import {JUDGE_VERSION,judgeSubmissionSchema,evaluateResearchJudge} from "../vault/research-judge";
 import {currentJudgeGate} from "../safe-edit/research-judge-gate";
 
 const nonempty = z.string().min(1);
@@ -124,7 +124,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
       const p=preview(source.safeEditRequest,actor);
       previews.push({kind:source.kind,expectedSha256:source.expectedSha256,...p});
     }
-    recordResearchJudgeGate(source.receiptKey,actor,{intakeId:plan.planId,actor,decision:judge.decision,
+    recordResearchJudgeGate(source.receiptKey,actor,{version:JUDGE_VERSION,intakeId:plan.planId,actor,decision:judge.decision,
       packetDigest:judge.packetDigest,resultDigest:judge.resultDigest,expiresAt:judge.expiresAt,history:judge.history,
       targets:workflow.steps.map(s=>({path:s.path,sha256:s.expectedSha256,operationId:s.receiptKey,kind:s.kind,
         eligible:s.state==="needs_create"||s.state==="verified_existing"}))});
@@ -148,7 +148,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
 export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   const args=canonicalApplySchema.parse(raw);
   const {plan,workflow,judge,enrolled}=planned(args.input,actor);
-  if(judge?.decision==="PASS"&&(!enrolled||enrolled.packetDigest!==judge.packetDigest||enrolled.resultDigest!==judge.resultDigest||enrolled.decision!=="PASS"))
+  if(judge?.decision==="PASS"&&(!enrolled||enrolled.version!==JUDGE_VERSION||enrolled.packetDigest!==judge.packetDigest||enrolled.resultDigest!==judge.resultDigest||enrolled.decision!=="PASS"))
     throw Error("research_judge_prepare_required_or_superseded");
   if(plan.planId!==args.planId) throw Error("Plan identity mismatch; original source or chronology changed");
   const pending=workflow.steps.filter(s=>s.state==="needs_create");

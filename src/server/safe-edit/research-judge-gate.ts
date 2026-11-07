@@ -2,10 +2,11 @@
  * Only canonical prepare records it; no wire caller can insert a gate event. */
 import {db} from "../db";
 import {splitFrontmatter} from "../vault/markdown";
-import {judgeHash,judgeHistoryCurrent} from "../vault/research-judge";
+import {JUDGE_VERSION,judgeHash,judgeHistoryCurrent} from "../vault/research-judge";
 import {m2VaultReadDeps} from "../vault/research-decision-v2";
 import {createReceipt} from "../vault/investment-research-context";
 export interface JudgeGate {
+  version:string;
   intakeId:string;actor:string;decision:"PASS"|"HOLD"|"FAIL";packetDigest:string;resultDigest:string|null;expiresAt:number;
   history:{path:string;sha256:string}[];
   targets:{path:string;sha256:string;operationId:string;kind:"source_intake"|"structured_claim"|"canonical_review";eligible:boolean}[];
@@ -35,6 +36,10 @@ export function assertResearchJudgeWrite(path:string,before:string,after:string,
   if(!target?.eligible||before!==""||g.actor!==actor)throw Error("research_judge_exact_bytes_or_actor_hold");
   // Source preservation is independent of semantic outcome and packet expiry.
   if(target.kind==="source_intake")return;
+  // Old gates did not require selected-history completeness or exact citation
+  // spans. Preserve their journal/receipts, but never reuse that authority for
+  // a pending Claim/Review write after the contract upgrade.
+  if(g.version!==JUDGE_VERSION)throw Error("research_judge_contract_version_hold");
   if(g.decision!=="PASS"||Date.now()>g.expiresAt||!judgeHistoryCurrent(g.history))throw Error("research_judge_semantic_or_stale_hold");
   if(stage==="apply")for(const prerequisite of g.targets.filter(t=>t.kind==="source_intake"||target.kind==="canonical_review"&&t.kind==="structured_claim")){
     const read=m2VaultReadDeps.readIndexed(prerequisite.path);

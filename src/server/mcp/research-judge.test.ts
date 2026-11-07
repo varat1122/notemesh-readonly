@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {Client} from "@modelcontextprotocol/sdk/client/index.js";
 import {InMemoryTransport} from "@modelcontextprotocol/sdk/inMemory.js";
-import {createHash} from "node:crypto";
+import {createHash,createHmac} from "node:crypto";
 import type {WritebackInput} from "../vault/investment-writeback-router";
 import type {IntakeClaim} from "../vault/canonical-claims";
 
@@ -66,7 +66,7 @@ async function judged(data:WritebackInput=input){
   const {buildResearchJudgePacket}=await import("../vault/research-judge");
   const {packet}=buildResearchJudgePacket(normalized,actor),body=JSON.parse(packet.body);
   const assessment=(key:string)=>({key,verdict:"PASS" as const,rationale:"Simulated analyst result, not real LLM evaluation",
-    references:[{key:"received_source",quote:data.extractedText.slice(0,60),locator:"received excerpt, opening characters"}],
+    references:[{key:"received_source",quote:data.extractedText.slice(0,60),locator:`utf16:0:${Math.min(data.extractedText.length,60)}`,sourceSha256:sha(data.extractedText)}],
     checks:{entailment:"PASS" as const,numbersUnits:"PASS" as const,periodRoleAttributionVintage:"PASS" as const,
       identityRelationships:"PASS" as const,pointInTime:"PASS" as const,independenceCounterEvidence:"PASS" as const,injectionCoverage:"PASS" as const}});
   const result:import("../vault/research-judge").JudgeResult={packetId:packet.packetId,packetDigest:packet.digest,reviewDigest:body.reviewDigest,
@@ -76,6 +76,133 @@ async function judged(data:WritebackInput=input){
 }
 
 describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluation",()=>{
+  it("F1 regression: selected historical readback failure must HOLD rather than disappear",async()=>{
+    const deps=(await import("../vault/research-decision-v2")).m2VaultReadDeps,read=deps.readIndexed;
+    vi.spyOn(deps,"readIndexed").mockImplementation(p=>p==="01_Companies/NVDA.md"?null:read(p));
+    const data=await judged(),body=JSON.parse(data.researchJudge.packet.body);
+    expect(body.coverage.incomplete).toContain("historical_readback_unavailable");
+    const p=await prepare(data);expect(p.researchJudge?.decision).toBe("HOLD");
+    expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);assertProtected();
+  });
+  it.each(["whitespace","fabricated location"])("F2 regression: %s must HOLD",async attack=>{
+    const data=await judged(),ref=data.researchJudge.result.claims[0].references[0];
+    if(attack==="whitespace"){ref.quote=" ";ref.locator=" ";}
+    else ref.locator="page 999999, invented section";
+    const p=await prepare(data);expect(p.researchJudge?.decision).toBe("HOLD");
+    expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);assertProtected();
+  });
+  it.each(["throws","missing","not indexed","not searchable","oversized"])("F1 selected history %s retains failure coverage and only Source can persist",async failure=>{
+    const deps=(await import("../vault/research-decision-v2")).m2VaultReadDeps,read=deps.readIndexed;
+    const fault=vi.spyOn(deps,"readIndexed").mockImplementation(p=>{
+      if(p!=="01_Companies/NVDA.md")return read(p);
+      if(failure==="throws")throw Error("private filesystem error must not leak");
+      if(failure==="missing")return null;
+      return {content:failure==="oversized"?"x".repeat(100001):"# Isolated protected fixture\n",indexed:failure!=="not indexed",searchable:failure!=="not searchable"};
+    });
+    const data=await judged(),body=JSON.parse(data.researchJudge.packet.body);
+    expect(body.coverage.status).toBe("bounded_not_exhaustive");
+    expect(body.coverage.selectedHistory).toMatchObject({status:"readback_hold",failures:[{path:"01_Companies/NVDA.md"}]});
+    expect(body.coverage.selectedHistory.read+1).toBe(body.coverage.selectedHistory.selected);
+    expect(data.researchJudge.packet.body).not.toContain("private filesystem error");
+    fault.mockRestore(); // A later recovery cannot retroactively approve the incomplete sealed packet.
+    const p=await prepare(data);expect(p.researchJudge?.reasons).toContain("selected_history_readback_unavailable");
+    const recipe=(await plan(data)).safeEditWorkflow!.steps.find(s=>s.kind==="structured_claim")!;
+    const engine=await import("../safe-edit/engine");
+    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/research_judge/);
+    const saved=await apply(data,p);expect(saved.status).toBe("hold_research_judge");expect(saved.receipts).toHaveLength(1);
+    expect(saved.steps.filter(s=>s.kind!=="source_intake").every(s=>!fs.existsSync(path.join(vault,s.path)))).toBe(true);
+    const receipt=await journal(),source=fs.readFileSync(path.join(vault,saved.steps[0].path));
+    await prepare(data);expect(fs.readFileSync(path.join(vault,saved.steps[0].path))).toEqual(source);
+    for(const row of receipt.filter(r=>r.status==="written"))expect(await journal()).toContainEqual(row);assertProtected();
+  });
+  it("F1 a legitimate bounded omission stays explicitly limited without being a selected read failure",async()=>{
+    const engine=await import("../safe-edit/engine");
+    for(let i=0;i<12;i++){
+      const p=engine.preview({operationId:`judge-bounded-history-${i}`,path:`10_Knowledge/Company Research/NVDA Historical ${i}.md`,reason:"Isolated bounded history fixture",
+        change:{kind:"create",content:`# NVDA historical research ${i}\nNVDA revenue historical comparison, unverified analysis.\n`}},actor);
+      engine.apply({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor);
+    }
+    const data=await judged(),body=JSON.parse(data.researchJudge.packet.body);
+    expect(body.coverage).toMatchObject({status:"bounded_not_exhaustive",selectedHistory:{status:"readback_complete",failures:[]}});
+    expect(body.coverage.omitted.length).toBeGreaterThan(0);expect(body.history.length).toBeLessThanOrEqual(8);
+    expect((await prepare(data)).researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});assertProtected();
+  });
+  it("F1 a selected note unavailable after preview blocks canonical and generic Claim/Review but retains Source",async()=>{
+    const data=await judged(),p=await prepare(data),deps=(await import("../vault/research-decision-v2")).m2VaultReadDeps,read=deps.readIndexed;
+    vi.spyOn(deps,"readIndexed").mockImplementation(path=>path==="01_Companies/NVDA.md"?null:read(path));
+    await expect(apply(data,p)).rejects.toThrow(/Authorization/);
+    const engine=await import("../safe-edit/engine"),source=p.previews.find(x=>x.kind==="source_intake")!;
+    engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    for(const old of p.previews.filter(x=>x.kind!=="source_intake")){
+      expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge_semantic_or_stale_hold/);
+      expect(fs.existsSync(path.join(vault,old.path))).toBe(false);
+    }
+    expect((await prepare(data)).researchJudge?.reasons).toContain("historical_readback_changed_hold");assertProtected();
+  });
+  it.each(["blank quote","blank locator","whitespace locator","missing hash","wrong hash","shifted offset","out of range","negative","reversed","empty span","unsafe integer"])("F2 %s cannot authorize new claims or review",async attack=>{
+    const data=await judged(),ref=data.researchJudge.result.claims[0].references[0];
+    if(attack==="blank quote")ref.quote="";
+    if(attack==="blank locator")ref.locator="";
+    if(attack==="whitespace locator")ref.locator=" \n\t";
+    if(attack==="missing hash")delete ref.sourceSha256;
+    if(attack==="wrong hash")ref.sourceSha256="0".repeat(64);
+    if(attack==="shifted offset")ref.locator="utf16:1:61";
+    if(attack==="out of range")ref.locator="utf16:0:999999";
+    if(attack==="negative")ref.locator="utf16:-1:59";
+    if(attack==="reversed")ref.locator="utf16:60:0";
+    if(attack==="empty span")ref.locator="utf16:0:0";
+    if(attack==="unsafe integer")ref.locator="utf16:9007199254740992:9007199254741052";
+    const p=await prepare(data);expect(p.researchJudge?.reasons).toContain("judge_locator_quote_unbound");
+    expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);assertProtected();
+  });
+  it("F2 invalid re-attestation revokes old generic preview eligibility without changing saved Source receipt",async()=>{
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
+    const source=p.previews.find(x=>x.kind==="source_intake")!;
+    engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    const sourceBytes=fs.readFileSync(path.join(vault,source.path)),sourceReceipt=(await journal()).find(r=>r.id===source.operationId);
+    data.researchJudge.result.review.references[0].locator="page 999999";
+    const held=await prepare(data);expect(held.researchJudge?.decision).toBe("HOLD");expect(held.previews).toEqual([]);
+    await expect(apply(data,p)).rejects.toThrow(/Authorization/);
+    for(const old of p.previews.filter(x=>x.kind!=="source_intake")){
+      expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge/);
+      expect(fs.existsSync(path.join(vault,old.path))).toBe(false);
+    }
+    expect(fs.readFileSync(path.join(vault,source.path))).toEqual(sourceBytes);expect(await journal()).toContainEqual(sourceReceipt);assertProtected();
+  });
+  it("F2 exact Unicode/multiline source span passes only eligibility; PDF/section label stays caller-declared",async()=>{
+    const data=await judged({...input,extractedText:"หัวข้อ 🧾\r\n"+excerpt}),ref=data.researchJudge.result.claims[0].references[0];
+    const start=data.extractedText.indexOf("Revenue");ref.quote=excerpt;ref.locator=`utf16:${start}:${start+excerpt.length}`;
+    ref.callerDeclaredLocator="PDF page 999999, section asserted by caller";
+    const body=JSON.parse(data.researchJudge.packet.body);
+    expect(body.citationContract.declaredLocators).toBe("caller_declared_unverified_including_pdf_pages_and_sections");
+    expect((await prepare(data)).researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});
+    ref.locator="PDF page 999999";expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");assertProtected();
+  });
+  it("F2 historical references bind full-note offsets/hash, never synthetic retrieval labels",async()=>{
+    const data=await judged(),body=JSON.parse(data.researchJudge.packet.body),h=body.history[0],span=h.citationSpans[0];
+    expect(span.text.trim()).not.toBe("");
+    data.researchJudge.result.review.references=[{key:h.key,quote:span.text,locator:`utf16:${span.start}:${span.end}`,sourceSha256:h.sha256}];
+    expect((await prepare(data)).researchJudge?.decision).toBe("PASS");
+    data.researchJudge.result.review.references[0].quote="[Source lines 1-2]";
+    expect((await prepare(data)).researchJudge?.reasons).toContain("judge_locator_quote_unbound");assertProtected();
+  });
+  it("F1/F2 old sealed packets and legacy gate events cannot authorize pending writes after contract upgrade",async()=>{
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine"),gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
+    // Existing internal journal API, not SQL/receipt fabrication: emulate an
+    // old server's admission contract while retaining the real preview rows.
+    const {version:_,...legacy}=gate;void _;
+    engine.recordResearchJudgeGate(p.previews[0].operationId,actor,legacy as typeof gate);
+    await expect(apply(data,p)).rejects.toThrow(/prepare_required_or_superseded/);
+    for(const old of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow("research_judge_contract_version_hold");
+    const {stableJudgeJson,verifyResearchJudgePacket}=await import("../vault/research-judge"),{seal:__,...envelope}=data.researchJudge.packet;void __;
+    const body=JSON.parse(envelope.body);body.version="RI001-JUDGE-1";
+    envelope.body=stableJudgeJson(body);envelope.digest=sha(envelope.body);envelope.packetId="RJP-"+envelope.digest.slice(0,32).toUpperCase();
+    const key=(await import("../env")).env.encryptionKey;
+    const packet={...envelope,seal:createHmac("sha256",key).update("research-judge-packet-v1\0"+stableJudgeJson(envelope)).digest("hex")};
+    expect(()=>verifyResearchJudgePacket(data,{packet},actor)).toThrow("research_judge_input_changed_hold");
+    const held=await prepare({...data,researchJudge:{packet}} as typeof data);expect(held.researchJudge?.decision).toBe("HOLD");
+    expect(held.previews.map(x=>x.kind)).toEqual(["source_intake"]);assertProtected();
+  });
   it("packet is bounded/read-only/deterministic, seals exact accessible input and does not claim a model/session",async()=>{
     const before=await journal(),a=await judged(),b=await judged();
     expect(a.researchJudge.packet.digest).toBe(b.researchJudge.packet.digest);
