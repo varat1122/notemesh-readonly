@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import Database from "better-sqlite3";
 import { instrument, isoDate, PRICE_POLICY, PriceError, type InstrumentInput, type PriceBar, type PriceSnapshot } from "./model.ts";
-import { maintenanceActive } from "../maintenance.ts";
+import { assertNoMaintenance, maintenanceActive } from "../maintenance.ts";
 
 export function priceDatabaseLimit(): number {
   const mb = Number(process.env.MARKET_PRICES_MAX_DB_MB ?? "4");
@@ -113,8 +113,19 @@ export class PriceStore {
 
   close(): void { this.db.close(); }
 
+  /** Every persistent write re-checks maintenance, in this process or any other. */
+  private fence(): void {
+    if (this.memory) return;
+    try {
+      assertNoMaintenance("price write");
+    } catch {
+      throw new PriceError("maintenance_active");
+    }
+  }
+
   acquireLease(now: Date): string | null {
     if (!this.writable) throw new PriceError("read_only_price_store");
+    this.fence();
     const token = crypto.randomUUID();
     const result = this.db.prepare(`INSERT INTO collector_lease VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET
       token=excluded.token,expires_at=excluded.expires_at WHERE collector_lease.expires_at<=?`)
@@ -122,6 +133,7 @@ export class PriceStore {
     return result.changes ? token : null;
   }
   releaseLease(token: string): void {
+    this.fence();
     this.db.prepare("DELETE FROM collector_lease WHERE id=1 AND token=?").run(token);
   }
 
@@ -142,6 +154,7 @@ export class PriceStore {
 
   failure(input: InstrumentInput, code: string, now: Date): void {
     if (!this.writable) throw new PriceError("read_only_price_store");
+    this.fence();
     this.assertSpace();
     this.db.transaction(() => {
       this.ensureInstrument(input);
@@ -153,6 +166,7 @@ export class PriceStore {
 
   save(snapshot: PriceSnapshot): { inserted: number; revised: number; unchanged: number; rowCount: number } {
     if (!this.writable) throw new PriceError("read_only_price_store");
+    this.fence();
     this.assertSpace();
     const id = snapshot.instrument.id;
     // The provider parser is the only producer; also validate at this persistence boundary.

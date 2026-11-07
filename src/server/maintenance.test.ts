@@ -272,19 +272,27 @@ describe("resume", () => {
     expect(fs.existsSync(file())).toBe(false);
     expect(JSON.parse(fs.readFileSync(path.join(root, "maintenance-history", `${id}.json`), "utf8"))).toMatchObject({ id, state: "active" });
   });
-  it("a removal that fails after the history entry stays in maintenance, and the next boot refuses it as a replay", async () => {
+  it("a record removal that fails leaves the resume marker: closed now, closed on a plain restart, completed only by the exact id", async () => {
     fs.writeFileSync(file(), record());
     process.env.NOTEMESH_MAINTENANCE_RESUME = id;
     vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
     const unlink = vi.spyOn(fs, "unlinkSync").mockImplementation(() => { throw Object.assign(Error("EIO"), { code: "EIO" }); });
     let m = await import("./maintenance");
     expect(m.maintenanceActive()).toBe(true);
+    expect(fs.existsSync(path.join(root, "maintenance-resume.json"))).toBe(true);
     unlink.mockRestore();
+    delete process.env.NOTEMESH_MAINTENANCE_RESUME;
     delete (globalThis as Record<symbol, unknown>)[KEY];
     vi.resetModules();
     m = await import("./maintenance");
     expect(m.maintenanceActive()).toBe(true);
-    expect(fs.existsSync(file())).toBe(true);
+    process.env.NOTEMESH_MAINTENANCE_RESUME = id;
+    delete (globalThis as Record<symbol, unknown>)[KEY];
+    vi.resetModules();
+    m = await import("./maintenance");
+    expect(m.maintenanceActive()).toBe(false);
+    expect(fs.existsSync(path.join(root, "maintenance-history", `${id}.json`))).toBe(true);
   });
   it.each([
     ["a different id", record(), "1f4c2a8e-1b2c-4d3e-8f9a-0b1c2d3e4f5a"],
@@ -376,15 +384,28 @@ describe("separate operator processes need an explicit gate", () => {
     expect(failed.status).toBe(75);
     expect(String(failed.stderr)).toMatch(/Maintenance is active/);
   });
-  it("the account cleanup --apply needs the maintenance id as an explicit acknowledgement", async () => {
+  it("the account cleanup --apply is outside the strict window: refused in maintenance, with no override", async () => {
     const { DatabaseSync } = await import("node:sqlite");
     const dbPath = path.join(root, "app.sqlite");
     new DatabaseSync(dbPath).close();
     fs.writeFileSync(file(), record());
     // @ts-expect-error standalone operator script is deliberately not bundled
     const { cleanupAccountIssuer } = await import("../../scripts/account-issuer-cleanup.mjs");
-    expect(() => cleanupAccountIssuer(dbPath, { apply: true })).toThrow(/NOTEMESH_MAINTENANCE_OPERATOR_ID/);
+    expect(() => cleanupAccountIssuer(dbPath, { apply: true })).toThrow(/strict no-mutation window/);
     process.env.NOTEMESH_MAINTENANCE_OPERATOR_ID = id;
-    expect(() => cleanupAccountIssuer(dbPath, { apply: true })).not.toThrow(/NOTEMESH_MAINTENANCE_OPERATOR_ID/);
+    expect(() => cleanupAccountIssuer(dbPath, { apply: true })).toThrow(/strict no-mutation window/);
+    fs.rmSync(file());
+    fs.writeFileSync(path.join(root, "maintenance-resume.json"), "{}");
+    expect(() => cleanupAccountIssuer(dbPath, { apply: true })).toThrow(/strict no-mutation window/);
+  });
+  it("the ob wrapper also refuses while a resume is unfinished", () => {
+    fs.writeFileSync(path.join(root, "maintenance-resume.json"), "{}");
+    let failed: { status?: number } = {};
+    try {
+      execFileSync(process.execPath, ["scripts/ob-readonly.mjs", "sync-status"], { env: { PATH: process.env.PATH, DATA_DIR: root }, stdio: "pipe" });
+    } catch (e) {
+      failed = e as typeof failed;
+    }
+    expect(failed.status).toBe(75);
   });
 });

@@ -19,25 +19,23 @@ import { DatabaseSync } from 'node:sqlite';
 // See docs/SECURITY_BETTER_AUTH_177_STAGING.md for the backup/rollback gate.
 const INDEX = 'account_issuer_accountId_uidx';
 
-// Maintenance (docs/maintenance-barrier.md): an operator write to the app DB
-// while a maintenance record (or NOTEMESH_MAINTENANCE=1) exists needs an
-// explicit acknowledgement naming that maintenance: never an implicit write.
-function assertMaintenanceAcknowledged(file) {
-  const record = path.join(path.dirname(path.resolve(file)), 'maintenance.json');
-  let present = false, id = null;
-  try {
-    fs.lstatSync(record);
-    present = true;
-    try { id = JSON.parse(fs.readFileSync(record, 'utf8'))?.id ?? null; } catch { id = null; }
-  } catch (e) { if (e?.code !== 'ENOENT') present = true; }
-  const expected = present ? id : process.env.NOTEMESH_MAINTENANCE === '1' ? 'forced' : null;
-  if ((present || expected) && (!expected || process.env.NOTEMESH_MAINTENANCE_OPERATOR_ID !== expected))
-    throw Error('Maintenance is active: --apply requires NOTEMESH_MAINTENANCE_OPERATOR_ID=<maintenance id> (or "forced" for NOTEMESH_MAINTENANCE=1); an unreadable record cannot be acknowledged');
+// Maintenance (docs/maintenance-barrier.md): --apply is a privileged DB
+// mutation and is NOT part of the strict no-mutation window. It is refused
+// while a maintenance record, an unfinished resume marker or
+// NOTEMESH_MAINTENANCE=1 exists, with no override: an operator id or variable
+// grants no write authority. Run it only outside maintenance, as its own
+// separately authorized procedure (app stopped, verified backup).
+function assertOutsideMaintenance(file) {
+  let active = process.env.NOTEMESH_MAINTENANCE === '1';
+  for (const name of ['maintenance.json', 'maintenance-resume.json']) {
+    try { fs.lstatSync(path.join(path.dirname(path.resolve(file)), name)); active = true; } catch (e) { if (e?.code !== 'ENOENT') active = true; }
+  }
+  if (active) throw Error('Maintenance is active: --apply is refused during the strict no-mutation window; run it only as a separately authorized procedure outside maintenance');
 }
 
 export function cleanupAccountIssuer(file, { apply = false } = {}) {
   if (!fs.existsSync(file)) throw Error(`No database at ${file}`);
-  if (apply) assertMaintenanceAcknowledged(file);
+  if (apply) assertOutsideMaintenance(file);
   const wal = `${file}-wal`;
   if (apply && fs.existsSync(wal) && fs.statSync(wal).size > 0)
     throw Error('Write-ahead log is not empty: stop the app (or checkpoint) before --apply');

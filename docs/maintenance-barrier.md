@@ -63,22 +63,52 @@ write or an `ob`/remote step it had already started; restart, then review.
 
 ## Separate processes
 
-The record (or `NOTEMESH_MAINTENANCE=1`) is read by every process: the price CLI
-(`refreshPrices`, writable `PriceStore`) refuses before any store, lease, Drive
-refresh or file; the `ob` wrapper (`ob-readonly.mjs`) refuses to launch (exit
-75); `account-issuer-cleanup.mjs --apply` requires
-`NOTEMESH_MAINTENANCE_OPERATOR_ID=<id>` (`forced` for env-only maintenance) as
-an explicit operator acknowledgement. One replica only (single volume).
+The record, an unfinished resume marker (`maintenance-resume.json`) or
+`NOTEMESH_MAINTENANCE=1` is maintenance for every process.
+
+Price writers (the server's collector and the separate price CLI) are
+coordinated across processes by announce-then-check: `refreshPrices` creates
+and fsyncs a lock in `DATA_DIR/maintenance-writers/` BEFORE checking
+maintenance, keeps it until its last write, and every persistent price write
+(lease acquire/release, bars, failure records, Drive upload) re-checks
+maintenance. A drain writes its record BEFORE looking for locks and waits for
+every lock (stale ones included: `staleWriterLocks`), so a writer either sees
+maintenance and stops or is waited for; a writer admitted before maintenance
+cannot write after `active`. The only possible post-`active` effect of a racing
+writer is creating and removing its own lock file — never DB or Vault data.
+
+The `ob` wrapper (`ob-readonly.mjs`) refuses to launch (exit 75).
+`account-issuer-cleanup.mjs --apply` is a privileged operator mutation and is
+**not** part of the strict window: it is refused during maintenance with no
+override; an operator id or variable grants no write authority. One replica
+only (single volume).
 
 ## Resume (owner, out of band, at boot)
 
 Never an HTTP action. Rules, in order: `NOTEMESH_MAINTENANCE=1` always wins;
-only an exact `NOTEMESH_MAINTENANCE_RESUME=<id>` on a valid record; a record
-that is not `active` also needs `NOTEMESH_MAINTENANCE_RESUME_UNDRAINED=<id>`; an
-id already in `maintenance-history/` is a replay and is refused. The history
-entry is written (O_EXCL) and fsynced before the record is unlinked; a failure
-in between leaves maintenance active (and the next attempt is a replay that
-needs manual review). A stale resume value with no record does nothing.
+only an exact `NOTEMESH_MAINTENANCE_RESUME=<id>`; a record that is not `active`
+also needs `NOTEMESH_MAINTENANCE_RESUME_UNDRAINED=<id>`; an id already committed
+to `maintenance-history/` is a replay and is refused. A stale value with no
+record does nothing.
+
+Protocol, each step durable before the next: (1) write the resume marker
+`maintenance-resume.json` (O_EXCL, fsync) holding the record; (2) remove
+`maintenance.json` and fsync; (3) write `maintenance-history/<id>.json`; (4)
+remove the marker and fsync — the only step that opens the gate. Every process
+treats the marker as maintenance. Any failure keeps (or restores) the marker
+and latches this process closed until restart; a crash leaves the marker, so a
+plain restart stays closed and only the same exact id (and acknowledgement)
+completes the remaining steps.
+
+## Health
+
+`/api/health` in maintenance reports this process first: `process.phase`
+(`draining`, `settled`, `booted_in_maintenance_started_nothing`), live
+`pendingWork`/`untrackedRequests`, `persistUncertain`, `resumeBlocked`.
+`drainedByThisProcess` is true only after this process settled `active` with a
+verified record. A record adopted from an earlier process is first rewritten
+`draining` (its saved report dropped) before anything is answered; a saved
+report is labelled `earlierProcessDrain`, never as this process's evidence.
 
 ## First cutover (not performed, not authorized here)
 

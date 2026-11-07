@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -146,7 +148,7 @@ describe("entering from a running server", () => {
     // registered, and both bundles' DB connections are fenced read-only.
     expect(result.drain).toMatchObject({ pendingWork: 0, untrackedRequests: 0, gitQuiescent: true, obsidianQuiescent: true,
       indexerQuiescent: true, cloudIntakeIdle: true, priceCollectorIdle: true, safeEditLockAbsent: true,
-      gitMutationLockAbsent: true, safeEditWritingRows: 0, dbConnections: 2, dbFenced: 2 });
+      gitMutationLockAbsent: true, safeEditWritingRows: 0, dbConnections: 2, dbFenced: 2, crossProcessWriters: 0, staleWriterLocks: 0 });
     expect(Number(result.drain.bundles)).toBeGreaterThanOrEqual(2);
     expect(JSON.parse(fs.readFileSync(path.join(dataDir, "maintenance.json"), "utf8"))).toMatchObject({ id: result.id, state: "active" });
     const health = await (await fetch(`${s.url}/api/health`)).json();
@@ -163,4 +165,48 @@ describe("entering from a running server", () => {
     await knockEverywhere(next);
     expect(snapshot(dataDir)).toEqual(settled);
   });
+});
+
+describe("a price writer in another process", () => {
+  it("the built server's drain waits for a separate price CLI that holds its lease, and refuses its late writes", async () => {
+    const dataDir = volume();
+    const s = await startServer({}, { dataDir, keepDataDir: true });
+    servers.push(s);
+    const cookie = await claimAdmin(s);
+    await markConfigured(s, { sync_backend: "git" });
+    const gate = path.join(dataDir, "release"), inside = path.join(dataDir, "inside"), script = path.join(dataDir, "child.mjs");
+    fs.writeFileSync(script, `
+import fs from "node:fs";
+const { refreshPrices } = await import(${JSON.stringify(pathToFileURL(path.resolve("src/server/market-prices/collector.ts")).href)});
+const { PriceError } = await import(${JSON.stringify(pathToFileURL(path.resolve("src/server/market-prices/model.ts")).href)});
+try {
+  await refreshPrices({ force: true, watchlist: [{ market: "US", symbol: "NVDA" }], pause: async () => {},
+    fetcher: async () => { fs.writeFileSync(${JSON.stringify(inside)}, "x");
+      while (!fs.existsSync(${JSON.stringify(gate)})) await new Promise(r => setTimeout(r, 20));
+      throw new PriceError("provider_http_500"); } });
+  console.log("RESULT");
+} catch (e) { console.log("ERR " + (e?.code ?? e?.message)); }
+`);
+    let out = "";
+    const child = spawn(process.execPath, [script], { env: { PATH: process.env.PATH, HOME: process.env.HOME, DATA_DIR: dataDir }, stdio: ["ignore", "pipe", "pipe"] });
+    child.stdout!.on("data", (d) => (out += d));
+    const exited = new Promise((r) => child.once("exit", r));
+    try {
+      for (let i = 0; i < 500 && !fs.existsSync(inside); i++) await new Promise((r) => setTimeout(r, 20));
+      const prices = path.join(dataDir, "market-prices", "prices.sqlite");
+      const atEntry = crypto.createHash("sha256").update(fs.readFileSync(prices)).digest("hex");
+      const entering = rpc(s, "enterMaintenance", [], cookie);
+      await new Promise((r) => setTimeout(r, 600));
+      expect(JSON.parse(fs.readFileSync(path.join(dataDir, "maintenance.json"), "utf8")).state).toBe("draining");
+      fs.writeFileSync(gate, "go");
+      const entered = await entering;
+      expect((entered.body.result as { state: string }).state).toBe("active");
+      await exited;
+      expect(out).toContain("maintenance_active");
+      expect(crypto.createHash("sha256").update(fs.readFileSync(prices)).digest("hex")).toBe(atEntry);
+    } finally {
+      fs.writeFileSync(gate, "go");
+      child.kill();
+    }
+  }, 60_000);
 });

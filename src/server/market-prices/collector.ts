@@ -3,7 +3,7 @@ import { z } from "zod";
 import { instrumentSchema, instrument, PILOT_INSTRUMENTS, BENCHMARKS, MAX_PRICE_INSTRUMENTS, PriceError, type InstrumentInput } from "./model.ts";
 import { PriceStore, priceDbPath } from "./store.ts";
 import { fetchYahooDaily } from "./yahoo.ts";
-import { maintenanceActive, worker } from "../maintenance.ts";
+import { maintenanceActive, withMaintenanceWriter, worker } from "../maintenance.ts";
 
 export function priceWatchlist(): InstrumentInput[] {
   try {
@@ -40,6 +40,16 @@ export async function refreshPrices(options: RefreshOptions = {}) {
   // Before any store, lease, Drive refresh or fetch: the CLI is a separate
   // process and reads the same durable record (or NOTEMESH_MAINTENANCE=1).
   if (maintenanceActive()) throw new PriceError("maintenance_active");
+  // Announced to every drain (any process) until the last write — failure
+  // records and lease release included — has been made or refused.
+  try {
+    return await withMaintenanceWriter("price", () => refreshPricesAdmitted(options));
+  } catch (e) {
+    if ((e as { code?: string })?.code === "maintenance_active" && !(e instanceof PriceError)) throw new PriceError("maintenance_active");
+    throw e;
+  }
+}
+async function refreshPricesAdmitted(options: RefreshOptions) {
   priceWatchlistFrom(options);
   const backend = process.env.MARKET_PRICES_STORAGE ?? "disk";
   if (!["disk", "google-drive"].includes(backend)) throw new PriceError("invalid_price_storage_backend");

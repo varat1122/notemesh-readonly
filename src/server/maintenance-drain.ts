@@ -17,6 +17,7 @@ import {
   pendingWork,
   registry,
   settleMaintenance,
+  writerLocks,
   type DrainReport,
   type MaintenanceRecord,
 } from "./maintenance";
@@ -34,7 +35,18 @@ export function maintenanceGate(event: { request: Request }): Response | null {
     admitRequest(event);
     return null;
   }
-  if (registry().admitted && !isMaintenanceLatched()) void enterMaintenanceAndDrain().catch(() => {});
+  if (registry().admitted && !isMaintenanceLatched()) {
+    // Adopt BEFORE answering: the record is rewritten "draining" (or latched as
+    // persistUncertain), so no answer advertises an earlier process's
+    // quiescence while this process still has work in flight.
+    try {
+      beginMaintenance();
+    } catch {
+      // Not entered: the record vanished; the next request re-evaluates.
+    }
+    void enterMaintenanceAndDrain().catch(() => {});
+    return maintenanceResponse(event.request, maintenanceStatus());
+  }
   return maintenanceResponse(event.request, status);
 }
 
@@ -65,6 +77,7 @@ function writingRows(): number {
 export function drainReport(): { quiescent: boolean; report: DrainReport } {
   const work = pendingWork();
   const rows = writingRows();
+  const writers = writerLocks();
   const report: DrainReport = {
     pendingWork: work.count,
     pendingHttp: work.kinds.filter((k) => k === "http").length,
@@ -79,8 +92,12 @@ export function drainReport(): { quiescent: boolean; report: DrainReport } {
     safeEditLockAbsent: !fs.existsSync(path.join(env.dataDir, "safe-edit.lock")),
     gitMutationLockAbsent: !fs.existsSync(path.join(env.dataDir, "git-mutation.lock")),
     safeEditWritingRows: rows,
+    // Writers in any process (the price CLI included) announce a lock before
+    // checking maintenance; a drain waits for every one, stale ones included.
+    crossProcessWriters: writers.count,
+    staleWriterLocks: writers.stale,
   };
-  const quiescent = work.count === 0 && work.untracked === 0 && rows === 0 &&
+  const quiescent = work.count === 0 && work.untracked === 0 && rows === 0 && writers.count === 0 &&
     Object.values(report).every((v) => v !== false);
   return { quiescent, report };
 }

@@ -13,7 +13,7 @@ DATA_DIR="${DATA_DIR:-/data}"
 # created or re-owned before the application gate, not even metadata. A volume
 # that needs ownership repair is a precondition to resolve outside
 # maintenance; the server still starts and serves its maintenance answer.
-if [ "${NOTEMESH_MAINTENANCE:-}" = "1" ] || [ -e "$DATA_DIR/maintenance.json" ] || [ -L "$DATA_DIR/maintenance.json" ]; then
+if [ "${NOTEMESH_MAINTENANCE:-}" = "1" ] || [ -e "$DATA_DIR/maintenance.json" ] || [ -L "$DATA_DIR/maintenance.json" ] || [ -e "$DATA_DIR/maintenance-resume.json" ] || [ -L "$DATA_DIR/maintenance-resume.json" ]; then
   if ! setpriv --reuid=node --regid=node --init-groups test -w "$DATA_DIR"; then
     echo "[entrypoint] maintenance: $DATA_DIR is missing or not writable by node; ownership repair is a HOLD precondition and is not done during maintenance" >&2
   fi
