@@ -148,9 +148,21 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
 export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   const args=canonicalApplySchema.parse(raw);
   const {plan,workflow,judge,enrolled}=planned(args.input,actor);
+  if(plan.planId!==args.planId) throw Error("Plan identity mismatch; original source or chronology changed");
+  // Apply can receive a newer HOLD/FAIL without another prepare. Revoke the
+  // matching bundle authority before any await or write (even if the submitted
+  // token set is refused below), otherwise generic apply could retain its old
+  // PASS. This only expires the old envelope; it does not approve new targets
+  // or attest the changed input. Source preservation remains independently
+  // eligible. An obsolete packet must not revoke a newer assessment of a
+  // different scope. The journal enforces the original Source/actor binding.
+  if(enrolled&&judge&&judge.decision!=="PASS"&&enrolled.packetDigest===judge.packetDigest){
+    const source=enrolled.targets.find(t=>t.kind==="source_intake");
+    if(!source)throw Error("research_judge_source_admission_hold");
+    recordResearchJudgeGate(source.operationId,actor,{...enrolled,decision:judge.decision,expiresAt:0});
+  }
   if(judge?.decision==="PASS"&&(!enrolled||enrolled.version!==JUDGE_VERSION||enrolled.packetDigest!==judge.packetDigest||enrolled.resultDigest!==judge.resultDigest||enrolled.decision!=="PASS"))
     throw Error("research_judge_prepare_required_or_superseded");
-  if(plan.planId!==args.planId) throw Error("Plan identity mismatch; original source or chronology changed");
   const pending=workflow.steps.filter(s=>s.state==="needs_create");
   const ids=pending.map(s=>s.receiptKey);
   if(new Set(args.authorizations.map(a=>a.operationId)).size!==args.authorizations.length||

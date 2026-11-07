@@ -40,7 +40,8 @@ export function assertResearchJudgeWrite(path:string,before:string,after:string,
   if(!target?.eligible||before!==""||g.actor!==actor)throw Error("research_judge_exact_bytes_or_actor_hold");
   // Source preservation is independent of semantic outcome and packet expiry.
   if(target.kind==="source_intake")return;
-  // Earlier gates lacked current identity/selection binding (v3), upstream
+  // Earlier gates could retain PASS after non-PASS apply (v4), or lacked
+  // current identity/selection binding (v3), upstream
   // completeness (v2) or exact citation
   // spans (v1). Preserve their journal/receipts, but never reuse that authority for
   // a pending Claim/Review write after the contract upgrade.

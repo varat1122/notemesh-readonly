@@ -83,6 +83,130 @@ async function addHistory(file:string,content:string,id="judge-history-delta-001
 }
 
 describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluation",()=>{
+  // Mechanical §09.5 probes, NOT the unavailable C1-11 blind-trial payload or
+  // an actual LLM evaluation. Every receipt comes from the real fixture engine.
+  it.each(["claim HOLD","claim FAIL","review HOLD","review FAIL"])("C1 All-or-Hold: %s blocks the entire enrolled non-Source bundle on both routes",async fault=>{
+    const data=await judged(),pass=structuredClone(data),old=await prepare(data),engine=await import("../safe-edit/engine");
+    const recipe=(await plan()).safeEditWorkflow!.steps.find(s=>s.kind==="structured_claim")!.safeEditRequest!;
+    const row=fault.startsWith("claim")?data.researchJudge.result.claims[1]:data.researchJudge.result.review;
+    row.verdict=fault.endsWith("FAIL")?"FAIL":"HOLD";
+    const held=await prepare(data);expect(held.researchJudge?.decision).toBe(row.verdict);
+    expect(held.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+    expect(held.steps.filter(x=>x.kind!=="source_intake").every(x=>x.state==="hold_research_judge")).toBe(true);
+    await expect(apply(pass,old)).rejects.toThrow(/prepare_required_or_superseded/);
+    const saved=await apply(data,held);expect(saved.receipts).toHaveLength(1);expect(saved.readyForNextNews).toBe(false);
+    expect(()=>engine.preview(recipe,actor)).toThrow(/research_judge/);
+    for(const token of old.previews.filter(x=>x.kind!=="source_intake")){
+      expect(()=>engine.apply({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
+      expect(fs.existsSync(path.join(vault,token.path))).toBe(false);
+    }
+    expect((await journal()).filter(x=>x.status==="written")).toHaveLength(1);assertProtected();
+  });
+  it.each(["remove claim","edit claim","edit review","remove assessment"])("C1 All-or-Hold: %s cannot retain the old assessment or generic tokens",async attack=>{
+    const original=await judged(),old=await prepare(original),changed=structuredClone(original);
+    if(attack==="remove claim")changed.claims!.pop();
+    if(attack==="edit claim")changed.claims![1].statement+=" Revised analyst wording.";
+    if(attack==="edit review")changed.researchReview!.whatChangedTh+=" การตัดหรือแก้ข้ออ้างต้องประเมินใหม่";
+    if(attack==="remove assessment")changed.researchJudge.result.claims.pop();
+    const held=await prepare(changed);expect(held.planId).toBe(old.planId);
+    expect(held.researchJudge?.decision).toBe("HOLD");expect(held.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+    expect(held.researchJudge?.reasons).toContain(attack==="remove assessment"?"judge_coverage_mismatch":"judge_packet_or_input_binding_hold");
+    await expect(apply(original,old)).rejects.toThrow(/prepare_required_or_superseded/);
+    const saved=await apply(changed,held);expect(saved.receipts).toHaveLength(1);
+    const engine=await import("../safe-edit/engine");
+    for(const token of old.previews.filter(x=>x.kind!=="source_intake")){
+      expect(()=>engine.apply({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
+      expect(fs.existsSync(path.join(vault,token.path))).toBe(false);
+    }
+    expect(fs.readFileSync(path.join(vault,saved.steps[0].path),"utf8")).toContain(excerpt);assertProtected();
+  });
+  it("C1 All-or-Hold: a revised bundle needs a fresh packet AND matching assessment, retaining the saved Source",async()=>{
+    const original=await judged(),stalePass=structuredClone(original.researchJudge.result);original.researchJudge.result.claims[1].verdict="FAIL";
+    const held=await apply(original,await prepare(original)),source=fs.readFileSync(path.join(vault,held.steps[0].path));
+    const sourceRow=(await journal()).find(x=>x.status==="written")!;
+    const revised={...input,claims:[claims[0]],researchReview:{...review,whatChangedTh:review.whatChangedTh+" ตัดข้ออ้างจากรายการบันทึกและประเมินชุดนี้ใหม่"}};
+    const fresh=await judged(revised);
+    expect(fresh.researchJudge.packet.digest).not.toBe(original.researchJudge.packet.digest);
+    const replay=structuredClone(fresh);replay.researchJudge.result=stalePass;
+    const denied=await prepare(replay);expect(denied.researchJudge?.decision).toBe("HOLD");expect(denied.previews).toEqual([]);
+    expect(denied.researchJudge?.reasons).toContain("judge_result_binding_mismatch");
+    const eligible=await prepare(fresh);expect(eligible.researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});
+    expect(eligible.previews.map(x=>x.kind)).toEqual(["structured_claim","canonical_review"]);
+    expect((await apply(fresh,eligible)).status).toBe("saved_verified");
+    expect(fs.readFileSync(path.join(vault,held.steps[0].path))).toEqual(source);expect(await journal()).toContainEqual(sourceRow);assertProtected();
+  });
+  it.each(["claim","review"])("C1 All-or-Hold: canonical authorization cannot silently omit a pending %s",async omit=>{
+    const data=await judged(),p=await prepare(data),before=await journal();
+    const target=p.previews.find(x=>x.kind===(omit==="claim"?"structured_claim":"canonical_review"))!;
+    await expect((await import("./canonical-writeback")).applyCanonicalWriteback({input:data,planId:p.planId,
+      authorizations:p.previews.filter(x=>x!==target).map(x=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}))},actor)).rejects.toThrow(/no partial or extra operation authorization/);
+    expect(await journal()).toEqual(before);expect(p.steps.every(x=>!fs.existsSync(path.join(vault,x.path)))).toBe(true);assertProtected();
+  });
+  it.each(["prepare","apply"])("C1 All-or-Hold: MCP %s and generic tools reject a failed bundle and retained PASS tokens",async entry=>{
+    const data=await judged(),old=await prepare(data);
+    data.researchJudge.result.claims[1].verdict="FAIL";
+    const {trackToolExecution}=await import("./maintenance-tools");
+    const server=trackToolExecution((await import("./safe-edit-server")).createSafeEditMcpServer({read:true,write:false,label:actor,scopes:["vault:read","vault:edit"]}));
+    const [a,b]=InMemoryTransport.createLinkedPair(),client=new Client({name:"c1-all-or-hold",version:"1"});
+    await server.connect(b);await client.connect(a);
+    try{
+      const source=old.previews.find(x=>x.kind==="source_intake")!;
+      const response=await client.callTool({name:entry==="prepare"?"prepare_canonical_writeback":"apply_canonical_writeback",
+        arguments:entry==="prepare"?data:{input:data,planId:old.planId,authorizations:[{operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash}]}});
+      expect(response.isError).not.toBe(true);
+      const outer=JSON.parse((response.content as {text:string}[])[0].text),p=JSON.parse(outer.result.split("\n").slice(1,-1).join("\n"));
+      expect(p.researchJudge.decision).toBe("FAIL");
+      if(entry==="prepare")expect(p.previews.map((x:{kind:string})=>x.kind)).toEqual(["source_intake"]);
+      else expect(p.receipts).toHaveLength(1);
+      const recipe=(await plan()).safeEditWorkflow!.steps.find(x=>x.kind==="structured_claim")!.safeEditRequest!;
+      const token=old.previews.find(x=>x.kind==="structured_claim")!;
+      for(const [name,args] of [
+        ["create_note",{operationId:recipe.operationId,path:recipe.path,reason:recipe.reason,content:recipe.change.content}],
+        ["apply_edit",{operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash}],
+        ["apply_canonical_writeback",{input:data,planId:old.planId,authorizations:old.previews.map(x=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}))}]
+      ] as const)expect((await client.callTool({name,arguments:args})).isError).toBe(true);
+      expect((await journal()).filter(x=>x.status==="written")).toHaveLength(entry==="prepare"?0:1);assertProtected();
+    }finally{await client.close();await server.close();}
+  });
+  it.each([
+    ["HOLD",false],["FAIL",false],["HOLD",true],["FAIL",true]
+  ] as const)("C1 All-or-Hold: %s submitted directly at apply revokes old generic PASS authority (Source saved=%s)",async(verdict,sourceSaved)=>{
+    const data=await judged(),old=await prepare(data),source=old.previews.find(x=>x.kind==="source_intake")!;
+    const engine=await import("../safe-edit/engine");
+    if(sourceSaved)engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    const historicalSource=sourceSaved?(await journal()).find(x=>x.id===source.operationId):null;
+    data.researchJudge.result.claims[1].verdict=verdict;
+    const saved=await (await import("./canonical-writeback")).applyCanonicalWriteback({input:data,planId:old.planId,
+      authorizations:sourceSaved?[]:[{operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash}]},actor);
+    expect(saved.researchJudge?.decision).toBe(verdict);expect(saved.receipts).toHaveLength(sourceSaved?0:1);
+    expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(old.planId)).toMatchObject({decision:verdict,expiresAt:0});
+    for(const token of old.previews.filter(x=>x.kind!=="source_intake")){
+      expect(()=>engine.apply({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
+      expect(fs.existsSync(path.join(vault,token.path))).toBe(false);
+    }
+    expect((await journal()).filter(x=>x.status==="written")).toHaveLength(1);
+    if(historicalSource)expect(await journal()).toContainEqual(historicalSource);
+    const sourceBytes=fs.readFileSync(path.join(vault,source.path)),sourceReceipt=engine.status(source.operationId,actor).receipt;
+    const fresh=await judged(),next=await prepare(fresh);expect(next.previews).toHaveLength(3);
+    expect((await apply(fresh,next)).status).toBe("saved_verified");
+    expect(fs.readFileSync(path.join(vault,source.path))).toEqual(sourceBytes);expect(engine.status(source.operationId,actor).receipt).toEqual(sourceReceipt);assertProtected();
+  });
+  it("C1 All-or-Hold: refused old full token set still revokes authority after a non-PASS apply",async()=>{
+    const data=await judged(),p=await prepare(data);data.researchJudge.result.review.verdict="FAIL";
+    await expect(apply(data,p)).rejects.toThrow(/Authorization/);
+    const gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
+    expect(gate).toMatchObject({decision:"FAIL",expiresAt:0});
+    const token=p.previews.find(x=>x.kind==="structured_claim")!,engine=await import("../safe-edit/engine");
+    expect(()=>engine.apply({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
+    expect((await journal()).some(x=>x.status==="written")).toBe(false);assertProtected();
+  });
+  it.each(["other actor","wrong intake"])("C1 All-or-Hold: %s cannot revoke an unrelated admitted authority",async mismatch=>{
+    const data=await judged(),p=await prepare(data),gates=await import("../safe-edit/research-judge-gate"),before=gates.currentJudgeGate(p.planId);
+    data.researchJudge.result.review.verdict="FAIL";
+    await expect((await import("./canonical-writeback")).applyCanonicalWriteback({input:data,planId:mismatch==="wrong intake"?"IN-0000000000000000":p.planId,authorizations:[]},
+      mismatch==="other actor"?"different-actor":actor)).rejects.toThrow(mismatch==="other actor"?/another OAuth client/:/Plan identity mismatch/);
+    expect(gates.currentJudgeGate(p.planId)).toEqual(before);expect((await journal()).some(x=>x.status==="written")).toBe(false);assertProtected();
+  });
   it("C1 integration: settled maintenance rejects Judge, Source-only and stale Safe Edit tokens without DB/Vault writes",async()=>{
     const data=await judged(),p=await prepare(data);
     const maintenance=await import("../maintenance");expect(maintenance.registerServer()).toBe(true);
@@ -512,7 +636,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     data.researchJudge.result.review.references[0].quote="[Source lines 1-2]";
     expect((await prepare(data)).researchJudge?.reasons).toContain("judge_locator_quote_unbound");assertProtected();
   });
-  it.each(["RI001-JUDGE-2","RI001-JUDGE-3"])("F1/F2 %s packets/gates cannot authorize pending writes after upgrade",async version=>{
+  it.each(["RI001-JUDGE-2","RI001-JUDGE-3","RI001-JUDGE-4"])("F1/F2 %s packets/gates cannot authorize pending writes after upgrade",async version=>{
     const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine"),gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
     // Existing internal journal API, not SQL/receipt fabrication: emulate an
     // old server's admission contract while retaining the real preview rows.

@@ -9,7 +9,9 @@ import {M2_POLICY,m2VaultReadDeps} from "./research-decision-v2";
 import {splitFrontmatter} from "./markdown";
 import {planInvestmentWriteback,type WritebackInput} from "./investment-writeback-router";
 
-export const JUDGE_VERSION="RI001-JUDGE-4";
+// v4 apply could report a newer non-PASS without revoking an earlier generic
+// PASS gate. Invalidate pending v4 authority; historical bytes/receipts stay put.
+export const JUDGE_VERSION="RI001-JUDGE-5";
 export const judgeHash=(s:string)=>createHash("sha256").update(s).digest("hex");
 export function stableJudgeJson(value:unknown):string {
   if(Array.isArray(value))return "["+value.map(stableJudgeJson).join(",")+"]";
