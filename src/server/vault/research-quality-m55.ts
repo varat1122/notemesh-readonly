@@ -143,7 +143,7 @@ function numericMaterialClauses(review:ThaiResearchReview):Array<{
 // Only an adjacent negation of the exact English "verified fact" phrase is
 // exempt from this mechanical tripwire. An affirmative occurrence anywhere
 // else in the same review still triggers; this is not semantic verification.
-const negatedVerifiedFactPrefix=/(?:ไม่ใช่|ไม่ถือ(?:ว่า)?เป็น|ยังไม่ใช่|มิใช่|ไม่ได้เป็น|not(?:\s+(?:an?|the))?|(?:is|are|was|were)\s+not(?:\s+(?:an?|the))?|isn['’]t(?:\s+(?:an?|the))?|cannot\s+be(?:\s+(?:an?|the))?|does\s+not\s+constitute(?:\s+(?:an?|the))?)\s*$/iu;
+const negatedVerifiedFactPrefix=/(?:ไม่ใช่|ไม่ถือ(?:ว่า)?เป็น|ยังไม่ใช่|มิใช่|ไม่ได้เป็น|\b(?:not(?:\s+(?:an?|the))?|(?:is|are|was|were)\s+not(?:\s+(?:an?|the))?|isn['’]t(?:\s+(?:an?|the))?|cannot\s+be(?:\s+(?:an?|the))?|does\s+not\s+constitute(?:\s+(?:an?|the))?))\s*$/iu;
 function unnegatedVerifiedFact(text:string):boolean{
   return [...text.matchAll(/\bverified fact\b/giu)].some(match=>{
     const preceding=text.slice(Math.max(0,(match.index??0)-80),match.index);
@@ -200,8 +200,11 @@ export function validateResearchM55(classification:ResearchClassification,review
     /(?:[+-]?\d+(?:[.,]\d+)?\s*%|\b(?:FY|CY|Q)[ -]?\d{1,4}\b)/iu.test(sourceText));
   if(guidanceInSubmittedText&&!review.claimAssessments?.length)
     issues.push("source_text_guidance_assessment_missing");
-  const assertedFactText=[review.headlineTh,review.whatChangedTh,review.mechanismTh,
-    review.thesisImplicationTh].join(" ");
+  // Do not allow a negation at the end of one review section to excuse an
+  // affirmative "Verified Fact" at the start of a different section.
+  const assertedFactSections=[review.headlineTh,review.whatChangedTh,review.mechanismTh,
+    review.thesisImplicationTh];
+  const assertedFactText=assertedFactSections.join(" ");
   const quantified=numericMaterialClauses(review);
   if(quantified.length&&!review.claimAssessments?.length)
     issues.push("material_numeric_claim_assessment_missing");
@@ -227,7 +230,7 @@ export function validateResearchM55(classification:ResearchClassification,review
       !explicitlyQualified.test(c.text)))
       issues.push("unresolved_numeric_claim_lacks_attribution");
   }
-  const explicitConfirmation=/(?:ยืนยัน(?:แล้ว|ได้)ว่า|พิสูจน์แล้วว่า|ตรวจสอบกับเอกสารต้นฉบับแล้ว|เป็นข้อเท็จจริงว่า|(?:officially )?confirmed by (?:issuer|company)|ต้องปรับ(?:เพิ่ม|ลด)(?:ทันที)?\s*(?:EPS|กำไร))/iu.test(assertedFactText)||unnegatedVerifiedFact(assertedFactText);
+  const explicitConfirmation=/(?:ยืนยัน(?:แล้ว|ได้)ว่า|พิสูจน์แล้วว่า|ตรวจสอบกับเอกสารต้นฉบับแล้ว|เป็นข้อเท็จจริงว่า|(?:officially )?confirmed by (?:issuer|company)|ต้องปรับ(?:เพิ่ม|ลด)(?:ทันที)?\s*(?:EPS|กำไร))/iu.test(assertedFactText)||assertedFactSections.some(unnegatedVerifiedFact);
   if(explicitConfirmation&&!review.claimAssessments?.length)
     issues.push("explicit_verified_claim_requires_assessment");
   for(const claim of review.claimAssessments??[]){
@@ -259,7 +262,7 @@ export function validateResearchM55(classification:ResearchClassification,review
       issues.push("thesis_conclusion_exceeds_evidence");
   }
   if(review.claimAssessments?.some(c=>c.resolution==="unresolved")&&
-     (/(?:ยืนยัน(?:แล้ว|ได้)ว่า|พิสูจน์แล้วว่า|เป็นข้อเท็จจริงว่า|(?:officially )?confirmed by (?:issuer|company)|ต้องปรับ(?:เพิ่ม|ลด)(?:ทันที)?)/iu.test(assertedFactText)||unnegatedVerifiedFact(assertedFactText)))
+     (/(?:ยืนยัน(?:แล้ว|ได้)ว่า|พิสูจน์แล้วว่า|เป็นข้อเท็จจริงว่า|(?:officially )?confirmed by (?:issuer|company)|ต้องปรับ(?:เพิ่ม|ลด)(?:ทันที)?)/iu.test(assertedFactText)||assertedFactSections.some(unnegatedVerifiedFact)))
     issues.push("unresolved_claim_asserted_as_verified");
   return [...new Set(issues)];
 }

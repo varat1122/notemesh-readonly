@@ -83,6 +83,28 @@ describe("M5.5 pre-write research contract",()=>{
     expect(validateResearchM55(memory,asserted))
       .toContain("explicit_verified_claim_requires_assessment");
   });
+  it("does not let a negator in one section excuse a claim in a different section",()=>{
+    const split={...review,headlineTh:"บทวิเคราะห์ฉบับนี้ไม่ใช่",
+      whatChangedTh:"Verified Fact เป็นข้อความยืนยันที่ยังไม่มีหลักฐานต้นฉบับรองรับ"};
+    expect(validateResearchM55(memory,split))
+      .toContain("explicit_verified_claim_requires_assessment");
+    const unresolved={entity:"MU",metric:"document-status",period:"2026",unit:"text",
+      competingValues:["unverified"],resolution:"unresolved" as const,conclusion:"no_change" as const};
+    expect(validateResearchM55(memory,{...split,claimAssessments:[unresolved]}))
+      .toContain("unresolved_claim_asserted_as_verified");
+  });
+  it("does not treat the ending of a different English word as the standalone negator not",()=>{
+    const ambiguous={...review,thesisImplicationTh:
+      "ข้อความกล่าวว่า cannot Verified Fact โดยไม่ให้หลักฐานต้นฉบับและต้องตรวจเพิ่มเติม"};
+    expect(validateResearchM55(memory,ambiguous))
+      .toContain("explicit_verified_claim_requires_assessment");
+  });
+  it("retains a valid English denial at the phrase boundary",()=>{
+    const denial={...review,thesisImplicationTh:
+      "ข้อความนี้ This cannot be a verified fact และต้องขอเอกสารประกอบเพิ่มเติม"};
+    expect(validateResearchM55(memory,denial))
+      .not.toContain("explicit_verified_claim_requires_assessment");
+  });
   it("requires an AI claim decision when submitted guidance is mislabeled as reported_fact",()=>{
     const renamed={...memory,sourceKind:"issuer_release",contentTypes:["reported_fact"]};
     const original="MU FY2027 revenue guidance +20% according to source A; source B reports -20%.";
