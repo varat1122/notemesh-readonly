@@ -157,8 +157,7 @@ describe("RI-001 canonical Review discovery and intake-bound assembly",()=>{
     expect((await pack("TSMC",{intakeId:TSMC})).contextBundles)
       .toEqual([expect.objectContaining({status:"HOLD",reason:"create_receipt_unverified"})]);
   });
-  it.each(["written_audit_missing","written_audit_mismatched_hash","forged_approval_row"] as const)
-    ("RC-01: HOLDs missing or inconsistent authoritative journal event: %s",async fault=>{
+  it.each(["written_audit_missing","written_audit_mismatched_hash","forged_approval_row"] as const)("RC-01: HOLDs missing or inconsistent authoritative journal event: %s",async fault=>{
       const target=await saved("TSMC",TSMC,"2026-11-02");
       const id="ILK-SYNTH-RI001-AUDIT";
       await appendSyntheticReview(target.reviewPath,id);
