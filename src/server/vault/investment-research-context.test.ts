@@ -61,6 +61,117 @@ describe("RI-001 canonical Review discovery and intake-bound assembly",()=>{
     expect(p.contextBundles).toEqual([expect.objectContaining({intakeId:TSMC,reviewPath:target.reviewPath,sourcePath:target.sourcePath,
       status:"BOUND_SOURCE_REVIEW",eventDate:null,publishedAt:"2026-11-02",economicEventEquivalence:"not_established",primaryVerification:"not_performed"})]);
   });
+  async function appendSyntheticReview(path:string,id:string){
+    const {preview,apply}=await import("../safe-edit/engine");
+    const p=preview({operationId:id,path,reason:"Synthetic receipted Review appendix",change:{
+      kind:"append",heading:"Research analysis",date:"2026-11-07",
+      content:"Synthetic duplicate context only. No verified primary claims or independent evidence increment."
+    }},"oauth:ri-fixture");
+    apply({operationId:id,previewToken:p.previewToken,expectedHash:p.beforeHash},"oauth:ri-fixture");
+  }
+  it("binds a Source to a Review through create + two receipted appends without upgrading trust",async()=>{
+    const target=await saved("TSMC",TSMC,"2026-11-02");
+    await appendSyntheticReview(target.reviewPath,"ILK-SYNTH-RI001-APPEND-A");
+    await appendSyntheticReview(target.reviewPath,"ILK-SYNTH-RI001-APPEND-B");
+    const {db}=await import("../db");
+    const before=db().prepare("SELECT total_changes() AS n").get() as {n:number};
+    const rawBefore=fs.readFileSync(path.join(vault,target.reviewPath),"utf8");
+    const p=await pack("TSMC",{intakeId:TSMC});
+    const bundle=p.contextBundles.find(b=>b.intakeId===TSMC);
+    const creationId="ICW-"+sha(["canonical_review",target.reviewPath,sha(target.review)].join("\n")).slice(0,32);
+    expect(bundle).toMatchObject({status:"BOUND_SOURCE_REVIEW",reviewReceiptId:creationId,
+      sourcePath:target.sourcePath,primaryVerification:"not_performed",economicEventEquivalence:"not_established"});
+    expect(p.items.find(item=>item.path===target.reviewPath)?.researchTrust?.comparator_eligible).toBe(false);
+    expect(fs.readFileSync(path.join(vault,target.reviewPath),"utf8")).toBe(rawBefore);
+    expect(db().prepare("SELECT total_changes() AS n").get()).toEqual(before);
+  });
+  it.each(["append_receipt_removed","append_status_interrupted","append_receipt_tampered",
+    "external_edit_after_append","replace_after_append"] as const)("holds an invalid or unsupported Review revision chain: %s",async fault=>{
+      const target=await saved("TSMC",TSMC,"2026-11-02");
+      const id="ILK-SYNTH-RI001-APPEND-ONE";
+      await appendSyntheticReview(target.reviewPath,id);
+      const {db}=await import("../db");
+      if(fault==="append_receipt_removed")
+        db().prepare("DELETE FROM safe_edit_operations WHERE id=?").run(id);
+      if(fault==="append_status_interrupted")
+        db().prepare("UPDATE safe_edit_operations SET status='writing' WHERE id=?").run(id);
+      if(fault==="append_receipt_tampered")
+        db().prepare("UPDATE safe_edit_operations SET receipt=json_set(receipt,'$.readback','pending') WHERE id=?").run(id);
+      if(fault==="external_edit_after_append"){
+        const now=fs.readFileSync(path.join(vault,target.reviewPath),"utf8");
+        await seed(target.reviewPath,now+"\nUnreceipted synthetic change.");
+      }
+      if(fault==="replace_after_append"){
+        const {preview,apply}=await import("../safe-edit/engine");
+        const op="RI001-SYNTH-REPLACE";
+        const p=preview({operationId:op,path:target.reviewPath,reason:"Synthetic allowed-body-replace test",change:{
+          kind:"replace",oldText:"Synthetic unverified cash conversion discussion.",
+          newText:"Synthetic altered cash conversion interpretation."
+        }},"oauth:ri-fixture");
+        apply({operationId:op,previewToken:p.previewToken,expectedHash:p.beforeHash},"oauth:ri-fixture");
+      }
+      const p=await pack("TSMC",{intakeId:TSMC});
+      expect(p.contextBundles).toEqual([expect.objectContaining({
+        status:"HOLD",reason:"create_receipt_unverified",reviewReceiptId:null,sourceReceiptId:null
+      })]);
+      expect(p.items.map(x=>x.path)).not.toContain(target.sourcePath);
+    });
+  const receiptTamperCases=[
+    ["approval","admin:forged"],
+    ["review",{verification:"verified"}],
+    ["remoteSync","verified"],
+    ["sync","verified"],
+    ["mobileSync","verified"],
+    ["backup","other.md"],
+    ["writtenAt","2000-01-01T00:00:00.000Z"],
+    ["unexpectedAuthority","verified"],
+  ] as const;
+  it.each(receiptTamperCases)("RC-01: HOLDs append receipt %s tamper",async(field,value)=>{
+    const target=await saved("TSMC",TSMC,"2026-11-02");
+    const id="ILK-SYNTH-RI001-METADATA";
+    await appendSyntheticReview(target.reviewPath,id);
+    const {db}=await import("../db");
+    db().prepare("UPDATE safe_edit_operations SET receipt=json_set(receipt,?,json(?)) WHERE id=?")
+      .run("$."+field,JSON.stringify(value),id);
+    const p=await pack("TSMC",{intakeId:TSMC});
+    expect(p.contextBundles).toEqual([expect.objectContaining({
+      status:"HOLD",reason:"create_receipt_unverified",reviewReceiptId:null,sourceReceiptId:null
+    })]);
+    expect(p.items.map(x=>x.path)).not.toContain(target.sourcePath);
+  });
+  it.each(receiptTamperCases)("RC-01: HOLDs creation receipt %s tamper",async(field,value)=>{
+    const target=await saved("TSMC",TSMC,"2026-11-02");
+    await appendSyntheticReview(target.reviewPath,"ILK-SYNTH-RI001-APPEND-CREATE-CHECK");
+    const {db}=await import("../db");
+    const id="ICW-"+sha(["canonical_review",target.reviewPath,sha(target.review)].join("\n")).slice(0,32);
+    db().prepare("UPDATE safe_edit_operations SET receipt=json_set(receipt,?,json(?)) WHERE id=?")
+      .run("$."+field,JSON.stringify(value),id);
+    expect((await pack("TSMC",{intakeId:TSMC})).contextBundles)
+      .toEqual([expect.objectContaining({status:"HOLD",reason:"create_receipt_unverified"})]);
+  });
+  it("RC-01: Source create-only receipt cannot claim verified remote delivery",async()=>{
+    const target=await saved("TSMC",TSMC,"2026-11-02");
+    const {db}=await import("../db");
+    const id="ICW-"+sha(["source_intake",target.sourcePath,sha(target.source)].join("\n")).slice(0,32);
+    db().prepare("UPDATE safe_edit_operations SET receipt=json_set(receipt,'$.remoteSync','verified') WHERE id=?").run(id);
+    expect((await pack("TSMC",{intakeId:TSMC})).contextBundles)
+      .toEqual([expect.objectContaining({status:"HOLD",reason:"create_receipt_unverified"})]);
+  });
+  it.each(["written_audit_missing","written_audit_mismatched_hash","forged_approval_row"] as const)("RC-01: HOLDs missing or inconsistent authoritative journal event: %s",async fault=>{
+      const target=await saved("TSMC",TSMC,"2026-11-02");
+      const id="ILK-SYNTH-RI001-AUDIT";
+      await appendSyntheticReview(target.reviewPath,id);
+      const {db}=await import("../db");
+      if(fault==="written_audit_missing")
+        db().prepare("DELETE FROM safe_edit_events WHERE operation_id=? AND event='written'").run(id);
+      if(fault==="written_audit_mismatched_hash")
+        db().prepare("UPDATE safe_edit_events SET detail=json_set(detail,'$.afterHash','tampered') WHERE operation_id=? AND event='written'").run(id);
+      if(fault==="forged_approval_row")
+        db().prepare("UPDATE safe_edit_operations SET approval=?,receipt=json_set(receipt,'$.approval',?) WHERE id=?")
+          .run("admin:forged","admin:forged",id);
+      expect((await pack("TSMC",{intakeId:TSMC})).contextBundles)
+        .toEqual([expect.objectContaining({status:"HOLD",reason:"create_receipt_unverified"})]);
+    });
   it("keeps different TSMC events on the same URL separate and supports explicit intake scope",async()=>{
     const first=await saved("TSMC",OLD,"2026-09-01","2026-08-31");
     const second=await saved("TSMC",TSMC,"2026-11-02","2026-11-01");
