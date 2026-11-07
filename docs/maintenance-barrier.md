@@ -61,54 +61,92 @@ quiescence **and** a verified record on disk; otherwise `drain_failed`
 "not proven quiescent": work still running at the deadline may complete a Vault
 write or an `ob`/remote step it had already started; restart, then review.
 
-## Separate processes
+## Separate processes: one enforcement mechanism
 
 The record, an unfinished resume marker (`maintenance-resume.json`) or
-`NOTEMESH_MAINTENANCE=1` is maintenance for every process.
+`NOTEMESH_MAINTENANCE=1` is maintenance for every process. Writers outside the
+server's own request/tool tracking (price stores in any process, the price
+CLI, Drive calls, operator scripts) all go through the same three rules:
 
-Price writers (the server's collector and the separate price CLI) are
-coordinated across processes by announce-then-check: `refreshPrices` creates
-and fsyncs a lock in `DATA_DIR/maintenance-writers/` BEFORE checking
-maintenance, keeps it until its last write, and every persistent price write
-(lease acquire/release, bars, failure records, Drive upload) re-checks
-maintenance. A drain writes its record BEFORE looking for locks and waits for
-every lock (stale ones included: `staleWriterLocks`), so a writer either sees
-maintenance and stops or is waited for; a writer admitted before maintenance
-cannot write after `active`. The only possible post-`active` effect of a racing
-writer is creating and removing its own lock file — never DB or Vault data.
+1. **Durable openness.** A writer treats the system as closed unless there is
+   no record, no marker AND that absence is durable: it fsyncs `DATA_DIR`
+   before every write and refuses if that fails. The server does the same once
+   at boot (`resolveServerBoot`) and stays closed until restart if it fails.
+2. **Announced writers, integrity-checked inventory.** A writer publishes a
+   lock in `DATA_DIR/maintenance-writers/` (atomic tmp+link, fsync) BEFORE it
+   checks maintenance; a drain records maintenance BEFORE reading the
+   inventory. A writable on-disk `PriceStore` is a writer for its whole life
+   (constructor to `close()`), however it was opened. The inventory has a
+   sentinel id; the server remembers it and the directory identity when it
+   registers (before admitting its first request). A missing, replaced,
+   corrupt or unreadable inventory is `uncertain` — the drain ends
+   `drain_failed` at once (`writerInventoryIntact: false`), never "zero
+   writers". A writer whose own lock or inventory vanished stops writing.
+   Stale locks (dead pid/start) still block a drain; the next normal server
+   start clears locks whose process is verifiably dead.
+3. **Checks under the target's lock.** Every `PriceStore` write (lease,
+   instrument, bars, failure records, schema) runs in `BEGIN IMMEDIATE` and
+   re-verifies rules 1–2 inside the transaction; statements that can write are
+   refused outside that path (`unfenced_price_write`), including via
+   `store.db`. After quiescence the drain takes and releases the write lock of
+   `app.sqlite` and `prices.sqlite` (`appDbBarrier`, `priceDbBarrier`): a
+   transaction already open is waited for (a non-empty rollback journal is
+   never touched; at the deadline it is `drain_failed`). Remote Drive
+   mutations (folder creation, upload) are registered as in-flight work and
+   checked at one HTTP choke point (`drive-http.ts`) synchronously before
+   `fetch()` — no await between check and initiation.
 
-The `ob` wrapper (`ob-readonly.mjs`) refuses to launch (exit 75).
-`account-issuer-cleanup.mjs --apply` is a privileged operator mutation and is
-**not** part of the strict window: it is refused during maintenance with no
-override; an operator id or variable grants no write authority. One replica
-only (single volume).
+`drain_failed` is not a strict no-mutation window: work still in flight at the
+deadline may complete. A Drive request already sent cannot be recalled; the
+drain waits for it (`pendingRemote`; in the CLI, the writer lock) and its 25 s
+timeout is below the 30 s drain deadline.
 
-## Resume (owner, out of band, at boot)
+The `ob` wrapper (`ob-readonly.mjs`) refuses to launch (exit 75), also when
+`DATA_DIR` cannot be fsynced. `account-issuer-cleanup.mjs --apply` is a
+privileged operator mutation and is **not** part of the strict window: it is
+refused during maintenance with no override (an operator id or variable grants
+no write authority), requires a durable open state, and re-checks inside its
+`BEGIN IMMEDIATE`. One replica only (single volume).
 
-Never an HTTP action. Rules, in order: `NOTEMESH_MAINTENANCE=1` always wins;
-only an exact `NOTEMESH_MAINTENANCE_RESUME=<id>`; a record that is not `active`
-also needs `NOTEMESH_MAINTENANCE_RESUME_UNDRAINED=<id>`; an id already committed
-to `maintenance-history/` is a replay and is refused. A stale value with no
-record does nothing.
+## Resume (owner, out of band, server boot only)
 
-Protocol, each step durable before the next: (1) write the resume marker
-`maintenance-resume.json` (O_EXCL, fsync) holding the record; (2) remove
-`maintenance.json` and fsync; (3) write `maintenance-history/<id>.json`; (4)
-remove the marker and fsync — the only step that opens the gate. Every process
-treats the marker as maintenance. Any failure keeps (or restores) the marker
-and latches this process closed until restart; a crash leaves the marker, so a
-plain restart stays closed and only the same exact id (and acknowledgement)
-completes the remaining steps.
+Never an HTTP action, and never performed by a CLI or any other process,
+whatever its environment: only the server's boot step (its first request gate)
+resumes. Rules, in order: `NOTEMESH_MAINTENANCE=1` always wins; only an exact
+`NOTEMESH_MAINTENANCE_RESUME=<id>`; an id already committed to
+`maintenance-history/` is a replay; another live server registered on the
+volume (e.g. an adopter whose record write failed) refuses, even with an
+acknowledgement; a record whose owner process (pid + start time) is still
+alive refuses. Quiescence counts as proven only for a settled `active` written
+by a known owner that has exited, with an intact inventory; anything else — not
+`active`, no owner (records from before ownership), missing/unreadable
+inventory — also needs `NOTEMESH_MAINTENANCE_RESUME_UNDRAINED=<id>`. A stale
+value with no record does nothing.
+
+Intent, completion and permission to reopen are separate: (1) publish the
+intent marker `maintenance-resume.json` (atomic, fsync); (2) remove
+`maintenance.json`, fsync; (3) publish `maintenance-history/<id>.json`
+(verified completion), fsync; (4) remove the marker, fsync. Permission to
+reopen is not step 4 itself: every process verifies durable openness (rule 1)
+before it writes. So any failure — including the double failure "marker
+removed, directory fsync fails, marker cannot be restored" — keeps this
+process closed until restart and every other process closed until the
+filesystem confirms the state; a crash leaves the marker (or a durable,
+committed resume). Only the same exact id completes an interrupted resume.
 
 ## Health
 
 `/api/health` in maintenance reports this process first: `process.phase`
 (`draining`, `settled`, `booted_in_maintenance_started_nothing`), live
-`pendingWork`/`untrackedRequests`, `persistUncertain`, `resumeBlocked`.
-`drainedByThisProcess` is true only after this process settled `active` with a
-verified record. A record adopted from an earlier process is first rewritten
-`draining` (its saved report dropped) before anything is answered; a saved
-report is labelled `earlierProcessDrain`, never as this process's evidence.
+`pendingWork`/`untrackedRequests`, `persistUncertain`, `heldClosed`
+(`resume_incomplete`, `open_state_not_durably_verified`,
+`writer_inventory_unavailable`). `drainedByThisProcess`/`quiescenceProven` are
+true only after this process settled `active` with a verified record.
+`recordOwner` says whose drain the record describes (`this_process`,
+`other_live_process`, `earlier_process`, `unknown`). A record adopted from an
+earlier process is rewritten `draining` with this process as owner before
+anything is answered; a saved report is labelled `earlierProcessDrain`, never
+as this process's evidence.
 
 ## First cutover (not performed, not authorized here)
 
@@ -139,5 +177,16 @@ one is expected.
 - A handler that throws in an unwrapped router (pages, `/_server`) leaves its
   request pending: the drain then fails closed (`drain_failed`), never falsely
   `active`.
+- Writers outside the protocol: a raw SQLite client (e.g. the `sqlite3` CLI)
+  or any code that opens `app.sqlite`/`prices.sqlite` without `PriceStore`/
+  `db()`, a manually launched `ob`/`git` that bypasses the wrappers, or a
+  process in another PID namespace sharing the volume. The barrier waits for
+  their already-open transactions, but cannot stop a new unchecked one; they
+  are an operational limitation (single replica, no shell writers during
+  maintenance).
+- Process liveness is pid + start time in this PID namespace; without
+  `/proc` an existing pid counts as alive (fail closed).
+- The entrypoint's ownership decision reads the visible (not fsync-verified)
+  state; it only re-owns `DATA_DIR` when it is not writable.
 - CI uses isolated fixtures and the built server; it is not runtime evidence on
   staging.

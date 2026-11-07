@@ -22,6 +22,21 @@ const marker = () => path.join(root, "maintenance-resume.json");
 const id = "0f4c2a8e-1b2c-4d3e-8f9a-0b1c2d3e4f5a";
 const write = (state = "active", extra: Record<string, unknown> = {}) => fs.writeFileSync(record(),
   JSON.stringify({ version: 1, id, state, requestedAt: "2026-11-07T00:00:00.000Z", settledAt: null, drain: null, ...extra }));
+// Settled by an earlier server process that has exited, on a volume whose writer inventory exists
+// (extra fields are ignored by candidates that predate ownership).
+const writeOwned = (state = "active") => {
+  fs.mkdirSync(path.join(root, "maintenance-writers"), { recursive: true });
+  fs.writeFileSync(path.join(root, "maintenance-writers", ".inventory.json"), JSON.stringify({ version: 1, id: crypto.randomUUID() }));
+  write(state, { owner: { pid: 4_000_000, start: "0" } });
+};
+type M = typeof import("./maintenance") & { resolveServerBoot?: () => void; registerServer?: () => unknown };
+// The server's boot step and its registration before admitting requests, where the candidate has them.
+const boot = async () => {
+  const m = (await import("./maintenance")) as M;
+  m.resolveServerBoot?.();
+  return m;
+};
+const serving = async () => ((await import("./maintenance")) as M).registerServer?.();
 const onDisk = () => JSON.parse(fs.readFileSync(record(), "utf8"));
 const hash = (p: string) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -83,6 +98,7 @@ describe("M-HIGH-1 a price writer in another process", () => {
       const prices = path.join(root, "market-prices", "prices.sqlite");
       const atEntry = hash(prices);
       const d = await import("./maintenance-drain");
+      await serving();
       const settling = d.enterMaintenanceAndDrain({ timeoutMs: 8_000 });
       await sleep(400);
       // The other process still holds its lease: no false quiescence.
@@ -123,7 +139,7 @@ describe("M-HIGH-1 a price writer in another process", () => {
       .withMaintenanceWriter("price", run)).rejects.toThrow("maintenance_active");
     expect(injected).toBe(true);
     expect(run).not.toHaveBeenCalled();
-    expect(fs.readdirSync(path.join(root, "maintenance-writers"))).toEqual([]);
+    expect(fs.readdirSync(path.join(root, "maintenance-writers")).filter((n) => !n.startsWith("."))).toEqual([]);
   });
 
   it("racing price processes never produce a write after active", async () => {
@@ -134,6 +150,7 @@ describe("M-HIGH-1 a price writer in another process", () => {
     });
     await sleep(150);
     const d = await import("./maintenance-drain");
+    await serving();
     const settled = await d.enterMaintenanceAndDrain({ timeoutMs: 15_000 });
     const prices = path.join(root, "market-prices", "prices.sqlite");
     const atActive = fs.existsSync(prices) ? hash(prices) : "absent";
@@ -158,7 +175,8 @@ describe("M-HIGH-1 a price writer in another process", () => {
 });
 
 describe("M-MEDIUM-2 resume never opens the gate on a failed step", () => {
-  const fsyncFailAfterUnlink = (target: () => string) => {
+  // `after` narrows the fault to a protocol step (e.g. only once the history entry exists).
+  const fsyncFailAfterUnlink = (target: () => string, after: () => boolean = () => true) => {
     const open = fs.openSync, fsync = fs.fsyncSync, fds = new Map<number, string>();
     vi.spyOn(fs, "openSync").mockImplementation(((p: fs.PathLike, ...rest: unknown[]) => {
       const fd = (open as (...a: unknown[]) => number)(p, ...rest);
@@ -166,17 +184,17 @@ describe("M-MEDIUM-2 resume never opens the gate on a failed step", () => {
       return fd;
     }) as typeof fs.openSync);
     vi.spyOn(fs, "fsyncSync").mockImplementation((fd: number) => {
-      if (fds.get(fd) === root && !fs.existsSync(target())) throw Object.assign(Error("EIO: fsync"), { code: "EIO" });
+      if (fds.get(fd) === root && !fs.existsSync(target()) && after()) throw Object.assign(Error("EIO: fsync"), { code: "EIO" });
       return fsync(fd);
     });
   };
   it("a directory fsync failure after the record is unlinked keeps every process closed, and restart completes only with the exact id", async () => {
-    write();
+    writeOwned();
     process.env.NOTEMESH_MAINTENANCE_RESUME = id;
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "log").mockImplementation(() => {});
     fsyncFailAfterUnlink(record);
-    let m = await import("./maintenance");
+    let m = await boot();
     const { db } = await import("./db");
     expect(m.maintenanceActive()).toBe(true);
     expect(() => db()).toThrow(/Maintenance/);
@@ -190,24 +208,24 @@ describe("M-MEDIUM-2 resume never opens the gate on a failed step", () => {
     delete process.env.NOTEMESH_MAINTENANCE_RESUME;
     reset();
     vi.resetModules();
-    m = await import("./maintenance");
+    m = await boot();
     expect(m.maintenanceActive()).toBe(true);
     // Restart with the exact id: the interrupted resume completes.
     process.env.NOTEMESH_MAINTENANCE_RESUME = id;
     reset();
     vi.resetModules();
-    m = await import("./maintenance");
+    m = await boot();
     expect(m.maintenanceActive()).toBe(false);
     expect(fs.existsSync(record())).toBe(false);
     expect(fs.existsSync(marker())).toBe(false);
   });
   it("a failure while removing the resume marker restores it and keeps this process closed", async () => {
-    write();
+    writeOwned();
     process.env.NOTEMESH_MAINTENANCE_RESUME = id;
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "log").mockImplementation(() => {});
-    fsyncFailAfterUnlink(marker);
-    const m = await import("./maintenance");
+    fsyncFailAfterUnlink(marker, () => fs.existsSync(path.join(root, "maintenance-history", `${id}.json`)));
+    const m = await boot();
     expect(m.maintenanceActive()).toBe(true);
     expect(fs.existsSync(marker())).toBe(true);
   });
@@ -215,7 +233,7 @@ describe("M-MEDIUM-2 resume never opens the gate on a failed step", () => {
     fs.writeFileSync(marker(), "{broken");
     process.env.NOTEMESH_MAINTENANCE_RESUME = id;
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const m = await import("./maintenance");
+    const m = await boot();
     expect(m.maintenanceActive()).toBe(true);
   });
 });

@@ -4,7 +4,6 @@ import { z } from "zod";
 import { driveKey, driveAccessToken } from "./drive-auth.ts";
 import { googleBytes, googleJson } from "./drive-http.ts";
 import { PriceError } from "./model.ts";
-import { maintenanceActive } from "../maintenance.ts";
 import { CATALOGUE_LIMIT, unpackPriceCatalogue } from "./drive-catalogue.ts";
 
 export const DRIVE_DB_LIMIT = 4 * 1024 * 1024;
@@ -98,12 +97,11 @@ export class GoogleDriveArchives implements ArchiveRepository {
     const id = result.files[0].id; return { id, bytes: await this.get(id) };
   }
   async publish(bytes: Buffer) {
-    // Remote writes are persistent writes too: refused in maintenance, re-checked after every wait.
-    if (maintenanceActive()) throw new PriceError("maintenance_active");
+    // Remote writes (folder creation, upload) are checked at the HTTP choke
+    // point (drive-http.ts) immediately before each one is initiated.
     if (this.role === "priceArchive") unpackDriveArchive(bytes);
     else unpackPriceCatalogue(bytes);
     const folder = await this.folder(true);
-    if (maintenanceActive()) throw new PriceError("maintenance_active");
     const boundary = "investment-os-" + crypto.randomBytes(16).toString("hex");
     const metadata = { name: `${this.role}-${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID()}.${this.role === "priceArchive" ? "iop" : "ioc"}`,
       mimeType: "application/octet-stream", parents: [folder], appProperties: { [this.role]: this.role === "priceArchive" ? "v1" : "v2" } };

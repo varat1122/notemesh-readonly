@@ -35,6 +35,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Drain = typeof import("./maintenance-drain");
 // The reviewed candidate took { ownRequests }, the remediation { event }.
 const enter = (d: Drain, opts: Record<string, unknown>) => (d.enterMaintenanceAndDrain as (o: unknown) => Promise<{ id: string; state: string; drain: Record<string, unknown> | null }>)(opts);
+// Where the remediation added a server boot step / registration, use it (feature-detected).
+const serving = async () => ((await import("./maintenance")) as { registerServer?: () => unknown }).registerServer?.();
 async function wrap<A extends unknown[], R>(fn: (...a: A) => R): Promise<(...a: A) => R> {
   const m = (await import("./maintenance")) as Record<string, unknown>;
   return typeof m.tracked === "function" ? (m.tracked as (f: typeof fn) => typeof fn)(fn) : fn;
@@ -186,6 +188,7 @@ describe("R11 durable success only", () => {
     const { db } = await import("./db");
     db().prepare("INSERT INTO settings (key,value) VALUES ('before','1')").run();
     const d = await import("./maintenance-drain");
+    await serving();
     expect((await enter(d, { timeoutMs: 1_000 })).state).toBe("active");
     const size = fs.statSync(path.join(root, "app.sqlite")).size;
     expect(() => db().prepare("INSERT INTO settings (key,value) VALUES ('late','1')").run()).toThrow();
@@ -202,7 +205,11 @@ describe("R11 durable success only", () => {
 });
 
 describe("R12 resume order, precedence and replay", () => {
-  const boot = async () => (await import("./maintenance")).maintenanceStatus();
+  const boot = async () => {
+    const m = (await import("./maintenance")) as typeof import("./maintenance") & { resolveServerBoot?: () => void };
+    m.resolveServerBoot?.();
+    return m.maintenanceStatus();
+  };
   it("forced maintenance wins and keeps the record", async () => {
     write();
     process.env.NOTEMESH_MAINTENANCE = "1";

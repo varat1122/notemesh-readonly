@@ -25,10 +25,17 @@ const INDEX = 'account_issuer_accountId_uidx';
 // NOTEMESH_MAINTENANCE=1 exists, with no override: an operator id or variable
 // grants no write authority. Run it only outside maintenance, as its own
 // separately authorized procedure (app stopped, verified backup).
+// The absence of maintenance state must also be durable (DATA_DIR fsync), and
+// it is checked again inside the write transaction, under the database write
+// lock that a drain also takes after recording maintenance.
 function assertOutsideMaintenance(file) {
   let active = process.env.NOTEMESH_MAINTENANCE === '1';
+  const dir = path.dirname(path.resolve(file));
   for (const name of ['maintenance.json', 'maintenance-resume.json']) {
-    try { fs.lstatSync(path.join(path.dirname(path.resolve(file)), name)); active = true; } catch (e) { if (e?.code !== 'ENOENT') active = true; }
+    try { fs.lstatSync(path.join(dir, name)); active = true; } catch (e) { if (e?.code !== 'ENOENT') active = true; }
+  }
+  if (!active) {
+    try { const fd = fs.openSync(dir, 'r'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } } catch { active = true; }
   }
   if (active) throw Error('Maintenance is active: --apply is refused during the strict no-mutation window; run it only as a separately authorized procedure outside maintenance');
 }
@@ -77,6 +84,7 @@ export function cleanupAccountIssuer(file, { apply = false } = {}) {
 
     db.exec('BEGIN IMMEDIATE');
     try {
+      assertOutsideMaintenance(file);
       db.exec(`DROP INDEX "${INDEX}"`);
       db.exec('ALTER TABLE account DROP COLUMN issuer');
       const after = { counts: counts(), otherSchemaSha256: otherSchema(), accountColumns: columns() };

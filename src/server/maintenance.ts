@@ -24,11 +24,27 @@ import { env } from "./env.ts";
  * scope.
  *
  * Resume is never an HTTP action (authenticating writes sessions and runs auth
- * migrations): see resolveResumeAtBoot and docs/maintenance-barrier.md.
+ * migrations) and never a side effect of reading state: only the server's own
+ * boot step (resolveServerBoot) performs it. See docs/maintenance-barrier.md.
+ *
+ * One enforcement mechanism for every writer outside the server's own request
+ * and tool tracking (price stores, price CLI, Drive calls, operator scripts):
+ *   1. durable state: writers treat the system as closed unless there is no
+ *      record or resume marker AND that absence is durable (fsync verified);
+ *   2. announced writers: a writer registers in an integrity-checked
+ *      inventory before it checks maintenance; a drain treats a missing,
+ *      replaced, corrupt or unreadable inventory as uncertain, never as empty;
+ *   3. checks under the target's lock: every SQLite write re-checks
+ *      maintenance inside a write transaction, and a drain takes the same
+ *      write lock (a barrier) after recording maintenance — so no check can
+ *      be overtaken by a drain; remote mutations are checked at the single
+ *      HTTP choke point immediately before they are initiated.
  */
 
 export type MaintenanceState = "draining" | "active" | "drain_failed";
 export type DrainReport = Record<string, boolean | number>;
+/** The process that last owned the record: pid plus kernel start time (pid reuse safe). */
+export interface Owner { pid: number; start: string }
 export interface MaintenanceRecord {
   version: 1;
   id: string;
@@ -36,29 +52,36 @@ export interface MaintenanceRecord {
   requestedAt: string;
   settledAt: string | null;
   drain: DrainReport | null;
+  /** null for records written before ownership existed: never treated as proven quiescence. */
+  owner: Owner | null;
 }
 export interface MaintenanceStatus {
   active: boolean;
   /** "process": this process entered (or adopted) maintenance and drained its own workers.
    * "resume": a resume was started and has not been durably committed. */
   source: "process" | "file" | "resume" | "env" | null;
-  state: MaintenanceState | "unknown" | "resume_incomplete" | null;
+  state: MaintenanceState | "unknown" | "resume_incomplete" | "open_unverified" | null;
   id: string | null;
   requestedAt: string | null;
   settledAt: string | null;
   forcedByEnv: boolean;
   drain: DrainReport | null;
+  owner: Owner | null;
 }
 
 interface Connection { readonly open?: boolean; pragma(source: string, options?: { simple?: boolean }): unknown }
 interface Worker { timer: ReturnType<typeof setInterval> | undefined; busy: boolean }
 interface Holder { id: number; claimed: boolean; closed: boolean; deferred: boolean }
+interface InventoryIdentity { id: string; dev: number; ino: number }
 interface Registry {
   latched: MaintenanceRecord | null;
   persistUncertain: boolean;
-  /** A resume step failed in this process: stay closed until restart, whatever the files say. */
-  resumeBlocked: boolean;
+  /** Why this process stays closed until restart, whatever the files say (failed resume, unverifiable openness). */
+  heldClosed: string | null;
   bootResolved: boolean;
+  /** Writer inventory identity this process registered with; changes are evidence of loss. */
+  inventory: InventoryIdentity | null;
+  presenceLock: string | null;
   admitted: boolean;
   fenced: boolean;
   work: Map<number, string>;
@@ -74,7 +97,7 @@ interface Registry {
 
 const REGISTRY = Symbol.for("notemesh.maintenance.registry.v1");
 function freshRegistry(): Registry {
-  return { latched: null, persistUncertain: false, resumeBlocked: false, bootResolved: false, admitted: false, fenced: false,
+  return { latched: null, persistUncertain: false, heldClosed: null, bootResolved: false, inventory: null, presenceLock: null, admitted: false, fenced: false,
     work: new Map(), nextWork: 1, untracked: 0, own: new Set(), draining: null,
     bundles: new Set(), connections: new Set(), workers: new Map() };
 }
@@ -93,6 +116,36 @@ const recordPath = () => path.join(env.dataDir, "maintenance.json");
 const resumeMarkerPath = () => path.join(env.dataDir, "maintenance-resume.json");
 const historyDir = () => path.join(env.dataDir, "maintenance-history");
 const writersDir = () => path.join(env.dataDir, "maintenance-writers");
+const sentinelPath = () => path.join(writersDir(), ".inventory.json");
+
+function startOf(pid: number): string | null {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
+  } catch {
+    return null;
+  }
+}
+const SELF: Owner = { pid: process.pid, start: startOf(process.pid) ?? `t${Math.round(performance.timeOrigin)}` };
+export function selfOwner(): Owner {
+  return SELF;
+}
+/** Alive means the same pid with the same start time; without /proc, an existing pid counts as alive. */
+export function ownerAlive(o: Owner): boolean {
+  if (o.pid === SELF.pid && o.start === SELF.start) return true;
+  if (fs.existsSync("/proc/self/stat")) return startOf(o.pid) === o.start;
+  try {
+    process.kill(o.pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException)?.code !== "ESRCH";
+  }
+}
+function parseOwner(raw: unknown): Owner | null {
+  const o = raw as Partial<Owner> | null | undefined;
+  return o && Number.isSafeInteger(o.pid) && (o.pid as number) > 0 && typeof o.start === "string" && o.start.length <= 64 ?
+    { pid: o.pid as number, start: o.start } : null;
+}
 
 type Read = { present: false } | { present: true; record: MaintenanceRecord | null };
 
@@ -109,7 +162,7 @@ function parseRecord(raw: string): MaintenanceRecord | null {
       drain = r.drain;
     }
     return { version: 1, id: r.id, state: r.state as MaintenanceState, requestedAt: r.requestedAt,
-      settledAt: r.settledAt ?? null, drain };
+      settledAt: r.settledAt ?? null, drain, owner: parseOwner(r.owner) };
   } catch {
     return null;
   }
@@ -192,39 +245,70 @@ function readResumeMarker(): Marker {
   }
 }
 
-function writeExclusive(file: string, body: unknown) {
-  const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+/**
+ * Publish a complete, fsynced file under a new name (fails if it exists):
+ * readers — and a restart after a crash — never see it partly written.
+ */
+function publishExclusive(file: string, body: unknown) {
+  const tmp = path.join(path.dirname(file), `.tmp-${crypto.randomUUID()}`);
   try {
-    fs.writeFileSync(fd, JSON.stringify(body) + "\n");
-    fs.fsyncSync(fd);
+    const fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(body) + "\n");
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.linkSync(tmp, file);
   } finally {
-    fs.closeSync(fd);
+    fs.rmSync(tmp, { force: true });
   }
+  // One directory fsync makes the new name (and the temporary's removal) durable.
   fsyncDir(path.dirname(file));
 }
 
 /**
- * Consume NOTEMESH_MAINTENANCE_RESUME once per process.
+ * The server's boot step, run once by the request gate of the server process
+ * only (never by a CLI or any other importer, whose environment may carry the
+ * same variables). Two parts:
  *
- * Refusals, in order: NOTEMESH_MAINTENANCE=1 wins; only an exact id; a record
- * that never reached "active" also needs NOTEMESH_MAINTENANCE_RESUME_UNDRAINED
- * with the same id; an id already committed to maintenance-history is a replay.
+ * Resume (NOTEMESH_MAINTENANCE_RESUME). Refusals, in order: NOTEMESH_MAINTENANCE=1
+ * wins; only an exact id; another live server registered on this volume (an
+ * adopter whose own record write may have failed) refuses; a record whose
+ * owner process is still alive refuses; a record that is not "active", or
+ * has no owner (written before ownership existed), also needs
+ * NOTEMESH_MAINTENANCE_RESUME_UNDRAINED with the same id; an id already
+ * committed to maintenance-history is a replay. Steps, each durable before
+ * the next, with the gate closed throughout (the marker is maintenance for
+ * every process): (1) write the intent marker; (2) remove the record; (3)
+ * write the history entry; (4) remove the marker.
  *
- * Protocol (every step durable before the next; every process treats the
- * marker exactly like the record, so the gate is closed throughout):
- *   1. write maintenance-resume.json (the resume intent) with the record;
- *   2. remove maintenance.json;
- *   3. write maintenance-history/<id>.json (replay protection);
- *   4. remove the marker — the only step that opens the gate.
- * Any failure keeps or restores the marker and latches this process closed. A
- * crash leaves the marker, so the next boot is still in maintenance and the
- * same exact id (and acknowledgement) completes the remaining steps.
+ * Openness. With no record, marker or forced variable, the server still opens
+ * only after it has verified that this absence is durable (fsync of DATA_DIR).
+ * Every other writer process does the same before each write
+ * (assertWritePermitted). So an unconfirmed final resume step — even when the
+ * marker cannot be restored — opens no process until the filesystem confirms
+ * it; a crash before confirmation leaves the marker, or a durable absence.
+ * Any failure holds this process closed until restart.
  */
-function resolveResumeAtBoot(r: Registry) {
+export function resolveServerBoot() {
+  const r = registry();
   if (r.bootResolved) return;
   r.bootResolved = true;
   const wanted = process.env.NOTEMESH_MAINTENANCE_RESUME?.trim();
-  if (!wanted || r.latched) return;
+  if (wanted && !r.latched) resume(r, wanted);
+  if (!r.heldClosed && !r.latched && process.env.NOTEMESH_MAINTENANCE !== "1" &&
+      !readMaintenanceRecord().present && !readResumeMarker().present) {
+    try {
+      fsyncDir(env.dataDir);
+    } catch {
+      r.heldClosed = "open_state_not_durably_verified";
+      console.error("[maintenance] DATA_DIR could not be fsynced; the server stays closed until restart");
+    }
+  }
+}
+
+function resume(r: Registry, wanted: string) {
   const refuse = (why: string) => console.error(`[maintenance] resume refused (${why}); maintenance stays active`);
   if (process.env.NOTEMESH_MAINTENANCE === "1") return refuse("NOTEMESH_MAINTENANCE=1 takes precedence");
   const marker = readResumeMarker();
@@ -242,25 +326,35 @@ function resolveResumeAtBoot(r: Registry) {
     if (fs.existsSync(entry)) return refuse("id already resumed once (replay)");
     target = current.record;
   }
-  if (target.state !== "active" && process.env.NOTEMESH_MAINTENANCE_RESUME_UNDRAINED?.trim() !== wanted)
-    return refuse(`record is ${target.state}; NOTEMESH_MAINTENANCE_RESUME_UNDRAINED=<id> required`);
+  const others = otherLiveServers();
+  if (others !== null && others > 0) return refuse("another server process is live on this volume");
+  if (target.owner && !(target.owner.pid === SELF.pid && target.owner.start === SELF.start) && ownerAlive(target.owner))
+    return refuse("the process that owns the record is still running");
+  // Quiescence is proven only by a settled "active" of a known (now dead)
+  // owner with no other server that could have adopted it since.
+  const unproven = target.state !== "active" ? `record is ${target.state}` : !target.owner ? "record has no owner" :
+    others === null ? "writer inventory missing or unreadable; an adopting server cannot be ruled out" : null;
+  if (unproven && process.env.NOTEMESH_MAINTENANCE_RESUME_UNDRAINED?.trim() !== wanted)
+    return refuse(`${unproven}; NOTEMESH_MAINTENANCE_RESUME_UNDRAINED=<id> required`);
   const intent = { version: 1, id: wanted, record: target, startedAt: new Date().toISOString() };
   try {
-    if (!marker.present) writeExclusive(resumeMarkerPath(), intent);
+    if (!marker.present) publishExclusive(resumeMarkerPath(), intent);
     if (readMaintenanceRecord().present) fs.unlinkSync(recordPath());
     fsyncDir(env.dataDir);
     fs.mkdirSync(historyDir(), { recursive: true, mode: 0o700 });
-    if (!fs.existsSync(entry)) writeExclusive(entry, { ...target, resumedAt: intent.startedAt });
+    if (!fs.existsSync(entry)) publishExclusive(entry, { ...target, resumedAt: intent.startedAt });
+    fsyncDir(historyDir());
     fs.unlinkSync(resumeMarkerPath());
     fsyncDir(env.dataDir);
     if (readMaintenanceRecord().present || readResumeMarker().present) throw Error("maintenance state still present after resume");
     console.log(`[maintenance] resumed ${wanted} (recorded state ${target.state}); normal startup follows`);
   } catch (e) {
-    r.resumeBlocked = true;
+    r.heldClosed = "resume_incomplete";
     try {
-      if (!readResumeMarker().present) writeExclusive(resumeMarkerPath(), intent);
+      if (!readResumeMarker().present) publishExclusive(resumeMarkerPath(), intent);
     } catch {
-      // This process stays closed regardless (resumeBlocked).
+      // Best effort only. Safety does not depend on it: this process is held
+      // closed, and every other process must verify durable openness itself.
     }
     refuse(e instanceof Error ? e.message : String(e));
   }
@@ -268,16 +362,16 @@ function resolveResumeAtBoot(r: Registry) {
 
 export function maintenanceStatus(): MaintenanceStatus {
   const r = registry();
-  resolveResumeAtBoot(r);
   const forcedByEnv = process.env.NOTEMESH_MAINTENANCE === "1";
   const file = readMaintenanceRecord();
-  const resuming = r.resumeBlocked || readResumeMarker().present;
+  const resuming = readResumeMarker().present || r.heldClosed === "resume_incomplete";
+  const unverified = r.heldClosed !== null && !resuming;
   const record = r.latched ?? (file.present ? file.record : null);
-  const active = Boolean(r.latched) || file.present || resuming || forcedByEnv;
-  const source = r.latched ? "process" : file.present ? "file" : resuming ? "resume" : forcedByEnv ? "env" : null;
-  const state = record?.state ?? (file.present ? "unknown" : resuming ? "resume_incomplete" : forcedByEnv ? "active" : null);
+  const active = Boolean(r.latched) || file.present || resuming || unverified || forcedByEnv;
+  const source = r.latched ? "process" : file.present ? "file" : resuming || unverified ? "resume" : forcedByEnv ? "env" : null;
+  const state = record?.state ?? (file.present ? "unknown" : resuming ? "resume_incomplete" : unverified ? "open_unverified" : forcedByEnv ? "active" : null);
   return { active, source, state, id: record?.id ?? null, requestedAt: record?.requestedAt ?? null,
-    settledAt: record?.settledAt ?? null, forcedByEnv, drain: record?.drain ?? null };
+    settledAt: record?.settledAt ?? null, forcedByEnv, drain: record?.drain ?? null, owner: record?.owner ?? null };
 }
 
 /** The guard every worker and sync entry point checks. Never opens the DB. */
@@ -324,11 +418,12 @@ export function beginMaintenance(): MaintenanceRecord {
   const current = readMaintenanceRecord();
   if (current.present) {
     if (!current.record) {
-      r.latched = { version: 1, id: "unreadable-record", state: "draining", requestedAt: new Date().toISOString(), settledAt: null, drain: null };
+      r.latched = { version: 1, id: "unreadable-record", state: "draining", requestedAt: new Date().toISOString(), settledAt: null, drain: null, owner: SELF };
       r.persistUncertain = true;
       return r.latched;
     }
-    const adopted: MaintenanceRecord = { ...current.record, state: "draining", settledAt: null, drain: null };
+    // This process becomes the owner: the earlier owner's "active" is not evidence for work in flight here.
+    const adopted: MaintenanceRecord = { ...current.record, state: "draining", settledAt: null, drain: null, owner: SELF };
     let verified = false;
     try {
       verified = writeRecord(adopted);
@@ -340,7 +435,7 @@ export function beginMaintenance(): MaintenanceRecord {
     return adopted;
   }
   const record: MaintenanceRecord = { version: 1, id: crypto.randomUUID(), state: "draining",
-    requestedAt: new Date().toISOString(), settledAt: null, drain: null };
+    requestedAt: new Date().toISOString(), settledAt: null, drain: null, owner: SELF };
   let verified = false;
   try {
     verified = writeRecord(record);
@@ -443,68 +538,227 @@ export function bundleCount(): number {
   return registry().bundles.size;
 }
 
-// ---- cross-process writers ------------------------------------------------------
+// ---- one mechanism for writers outside request/tool tracking ------------------------
 
 function maintenanceRefusal(what: string) {
   return Object.assign(Error("maintenance_active"), { code: "maintenance_active", detail: `${what} refused` });
 }
 
-/** Per-write fence for writers outside this process's registry: any maintenance at all refuses. */
+/** Cheap check for writers in any process: any maintenance state at all refuses. */
 export function assertNoMaintenance(what: string) {
   if (maintenanceActive()) throw maintenanceRefusal(what);
 }
 
 /**
- * Run a writer that may live in another process (the price CLI) or outlive a
- * request. Announce-then-check: a lock file is created and fsynced in
- * DATA_DIR/maintenance-writers BEFORE maintenance is checked, and a drain
- * records maintenance BEFORE it looks for locks. So either the writer sees the
- * record and stops, or the drain sees the lock and waits — there is no
- * interleaving in which both proceed. The writer must also call
- * assertNoMaintenance at each persistent write; it keeps its lock until its
- * last write (lease release included) is done. A lock left by a crash keeps
- * every later drain from claiming quiescence until an operator removes it.
+ * The check a writer outside the server's request/tool tracking makes before
+ * EVERY persistent write (inside the target's write lock where there is one):
+ * no maintenance state, and that absence durably on disk. If DATA_DIR cannot
+ * be fsynced, openness is not proven and the write is refused.
  */
-export async function withMaintenanceWriter<T>(name: string, run: () => Promise<T> | T): Promise<T> {
-  // In steady maintenance nothing is created at all.
-  assertNoMaintenance(name);
-  const dir = writersDir();
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const lock = path.join(dir, `${name}.${process.pid}.${crypto.randomUUID()}.lock`);
-  writeExclusive(lock, { name, pid: process.pid, startedAt: new Date().toISOString() });
+export function assertWritePermitted(what: string) {
+  assertNoMaintenance(what);
   try {
-    assertNoMaintenance(name);
-    return await run();
-  } finally {
-    try {
-      fs.unlinkSync(lock);
-      fsyncDir(dir);
-    } catch {
-      // A lock that cannot be removed keeps every drain from claiming quiescence.
-    }
+    fsyncDir(env.dataDir);
+  } catch {
+    throw maintenanceRefusal(`${what} (maintenance state durability unverified)`);
   }
 }
 
-/** Writer locks visible to a drain; unknown state counts as a held lock. */
-export function writerLocks(): { count: number; stale: number } {
+// The inventory: DATA_DIR/maintenance-writers holds a sentinel with a random
+// id and one lock per announced writer (and per running server, its presence).
+const LOCK = /^(price|drive|server|writer)\.(\d+)\.([0-9a-f-]{36})\.lock$/;
+
+function readInventoryIdentity(): InventoryIdentity | null {
+  try {
+    const dir = fs.lstatSync(writersDir());
+    if (!dir.isDirectory() || dir.isSymbolicLink()) return null;
+    const st = fs.lstatSync(sentinelPath());
+    if (!st.isFile() || st.size > MAX_RECORD_BYTES) return null;
+    const id = (JSON.parse(fs.readFileSync(sentinelPath(), "utf8")) as { id?: unknown }).id;
+    return typeof id === "string" && ID.test(id) ? { id, dev: dir.dev, ino: dir.ino } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Normal mode only: create the inventory (or its missing sentinel) and return its identity. */
+function ensureInventory(): InventoryIdentity {
+  fs.mkdirSync(writersDir(), { recursive: true, mode: 0o700 });
+  if (!fs.existsSync(sentinelPath())) {
+    try {
+      publishExclusive(sentinelPath(), { version: 1, id: crypto.randomUUID() });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code !== "EEXIST") throw e;
+    }
+  }
+  const ident = readInventoryIdentity();
+  if (!ident) throw maintenanceRefusal("writer inventory unreadable");
+  return ident;
+}
+
+export interface WriterHandle { lock: string; inventoryId: string; release(): void; verify(): void }
+
+/**
+ * Announce a writer: register in the inventory FIRST, then check. A drain
+ * records maintenance first, then reads the inventory, so either the writer
+ * sees maintenance and stops or the drain sees the writer and waits. verify()
+ * must be called before every write: it re-checks maintenance and durable
+ * openness, and that this writer's own lock is still in the same inventory —
+ * a lost or replaced inventory stops the writer (it never writes unannounced).
+ */
+export function announceWriter(kind: "price" | "drive" | "writer"): WriterHandle {
+  assertNoMaintenance(kind);
+  const ident = ensureInventory();
+  const lock = path.join(writersDir(), `${kind}.${SELF.pid}.${crypto.randomUUID()}.lock`);
+  publishExclusive(lock, { kind, owner: SELF, inventoryId: ident.id, startedAt: new Date().toISOString() });
+  let released = false;
+  const handle: WriterHandle = {
+    lock,
+    inventoryId: ident.id,
+    release() {
+      if (released) return;
+      released = true;
+      try {
+        fs.unlinkSync(lock);
+        fsyncDir(writersDir());
+      } catch {
+        // A lock that cannot be removed keeps every drain from claiming quiescence.
+      }
+    },
+    verify() {
+      if (released) throw maintenanceRefusal(`${kind} writer already released`);
+      assertWritePermitted(kind);
+      if (!fs.existsSync(lock) || readInventoryIdentity()?.id !== ident.id) throw maintenanceRefusal(`${kind} writer inventory lost`);
+    },
+  };
+  try {
+    handle.verify();
+  } catch (e) {
+    handle.release();
+    throw e;
+  }
+  return handle;
+}
+
+/** Run a writer that may live in another process or outlive a request. */
+export async function withMaintenanceWriter<T>(kind: "price" | "drive" | "writer", run: (writer: WriterHandle) => Promise<T> | T): Promise<T> {
+  const writer = announceWriter(kind);
+  try {
+    return await run(writer);
+  } finally {
+    writer.release();
+  }
+}
+
+/**
+ * Called by the server before it admits its first request (normal mode only):
+ * remember the inventory identity, register this server's presence (so a
+ * resume elsewhere sees a live adopter), and clear locks whose process is
+ * verifiably dead (pid + start time). Returns false when the server cannot
+ * register: it is then held closed — an unregistered server would be
+ * invisible to a resume in another process.
+ */
+export function registerServer(): boolean {
+  const r = registry();
+  if (r.inventory) return true;
+  try {
+    const ident = ensureInventory();
+    for (const name of fs.readdirSync(writersDir())) {
+      if (!LOCK.test(name)) continue;
+      const owner = lockOwner(path.join(writersDir(), name));
+      if (owner && !ownerAlive(owner)) fs.unlinkSync(path.join(writersDir(), name));
+    }
+    const lock = path.join(writersDir(), `server.${SELF.pid}.${crypto.randomUUID()}.lock`);
+    publishExclusive(lock, { kind: "server", owner: SELF, inventoryId: ident.id, startedAt: new Date().toISOString() });
+    r.presenceLock = lock;
+    r.inventory = ident;
+    process.once("exit", () => {
+      try {
+        fs.unlinkSync(lock);
+      } catch {
+        // A dead server's lock is cleared by the next server start.
+      }
+    });
+    return true;
+  } catch (e) {
+    r.heldClosed ??= "writer_inventory_unavailable";
+    console.error("[maintenance] writer inventory unavailable; this server stays closed until restart:", e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
+function lockOwner(file: string): Owner | null {
+  try {
+    const st = fs.lstatSync(file);
+    if (!st.isFile() || st.size > MAX_RECORD_BYTES) return null;
+    return parseOwner((JSON.parse(fs.readFileSync(file, "utf8")) as { owner?: unknown }).owner);
+  } catch {
+    return null;
+  }
+}
+
+export interface InventoryState { writers: number; stale: number; otherServers: number; uncertain: string | null }
+
+/**
+ * What a drain may conclude about writers in any process. Missing, replaced,
+ * corrupt or unreadable inventory is "uncertain" — never zero writers.
+ */
+export function inventoryState(): InventoryState {
+  const r = registry();
+  const none = (why: string): InventoryState => ({ writers: 0, stale: 0, otherServers: 0, uncertain: why });
+  if (!r.inventory) return none("no_inventory_baseline");
+  const ident = readInventoryIdentity();
+  if (!ident) return none("inventory_missing_or_unreadable");
+  if (ident.id !== r.inventory.id || ident.dev !== r.inventory.dev || ident.ino !== r.inventory.ino) return none("inventory_replaced");
   let names: string[];
   try {
     names = fs.readdirSync(writersDir());
-  } catch (e) {
-    return (e as NodeJS.ErrnoException)?.code === "ENOENT" ? { count: 0, stale: 0 } : { count: 1, stale: 0 };
+  } catch {
+    return none("inventory_unreadable");
   }
-  let count = 0, stale = 0;
+  const out: InventoryState = { writers: 0, stale: 0, otherServers: 0, uncertain: null };
   for (const name of names) {
-    count++;
-    const pid = Number(/\.(\d+)\.[0-9a-f-]{36}\.lock$/.exec(name)?.[1]);
-    if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+    // Sentinel, and a lock not yet published (its writer has not checked yet).
+    if (name === ".inventory.json" || /^\.tmp-[0-9a-f-]{36}$/.test(name)) continue;
+    const m = LOCK.exec(name);
+    const file = path.join(writersDir(), name);
+    if (!m) return none("inventory_corrupt");
+    if (file === r.presenceLock) continue;
+    let body: { inventoryId?: unknown };
     try {
-      process.kill(pid, 0);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException)?.code === "ESRCH") stale++;
+      body = JSON.parse(fs.readFileSync(file, "utf8")) as { inventoryId?: unknown };
+    } catch {
+      return none("inventory_corrupt");
     }
+    const owner = lockOwner(file);
+    if (body.inventoryId !== ident.id || !owner) return none("inventory_corrupt");
+    const alive = ownerAlive(owner);
+    if (m[1] === "server") {
+      if (alive) out.otherServers++;
+      continue;
+    }
+    out.writers++;
+    if (!alive) out.stale++;
   }
-  return { count, stale };
+  return out;
+}
+
+/** Live servers other than this one; null when it cannot be told (missing or unreadable inventory). */
+function otherLiveServers(): number | null {
+  if (!readInventoryIdentity()) return null;
+  try {
+    let n = 0;
+    for (const name of fs.readdirSync(writersDir())) {
+      const m = LOCK.exec(name);
+      if (!m || m[1] !== "server") continue;
+      const owner = lockOwner(path.join(writersDir(), name));
+      if (!owner) return null;
+      if (!(owner.pid === SELF.pid && owner.start === SELF.start) && ownerAlive(owner)) n++;
+    }
+    return n;
+  } catch {
+    return null;
+  }
 }
 
 // ---- requests -----------------------------------------------------------------
@@ -610,8 +864,13 @@ export function maintenanceResponse(request: Request, status: MaintenanceStatus)
   const view = { active: true, source: status.source, state: status.state, id: status.id,
     requestedAt: status.requestedAt, settledAt: status.settledAt, forcedByEnv: status.forcedByEnv,
     process: { phase, pendingWork: work.count, untrackedRequests: work.untracked, persistUncertain: r.persistUncertain,
-      resumeBlocked: r.resumeBlocked },
+      heldClosed: r.heldClosed },
+    // Whose drain the record describes: a stale "active" of an earlier process is not this process's quiescence.
+    recordOwner: !status.owner ? "unknown" : status.owner.pid === SELF.pid && status.owner.start === SELF.start ? "this_process" :
+      ownerAlive(status.owner) ? "other_live_process" : "earlier_process",
     drainedByThisProcess: phase === "settled" && status.state === "active" && !r.persistUncertain,
+    // drain_failed, adoption without persistence or an earlier process's report are never a strict window.
+    quiescenceProven: phase === "settled" && status.state === "active" && !r.persistUncertain,
     recordedDrain: phase === "settled" ? status.drain : null,
     earlierProcessDrain: phase === "settled" ? null : status.source === "file" ? status.drain : null };
   const headers = { "Content-Type": "application/json", "Cache-Control": "no-store" };

@@ -10,9 +10,13 @@ import { preflight } from './cloud-sync-preflight.mjs';
 // passes through this wrapper, so a launch that slips past the in-process
 // guards is still refused while a maintenance record, an unfinished resume
 // marker or NOTEMESH_MAINTENANCE=1 exists. Present-but-unreadable counts.
+// The absence of that state must also be durable (DATA_DIR fsync).
 let inMaintenance = process.env.NOTEMESH_MAINTENANCE === '1';
 for (const name of ['maintenance.json', 'maintenance-resume.json']) {
   try { fs.lstatSync(path.join(process.env.DATA_DIR || '/data', name)); inMaintenance = true; } catch (e) { if (e?.code !== 'ENOENT') inMaintenance = true; }
+}
+if (!inMaintenance) {
+  try { const fd = fs.openSync(process.env.DATA_DIR || '/data', 'r'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } } catch { inMaintenance = true; }
 }
 if (inMaintenance) {
   console.error('[readonly] Maintenance is active; ob refused.');

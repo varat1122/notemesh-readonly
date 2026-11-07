@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { env } from "./env";
+import { priceDbPath } from "./market-prices/store";
 import { gitBackend } from "./sync/git";
 import { supervisor } from "./ob/supervisor";
 import { indexer } from "./vault/indexer";
@@ -11,13 +13,15 @@ import {
   beginMaintenance,
   bundleCount,
   excludeOwnRequest,
+  inventoryState,
   isMaintenanceLatched,
   maintenanceResponse,
   maintenanceStatus,
   pendingWork,
+  registerServer,
   registry,
+  resolveServerBoot,
   settleMaintenance,
-  writerLocks,
   type DrainReport,
   type MaintenanceRecord,
 } from "./maintenance";
@@ -30,11 +34,16 @@ import {
  * from outside) — adopts it and drains this process's workers too.
  */
 export function maintenanceGate(event: { request: Request }): Response | null {
-  const status = maintenanceStatus();
-  if (!status.active) {
+  // The server's own boot step (resume, durable-openness check) runs here and
+  // only here — never as a side effect in another process.
+  resolveServerBoot();
+  let status = maintenanceStatus();
+  // Admission needs a registered presence; failing that, the server holds closed.
+  if (!status.active && registerServer()) {
     admitRequest(event);
     return null;
   }
+  status = maintenanceStatus();
   if (registry().admitted && !isMaintenanceLatched()) {
     // Adopt BEFORE answering: the record is rewritten "draining" (or latched as
     // persistUncertain), so no answer advertises an earlier process's
@@ -74,10 +83,10 @@ function writingRows(): number {
  * rebuild or link pass, an intake or price tick, a Safe Edit write — each is
  * waited for. The admin entry requests are excluded by identity only.
  */
-export function drainReport(): { quiescent: boolean; report: DrainReport } {
+export function drainReport(): { quiescent: boolean; report: DrainReport; inventoryUncertain: string | null } {
   const work = pendingWork();
   const rows = writingRows();
-  const writers = writerLocks();
+  const writers = inventoryState();
   const report: DrainReport = {
     pendingWork: work.count,
     pendingHttp: work.kinds.filter((k) => k === "http").length,
@@ -92,14 +101,88 @@ export function drainReport(): { quiescent: boolean; report: DrainReport } {
     safeEditLockAbsent: !fs.existsSync(path.join(env.dataDir, "safe-edit.lock")),
     gitMutationLockAbsent: !fs.existsSync(path.join(env.dataDir, "git-mutation.lock")),
     safeEditWritingRows: rows,
+    pendingRemote: work.kinds.filter((k) => k === "remote").length,
     // Writers in any process (the price CLI included) announce a lock before
     // checking maintenance; a drain waits for every one, stale ones included.
-    crossProcessWriters: writers.count,
+    // An uncertain inventory is never read as zero.
+    crossProcessWriters: writers.writers,
     staleWriterLocks: writers.stale,
+    otherLiveServers: writers.otherServers,
+    writerInventoryIntact: writers.uncertain === null,
   };
-  const quiescent = work.count === 0 && work.untracked === 0 && rows === 0 && writers.count === 0 &&
-    Object.values(report).every((v) => v !== false);
-  return { quiescent, report };
+  const quiescent = work.count === 0 && work.untracked === 0 && rows === 0 && writers.writers === 0 &&
+    writers.otherServers === 0 && writers.uncertain === null && Object.values(report).every((v) => v !== false);
+  return { quiescent, report, inventoryUncertain: writers.uncertain };
+}
+
+/**
+ * Take and release the write lock of every SQLite file a writer outside this
+ * process's request tracking may write (price stores in any process, operator
+ * scripts). Those writers re-check maintenance INSIDE their write
+ * transaction, and this runs after maintenance is recorded: a transaction
+ * either committed before the barrier or sees maintenance and writes nothing.
+ * Synchronous with short lock waits, immediately followed by settle; a busy
+ * lock is retried by the drain loop until its deadline. A non-empty rollback
+ * journal (a writer mid-transaction, or a crashed one) is never touched.
+ */
+function sqliteBarrier(): DrainReport {
+  const out: DrainReport = { appDbBarrier: false, priceDbBarrier: false };
+  const take = (db: { exec(sql: string): unknown }) => {
+    db.exec("BEGIN IMMEDIATE");
+    db.exec("ROLLBACK");
+  };
+  if (!fs.existsSync(env.dbPath)) out.appDbBarrier = true;
+  else {
+    // The server's own connection where it has one (a fresh one could checkpoint the WAL on close).
+    const own = [...registry().connections].find((c) => c.open !== false) as unknown as
+      { exec(sql: string): unknown; pragma(sql: string, o?: { simple?: boolean }): unknown; inTransaction?: boolean } | undefined;
+    if (own && !own.inTransaction) {
+      const wait = own.pragma("busy_timeout", { simple: true });
+      try {
+        own.pragma("busy_timeout = 100");
+        take(own);
+        out.appDbBarrier = true;
+      } catch {
+        out.appDbBarrier = false;
+      } finally {
+        own.pragma(`busy_timeout = ${Number(wait) || 5000}`);
+      }
+    } else if (!own) out.appDbBarrier = barrierOn(env.dbPath, take);
+  }
+  let file: string | null = null;
+  try {
+    file = priceDbPath();
+  } catch {
+    file = null;
+  }
+  if (file && !fs.existsSync(file)) out.priceDbBarrier = true;
+  else if (file) {
+    let journal = 0;
+    try {
+      journal = fs.statSync(file + "-journal").size;
+    } catch {
+      journal = 0;
+    }
+    out.priceDbBarrier = journal === 0 && barrierOn(file, take);
+  }
+  return out;
+}
+
+function barrierOn(file: string, take: (db: Database.Database) => void): boolean {
+  let db: Database.Database | undefined;
+  try {
+    db = new Database(file, { fileMustExist: true, timeout: 100 });
+    take(db);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // The barrier outcome is already decided.
+    }
+  }
 }
 
 class DrainDeadline extends Error {}
@@ -148,13 +231,19 @@ export function enterMaintenanceAndDrain(opts: { timeoutMs?: number; event?: unk
       await stop("cloudIntake", () => stopCloudIntake());
       await stop("priceCollector", () => stopPriceCollector());
       await stop("indexer", () => indexer().stopForMaintenance());
+      let barrier: DrainReport = {};
       for (;;) {
-        const { quiescent, report } = drainReport();
+        const { quiescent, report, inventoryUncertain } = drainReport();
+        // A lost or replaced writer inventory does not heal by waiting.
+        if (inventoryUncertain) failures[`inventory_${inventoryUncertain}`] = true;
         const failed = Object.keys(failures).length > 0;
-        if (quiescent && !failed) return settleMaintenance("active", report);
+        if (quiescent && !failed) {
+          barrier = sqliteBarrier();
+          if (Object.values(barrier).every((v) => v === true)) return settleMaintenance("active", { ...report, ...barrier });
+        }
         if (failed || Date.now() >= deadline) {
-          console.error("[maintenance] drain did not reach quiescence; maintenance stays active:", JSON.stringify({ ...report, ...failures }));
-          return settleMaintenance("drain_failed", { ...report, ...failures });
+          console.error("[maintenance] drain did not reach quiescence; maintenance stays active:", JSON.stringify({ ...report, ...barrier, ...failures }));
+          return settleMaintenance("drain_failed", { ...report, ...barrier, ...failures });
         }
         await new Promise((resolve) => setTimeout(resolve, 50));
       }

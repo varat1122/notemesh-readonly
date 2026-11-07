@@ -16,6 +16,20 @@ const file = () => path.join(root, "maintenance.json");
 const dbFile = () => path.join(root, "app.sqlite");
 const id = "0f4c2a8e-1b2c-4d3e-8f9a-0b1c2d3e4f5a";
 const record = (state = "active", rid = id) => JSON.stringify({ version: 1, id: rid, state, requestedAt: "2026-11-07T00:00:00.000Z", settledAt: null, drain: null });
+// A record settled by an earlier server process that has since exited, on a volume whose writer inventory exists.
+const DEAD = { pid: 4_000_000, start: "0" };
+const ownedRecord = (state = "active") => {
+  fs.mkdirSync(path.join(root, "maintenance-writers"), { recursive: true });
+  fs.writeFileSync(path.join(root, "maintenance-writers", ".inventory.json"), JSON.stringify({ version: 1, id: crypto.randomUUID() }));
+  return JSON.stringify({ ...JSON.parse(record(state)), owner: DEAD });
+};
+// The server's own boot step (resume happens only here), and its registration before it admits requests.
+const boot = async () => {
+  const m = await import("./maintenance");
+  m.resolveServerBoot();
+  return m;
+};
+const serving = async () => (await import("./maintenance")).registerServer();
 const req = (p: string, method = "GET") => new Request(`http://local${p}`, { method });
 const event = (res: EventEmitter | null = new EventEmitter()) => ({ request: req("/api/mcp", "POST"), nativeEvent: res ? { node: { res } } : undefined });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -159,6 +173,7 @@ describe("MCP tool calls outlive their HTTP stream", () => {
     const { trackToolExecution } = await import("./mcp/maintenance-tools");
     const { db } = await import("./db");
     const d = await import("./maintenance-drain");
+    await serving();
     db().prepare("INSERT INTO settings (key,value) VALUES ('seed','1')").run();
     let release = () => {};
     let started = () => {};
@@ -205,6 +220,7 @@ describe("drain", () => {
     const b = await import("./db");
     b.db();
     const d = await import("./maintenance-drain");
+    await serving();
     const outcome = await d.enterMaintenanceAndDrain({ timeoutMs: 1_000 });
     expect(outcome).toMatchObject({ state: "active", drain: { dbConnections: 2, dbFenced: 2 } });
     expect(Number(a.db().pragma("query_only", { simple: true }))).toBe(1);
@@ -264,33 +280,33 @@ describe("the gate", () => {
 
 describe("resume", () => {
   it("archives an active record to history before removing it, then starts normally", async () => {
-    fs.writeFileSync(file(), record());
+    fs.writeFileSync(file(), ownedRecord());
     process.env.NOTEMESH_MAINTENANCE_RESUME = id;
     vi.spyOn(console, "log").mockImplementation(() => {});
-    const m = await import("./maintenance");
+    const m = await boot();
     expect(m.maintenanceActive()).toBe(false);
     expect(fs.existsSync(file())).toBe(false);
     expect(JSON.parse(fs.readFileSync(path.join(root, "maintenance-history", `${id}.json`), "utf8"))).toMatchObject({ id, state: "active" });
   });
   it("a record removal that fails leaves the resume marker: closed now, closed on a plain restart, completed only by the exact id", async () => {
-    fs.writeFileSync(file(), record());
+    fs.writeFileSync(file(), ownedRecord());
     process.env.NOTEMESH_MAINTENANCE_RESUME = id;
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "log").mockImplementation(() => {});
     const unlink = vi.spyOn(fs, "unlinkSync").mockImplementation(() => { throw Object.assign(Error("EIO"), { code: "EIO" }); });
-    let m = await import("./maintenance");
+    let m = await boot();
     expect(m.maintenanceActive()).toBe(true);
     expect(fs.existsSync(path.join(root, "maintenance-resume.json"))).toBe(true);
     unlink.mockRestore();
     delete process.env.NOTEMESH_MAINTENANCE_RESUME;
     delete (globalThis as Record<symbol, unknown>)[KEY];
     vi.resetModules();
-    m = await import("./maintenance");
+    m = await boot();
     expect(m.maintenanceActive()).toBe(true);
     process.env.NOTEMESH_MAINTENANCE_RESUME = id;
     delete (globalThis as Record<symbol, unknown>)[KEY];
     vi.resetModules();
-    m = await import("./maintenance");
+    m = await boot();
     expect(m.maintenanceActive()).toBe(false);
     expect(fs.existsSync(path.join(root, "maintenance-history", `${id}.json`))).toBe(true);
   });
@@ -301,13 +317,13 @@ describe("resume", () => {
     fs.writeFileSync(file(), content);
     process.env.NOTEMESH_MAINTENANCE_RESUME = wanted;
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
-    const m = await import("./maintenance");
+    const m = await boot();
     expect(m.maintenanceActive()).toBe(true);
     expect(err).toHaveBeenCalled();
   });
   it("a stale resume value with no record does nothing, and cannot clear a later maintenance in the same process", async () => {
     process.env.NOTEMESH_MAINTENANCE_RESUME = id;
-    const m = await import("./maintenance");
+    const m = await boot();
     expect(m.maintenanceActive()).toBe(false);
     fs.writeFileSync(file(), record());
     expect(m.maintenanceActive()).toBe(true);
