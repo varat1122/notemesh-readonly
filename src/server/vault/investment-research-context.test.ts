@@ -86,8 +86,7 @@ describe("RI-001 canonical Review discovery and intake-bound assembly",()=>{
     expect(db().prepare("SELECT total_changes() AS n").get()).toEqual(before);
   });
   it.each(["append_receipt_removed","append_status_interrupted","append_receipt_tampered",
-    "external_edit_after_append","replace_after_append"] as const)
-    ("holds an invalid or unsupported Review revision chain: %s",async fault=>{
+    "external_edit_after_append","replace_after_append"] as const)("holds an invalid or unsupported Review revision chain: %s",async fault=>{
       const target=await saved("TSMC",TSMC,"2026-11-02");
       const id="ILK-SYNTH-RI001-APPEND-ONE";
       await appendSyntheticReview(target.reviewPath,id);
