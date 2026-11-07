@@ -13,6 +13,7 @@ import { audit } from "../audit";
 import { previewSchema, applySchema, operationId as idSchema, type PreviewInput } from "./schema";
 
 import {assertReviewChronology,assertReviewPreviewAdmission,hasRuntimeReviewLineage} from "./research-lineage";
+import {assertResearchStateAuthority} from "../vault/research-state";
 import {assertDeclaredEvidenceAuthority,assertPrimaryMetadataAuthority} from "./primary-authority";
 import {assertResearchJudgeWrite,currentJudgeGate,type JudgeGate} from "./research-judge-gate";
 
@@ -228,6 +229,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
       checkStoredReviewLineage(existing);
       assertDeclaredEvidenceAuthority(p.evidence);
       assertPrimaryMetadataAuthority(document(existing.before_text).data,document(existing.after_text).data);
+      assertResearchStateAuthority(document(existing.before_text).data,document(existing.after_text).data);
       // A lost response must not strand a canonical source forever. Rotate the
       // one-use token for the SAME actor and payload; invalidate prior tokens
       // and any approval so the exact diff must be reviewed again. Never
@@ -249,6 +251,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
   const afterMetadata=document(after).data,beforeMetadata=document(before??"").data;
   if(p.change.kind==="create")assertReviewPreviewAdmission(after,canonical);
   assertPrimaryMetadataAuthority(beforeMetadata,afterMetadata);
+  assertResearchStateAuthority(beforeMetadata,afterMetadata);
   warnings(before??"",after);
   // Body operations cannot silently introduce metadata or rewrite provenance.
   if(p.change.kind==="replace"||p.change.kind==="append") {
@@ -339,6 +342,7 @@ export function apply(input:unknown,actor:string) {
     checkEvidence(p);
     assertResearchJudgeWrite(p.path,current??"",r.after_text,actor,"apply");
     assertPrimaryMetadataAuthority(document(current??"").data,document(r.after_text).data);
+    assertResearchStateAuthority(document(current??"").data,document(r.after_text).data);
     assertHeadroom(Buffer.byteLength(r.before_text)*2+Buffer.byteLength(r.after_text)+64_000);
     backup(r,p);
     const receipt={operationId:r.id,path:p.path,beforeHash:r.before_hash,afterHash:r.after_hash,

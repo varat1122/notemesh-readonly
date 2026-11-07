@@ -1,5 +1,6 @@
 /** Admission evidence in the EXISTING Safe Edit event journal. No new schema.
  * Only canonical prepare records it; no wire caller can insert a gate event. */
+import {RESEARCH_STATE_POLICY} from "../vault/research-state";
 import {db} from "../db";
 import {splitFrontmatter} from "../vault/markdown";
 import {JUDGE_VERSION,judgeHash,judgeHistoryCurrent} from "../vault/research-judge";
@@ -9,6 +10,7 @@ import {m2VaultReadDeps} from "../vault/research-decision-v2";
 import {createReceipt} from "../vault/investment-research-context";
 export interface JudgeGate {
   version:string;
+  researchStatePolicy:string;
   intakeId:string;actor:string;decision:"PASS"|"HOLD"|"FAIL";packetDigest:string;resultDigest:string|null;expiresAt:number;
   history:{path:string;sha256:string}[];
   retrieval:RetrievalCoverage|null;
@@ -45,7 +47,7 @@ export function assertResearchJudgeWrite(path:string,before:string,after:string,
   // completeness (v2) or exact citation
   // spans (v1). Preserve their journal/receipts, but never reuse that authority for
   // a pending Claim/Review write after the contract upgrade.
-  if(g.version!==JUDGE_VERSION)throw Error("research_judge_contract_version_hold");
+  if(g.version!==JUDGE_VERSION||g.researchStatePolicy!==RESEARCH_STATE_POLICY)throw Error("research_judge_contract_version_hold");
   if(g.decision!=="PASS"||Date.now()>g.expiresAt||!judgeHistoryCurrent(g.history)||!judgeScopeCurrent(g.scopeWitness,g.retrieval,g.targets,g.intakeId,g.actor))throw Error("research_judge_semantic_or_stale_hold");
   if(stage==="apply")for(const prerequisite of g.targets.filter(t=>t.kind==="source_intake"||target.kind==="canonical_review"&&t.kind==="structured_claim")){
     const read=m2VaultReadDeps.readIndexed(prerequisite.path);

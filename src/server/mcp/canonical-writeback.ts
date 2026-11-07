@@ -12,6 +12,7 @@ import { planInvestmentWriteback } from "../vault/investment-writeback-router";
 import { apply, preview, previewCanonicalReview, recordResearchJudgeGate, status } from "../safe-edit/engine";
 import { withPausedSync } from "../safe-edit/sync";
 import {JUDGE_VERSION,judgeSubmissionSchema,evaluateResearchJudge} from "../vault/research-judge";
+import {RESEARCH_STATE_POLICY} from "../vault/research-state";
 import {currentJudgeGate} from "../safe-edit/research-judge-gate";
 
 const nonempty = z.string().min(1);
@@ -124,7 +125,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
       const p=preview(source.safeEditRequest,actor);
       previews.push({kind:source.kind,expectedSha256:source.expectedSha256,...p});
     }
-    recordResearchJudgeGate(source.receiptKey,actor,{version:JUDGE_VERSION,intakeId:plan.planId,actor,decision:judge.decision,
+    recordResearchJudgeGate(source.receiptKey,actor,{version:JUDGE_VERSION,researchStatePolicy:RESEARCH_STATE_POLICY,intakeId:plan.planId,actor,decision:judge.decision,
       packetDigest:judge.packetDigest,resultDigest:judge.resultDigest,expiresAt:judge.expiresAt,history:judge.history,retrieval:judge.retrieval,scopeWitness:judge.scopeWitness,
       targets:workflow.steps.map(s=>({path:s.path,sha256:s.expectedSha256,operationId:s.receiptKey,kind:s.kind,
         eligible:s.state==="needs_create"||s.state==="verified_existing"}))});
@@ -140,7 +141,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
   return {phase:"preview_only",planId:plan.planId,workflowStatus:workflow.status,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     qualityIssues:workflow.qualityIssues,claimIssues:workflow.claimIssues,lineageIssues:workflow.lineageIssues,claimInterpretationBoundary:workflow.claimInterpretationBoundary,readyForNextNews:workflow.readyForNextNews,
     archiveProvenanceStatus:workflow.archiveProvenanceStatus,archiveProvenanceReason:workflow.archiveProvenanceReason,
-    steps:workflow.steps.map(({kind,path,state,expectedSha256,receiptKey})=>({kind,path,state,expectedSha256,receiptKey})),
+    steps:workflow.steps.map(({kind,path,state,expectedSha256,receiptKey,researchTrust})=>({kind,path,state,expectedSha256,receiptKey,researchTrust})),
     previews,protectedNotesTouched:false,perDeviceSync:"unverified",writesPerformed:false,
     next:"Review exact diffs and authorize apply_canonical_writeback with these tokens; no Vault notes have been written."};
 }
@@ -161,7 +162,7 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
     if(!source)throw Error("research_judge_source_admission_hold");
     recordResearchJudgeGate(source.operationId,actor,{...enrolled,decision:judge.decision,expiresAt:0});
   }
-  if(judge?.decision==="PASS"&&(!enrolled||enrolled.version!==JUDGE_VERSION||enrolled.packetDigest!==judge.packetDigest||enrolled.resultDigest!==judge.resultDigest||enrolled.decision!=="PASS"))
+  if(judge?.decision==="PASS"&&(!enrolled||enrolled.version!==JUDGE_VERSION||enrolled.researchStatePolicy!==RESEARCH_STATE_POLICY||enrolled.packetDigest!==judge.packetDigest||enrolled.resultDigest!==judge.resultDigest||enrolled.decision!=="PASS"))
     throw Error("research_judge_prepare_required_or_superseded");
   const pending=workflow.steps.filter(s=>s.state==="needs_create");
   const ids=pending.map(s=>s.receiptKey);
@@ -205,8 +206,8 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
     status:after.status,readyForNextNews:after.readyForNextNews,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     qualityIssues:after.qualityIssues,claimIssues:after.claimIssues,lineageIssues:after.lineageIssues,claimInterpretationBoundary:after.claimInterpretationBoundary,
     archiveProvenanceStatus:after.archiveProvenanceStatus,archiveProvenanceReason:after.archiveProvenanceReason,
-    steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable})=>
-      ({kind,path,state,receiptKey,readbackVerified,indexed,searchable})),
+    steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable,researchTrust})=>
+      ({kind,path,state,receiptKey,readbackVerified,indexed,searchable,researchTrust})),
     receipts,interrupted,protectedNotesTouched:false,perDeviceSync:"unverified",
     outcome:after.status==="saved_verified"?"saved_verified":
       after.status==="source_saved_analysis_pending"?"source_saved_analysis_pending":"pending_or_blocked",

@@ -1,3 +1,4 @@
+import {researchTrust,type ResearchTrust} from "./research-state";
 import {judgeExclusionSql,type JudgeSelectionPolicy} from "./queries";
 /** Read-only adapters for existing canonical Review/Source/receipt contracts.
  * No new identities, tables, writes, or economic-event equivalence inference. */
@@ -13,6 +14,7 @@ const intake=/^IN-[A-F0-9]{16}$/;
 const folder="10_Knowledge/Company Research/Investment Review - ";
 type Metadata=Record<string,unknown>;
 export interface ContextBundle {
+  researchTrust:ResearchTrust|null;
   intakeId:string;reviewPath:string;sourcePath:string|null;
   status:"BOUND_SOURCE_REVIEW"|"HOLD";reason:string|null;
   eventDate:string|null;publishedAt:string|null;
@@ -71,7 +73,7 @@ export function createReceipt(kind:"source_intake"|"canonical_review"|"structure
   return id;
 }
 function assemble(path:string,id:string,note:ReturnType<typeof indexedRead>,observer:RetrievalObserver):ContextBundle{
-  const result:ContextBundle={intakeId:id,reviewPath:path,sourcePath:null,status:"HOLD",reason:null,
+  const result:ContextBundle={researchTrust:researchTrust(path,note.fm),intakeId:id,reviewPath:path,sourcePath:null,status:"HOLD",reason:null,
     eventDate:null,publishedAt:null,reviewSha256:sha(note.raw),sourceSha256:null,
     reviewReceiptId:null,sourceReceiptId:null,economicEventEquivalence:"not_established",primaryVerification:"not_performed"};
   try{

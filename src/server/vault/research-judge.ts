@@ -1,5 +1,6 @@
 /** Chat-first, opt-in semantic review. No model invocation, writes or primary
  * authority. A server seal authenticates packet bytes, NEVER the LLM reasoning. */
+import {RESEARCH_STATE_POLICY,researchTrust,type ResearchTrust} from "./research-state";
 import {createHash,createHmac,timingSafeEqual} from "node:crypto";
 import {z} from "zod";
 import {env} from "../env";
@@ -43,10 +44,10 @@ export const judgeEnvelopeSchema=z.object({body:z.string().min(1).max(250000),di
 export const judgeSubmissionSchema=z.object({packet:judgeEnvelopeSchema,result:judgeResultSchema.optional()}).strict();
 export type JudgeSubmission=z.infer<typeof judgeSubmissionSchema>;
 export type JudgeResult=z.infer<typeof judgeResultSchema>;
-interface History {key:string;path:string;sha256:string;excerpt:string;citationSpans:{start:number;end:number;text:string}[];counterEvidence:boolean;use:"historical_context_only"|"unverified_candidate";dates:Record<string,unknown>}
+interface History {researchTrust:ResearchTrust|null;key:string;path:string;sha256:string;excerpt:string;citationSpans:{start:number;end:number;text:string}[];counterEvidence:boolean;use:"historical_context_only"|"unverified_candidate";dates:Record<string,unknown>}
 interface HistoryFailure {key:string;path:string;reason:string}
 interface PacketBody {
-  version:string;framework:typeof M2_POLICY;inputDigest:string;reviewDigest:string;
+  researchStatePolicy:typeof RESEARCH_STATE_POLICY;version:string;framework:typeof M2_POLICY;inputDigest:string;reviewDigest:string;
   scope:{domain:string;entities:string[];topic:string;contentTypes:unknown};
   source:{intakeId:string;sha256:string;url:string|null;publisher:string|null;text:string;provenance:string};
   provenance:{sourceKind:string;sourceLanguage:string|null;sourceChannel:string|null;attributedOrigin:string|null;
@@ -85,7 +86,7 @@ export function buildResearchJudgePacket(input:WritebackInput,actor:string){
       const citationSpans=[...new Set(item.excerpt.split(/\r?\n/))].filter(s=>s.trim()).slice(0,64).flatMap(text=>{
         const start=note.content.indexOf(text);return start<0?[]:[{start,end:start+text.length,text}];
       });
-      history.push({key,path:item.path,sha256:judgeHash(note.content),excerpt:item.excerpt,citationSpans,
+      history.push({researchTrust:researchTrust(item.path,fm),key,path:item.path,sha256:judgeHash(note.content),excerpt:item.excerpt,citationSpans,
         counterEvidence:item.counterEvidenceExcerptIncluded,use:item.evidenceUse,
         dates:{event:fm.event_date??null,publication:fm.published_at??null,analysis:fm.analysis_created_at??null,provenance:"declared_not_verified"}});
     }catch{incomplete.push("historical_readback_unavailable");failures.push({key,path:item.path,reason:reason||"readback_failed"});}
@@ -102,7 +103,7 @@ export function buildResearchJudgePacket(input:WritebackInput,actor:string){
   if(clean.inputFormat==="pdf"||clean.inputFormat==="mixed"||clean.inputFormat==="screenshot")constraints.push("document_coverage_requires_reviewed_evidence_not_caller_full_original_flag");
   const cutoff=clean.researchLineage?.knowledgeCutoffAsOf;
   if(cutoff&&Date.parse(clean.publicationDate??"")>Date.parse(cutoff))constraints.push("source_after_knowledge_cutoff");
-  const body:PacketBody={version:JUDGE_VERSION,framework:M2_POLICY,inputDigest:inputDigest(clean),reviewDigest:judgeHash(stableJudgeJson(clean.researchReview??null)),
+  const body:PacketBody={researchStatePolicy:RESEARCH_STATE_POLICY,version:JUDGE_VERSION,framework:M2_POLICY,inputDigest:inputDigest(clean),reviewDigest:judgeHash(stableJudgeJson(clean.researchReview??null)),
     scope:{domain:clean.domain,entities:clean.entities,topic:clean.topic,contentTypes:clean.contentTypes??[]},
     source:{intakeId:plan.planId,sha256:judgeHash(clean.extractedText),url:clean.sourceUrl??null,publisher:clean.publisher??null,text:clean.extractedText,
       provenance:"exact_received_text_not_publisher_authentication"},
@@ -131,7 +132,7 @@ export function verifyResearchJudgePacket(input:WritebackInput,submission:JudgeS
   if(!timingSafeEqual(Buffer.from(supplied,"hex"),Buffer.from(seal(p),"hex"))||p.actorLabelSha256!==judgeHash(actor)||
     p.digest!==judgeHash(p.body)||p.packetId!=="RJP-"+p.digest.slice(0,32).toUpperCase()||p.issuedAt>Date.now()||p.expiresAt<Date.now())throw Error("research_judge_packet_binding_hold");
   const body=JSON.parse(p.body) as PacketBody;
-  if(body.version!==JUDGE_VERSION||body.inputDigest!==inputDigest(input))throw Error("research_judge_input_changed_hold");
+  if(body.researchStatePolicy!==RESEARCH_STATE_POLICY||body.version!==JUDGE_VERSION||body.inputDigest!==inputDigest(input))throw Error("research_judge_input_changed_hold");
   return body;
 }
 export function judgeHistoryCurrent(history:Pick<History,"path"|"sha256">[]){

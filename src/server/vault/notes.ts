@@ -1,3 +1,4 @@
+import {researchTrust,type ResearchTrust} from "./research-state";
 import fs from "node:fs";
 import path from "node:path";
 import { env } from "../env";
@@ -66,6 +67,7 @@ export const MAX_READ_LINES = 20000;
 export const MAX_READ_BYTES = 100 * 1000;
 
 export interface NoteChunk {
+  researchTrust:ResearchTrust|null;
   path: string;
   content: string;
   totalLines: number;
@@ -94,6 +96,7 @@ export function readNoteRange(
     truncatedForSize = true;
   }
   const out: NoteChunk = {
+    researchTrust:researchTrust(rel,splitFrontmatter(content).data),
     path: rel,
     content: slice.join("\n"),
     totalLines: lines.length,
