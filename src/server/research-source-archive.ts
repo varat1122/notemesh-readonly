@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { db } from "./db";
+import { assertMutationAllowed } from "./maintenance";
 import { env } from "./env";
 import {archiveEligibleUrl,canonicalSourceUrl} from "./source-url";
 
@@ -88,6 +89,9 @@ function getRow(row:Row,validateBytes:boolean):DocumentSnapshot{
     archiveStatus,publisherAuthenticityVerified:false,originalDocumentSignatureVerified:false};
 }
 function safeBlobWrite(bytes:Buffer,digest:string){
+  // A late continuation (e.g. a fetch that outlived its disconnected request)
+  // must not write once maintenance has settled.
+  assertMutationAllowed("source archive write");
   const target=blobPath(digest);
   const parent=path.dirname(target);
   fs.mkdirSync(parent,{recursive:true,mode:0o700});

@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import Database from "better-sqlite3";
 import { instrument, isoDate, PRICE_POLICY, PriceError, type InstrumentInput, type PriceBar, type PriceSnapshot } from "./model.ts";
+import { maintenanceActive } from "../maintenance.ts";
 
 export function priceDatabaseLimit(): number {
   const mb = Number(process.env.MARKET_PRICES_MAX_DB_MB ?? "4");
@@ -36,6 +37,9 @@ export class PriceStore {
     this.memory = Buffer.isBuffer(filename) || filename === ":memory:";
     this.filename = typeof filename === "string" ? filename : ":memory:";
     this.writable = writable;
+    // No writable on-disk store (and so no lease, no file, no directory) while
+    // maintenance is active — in the server or in a separate CLI process.
+    if (writable && !this.memory && maintenanceActive()) throw new PriceError("maintenance_active");
     if (!this.memory) try {
       const stats = fs.lstatSync(filename);
       if (stats.isSymbolicLink() || stats.nlink > 1) throw new PriceError("linked_price_database_refused");

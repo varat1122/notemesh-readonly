@@ -1,4 +1,5 @@
 import { createMiddleware } from "@solidjs/start/middleware";
+import type { FetchEvent } from "@solidjs/start/server";
 import { ensureSyncStarted } from "./server/sync";
 import { ensureIndexerStarted } from "./server/vault/indexer";
 import { discoveryEndpoint } from "./server/discovery";
@@ -9,6 +10,7 @@ import { protectedResourceMetadata } from "./server/mcp/endpoint";
 import { ensureCloudIntakeStarted } from "./server/cloud-intake";
 import { ensurePriceCollectorStarted } from "./server/market-prices/collector";
 import { maintenanceGate } from "./server/maintenance-drain";
+import { releaseRequest, releaseUnclaimedRequest } from "./server/maintenance";
 
 function redirectTo(path: string): Response {
   return new Response(null, { status: 302, headers: { Location: path } });
@@ -64,6 +66,11 @@ export default createMiddleware({
     (event) => {
       applySecurityHeaders(event.request, event.response.headers);
     },
+    // A handler that no API route wrapper claimed (pages, /_server) has
+    // finished by the time it produces a response.
+    (event) => {
+      releaseUnclaimedRequest(event);
+    },
   ],
   onRequest: [
     async (event) => {
@@ -71,6 +78,21 @@ export default createMiddleware({
       // maintenance only a DB-free health/status answer is served.
       const maintenance = maintenanceGate(event);
       if (maintenance) return maintenance;
+      // Admitted requests stay pending work until their handler finishes. When
+      // this middleware answers (or throws) itself, no handler runs.
+      try {
+        const answered = await admitted(event);
+        if (answered) releaseRequest(event);
+        return answered;
+      } catch (e) {
+        releaseRequest(event);
+        throw e;
+      }
+    },
+  ],
+});
+
+async function admitted(event: FetchEvent): Promise<Response | undefined> {
       // Idempotent: restarts the sync daemon after a server (re)boot, and warms
       // the vault index in the background so the first MCP call doesn't pay for
       // a full-vault scan.
@@ -143,6 +165,5 @@ export default createMiddleware({
           { headers: { "Content-Type": "application/json" } },
         );
       }
-    },
-  ],
-});
+  return undefined;
+}

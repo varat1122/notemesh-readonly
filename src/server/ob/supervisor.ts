@@ -117,6 +117,8 @@ export class SyncSupervisor implements SyncBackend {
   private authProbeAt = 0;
   private authProbing = false;
   private settingsSyncTried = false;
+  /** Detached helper started by start(); a drain waits for it, not just for the daemon. */
+  private settingsSync: Promise<unknown> | null = null;
   private editPaused = false;
   private manualSyncActive = false;
 
@@ -175,7 +177,12 @@ export class SyncSupervisor implements SyncBackend {
     // Best effort; the daemon starts regardless (see settings-sync.ts).
     if (!this.settingsSyncTried) {
       this.settingsSyncTried = true;
-      void enableSettingsSync().catch(() => {});
+      const pending: Promise<unknown> = enableSettingsSync()
+        .catch(() => {})
+        .finally(() => {
+          if (this.settingsSync === pending) this.settingsSync = null;
+        });
+      this.settingsSync = pending;
     }
 
     const child = execa(this.obBin(), ["sync", "--continuous", "--path", env.vaultDir], {
@@ -304,9 +311,10 @@ export class SyncSupervisor implements SyncBackend {
 
   private hasChild(): boolean { return this.child !== null; }
 
-  /** No daemon, one-shot sync, pause or pending restart; observed, not inferred from stop(). */
+  /** No daemon, one-shot sync, pause, pending restart, settings-sync helper or auth probe. */
   isQuiescent(): boolean {
-    return !this.child && !this.manualSyncActive && !this.editPaused && !this.restartTimer;
+    return !this.child && !this.manualSyncActive && !this.editPaused && !this.restartTimer &&
+      !this.settingsSync && !this.authProbing;
   }
 
   /** Await daemon exit before a guarded atomic edit; no polling or forced kill. */

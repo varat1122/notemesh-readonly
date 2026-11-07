@@ -3,7 +3,7 @@ import { z } from "zod";
 import { instrumentSchema, instrument, PILOT_INSTRUMENTS, BENCHMARKS, MAX_PRICE_INSTRUMENTS, PriceError, type InstrumentInput } from "./model.ts";
 import { PriceStore, priceDbPath } from "./store.ts";
 import { fetchYahooDaily } from "./yahoo.ts";
-import { maintenanceActive } from "../maintenance.ts";
+import { maintenanceActive, worker } from "../maintenance.ts";
 
 export function priceWatchlist(): InstrumentInput[] {
   try {
@@ -37,6 +37,9 @@ export interface RefreshOptions {
   fetcher?: typeof fetchYahooDaily; pause?: (ms: number) => Promise<unknown>;
 }
 export async function refreshPrices(options: RefreshOptions = {}) {
+  // Before any store, lease, Drive refresh or fetch: the CLI is a separate
+  // process and reads the same durable record (or NOTEMESH_MAINTENANCE=1).
+  if (maintenanceActive()) throw new PriceError("maintenance_active");
   priceWatchlistFrom(options);
   const backend = process.env.MARKET_PRICES_STORAGE ?? "disk";
   if (!["disk", "google-drive"].includes(backend)) throw new PriceError("invalid_price_storage_backend");
@@ -90,32 +93,34 @@ export async function collectIntoPriceStore(store: PriceStore, options: RefreshO
   }
 }
 
-let timer: ReturnType<typeof setInterval> | undefined;
-let busy = false;
+// Shared with every router bundle through the maintenance registry; see cloud-intake.ts.
+const state = () => worker("priceCollector");
 export function ensurePriceCollectorStarted(): void {
-  if (process.env.MARKET_PRICES_ENABLED !== "1" || timer || maintenanceActive()) return;
+  const w = state();
+  if (process.env.MARKET_PRICES_ENABLED !== "1" || w.timer || maintenanceActive()) return;
   const tick = async () => {
-    if (busy || maintenanceActive()) return;
-    busy = true;
+    if (w.busy || maintenanceActive()) return;
+    w.busy = true;
     try {
       const result = await refreshPrices();
       if (result.results.some(r => ["updated", "failed"].includes(r.status))) console.log("[market-prices]", JSON.stringify(result));
     } catch (error) {
       console.error("[market-prices]", error instanceof PriceError ? error.code : "collector_failed",
         error instanceof PriceError && error.details ? JSON.stringify(error.details) : "");
-    } finally { busy = false; }
+    } finally { w.busy = false; }
   };
   // A single server replica, with a durable cross-process lease for CLI/restarts.
-  timer = setInterval(() => { void tick(); }, 60 * 1000);
-  timer.unref();
+  w.timer = setInterval(() => { void tick(); }, 60 * 1000);
+  w.timer.unref();
   void tick();
 }
 
 export function stopPriceCollector(): void {
-  if (timer) clearInterval(timer);
-  timer = undefined;
+  const w = state();
+  if (w.timer) clearInterval(w.timer);
+  w.timer = undefined;
 }
 
 export function priceCollectorBusy(): boolean {
-  return busy;
+  return state().busy;
 }

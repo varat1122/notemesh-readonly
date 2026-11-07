@@ -333,8 +333,9 @@ export async function enterMaintenance() {
   const session = await requireAdmin();
   audit("maintenance.enter", { user: session.user.id });
   const { enterMaintenanceAndDrain } = await import("./maintenance-drain");
-  // This request itself is in flight until its response closes.
-  const record = await enterMaintenanceAndDrain({ ownRequests: 1 });
+  // This request is pending work itself; it is excluded by identity, never by
+  // a count that could hide an unrelated request.
+  const record = await enterMaintenanceAndDrain({ event: getRequestEvent() });
   audit("maintenance.settled", { id: record.id, state: record.state });
   return { id: record.id, state: record.state, settledAt: record.settledAt, drain: record.drain };
 }

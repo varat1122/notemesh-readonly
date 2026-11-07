@@ -7,6 +7,7 @@ import {
   safeContentType,
   verifyAttachmentUrl,
 } from "~/server/vault/attachment-url";
+import { tracked } from "~/server/maintenance";
 
 /**
  * Fetch an attachment by signed URL.
@@ -31,7 +32,7 @@ function refuse(status: number, message: string): Response {
   });
 }
 
-export async function GET(event: APIEvent) {
+async function handleGET(event: APIEvent) {
   const url = new URL(event.request.url);
   const relPath = url.searchParams.get("path");
   const verdict = verifyAttachmentUrl(
@@ -90,3 +91,6 @@ export async function GET(event: APIEvent) {
   }
   return undefined;
 }
+
+// Pending work until the handler settles, even if the client disconnects (maintenance drain).
+export const GET = tracked(handleGET);

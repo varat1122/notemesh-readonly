@@ -6,6 +6,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { preflight } from './cloud-sync-preflight.mjs';
 
+// Maintenance (docs/maintenance-barrier.md): every ob launch the server makes
+// passes through this wrapper, so a launch that slips past the in-process
+// guards is still refused while a maintenance record or NOTEMESH_MAINTENANCE=1
+// exists. A present-but-unreadable record counts as maintenance.
+const maintenanceRecord = path.join(process.env.DATA_DIR || '/data', 'maintenance.json');
+let inMaintenance = process.env.NOTEMESH_MAINTENANCE === '1';
+try { fs.lstatSync(maintenanceRecord); inMaintenance = true; } catch (e) { if (e?.code !== 'ENOENT') inMaintenance = true; }
+if (inMaintenance) {
+  console.error('[readonly] Maintenance is active; ob refused.');
+  process.exit(75);
+}
+
 const args = process.argv.slice(2);
 if (args[0] === 'sync') {
   const pathIndex = args.indexOf('--path');

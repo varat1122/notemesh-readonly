@@ -101,22 +101,28 @@ describe("booting into maintenance", () => {
 });
 
 describe("resume", () => {
-  it("needs the exact id, is applied at boot, and archives the record before normal startup", async () => {
+  it("needs the exact id, forced maintenance wins, an undrained record needs its acknowledgement, and the record is archived first", async () => {
     const dataDir = volume();
     fs.writeFileSync(path.join(dataDir, "maintenance.json"), record("drain_failed"));
-    const wrong = await startServer({ NOTEMESH_MAINTENANCE_RESUME: "6a1f0c2e-0000-4e5f-8a9b-0c1d2e3f4a5b" }, { dataDir, keepDataDir: true });
-    expect((await (await fetch(`${wrong.url}/api/health`)).json()).maintenance.active).toBe(true);
-    expect(wrong.log()).toMatch(/does not match/);
-    await wrong.stop();
-    expect(fs.readdirSync(dataDir)).toEqual(["maintenance.json"]);
+    const refusals: [Record<string, string>, RegExp][] = [
+      [{ NOTEMESH_MAINTENANCE_RESUME: "6a1f0c2e-0000-4e5f-8a9b-0c1d2e3f4a5b" }, /id does not match/],
+      [{ NOTEMESH_MAINTENANCE_RESUME: id, NOTEMESH_MAINTENANCE_RESUME_UNDRAINED: id, NOTEMESH_MAINTENANCE: "1" }, /takes precedence/],
+      [{ NOTEMESH_MAINTENANCE_RESUME: id }, /RESUME_UNDRAINED/],
+    ];
+    for (const [envs, why] of refusals) {
+      const s = await startServer(envs, { dataDir, keepDataDir: true });
+      expect((await (await fetch(`${s.url}/api/health`)).json()).maintenance.active).toBe(true);
+      expect(s.log()).toMatch(why);
+      await s.stop();
+      expect(fs.readdirSync(dataDir)).toEqual(["maintenance.json"]);
+    }
 
-    const s = await startServer({ NOTEMESH_MAINTENANCE_RESUME: id }, { dataDir, keepDataDir: true });
+    const s = await startServer({ NOTEMESH_MAINTENANCE_RESUME: id, NOTEMESH_MAINTENANCE_RESUME_UNDRAINED: id }, { dataDir, keepDataDir: true });
     servers.push(s);
     const health = await (await fetch(`${s.url}/api/health`)).json();
     expect(health).toEqual({ ok: true, configured: false });
     expect(fs.existsSync(path.join(dataDir, "maintenance.json"))).toBe(false);
-    const [archived] = fs.readdirSync(path.join(dataDir, "maintenance-history"));
-    expect(JSON.parse(fs.readFileSync(path.join(dataDir, "maintenance-history", archived), "utf8"))).toMatchObject({ id, state: "drain_failed" });
+    expect(JSON.parse(fs.readFileSync(path.join(dataDir, "maintenance-history", `${id}.json`), "utf8"))).toMatchObject({ id, state: "drain_failed" });
     expect((await rpc(s, "getSetupStage")).status).toBe(200);
   });
 });
@@ -128,14 +134,20 @@ describe("entering from a running server", () => {
     const cookie = await claimAdmin(s);
     await markConfigured(s, { sync_backend: "git" });
     expect((await rpc(s, "getStatusPage", [], cookie)).status).toBe(200);
+    // The /_server router is a separate bundle with its own module copies: a
+    // request there opens its own DB connection through its own middleware.
+    await fetch(`${s.url}/_server`, { method: "POST", headers: { Origin: s.url } });
 
     const entered = await rpc(s, "enterMaintenance", [], cookie);
     expect(entered.status).toBe(200);
     const result = entered.body.result as { id: string; state: string; drain: Record<string, unknown> };
     expect(result.state).toBe("active");
-    expect(result.drain).toMatchObject({ httpInflight: 0, httpUntracked: 0, gitQuiescent: true, obsidianQuiescent: true,
+    // One process-wide registry in the EMITTED build: both router bundles
+    // registered, and both bundles' DB connections are fenced read-only.
+    expect(result.drain).toMatchObject({ pendingWork: 0, untrackedRequests: 0, gitQuiescent: true, obsidianQuiescent: true,
       indexerQuiescent: true, cloudIntakeIdle: true, priceCollectorIdle: true, safeEditLockAbsent: true,
-      gitMutationLockAbsent: true, safeEditWritingRows: 0 });
+      gitMutationLockAbsent: true, safeEditWritingRows: 0, dbConnections: 2, dbFenced: 2 });
+    expect(Number(result.drain.bundles)).toBeGreaterThanOrEqual(2);
     expect(JSON.parse(fs.readFileSync(path.join(dataDir, "maintenance.json"), "utf8"))).toMatchObject({ id: result.id, state: "active" });
     const health = await (await fetch(`${s.url}/api/health`)).json();
     expect(health.maintenance).toMatchObject({ source: "process", state: "active", id: result.id, drainedByThisProcess: true });

@@ -3,6 +3,7 @@ import { auth, runAuthMigrations } from "~/server/auth";
 import { userCount } from "~/server/claim";
 import { audit } from "~/server/audit";
 import { normalizeClientRegistration } from "~/server/oauth-registration";
+import { tracked } from "~/server/maintenance";
 
 const handler = toSolidStartHandler(auth);
 
@@ -56,5 +57,5 @@ async function withMigrations(
   return res;
 }
 
-export const GET = (event: { request: Request }) => withMigrations(handler.GET, event);
-export const POST = (event: { request: Request }) => withMigrations(handler.POST, event);
+export const GET = tracked((event: { request: Request }) => withMigrations(handler.GET, event));
+export const POST = tracked((event: { request: Request }) => withMigrations(handler.POST, event));

@@ -1,6 +1,7 @@
 import { execa } from "execa";
 import { env } from "../env";
 import { getGitCredentials } from "./git-credentials";
+import { mutationFenced } from "../maintenance";
 
 // Every git invocation goes through here. Split out from git.ts so the
 // conflict-resolution module can run git without importing the backend that
@@ -32,6 +33,9 @@ export async function runGit(
   args: string[],
   opts: { cwd?: string; authenticated?: boolean; timeoutMs?: number } = {},
 ): Promise<GitResult> {
+  // After maintenance settles nothing may run git, including a late
+  // continuation of a reconcile that was still in flight when the drain ended.
+  if (mutationFenced()) return { ok: false, stdout: "", stderr: "maintenance", combined: "Maintenance is active; git refused", code: null };
   const creds = opts.authenticated ? getGitCredentials() : null;
   const full = creds ? ["-c", `credential.helper=${CREDENTIAL_HELPER}`, ...args] : args;
   try {
