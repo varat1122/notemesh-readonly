@@ -1,3 +1,4 @@
+import {researchTrust,type ResearchTrust} from "./research-state";
 import {canonicalHttpSourceUrl} from "../source-url";
 import { db } from "../db";
 import {readPersistedClaim,type IntakeClaim} from "./canonical-claims";
@@ -30,6 +31,7 @@ export interface IncomingClaim {
 }
 interface IndexedRow { path:string; frontmatter:string|null }
 interface StructuredRecord {
+  researchTrust:ResearchTrust|null;
   path:string; claimId:string|null; originalSource:string|null;
   metric:string; period:string; value:string|null; unit:string|null;
   verification:string|null; explicit:boolean;
@@ -49,7 +51,7 @@ export interface ClaimReview {
   relatedEventClaims:StructuredRecord[];
   sourceLinkedUnstructuredPaths:string[];
   metadataScan:{indexedNotesWithMetadata:number;notesScanned:number;truncated:boolean;eligibleEntityNotes:number};
-  possibleHistoricalPaths:{path:string;role:string;declaredVerification:string|null;line:number}[];
+  possibleHistoricalPaths:{path:string;role:string;declaredVerification:string|null;line:number;researchTrust:ResearchTrust|null}[];
   evidenceNeeded:string[];
   suggestedThesisAction:"maintain_pending_review";
   canAutoUpdateThesis:false;
@@ -73,7 +75,7 @@ function record(raw:Record<string,unknown>,path:string,verification:string|null)
   const metric=stringOrNull(raw.metric),period=stringOrNull(raw.period);
   if(!metric||!period)return null;
   return {
-    path,
+    path,researchTrust:null,
     claimId:stringOrNull(raw.claim_id),
     originalSource:stringOrNull(raw.original_source)||stringOrNull(raw.source_url)||stringOrNull(raw.primary_url),
     metric,period,value:stringOrNull(raw.value)||stringOrNull(raw.claim_value),
@@ -137,6 +139,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
       const merged={...fm,...child};
       if(!sameEntity(merged,input))continue;
       const v=record(merged,row.path,stringOrNull(merged.verification));
+      if(v)v.researchTrust=researchTrust(row.path,fm);
       if(v&&persisted){
         const c=persisted.claim;
         Object.assign(v,{evidenceClass:c.evidence_class,sourceLocator:c.source_locator,sourceExcerpt:c.source_excerpt,
@@ -187,7 +190,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
     maxNotes:Math.min(16,Math.max(5,limit+2)),maxChars:10000
   });
   const paths=[...new Set(selected.map(x=>x.path))];
-  const possible=[...scoped.items.map(x=>({path:x.path,role:x.role,declaredVerification:x.declaredVerification,line:x.line}))]
+  const possible=[...scoped.items.map(x=>({path:x.path,role:x.role,declaredVerification:x.declaredVerification,line:x.line,researchTrust:x.researchTrust}))]
     .filter(x=>!paths.includes(x.path)).slice(0,limit);
   const evidenceNeeded=[
     "Read full original sources, verify numerical units and period; indexed metadata is not primary-source verification.",

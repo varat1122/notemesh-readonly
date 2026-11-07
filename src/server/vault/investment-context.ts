@@ -32,7 +32,7 @@ export interface IdentityHoldDiscovery {
 export interface MacroCoverage {scope:string;subjectEvidence:Coverage;counterEvidence:Coverage}
 type DeclaredDate={status:"DECLARED"|"UNKNOWN";value:string|null};
 export interface ResearchChronology {eventDate:DeclaredDate;publicationDate:DeclaredDate;analysisDate:DeclaredDate;importDate:DeclaredDate}
-export interface Item { contentSha256:string; path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
+export interface Item { researchTrust:SchemaInspection["researchTrust"]; contentSha256:string; path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
 export interface Pack { retrieval:RetrievalCoverage; status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
 function resolveIssuers(requested:string[],observer:RetrievalObserver):IssuerResolution[]{
@@ -175,6 +175,7 @@ function indexedMetadata(path:string):Record<string,unknown>{
   }catch{return {};}
 }
 function historicalOnly(path:string,fm:Record<string,unknown>):boolean{
+  if(inspectCanonicalKnowledgeMetadata(path,fm).researchTrust?.usage_tier==="historical_analysis_only")return true;
   const schema=inspectCanonicalKnowledgeMetadata(path,fm);
   return path.startsWith("07_Sources/ChatGPT/")||schema.role==="archive"||
     schema.independenceAssessment!=="not_assessed";
@@ -230,7 +231,7 @@ function declared(raw: string, notePath: string) {
   const f = splitFrontmatter(raw).data as Record<string,unknown>;
   const schema=inspectCanonicalKnowledgeMetadata(notePath,f);
   const date=(value:string|null):DeclaredDate=>({status:value?"DECLARED":"UNKNOWN",value});
-  return {declaredVerification:typeof f.verification==="string"?f.verification:null,declaredEventDate:schema.eventDate,declaredPublishedAt:schema.publishedAt,
+  return {researchTrust:schema.researchTrust,declaredVerification:typeof f.verification==="string"?f.verification:null,declaredEventDate:schema.eventDate,declaredPublishedAt:schema.publishedAt,
     declaredSourceType:typeof f.source_type==="string"?f.source_type.slice(0,80):typeof f.source_tier==="string"?f.source_tier.slice(0,80):null,
     chronology:{eventDate:date(schema.eventDate),publicationDate:date(schema.publishedAt),analysisDate:date(schema.analysisDate),importDate:date(schema.importedAt)},schemaCompatibility:schema};
 }

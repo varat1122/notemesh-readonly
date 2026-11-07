@@ -5,7 +5,9 @@
  *
  * Input must already be parsed by the shared hardened splitFrontmatter parser.
  */
+import {researchTrust,type ResearchTrust} from "./research-state";
 export interface SchemaInspection {
+  researchTrust:ResearchTrust|null;
   status: "read_time_adapter_only";
   role: "structured_claim" | "source_receipt" | "source" | "industry" | "company" | "timeline" |
     "thesis" | "evidence_register" | "review" | "historical_analysis" | "navigation" | "archive" | "method" | "other";
@@ -64,7 +66,7 @@ function roleOfNote(path:string, fm:Data):SchemaInspection["role"] {
     return "historical_analysis";
   if(["knowledge_index","company_history_index","topic_history_index","macro_hub",
       "chat_transcript_index","historical_navigation_redirect"].includes(t??""))return "navigation";
-  if(["news_thesis_review","investment_review","research_note","preferred_research_note",
+  if(["investment_research_review","news_thesis_review","investment_review","research_note","preferred_research_note",
       "research_update","macro_research_note","dated_evidence_review","research_synthesis",
       "research_map","import_review"].includes(t??""))return "review";
   if(t==="research_workflow"||path.startsWith("09_Templates/"))return "method";
@@ -166,7 +168,7 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   if(role==="thesis"&&asText(fm.status)!=="owner_approved")
     warnings.push("thesis_not_owner_approved_by_status");
   return {
-    status:"read_time_adapter_only",role,declaredSourceType,rawSourceType,
+    status:"read_time_adapter_only",researchTrust:researchTrust(path,fm),role,declaredSourceType,rawSourceType,
     normalizedSourceType,sourceTypeMapping,independenceAssessment,
     declaredVerification:asText(fm.verification),
     originalSource,sourceUrlAlias,eventDate,publishedAt,analysisDate:strictDate(fm.analysis_date),importedAt,

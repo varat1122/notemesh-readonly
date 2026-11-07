@@ -1,3 +1,4 @@
+import {researchTrust,type ResearchTrust} from "./research-state";
 import fs from "node:fs";
 import { countWords, stripCr } from "./text";
 import { extractStructure, splitFrontmatter } from "./markdown";
@@ -13,6 +14,7 @@ import { readNote } from "./notes";
 import { dailyNotePath } from "./daily";
 
 export interface SearchHit {
+  researchTrust:ResearchTrust|null;
   path: string;
   title: string;
   /** Plain text, safe to quote verbatim — carries no highlight markup. */
@@ -126,7 +128,7 @@ export function searchVault(query: string, opts: SearchOptions = {}, judgePolicy
   const rows = db()
     .prepare(
       `SELECT notes.path AS path, notes_fts.title AS title, snippet(notes_fts, 3, ?, ?, ' … ', ?) AS snippet,
-              COALESCE(notes.modified, notes.mtime) AS modified
+              COALESCE(notes.modified, notes.mtime) AS modified, notes.frontmatter AS frontmatter
        ${from} WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ? OFFSET ?`,
     )
     .all(HL_START, HL_END, snippetTokens, ...params, limit, offset) as {
@@ -134,9 +136,11 @@ export function searchVault(query: string, opts: SearchOptions = {}, judgePolicy
     title: string;
     snippet: string;
     modified: number;
+    frontmatter: string;
   }[];
   return {
     hits: rows.map((r) => ({
+      researchTrust:researchTrust(r.path,JSON.parse(r.frontmatter||"{}")),
       path: r.path,
       title: r.title,
       ...splitHighlights(r.snippet),

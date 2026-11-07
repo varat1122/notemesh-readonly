@@ -21,6 +21,7 @@ type ContextRef = {
   path:string;role:Role;declaredVerification:string|null;
   declaredSourceType:string|null;
   evidenceUse:Item["evidenceUse"];
+  researchTrust:Item["researchTrust"];
   declaredEventDate:string|null;declaredPublishedAt:string|null;
   chronology:Item["chronology"];matchedMacroScopes:string[];
   line:number;truncated:boolean;counterEvidenceExcerptIncluded:boolean;
@@ -152,7 +153,7 @@ export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimRe
     maxNotes:10,maxChars:10000
   });
   const pointers:ContextRef[]=scoped.items.map(x=>({
-    path:x.path,role:x.role,evidenceUse:x.evidenceUse,declaredVerification:x.declaredVerification,
+    path:x.path,role:x.role,evidenceUse:x.evidenceUse,researchTrust:x.researchTrust,declaredVerification:x.declaredVerification,
     declaredSourceType:x.declaredSourceType,
     declaredEventDate:x.declaredEventDate,declaredPublishedAt:x.declaredPublishedAt,
     chronology:x.chronology,matchedMacroScopes:x.matchedMacroScopes,

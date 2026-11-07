@@ -873,3 +873,126 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
   });
 });
 
+
+describe("C1 Draft trust integration (simulated assessment; no semantic acceptance)",()=>{
+  it("real four-note persistence -> cold search/read/context/bundle/decision/next Judge retains Draft trust",async()=>{
+    const data=await judged(),p=await prepare(data),saved=await apply(data,p);
+    expect(saved.status).toBe("saved_verified");expect(saved.receipts).toHaveLength(4);
+    const reviewStep=saved.steps.find(s=>s.kind==="canonical_review")!,source=saved.steps[0];
+    const expected={research_status:"draft",usage_tier:"historical_analysis_only",independent_evidence_increment:0,
+      comparator_eligible:false,critic_independence:"not_verified",primary_authority:false,owner_thesis_authority:false};
+    expect(reviewStep.researchTrust).toMatchObject(expected);
+    expect(source.researchTrust?.research_status).toBe("source_only");
+    const bytes=fs.readFileSync(path.join(vault,reviewStep.path),"utf8"),sourceBytes=fs.readFileSync(path.join(vault,source.path),"utf8");
+    expect(sourceBytes).toContain(excerpt);const receipts=await journal();
+    vi.resetModules();
+    const {searchVault}=await import("../vault/queries"),{readNoteRange}=await import("../vault/notes");
+    expect(searchVault("InvestmentIntake"+p.planId.slice(3),{limit:20}).hits.find(h=>h.path===reviewStep.path)?.researchTrust).toMatchObject(expected);
+    // A paged read beyond frontmatter still carries the trust restriction.
+    expect(readNoteRange(reviewStep.path,{offset:30,limit:3}).researchTrust).toMatchObject(expected);
+    const {buildInvestmentContextPack}=await import("../vault/investment-context");
+    const ctx=buildInvestmentContextPack({question:"NVDA revenue guidance",issuers:["NVDA"],maxNotes:20,maxChars:20000});
+    expect(ctx.items.find(i=>i.path===reviewStep.path)).toMatchObject({researchTrust:expected,evidenceUse:"historical_context_only"});
+    expect(ctx.contextBundles.find(b=>b.reviewPath===reviewStep.path)).toMatchObject({status:"BOUND_SOURCE_REVIEW",researchTrust:expected,primaryVerification:"not_performed"});
+    const incoming={domain:"company" as const,entity:"NVDA",metric:"revenue",value:"96.2",unit:"USD billion",period:"Q2 FY2027",statement:"NVDA revenue guidance",originalSource:url};
+    const claimReview=(await import("../vault/investment-claim-review")).reviewInvestmentClaim(incoming);
+    expect(claimReview.possibleHistoricalPaths.find(x=>x.path===reviewStep.path)?.researchTrust).toMatchObject(expected);
+    expect(claimReview.matchingClaims.every(x=>x.researchTrust?.independent_evidence_increment===0)).toBe(true);
+    const packet=(await import("../vault/investment-decision-packet")).buildInvestmentDecisionPacket(incoming,claimReview);
+    expect(packet.historicalContext.sourcePointers.find(x=>x.path===reviewStep.path)?.researchTrust).toMatchObject(expected);
+    expect(packet.historicalContext.noteDeclaredPrimaryCandidates).not.toContain(reviewStep.path);
+    const next=await judged({...input,sourceUrl:url+"?edition=next",extractedText:excerpt+"Separate received appearance for next-review retrieval.\n"});
+    const h=JSON.parse(next.researchJudge.packet.body).history.find((x:{path:string})=>x.path===reviewStep.path);
+    expect(h).toMatchObject({researchTrust:{...expected,analysis_as_of:"2026-08-26T20:36:00Z"},use:"historical_context_only",sha256:sha(bytes)});
+    // Repeat proves persistence, never Reviewed/primary/comparator promotion.
+    const retry=await apply(data,await prepare(data));expect(retry.status).toBe("saved_verified");expect(retry.receipts).toEqual([]);
+    expect(retry.steps.find(x=>x.kind==="canonical_review")?.researchTrust).toMatchObject(expected);
+    expect(await journal()).toEqual(receipts);expect(fs.readFileSync(path.join(vault,reviewStep.path),"utf8")).toBe(bytes);
+    expect(fs.readFileSync(path.join(vault,source.path),"utf8")).toBe(sourceBytes);assertProtected();
+  });
+  it("pre-policy historical Review retains exact real receipt/bytes and is not retroactively marked Draft",async()=>{
+    const legacyInput={...input,claims:undefined,researchLineage:undefined};
+    const recipe=await plan(legacyInput),engine=await import("../safe-edit/engine");
+    const source=recipe.safeEditWorkflow!.steps[0],reviewStep=recipe.safeEditWorkflow!.steps[1];
+    const sp=engine.preview(source.safeEditRequest,actor);engine.apply({operationId:sp.operationId,previewToken:sp.previewToken,expectedHash:sp.beforeHash},actor);
+    const {draftMetadata}=await import("../vault/research-state");
+    let old=reviewStep.safeEditRequest!.change.content;
+    for(const [k,v] of Object.entries(draftMetadata))old=old.replace(`${k}: ${JSON.stringify(v)}\n`,"");
+    const oldId="ICW-"+sha(["canonical_review",reviewStep.path,sha(old)].join("\n")).slice(0,32);
+    const op=engine.preview({...reviewStep.safeEditRequest!,operationId:oldId,change:{kind:"create",content:old}},actor);
+    engine.apply({operationId:op.operationId,previewToken:op.previewToken,expectedHash:op.beforeHash},actor);
+    const before=await journal(),retry=await apply(legacyInput,await prepare(legacyInput));
+    expect(retry.status).toBe("saved_verified");expect(retry.receipts).toEqual([]);
+    expect(retry.steps.find(x=>x.kind==="canonical_review")).toMatchObject({receiptKey:oldId,researchTrust:{research_status:"unclassified",metadata_status:"legacy_unclassified",comparator_eligible:false}});
+    expect(fs.readFileSync(path.join(vault,reviewStep.path),"utf8")).toBe(old);expect(await journal()).toEqual(before);assertProtected();
+  });
+  it.each([false,true])("material risk cannot use Draft as an independent-critic fallback (same-chat critic=%s)",async critic=>{
+    const data=await judged();data.researchJudge.result.materialRisk=true;
+    if(critic)Object.assign(data.researchJudge.result,{critic:{verdict:"PASS",rationale:"Same-chat second look",independence:"not_verified"}});
+    const p=await prepare(data);expect(p.researchJudge?.decision).toBe("HOLD");expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+    const saved=await apply(data,p);expect(saved.receipts).toHaveLength(1);
+    const engine=await import("../safe-edit/engine");
+    for(const s of (await plan()).safeEditWorkflow!.steps.filter(s=>s.kind!=="source_intake"))expect(()=>engine.preview(s.safeEditRequest,actor)).toThrow(/research_judge/);
+    assertProtected();
+  });
+  it("same-version packet/gate without Draft policy stamp cannot authorize non-Source; fresh assessment restores eligibility",async()=>{
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
+    const gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
+    const {researchStatePolicy:_,...legacy}=gate;void _;
+    engine.recordResearchJudgeGate(p.previews[0].operationId,actor,legacy as typeof gate);
+    await expect(apply(data,p)).rejects.toThrow(/prepare_required_or_superseded/);
+    for(const t of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/contract_version/);
+    const {stableJudgeJson}=await import("../vault/research-judge"),{seal:__,...envelope}=data.researchJudge.packet;void __;
+    const body=JSON.parse(envelope.body);delete body.researchStatePolicy;
+    envelope.body=stableJudgeJson(body);envelope.digest=sha(envelope.body);envelope.packetId="RJP-"+envelope.digest.slice(0,32).toUpperCase();
+    const packet={...envelope,seal:createHmac("sha256",(await import("../env")).env.encryptionKey).update("research-judge-packet-v1\0"+stableJudgeJson(envelope)).digest("hex")};
+    const stale=await prepare({...data,researchJudge:{packet}} as typeof data);expect(stale.researchJudge?.decision).toBe("HOLD");
+    expect(stale.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+    const fresh=await judged(),saved=await apply(fresh,await prepare(fresh));expect(saved.status).toBe("saved_verified");assertProtected();
+  });
+  it("Draft with declared primary metadata/path remains historical and cannot fill primary authority gaps",async()=>{
+    const {draftMetadata}=await import("../vault/research-state");
+    const file="08_Daily_Weekly/Research Indexes/Primary Evidence - NVDA Draft.md";
+    fs.mkdirSync(path.dirname(path.join(vault,file)),{recursive:true});
+    const content="---\ntype: investment_research_review\nentity: NVDA\nsource_type: primary\n"+
+      Object.entries(draftMetadata).map(([k,v])=>`${k}: ${JSON.stringify(v)}`).join("\n")+"\n---\n# NVDA revenue guidance Draft\nยังไม่ใช่ข้อเท็จจริงที่ยืนยันแล้ว\n";
+    await addHistory(file,content,"draft-declared-primary-001");
+    const ctx=(await import("../vault/investment-context")).buildInvestmentContextPack({question:"NVDA revenue guidance",issuers:["NVDA"]});
+    expect(ctx.items.find(x=>x.path===file)).toMatchObject({evidenceUse:"historical_context_only",researchTrust:{research_status:"draft",primary_authority:false,comparator_eligible:false}});
+    expect(ctx.incomplete.join(" ")).toContain("Server-verified primary evidence not established");
+    const inc={domain:"company" as const,entity:"NVDA",metric:"revenue",period:"Q2 FY2027",statement:"NVDA revenue guidance",originalSource:url};
+    const packet=(await import("../vault/investment-decision-packet")).buildInvestmentDecisionPacket(inc,(await import("../vault/investment-claim-review")).reviewInvestmentClaim(inc));
+    expect(packet.historicalContext.noteDeclaredPrimaryCandidates).not.toContain(file);
+    expect(packet.historicalContext.primaryVerification.serverVerifiedPrimaryPaths).toEqual([]);assertProtected();
+  });
+  it("old generic promotion preview is rejected on retry and apply inside the shared write engine",async()=>{
+    const state=await import("../vault/research-state"),engine=await import("../safe-edit/engine");
+    const fm={type:"investment_research_review",...state.draftMetadata,research_status:"reviewed",comparator_eligible:true};
+    const content="---\n"+Object.entries(fm).map(([k,v])=>`${k}: ${JSON.stringify(v)}`).join("\n")+"\n---\n# NVDA legacy pending preview\n";
+    const request={operationId:"old-draft-promotion-preview",path:"10_Knowledge/Company Research/NVDA old pending.md",reason:"Simulate pre-policy preview only",change:{kind:"create" as const,content}};
+    // Emulate only old preview admission. Real journal/token, no direct SQL and
+    // no forged receipt. Restore the current guard before retry/apply.
+    const old=vi.spyOn(state,"assertResearchStateAuthority").mockImplementation(()=>{});
+    const preview=engine.preview(request,actor);old.mockRestore();
+    expect(()=>engine.preview(request,actor)).toThrow(/research_state/);
+    expect(()=>engine.apply({operationId:preview.operationId,previewToken:preview.previewToken,expectedHash:preview.beforeHash},actor)).toThrow(/research_state/);
+    expect(fs.existsSync(path.join(vault,request.path))).toBe(false);expect((await journal()).filter(r=>r.status==="written")).toEqual([]);assertProtected();
+  });
+  it.each(["reviewed","comparator","independence","critic"])("generic create cannot mint %s authority; existing legacy declarations remain historical",async attack=>{
+    const {draftMetadata}=await import("../vault/research-state");const fm:Record<string,unknown>={type:"investment_research_review",...draftMetadata};
+    if(attack==="reviewed")fm.research_status="reviewed";
+    if(attack==="comparator")fm.comparator_eligible=true;
+    if(attack==="independence")fm.independent_evidence_increment=1;
+    if(attack==="critic")fm.critic_independence="verified";
+    const content="---\n"+Object.entries(fm).map(([k,v])=>`${k}: ${JSON.stringify(v)}`).join("\n")+"\n---\n# NVDA archived research\n";
+    const engine=await import("../safe-edit/engine"),file="10_Knowledge/Company Research/NVDA forged "+attack+".md";
+    expect(()=>engine.preview({operationId:"draft-promotion-"+attack,path:file,reason:"Isolated adversarial fixture",change:{kind:"create",content}},actor)).toThrow(/research_state/);
+    expect(fs.existsSync(path.join(vault,file))).toBe(false);
+    // Historical fixture, not a receipt or authority fabrication: old bytes may
+    // exist on disk, but retrieval MUST NOT accept their declared promotion.
+    fs.writeFileSync(path.join(vault,file),content);(await import("../vault/indexer")).reindexPath(file);
+    expect((await import("../vault/queries")).searchVault("NVDA archived").hits.find(h=>h.path===file)?.researchTrust)
+      .toMatchObject({research_status:"unclassified",metadata_status:"unsupported_declaration_hold",comparator_eligible:false,independent_evidence_increment:0,critic_independence:"not_verified"});
+    assertProtected();
+  });
+});

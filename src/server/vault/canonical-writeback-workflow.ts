@@ -11,6 +11,8 @@ import type { WritebackInput, WritebackPlan } from "./investment-writeback-route
 import {renderThaiResearchM55,validateResearchM55} from "./research-quality-m55";
 import {sourceArchiveReviewLines} from "./source-archive-provenance-p0";
 import {planClaimNotes,lineageMetadata,readPersistedClaim,claimInterpretationBoundary} from "./canonical-claims";
+import {splitFrontmatter} from "./markdown";
+import {draftMetadata,researchTrust,type ResearchTrust} from "./research-state";
 import {revalidateHistoricalArchive} from "./canonical-archive-revalidation";
 
 const sha=(s:string)=>createHash("sha256").update(s,"utf8").digest("hex");
@@ -27,6 +29,7 @@ function originalFence(original:string){
   return `${fence}text\n${original}${original.endsWith("\n")?"":"\n"}${fence}\n`;
 }
 export interface CanonicalSafeEditStep {
+  researchTrust:ResearchTrust|null;
   kind:"source_intake"|"canonical_review"|"structured_claim";
   path:string;
   expectedSha256:string;
@@ -83,7 +86,7 @@ function toStep(kind:CanonicalSafeEditStep["kind"],path:string,content:string,ta
   // Operation IDs are deterministic across model retries but never reused for
   // changed content. A changed existing note is a conflict, not an overwrite.
   const operationId="ICW-"+sha([kind,path,digest].join("\n")).slice(0,32);
-  return {kind,path,expectedSha256:digest,receiptKey:operationId,state,
+  return {researchTrust:researchTrust(path,splitFrontmatter(content).data),kind,path,expectedSha256:digest,receiptKey:operationId,state,
     readbackVerified:check.hashOK,indexed:check.indexed,searchable:check.searchable,
     safeEditRequest:state==="needs_create"?{operationId,path,
       reason:"M5.3 attributed investment source/review: add-only; no Thesis, Evidence Register, Portfolio or automatic Company Timeline edits",
@@ -170,9 +173,10 @@ export function buildCanonicalSafeEditWorkflow(
       `- ${row.metric} ${row.period}: ${row.oldValue} → ${row.newValue} ${row.unit} (attributed vintages)`),
     ""
   ]:[];
-  const renderReview=(legacy=false)=>[
+  const renderReview=(legacy=false,withDraftState=true)=>[
     "---","type: investment_research_review","source_type: chatgpt_analysis",
     "verification: not_reverified","status: analyst_review_not_user_endorsed",
+    ...(withDraftState?Object.entries(draftMetadata).map(([k,v])=>`${k}: ${JSON.stringify(v)}`):[]),
     `intake_id: ${yaml(plan.planId)}`,`source_chat: ${yaml(sourceChat)}`,
     `source_kind: ${yaml(plan.sourceKind)}`,`attributed_publisher: ${yaml(input.publisher)}`,
     ...(input.researchReview?[
@@ -237,10 +241,15 @@ export function buildCanonicalSafeEditWorkflow(
   const archiveHold=plan.sourceCapture.archiveProvenanceStatus==="HOLD";
   if(reviewStep&&(reviewStep.state==="hold_conflict"||archiveHold&&reviewStep.state==="verified_existing")){
     const historical=revalidateHistoricalArchive(reviewPath,reviewContent,plan.sourceCapture.originalSourceArchive,archiveHold)??
-      revalidateHistoricalArchive(reviewPath,renderReview(true),plan.sourceCapture.originalSourceArchive,archiveHold);
+      revalidateHistoricalArchive(reviewPath,renderReview(true),plan.sourceCapture.originalSourceArchive,archiveHold)??
+      // Exact pre-policy renderings + real immutable receipt, never strip caller
+      // metadata or retrofit Draft authority onto historical Review bytes.
+      revalidateHistoricalArchive(reviewPath,renderReview(false,false),plan.sourceCapture.originalSourceArchive,archiveHold)??
+      revalidateHistoricalArchive(reviewPath,renderReview(true,false),plan.sourceCapture.originalSourceArchive,archiveHold);
     if(historical){
       const check=inspect(reviewPath,historical.content,tag);
       reviewStep.state=!check.hashOK?"hold_conflict":!check.indexed||!check.searchable?"hold_index_repair":historical.state;
+      reviewStep.researchTrust=researchTrust(reviewPath,splitFrontmatter(historical.content).data);
       reviewStep.expectedSha256=sha(historical.content);
       reviewStep.receiptKey=historical.receiptKey;
       reviewStep.readbackVerified=check.hashOK;

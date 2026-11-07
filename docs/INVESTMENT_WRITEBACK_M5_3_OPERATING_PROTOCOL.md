@@ -169,3 +169,55 @@ planner, a consent-scoped Safe Edit server, preview/apply receipts, indexed
 search, and protected-note invariance against a temporary local Vault. It
 does **not** certify the installed ChatGPT Web host against a deployed M5.3
 endpoint or any real device's Obsidian Sync.
+
+
+## C1 Research Draft trust contract — RI001-DRAFT-1
+
+This additive contract follows IOS Master 2.0.0 §09 and the accepted C1 Draft
+policy in IOS-ORCH-RI-001. It uses existing Markdown, indexed frontmatter and
+Safe Edit; no DB schema/migration or writer is added.
+
+New canonical Research Reviews carry `research_status=draft`,
+`usage_tier=historical_analysis_only`, `independent_evidence_increment=0`,
+`comparator_eligible=false`, `critic_independence=not_verified`, and
+`research_state_version=RI001-DRAFT-1`. These are conservative use restrictions,
+not a semantic assessment, verified fact, independent critic attestation or
+Owner-approved Thesis. `saved_verified` continues to describe persistence
+(write/readback/index/links), never Research Reviewed.
+
+The typed `researchTrust` projection accompanies canonical steps, Search hits,
+paged note reads, Context Pack items/Source-Review bundles, claim-review pointers,
+Decision Packet references and the next Judge packet's historical evidence.
+Source artifacts project as `source_only` / `attributed_source_only`; this does
+not assert that an associated Review is missing. Historical unlabeled Reviews
+remain `unclassified` / `historical_analysis_only`. Neither repeat retrieval nor
+multiple Claims/Reviews grants independent evidence or comparator eligibility.
+`analysis_as_of` comes only from a valid declared `knowledge_cutoff_as_of`;
+`analysis_created_at` remains separate. Read projections do not authenticate
+these dates or substitute event/import/file time. No critic run is inferred
+from `critic_independence=not_verified`.
+
+There is no authorized Reviewed/comparator/Approved-Thesis transition or trusted
+independent-critic attestation API in this candidate. Caller-declared promotion
+labels remain untrusted historical data on read; generic Safe Edit cannot mint
+such promotions or remove managed Draft restrictions. Existing legacy writers
+without managed labels remain compatible and unclassified. Historical accepted
+Review bytes and real receipts are revalidated against exact pre-policy
+renderings, never rewritten to insert labels.
+
+Judge `RI001-JUDGE-5` remains All-or-Hold for the entire assessed non-Source
+bundle. Required independent critic unavailable, operational read/search failure,
+failed required assessment, stale scope or changed content still HOLD. There is
+no Draft fallback exception. Source preservation remains subject to existing
+rights, identity/provenance, writer and maintenance controls. A fresh packet and
+assessment are required when content changes. The sealed packet and journal gate
+also bind `RI001-DRAFT-1`; earlier pending Judge-5 authority without this policy
+stamp cannot authorize new Claims/Review. Re-prepare with a fresh assessment;
+do not edit old journals or receipts. Deliberate bounded omissions remain
+explicit and are not automatically a HOLD.
+
+Independent security review, the exact Reviewed/critic promotion contract, and
+separately authorized WORK runtime acceptance remain external gates. CI uses
+simulated assessments to test enforcement and does not certify LLM research
+quality. This change authorizes no deployment, live mutation, automatic protected
+record update, backup/restore or first-cutover operation.
