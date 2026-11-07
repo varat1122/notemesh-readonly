@@ -5,8 +5,8 @@
 export function assertProtectedRecord(path:string,...metadata:Record<string,unknown>[]){
   const file=path.split("/").at(-1)??"";
   const types=metadata.map(fm=>typeof fm.type==="string"?fm.type.trim().toLowerCase():null);
-  const timeline=/^(?:Company Evolution - .+|00_Investment_Evolution_Master(?: - .+)?|.+ - Company Evolution Timeline)\.md$/i.test(file);
-  const decision=/^(?:Decision Ledger(?: - .+)?|.+ - Decision Ledger)\.md$/i.test(file);
+  const timeline=/^(?:Company Evolution - .+|Company Evolution Timeline(?: - .+)?|00_Investment_Evolution_Master(?: - .+)?|.+ - Company Evolution Timeline)\.md$/i.test(file);
+  const decision=/^(?:(?:Investment )?Decision Ledger(?: - .+)?|.+ - Decision Ledger)\.md$/i.test(file);
   const typed=types.some(type=>type!==null&&["company_evolution_timeline","investment_evolution_master","decision_ledger"].includes(type));
   if(timeline||decision||typed)throw Error("protected_record_separate_authorization_required");
   // The accepted exact-diff + structured-evidence Thesis workflow is scoped to

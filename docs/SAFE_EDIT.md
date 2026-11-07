@@ -106,6 +106,12 @@ cannot authorize a write after this guard is installed; already-written receipts
 remain readable/idempotent and are never deleted or rewritten. Derived timeline
 read views and normal Source/Review writes remain available.
 
+Untyped basename aliases `Company Evolution Timeline.md`,
+`Company Evolution Timeline - *.md`, `Investment Decision Ledger.md` and
+`Investment Decision Ledger - *.md` use the same boundary, independent of folder
+or case. This is an anchored record-name rule, not a substring ban on Research
+notes that discuss timelines or decision ledgers.
+
 This does not invent a Timeline/admin permission. The existing structured-evidence
 and exact-diff admin workflow for `05_Thesis/` remains scoped there; a Current
 Thesis or Evidence Register moved/declared elsewhere cannot shed that boundary.
