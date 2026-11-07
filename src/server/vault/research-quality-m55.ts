@@ -147,7 +147,10 @@ const negatedVerifiedFactPrefix=/(?:ไม่ใช่|ไม่ถือ(?:ว�
 function unnegatedVerifiedFact(text:string):boolean{
   return [...text.matchAll(/\bverified fact\b/giu)].some(match=>{
     const preceding=text.slice(Math.max(0,(match.index??0)-80),match.index);
-    return !negatedVerifiedFactPrefix.test(preceding);
+    const adjacentDenial=negatedVerifiedFactPrefix.exec(preceding);
+    // Double negation is affirmative or ambiguous: fail closed rather than
+    // treating only its innermost denial as an exemption from assessment.
+    return !adjacentDenial||negatedVerifiedFactPrefix.test(preceding.slice(0,adjacentDenial.index));
   });
 }
 

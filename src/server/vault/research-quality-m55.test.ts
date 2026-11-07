@@ -105,6 +105,42 @@ describe("M5.5 pre-write research contract",()=>{
     expect(validateResearchM55(memory,denial))
       .not.toContain("explicit_verified_claim_requires_assessment");
   });
+  it.each([
+    "not not a verified fact",
+    "isn't not a verified fact",
+    "not not verified fact",
+    "is not not a verified fact",
+    "not a not a verified fact",
+    "not not not a verified fact",
+    "ไม่ใช่ไม่ใช่ Verified Fact",
+    "ยังไม่ใช่ไม่ใช่ Verified Fact",
+    "มิใช่ไม่ใช่ Verified Fact",
+    "ไม่ได้เป็น ไม่ใช่ Verified Fact",
+  ])("QD-01: double/ambiguous negation cannot bypass claim assessment: %s",phrase=>{
+    const ambiguous={...review,thesisImplicationTh:
+      `ข้อความจำลองนี้ ${phrase} จึงต้องตรวจสอบหลักฐานต้นฉบับและที่มาให้ครบถ้วน`};
+    expect(validateResearchM55(memory,ambiguous))
+      .toContain("explicit_verified_claim_requires_assessment");
+    const unresolved={entity:"MU",metric:"source authentication",period:"2026",unit:"text",
+      competingValues:["unverified"],resolution:"unresolved" as const,conclusion:"no_change" as const};
+    expect(validateResearchM55(memory,{...ambiguous,claimAssessments:[unresolved]}))
+      .toContain("unresolved_claim_asserted_as_verified");
+  });
+  it.each([
+    "not a verified fact",
+    "This is not a verified fact",
+    "This isn't a verified fact",
+    "This does not constitute a verified fact",
+    "This cannot be a verified fact",
+    "ไม่ใช่ Verified Fact",
+    "ยังไม่ใช่ Verified Fact",
+    "ไม่ถือว่าเป็น Verified Fact",
+  ])("QD-01: legitimate single denial is not an affirmative verified claim: %s",phrase=>{
+    const denial={...review,thesisImplicationTh:
+      `ข้อความทดลองนี้ ${phrase} จึงยังต้องตรวจเอกสารหลักฐานก่อนนำไปใช้ในสมมติฐานการลงทุน`};
+    expect(validateResearchM55(memory,denial))
+      .not.toContain("explicit_verified_claim_requires_assessment");
+  });
   it("requires an AI claim decision when submitted guidance is mislabeled as reported_fact",()=>{
     const renamed={...memory,sourceKind:"issuer_release",contentTypes:["reported_fact"]};
     const original="MU FY2027 revenue guidance +20% according to source A; source B reports -20%.";
