@@ -64,7 +64,7 @@ describe("RI-001 canonical Review discovery and intake-bound assembly",()=>{
   async function appendSyntheticReview(path:string,id:string){
     const {preview,apply}=await import("../safe-edit/engine");
     const p=preview({operationId:id,path,reason:"Synthetic receipted Review appendix",change:{
-      kind:"append",heading:"## Research analysis",date:"2026-11-07",
+      kind:"append",heading:"Research analysis",date:"2026-11-07",
       content:"Synthetic duplicate context only. No verified primary claims or independent evidence increment."
     }},"oauth:ri-fixture");
     apply({operationId:id,previewToken:p.previewToken,expectedHash:p.beforeHash},"oauth:ri-fixture");
