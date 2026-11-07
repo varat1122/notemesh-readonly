@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import {RetrievalObserver,type RetrievalCoverage} from "./investment-retrieval-coverage";
 import { searchVault } from "./queries";
 import { db } from "../db";
 import { readNote } from "./notes";
@@ -31,9 +32,9 @@ export interface MacroCoverage {scope:string;subjectEvidence:Coverage;counterEvi
 type DeclaredDate={status:"DECLARED"|"UNKNOWN";value:string|null};
 export interface ResearchChronology {eventDate:DeclaredDate;publicationDate:DeclaredDate;analysisDate:DeclaredDate;importDate:DeclaredDate}
 export interface Item { path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
-export interface Pack { status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
+export interface Pack { retrieval:RetrievalCoverage; status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
-function resolveIssuers(requested:string[]):IssuerResolution[]{
+function resolveIssuers(requested:string[],observer:RetrievalObserver):IssuerResolution[]{
   if(!requested.length)return [];
   // Same indexed Company Hub/alias contract as M5.2. A sentinel prevents an
   // incomplete index scan from establishing a falsely unique mapping.
@@ -52,9 +53,11 @@ function resolveIssuers(requested:string[]):IssuerResolution[]{
     if(!candidates.length)return result("unresolved");
     const hub=candidates[0];
     try{
-      const actual=JSON.stringify(splitFrontmatter(readNote(hub.path).content).data);
-      const aliases=(fm:string|null)=>JSON.stringify([...new Set(indexedHubAliases(fm).map(hubIdentityKey))].sort());
-      if(aliases(actual)!==aliases(hub.frontmatter))return result("readback_hold");
+      observer.read("issuer_identity",hub.path,()=>{
+        const actual=JSON.stringify(splitFrontmatter(readNote(hub.path).content).data);
+        const aliases=(fm:string|null)=>JSON.stringify([...new Set(indexedHubAliases(fm).map(hubIdentityKey))].sort());
+        if(aliases(actual)!==aliases(hub.frontmatter))throw Error("readback_hold");
+      });
     }catch{return result("readback_hold");}
     return result(hubIdentityKey(hub.title)===wanted?"exact_existing_title":"indexed_alias",hub.title,hub.path);
   });
@@ -65,7 +68,7 @@ function scopeKeys(r:IssuerResolution):string[]{
   // unresolved. Qualified/invalid identifiers never become unscoped queries.
   return r.status==="unresolved"&&/^[A-Z][A-Z0-9.-]{0,11}$/.test(r.requested)?[r.requested]:[];
 }
-function discoverDuringIdentityHold(resolutions:IssuerResolution[]):IdentityHoldDiscovery[]{
+function discoverDuringIdentityHold(resolutions:IssuerResolution[],observer:RetrievalObserver):IdentityHoldDiscovery[]{
   return resolutions.filter(r=>["ambiguous_hold","readback_hold","index_limit_hold"].includes(r.status)&&
     /^[A-Z][A-Z0-9.-]{0,11}$/.test(r.requested)).map(r=>{
     const result:IdentityHoldDiscovery={requested:r.requested,resolutionStatus:r.status,mappingVerified:false,
@@ -75,14 +78,16 @@ function discoverDuringIdentityHold(resolutions:IssuerResolution[]):IdentityHold
       result.scanComplete=false;result.reasons.push("literal_folder_unavailable");return result;
     }
     try{
-      const found=searchVault(r.requested,{folder,limit:31});
+      const found=observer.search("literal_discovery",r.requested,folder,()=>searchVault(r.requested,{folder,limit:31}));
       if(found.total>30){result.scanComplete=false;result.reasons.push("literal_search_limit");}
       const candidates=found.hits.slice(0,30).filter(h=>namedIssuers(h.path).includes(r.requested));
       if(candidates.length>12){result.scanComplete=false;result.reasons.push("literal_read_limit");}
       for(const h of candidates.slice(0,12))try{
-        const raw=readNote(h.path).content;
-        if(Buffer.byteLength(raw)>100000||JSON.stringify(splitFrontmatter(raw).data)!==JSON.stringify(indexedMetadata(h.path)))throw Error("unreadable");
-        result.candidatePaths.push(h.path);
+        observer.read("literal_discovery",h.path,()=>{
+          const raw=readNote(h.path).content;
+          if(Buffer.byteLength(raw)>100000||JSON.stringify(splitFrontmatter(raw).data)!==JSON.stringify(indexedMetadata(h.path)))throw Error("unreadable");
+          result.candidatePaths.push(h.path);
+        });
       }catch{result.scanComplete=false;result.reasons.push("literal_readback_unavailable");}
     }catch{result.scanComplete=false;result.reasons.push("literal_search_unavailable");}
     result.reasons=[...new Set(result.reasons)];return result;
@@ -233,8 +238,9 @@ export function buildInvestmentContextPack(req: Input): Pack {
   if (question.length<3) throw new Error("Question must contain at least 3 characters");
   const requestedIssuers = [...new Set((req.issuers||[]).map(s=>s.trim().toUpperCase()))].slice(0,6);
   if(req.intakeId&&(!/^IN-[A-F0-9]{16}$/.test(req.intakeId)||!requestedIssuers.length))throw Error("Intake scope requires a valid intake ID and issuer scope");
-  const issuerResolution=resolveIssuers(requestedIssuers);
-  const identityHoldDiscovery=discoverDuringIdentityHold(issuerResolution);
+  const observer=new RetrievalObserver();
+  const issuerResolution=resolveIssuers(requestedIssuers,observer);
+  const identityHoldDiscovery=discoverDuringIdentityHold(issuerResolution,observer);
   const issuers=[...new Set(issuerResolution.flatMap(scopeKeys).map(x=>x.toUpperCase()))];
   const contextKeys=[...new Set(issuerResolution.flatMap(r=>r.contextKey?[r.contextKey]:scopeKeys(r)))];
   const issuerScoped=requestedIssuers.length>0;
@@ -251,11 +257,11 @@ export function buildInvestmentContextPack(req: Input): Pack {
   });
   // Reuse the same collision/readback checks for filename aliases. A Hub's
   // declaration alone cannot authorize an alias also claimed by another Hub.
-  const aliasResolution=resolveIssuers([...new Set(subjectScopes.flatMap(scope=>scope.aliases.slice(0,12)))]);
+  const aliasResolution=resolveIssuers([...new Set(subjectScopes.flatMap(scope=>scope.aliases.slice(0,12)))],observer);
   const researchScans=subjectScopes.map(({key,resolved,aliases})=>{
     const checked=aliasResolution.filter(r=>aliases.slice(0,12).includes(r.requested));
     const subjects=resolved.length?[...resolved.flatMap(scopeKeys),...checked.filter(r=>r.contextKey===key).map(r=>r.requested)]:undefined;
-    const scan=discoverCanonicalResearch(key,req.intakeId,subjects);
+    const scan=discoverCanonicalResearch(key,req.intakeId,subjects,observer);
     if(aliases.length>12){scan.complete=false;scan.reasons.push("legacy_subject_alias_limit");}
     if(checked.some(r=>r.contextKey!==key)){scan.complete=false;scan.reasons.push("legacy_subject_alias_unresolved");}
     if(!scan.complete){scan.chronology="SCAN_INCOMPLETE";scan.latestReviewPaths=[];}
@@ -274,7 +280,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
     }
   }
   const search=(query:string,opts:Parameters<typeof searchVault>[1])=>{
-    const result=searchVault(query,opts);
+    const result=observer.search("search",query,opts?.folder,()=>searchVault(query,opts));
     if(result.total>result.hits.length)limits.add("Search window truncated: "+query);
     return result;
   };
@@ -298,7 +304,8 @@ export function buildInvestmentContextPack(req: Input): Pack {
     ]),
   ];
   const absent: string[] = [];
-  for (const p of needed) { if (exists(p)) pool.set(p,120); else absent.push(p); }
+  const available=(p:string)=>exists(p)||!!db().prepare("SELECT 1 FROM notes WHERE path=?").get(p);
+  for (const p of needed) { if (available(p)) pool.set(p,120); else absent.push(p); }
   // Historical Company indexes exist in two legacy locations. Neither is a
   // current/approved Thesis, but both provide routes back to dated prior
   // conversations. A missing newer index must not hide the older one or be
@@ -308,7 +315,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
       "08_Daily_Weekly/Research Indexes/Company - "+ticker+".md",
       "10_Knowledge/Indexes/Company - "+ticker+".md"
     ];
-    const present=candidates.filter(exists);
+    const present=candidates.filter(available);
     if(present.length) for(const p of present)pool.set(p,120);
     else absent.push("No legacy Company Index found for "+ticker+" (both known locations checked).");
   }
@@ -321,14 +328,14 @@ export function buildInvestmentContextPack(req: Input): Pack {
   if(issuers.length && !req.industry){
     for(const ticker of contextKeys){
       const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - "+ticker+".md";
-      if(!exists(timeline))continue;
+      if(!available(timeline))continue;
       const rows=db().prepare(
         "SELECT DISTINCT resolved_path FROM links WHERE source_path=? AND resolved_path LIKE ? ORDER BY resolved_path LIMIT 12"
       ).all(timeline,"02_Industries_Themes/%.md") as {resolved_path:string|null}[];
       for(const row of rows){
         const target=row.resolved_path;
         if(target && target.startsWith("02_Industries_Themes/") &&
-           roleOf(target)==="industry" && exists(target)){
+           roleOf(target)==="industry" && available(target)){
           pool.set(target,Math.max(pool.get(target)||0,116));
           linkedIndustryPaths.add(target);
         }
@@ -343,7 +350,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
     const matches = db().prepare("SELECT path FROM notes WHERE substr(path,1,?)=? ORDER BY path DESC LIMIT 13")
       .all(prefix.length,prefix) as {path:string}[];
     if(matches.length>12)limits.add("Primary-source filename window truncated: "+ticker);
-    for (const note of matches.slice(0,12)) if(exists(note.path)) pool.set(note.path,115);
+    for (const note of matches.slice(0,12)) if(available(note.path)) pool.set(note.path,115);
   }
   const searchTerms = issuerScoped&&!issuers.length?[]:[...new Set([...issuers,...topicTerms(req.industry||""),...terms(question)])].slice(0,12);
   const failed: string[] = [];
@@ -374,7 +381,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
         .all(scope) as {path:string}[];
       if(candidatePaths.length>150)limits.add("Macro filename window truncated: "+scope);
       for(const r of candidatePaths.slice(0,150))if((r.path.startsWith(folder+"/")||r.path.startsWith("02_Industries_Themes/"))&&
-        explicitMacroScope(r.path,scope)&&exists(r.path))pool.set(r.path,Math.max(pool.get(r.path)||0,macroSubjectPaths.has(r.path)?60:22));
+        explicitMacroScope(r.path,scope)&&available(r.path))pool.set(r.path,Math.max(pool.get(r.path)||0,macroSubjectPaths.has(r.path)?60:22));
     }
   }
   const industryMatches = new Set<string>();
@@ -445,13 +452,15 @@ export function buildInvestmentContextPack(req: Input): Pack {
     const reasons=macroReadReasons.get(scope)!;
     if(paths.length>24)reasons.push("counter_read_limit");
     for(const p of [...paths].sort().slice(0,24))try{
-      const raw=readNote(p).content;
-      if(Buffer.byteLength(raw)>100000)throw Error("read_limit");
-      const parsed=splitFrontmatter(raw);
-      if(!explicitMacroScope(p,scope,parsed.data))throw Error("scope_readback");
-      const lines=parsed.body.split(/\r?\n/);
-      if(lines.length>1200)reasons.push("counter_line_limit");
-      if(lines.slice(0,1200).some(line=>COUNTER_SECTION.test(line)))macroRiskPaths.add(p);
+      observer.read("macro_counter",p,()=>{
+        const raw=readNote(p).content;
+        if(Buffer.byteLength(raw)>100000)throw Error("read_limit");
+        const parsed=splitFrontmatter(raw);
+        if(!explicitMacroScope(p,scope,parsed.data))throw Error("scope_readback");
+        const lines=parsed.body.split(/\r?\n/);
+        if(lines.length>1200)reasons.push("counter_line_limit");
+        if(lines.slice(0,1200).some(line=>COUNTER_SECTION.test(line)))macroRiskPaths.add(p);
+      });
     }catch{reasons.push("counter_readback_unavailable");}
   }
   // Promote same-event research whose headline contains the user's specific
@@ -523,20 +532,24 @@ export function buildInvestmentContextPack(req: Input): Pack {
     const n=roleCounts.get(row.role)||0;
     if(n>=(quota[row.role]??4)){omitted.push(row.path);continue;}
     try {
-      const raw=readNote(row.path).content;
-      const current=splitFrontmatter(raw).data;
-      if(macroScope&&row.role!=="rules"&&!matchedMacroScopes.some(scope=>explicitMacroScope(row.path,scope,current)))throw Error("macro_scope_readback");
-      const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining,macroScope?Math.floor(budget/Math.max(2,macroScopes.length*2)):2000),row.role);
-      if(!excerpt.excerpt.trim())continue;
-      const historical=canonicalReviews.get(row.path)?.legacy||row.historical||historicalOnly(row.path,splitFrontmatter(raw).data);
-      items.push({path:row.path,role:row.role,matchedMacroScopes:matchedMacroScopes.filter(scope=>explicitMacroScope(row.path,scope,current)),evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
-      if(archivalSelection)historicalCount++;
-      if(background)for(const scope of matchedMacroScopes)macroBackgroundCounts.set(scope,(macroBackgroundCounts.get(scope)||0)+1);
-      roleCounts.set(row.role,n+1);remaining-=excerpt.excerpt.length;
-    } catch {omitted.push(row.path);}
+      observer.read("selection",row.path,()=>{
+        const raw=readNote(row.path).content;
+        const current=splitFrontmatter(raw).data;
+        if(macroScope&&row.role!=="rules"&&!matchedMacroScopes.some(scope=>explicitMacroScope(row.path,scope,current)))throw Error("macro_scope_readback");
+        const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining,macroScope?Math.floor(budget/Math.max(2,macroScopes.length*2)):2000),row.role);
+        if(!excerpt.excerpt.trim()){omitted.push(row.path);return;}
+        const historical=canonicalReviews.get(row.path)?.legacy||row.historical||historicalOnly(row.path,splitFrontmatter(raw).data);
+        items.push({path:row.path,role:row.role,matchedMacroScopes:matchedMacroScopes.filter(scope=>explicitMacroScope(row.path,scope,current)),evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
+        if(archivalSelection)historicalCount++;
+        if(background)for(const scope of matchedMacroScopes)macroBackgroundCounts.set(scope,(macroBackgroundCounts.get(scope)||0)+1);
+        roleCounts.set(row.role,n+1);remaining-=excerpt.excerpt.length;
+      });
+    } catch {/* Operational failure is retained in retrieval, never a quota omission. */}
   }
   const roles=new Set(items.map(x=>x.role));
+  const retrieval=observer.snapshot({question,issuers:requestedIssuers,intakeId:req.intakeId,industry:req.industry,focus,maxNotes,maxChars:budget},items.length,omitted.length);
   const incomplete=[...absent,...limits];
+  if(retrieval.status==="operational_hold")incomplete.push("Operational retrieval failure: see retrieval counts and bounded failure records.");
   for(const scan of researchScans)for(const review of scan.reviews)if(review.bundle.status==="HOLD")
     incomplete.push(`${review.intakeId}: Source/Review context binding HOLD (${review.bundle.reason}); no alternate Source inferred.`);
   for(const discovery of identityHoldDiscovery)incomplete.push(`${discovery.requested}: identity HOLD; ${discovery.candidatePaths.length} literal historical candidates retained separately, not issuer mappings or duplicate adjudication. ${discovery.reasons.join(", ")}`);
@@ -607,7 +620,7 @@ export function buildInvestmentContextPack(req: Input): Pack {
   }
   if(failed.length)incomplete.push("Search failed on terms: "+failed.join(", "));
   return {
-    status:"retrieval_only_not_verified",question,issuers:requestedIssuers,issuerResolution,issuerCoverage,identityHoldDiscovery,macroCoverage,researchCoverage,
+    retrieval,status:"retrieval_only_not_verified",question,issuers:requestedIssuers,issuerResolution,issuerCoverage,identityHoldDiscovery,macroCoverage,researchCoverage,
     contextBundles:researchScans.flatMap(scan=>scan.reviews.map(review=>review.bundle)),focus,industry:req.industry?.slice(0,140)||null,
     items,considered:rank.length,selected:items.length,excerptChars:budget-remaining,
     incomplete,omitted:omitted.slice(0,15),

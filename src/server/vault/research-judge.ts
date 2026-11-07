@@ -4,11 +4,12 @@ import {createHash,createHmac,timingSafeEqual} from "node:crypto";
 import {z} from "zod";
 import {env} from "../env";
 import {buildInvestmentContextPack} from "./investment-context";
+import {retrievalOperationallyComplete,type RetrievalCoverage} from "./investment-retrieval-coverage";
 import {M2_POLICY,m2VaultReadDeps} from "./research-decision-v2";
 import {splitFrontmatter} from "./markdown";
 import {planInvestmentWriteback,type WritebackInput} from "./investment-writeback-router";
 
-export const JUDGE_VERSION="RI001-JUDGE-2";
+export const JUDGE_VERSION="RI001-JUDGE-3";
 export const judgeHash=(s:string)=>createHash("sha256").update(s).digest("hex");
 export function stableJudgeJson(value:unknown):string {
   if(Array.isArray(value))return "["+value.map(stableJudgeJson).join(",")+"]";
@@ -50,7 +51,7 @@ interface PacketBody {
     inputFormat:string;declaredAccess:string|null;brokerVintage:unknown;attachment:unknown;authority:string};
   claims:{key:string;candidate:unknown}[];relationships:{key:string;candidate:unknown}[];
   proposedThaiReview:unknown;dates:{event:string|null;publication:string|null;analysisAsOf:string|null;analysisCreatedAt:null};
-  history:History[];coverage:{status:string;incomplete:string[];omitted:string[];issuerResolution:unknown;researchCoverage:unknown;macroCoverage:unknown;
+  history:History[];coverage:{retrieval:RetrievalCoverage;status:string;incomplete:string[];omitted:string[];issuerResolution:unknown;researchCoverage:unknown;macroCoverage:unknown;
     selectedHistory:{status:"readback_complete"|"readback_hold";selected:number;read:number;failures:HistoryFailure[]}};
   citationContract:{format:string;offsets:string;authority:string;declaredLocators:string};
   constraints:string[];trust:{actorLabelSha256:string;actorProvenance:string;session:string;modelVersion:string;judgeIdentity:string};
@@ -88,6 +89,7 @@ export function buildResearchJudgePacket(input:WritebackInput,actor:string){
     }catch{incomplete.push("historical_readback_unavailable");failures.push({key,path:item.path,reason:reason||"readback_failed"});}
   }
   const constraints:string[]=[];
+  if(!retrievalOperationallyComplete(context.retrieval))constraints.push("historical_retrieval_operational_hold");
   if(failures.length)constraints.push("selected_history_readback_unavailable");
   if(clean.domain==="company"&&context.issuerResolution.some(r=>!["exact_existing_title","indexed_alias"].includes(r.status)))constraints.push("issuer_identity_resolution_hold");
   if(clean.claim)constraints.push("legacy_singular_claim_not_supported_by_opt_in_judge");
@@ -107,7 +109,7 @@ export function buildResearchJudgePacket(input:WritebackInput,actor:string){
     relationships:(clean.entityRoles??[]).map((candidate,i)=>({key:`relationship_${i}`,candidate})),
     proposedThaiReview:clean.researchReview??null,dates:{event:clean.eventDate??null,publication:clean.publicationDate??null,
       analysisAsOf:cutoff??null,analysisCreatedAt:null},history,
-    coverage:{status:"bounded_not_exhaustive",incomplete:incomplete.slice(0,30),omitted:context.omitted.slice(0,30),
+    coverage:{retrieval:context.retrieval,status:"bounded_not_exhaustive",incomplete:incomplete.slice(0,30),omitted:context.omitted.slice(0,30),
       issuerResolution:context.issuerResolution,researchCoverage:context.researchCoverage,macroCoverage:context.macroCoverage,
       selectedHistory:{status:failures.length?"readback_hold":"readback_complete",selected:selected.length,read:history.length,failures}},
     citationContract:{format:"utf16:START:END",offsets:"zero_based_end_exclusive_in_exact_received_text_or_full_historical_note",
@@ -130,6 +132,14 @@ export function verifyResearchJudgePacket(input:WritebackInput,submission:JudgeS
 export function judgeHistoryCurrent(history:Pick<History,"path"|"sha256">[]){
   return history.every(h=>{try{const r=m2VaultReadDeps.readIndexed(h.path);return !!r?.indexed&&r.searchable&&judgeHash(r.content)===h.sha256;}catch{return false;}});
 }
+/** Recheck operational availability at admission, including generic apply.
+ * Ordinary bounds/missing roles are not errors. This does not re-attest unseen
+ * evidence or change the sealed analyst inputs; historical hashes still bind. */
+export function judgeRetrievalCurrent(retrieval:unknown):boolean {
+  if(!retrievalOperationallyComplete(retrieval))return false;
+  try{return retrievalOperationallyComplete(buildInvestmentContextPack(retrieval.scope).retrieval);}
+  catch{return false;}
+}
 function exactTextReference(ref:z.infer<typeof reference>,text:string|undefined,sha256:string|undefined):boolean {
   if(!text||!sha256||ref.sourceSha256!==sha256||!ref.quote.replace(/[\s\p{Cf}]/gu,""))return false;
   const span=/^utf16:(0|[1-9]\d*):(0|[1-9]\d*)$/.exec(ref.locator);
@@ -142,6 +152,7 @@ function exactTextReference(ref:z.infer<typeof reference>,text:string|undefined,
 export function evaluateResearchJudge(input:WritebackInput,submission:JudgeSubmission,actor:string){
   const body=verifyResearchJudgePacket(input,submission,actor),r=submission.result,reasons=[...body.constraints];
   let decision:"PASS"|"HOLD"|"FAIL"="HOLD",criticRequired=false;
+  if(!judgeRetrievalCurrent(body.coverage.retrieval))reasons.push("historical_retrieval_operational_hold");
   if(body.coverage.selectedHistory.status!=="readback_complete")reasons.push("selected_history_readback_unavailable");
   if(!judgeHistoryCurrent(body.history))reasons.push("historical_readback_changed_hold");
   if(!r)reasons.push("judge_result_missing");
@@ -176,6 +187,6 @@ export function evaluateResearchJudge(input:WritebackInput,submission:JudgeSubmi
   if(reasons.length&&decision!=="FAIL")decision="HOLD";
   return {decision,reasons:[...new Set(reasons)],criticRequired,criticStatus:criticRequired?"not_independently_verified":"not_required",
     packetId:submission.packet.packetId,packetDigest:submission.packet.digest,resultDigest:r?judgeHash(stableJudgeJson(r)):null,
-    history:body.history.map(h=>({path:h.path,sha256:h.sha256})),expiresAt:submission.packet.expiresAt,
+    history:body.history.map(h=>({path:h.path,sha256:h.sha256})),retrieval:body.coverage.retrieval as RetrievalCoverage|null,expiresAt:submission.packet.expiresAt,
     trust:body.trust,semanticTruthVerified:false,primaryAuthority:false};
 }

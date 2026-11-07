@@ -76,6 +76,115 @@ async function judged(data:WritebackInput=input){
 }
 
 describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluation",()=>{
+  it.each(["deleted", "symlink", "read error", "search error"])("F1 residual upstream %s cannot disappear before Judge selection",async failure=>{
+    const file="10_Knowledge/Company Research/NVDA adverse earnings.md";
+    const engine=await import("../safe-edit/engine");
+    const preview=engine.preview({operationId:"judge-upstream-history-001",path:file,reason:"Isolated adverse history fixture",
+      change:{kind:"create",content:"# NVDA earnings\n## Counter-evidence\nNVDA demand may decline despite revenue guidance.\n"}},actor);
+    engine.apply({operationId:preview.operationId,previewToken:preview.previewToken,expectedHash:preview.beforeHash},actor);
+    const {buildInvestmentContextPack}=await import("../vault/investment-context");
+    expect(buildInvestmentContextPack({question:"NVDA: "+input.topic,issuers:["NVDA"],maxNotes:8,maxChars:12000}).items.some(x=>x.path===file)).toBe(true);
+    const before=await journal();
+    if(failure==="deleted")fs.unlinkSync(path.join(vault,file));
+    if(failure==="symlink"){
+      fs.unlinkSync(path.join(vault,file));fs.writeFileSync(path.join(root,"outside.md"),"private outside data");
+      fs.symlinkSync(path.join(root,"outside.md"),path.join(vault,file));
+    }
+    if(failure==="read error"){
+      const notes=await import("../vault/notes"),read=notes.readNote;
+      vi.spyOn(notes,"readNote").mockImplementation(p=>{if(p===file)throw Error("private upstream filesystem error");return read(p);});
+    }
+    if(failure==="search error")vi.spyOn(await import("../vault/queries"),"searchVault").mockImplementation(()=>{throw Error("private search failure");});
+    const data=await judged(),p=await prepare(data);
+    const coverage=JSON.parse(data.researchJudge.packet.body).coverage.retrieval;
+    expect(coverage).toMatchObject({version:1,status:"operational_hold",scope:{issuers:["NVDA"],maxNotes:8,maxChars:12000}});
+    expect(coverage.reads.attempted).toBe(coverage.reads.read+coverage.reads.failed);
+    expect(coverage.searches.attempted).toBe(coverage.searches.read+coverage.searches.failed);
+    if(failure==="search error")expect(coverage.failures).toContainEqual(expect.objectContaining({operation:"search",reason:"search_unavailable"}));
+    else{
+      expect(coverage.selection.failed).toBe(1);
+      expect(coverage.failures).toContainEqual(expect.objectContaining({path:file,stage:"selection",reason:"readback_unavailable"}));
+      expect(JSON.parse(data.researchJudge.packet.body).coverage.omitted).not.toContain(file);
+    }
+    expect(p.researchJudge?.decision).toBe("HOLD");
+    expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+    const recipe=(await plan(data)).safeEditWorkflow!.steps.find(s=>s.kind==="structured_claim")!;
+    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/research_judge/);
+    const saved=await apply(data,p);expect(saved.status).toBe("hold_research_judge");expect(saved.receipts).toHaveLength(1);
+    for(const row of before.filter(x=>x.status==="written"))expect(await journal()).toContainEqual(row);
+    expect(data.researchJudge.packet.body).not.toMatch(/private (outside|upstream|search)/);assertProtected();
+  });
+  it.each(["canonical_review","bound_source","macro_counter","issuer_identity"])("F1 residual upstream %s read failures survive discovery",async stage=>{
+    let file:string,dataInput=input;
+    if(stage==="canonical_review"||stage==="bound_source"){
+      const previous={...input,topic:"Earlier NVDA historical guidance",extractedText:excerpt+"Earlier appearance.\n"};
+      const saved=await apply(previous,await prepare(previous));expect(saved.status).toBe("saved_verified");
+      file=saved.steps.find(x=>x.kind===(stage==="canonical_review"?"canonical_review":"source_intake"))!.path;
+    }else if(stage==="issuer_identity")file="01_Companies/NVDA.md";
+    else{
+      file="10_Knowledge/Macro and Markets/Vietnam downside.md";
+      fs.mkdirSync(path.dirname(path.join(vault,file)),{recursive:true});
+      const engine=await import("../safe-edit/engine"),p=engine.preview({operationId:"judge-macro-upstream-001",path:file,
+        reason:"Isolated macro counter evidence",change:{kind:"create",content:"---\ncountry: Vietnam\n---\n# Vietnam GDP\n## Risk\nVietnam economic demand may decline.\n"}},actor);
+      engine.apply({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor);
+      dataInput={...input,domain:"macro",entities:["Vietnam"],topic:"Vietnam GDP risk",claims:undefined};
+    }
+    const notes=await import("../vault/notes"),read=notes.readNote;
+    const fault=vi.spyOn(notes,"readNote").mockImplementation(p=>{if(p===file)throw Error("private read failure");return read(p);});
+    const data=await judged(dataInput),body=JSON.parse(data.researchJudge.packet.body);
+    expect(body.coverage.retrieval.failures).toContainEqual(expect.objectContaining({stage,path:file}));
+    fault.mockRestore();
+    expect((await prepare(data)).researchJudge?.reasons).toContain("historical_retrieval_operational_hold");assertProtected();
+  });
+  it("F1 residual upstream indexed filename discovery cannot hide a missing primary-source candidate",async()=>{
+    const file="08_Daily_Weekly/Research Indexes/Primary Evidence - NVDA earnings.md";
+    fs.mkdirSync(path.dirname(path.join(vault,file)),{recursive:true});fs.writeFileSync(path.join(vault,file),"# NVDA earnings source candidate\n");
+    (await import("../vault/indexer")).reindexPath(file);fs.unlinkSync(path.join(vault,file));
+    const data=await judged(),body=JSON.parse(data.researchJudge.packet.body);
+    expect(body.coverage.retrieval.failures).toContainEqual(expect.objectContaining({path:file}));
+    expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");assertProtected();
+  });
+  it("F1 residual search failure after a good preview blocks canonical/generic apply and new generic preview",async()=>{
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
+    const recipe=(await plan(data)).safeEditWorkflow!.steps.find(s=>s.kind==="structured_claim")!;
+    vi.spyOn(await import("../vault/queries"),"searchVault").mockImplementation(()=>{throw Error("private search error");});
+    await expect(apply(data,p)).rejects.toThrow(/Authorization/);
+    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/research_judge/);
+    const source=p.previews.find(x=>x.kind==="source_intake")!;
+    engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    for(const old of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge/);
+    const current=await prepare(data);expect(current.researchJudge?.decision).toBe("HOLD");expect(current.previews).toEqual([]);assertProtected();
+  });
+  it.each(["missing metadata","forged status","truncated failures","inconsistent counts"])("F1 residual %s cannot become server admission authority",async attack=>{
+    const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
+    const gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
+    const corrupt=(coverage:import("../vault/investment-retrieval-coverage").RetrievalCoverage)=>{ // Deliberately malformed internal fixture, never a caller-authorized journal API.
+      if(attack==="missing metadata")return undefined;
+      if(attack==="forged status")coverage.reads.failed=1;
+      if(attack==="truncated failures")coverage.failuresTruncated=true;
+      if(attack==="inconsistent counts")coverage.reads.attempted++;
+      return coverage;
+    };
+    engine.recordResearchJudgeGate(p.previews[0].operationId,actor,{...gate,retrieval:corrupt(structuredClone(gate.retrieval!))} as typeof gate);
+    for(const old of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge/);
+    const body=JSON.parse(data.researchJudge.packet.body);body.coverage.retrieval=corrupt(body.coverage.retrieval);
+    // Test a malformed even-server-sealed coverage contract; HMAC tampering is
+    // separately covered below. No receipt/DB fabrication or live key is used.
+    const {stableJudgeJson}=await import("../vault/research-judge"),{seal:_,...envelope}=data.researchJudge.packet;void _;
+    envelope.body=stableJudgeJson(body);envelope.digest=sha(envelope.body);envelope.packetId="RJP-"+envelope.digest.slice(0,32).toUpperCase();
+    data.researchJudge.packet={...envelope,seal:createHmac("sha256",(await import("../env")).env.encryptionKey)
+      .update("research-judge-packet-v1\0"+stableJudgeJson(envelope)).digest("hex")};
+    data.researchJudge.result.packetId=envelope.packetId;data.researchJudge.result.packetDigest=envelope.digest;
+    expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");assertProtected();
+  });
+  it.each(["remove failures","truncate packet"])("F1 residual caller cannot %s from an existing sealed packet",async attack=>{
+    const fault=vi.spyOn(await import("../vault/queries"),"searchVault").mockImplementation(()=>{throw Error("fault");});
+    const data=await judged();fault.mockRestore();
+    const body=JSON.parse(data.researchJudge.packet.body);body.coverage.retrieval.status="operational_complete";body.coverage.retrieval.failures=[];body.constraints=[];
+    data.researchJudge.packet.body=JSON.stringify(body);
+    if(attack==="truncate packet")data.researchJudge.packet.body=data.researchJudge.packet.body.slice(0,-100);
+    expect((await prepare(data)).researchJudge?.reasons).toContain("judge_packet_or_input_binding_hold");assertProtected();
+  });
   it("F1 regression: selected historical readback failure must HOLD rather than disappear",async()=>{
     const deps=(await import("../vault/research-decision-v2")).m2VaultReadDeps,read=deps.readIndexed;
     vi.spyOn(deps,"readIndexed").mockImplementation(p=>p==="01_Companies/NVDA.md"?null:read(p));
@@ -124,6 +233,8 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     }
     const data=await judged(),body=JSON.parse(data.researchJudge.packet.body);
     expect(body.coverage).toMatchObject({status:"bounded_not_exhaustive",selectedHistory:{status:"readback_complete",failures:[]}});
+    expect(body.coverage.retrieval).toMatchObject({status:"operational_complete",failures:[],selection:{failed:0}});
+    expect(body.coverage.retrieval.selection.omitted).toBeGreaterThan(0);
     expect(body.coverage.omitted.length).toBeGreaterThan(0);expect(body.history.length).toBeLessThanOrEqual(8);
     expect((await prepare(data)).researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});assertProtected();
   });
@@ -191,11 +302,11 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     // Existing internal journal API, not SQL/receipt fabrication: emulate an
     // old server's admission contract while retaining the real preview rows.
     const {version:_,...legacy}=gate;void _;
-    engine.recordResearchJudgeGate(p.previews[0].operationId,actor,legacy as typeof gate);
+    engine.recordResearchJudgeGate(p.previews[0].operationId,actor,{...legacy,version:"RI001-JUDGE-2"} as typeof gate);
     await expect(apply(data,p)).rejects.toThrow(/prepare_required_or_superseded/);
     for(const old of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow("research_judge_contract_version_hold");
     const {stableJudgeJson,verifyResearchJudgePacket}=await import("../vault/research-judge"),{seal:__,...envelope}=data.researchJudge.packet;void __;
-    const body=JSON.parse(envelope.body);body.version="RI001-JUDGE-1";
+    const body=JSON.parse(envelope.body);body.version="RI001-JUDGE-2";delete body.coverage.retrieval;
     envelope.body=stableJudgeJson(body);envelope.digest=sha(envelope.body);envelope.packetId="RJP-"+envelope.digest.slice(0,32).toUpperCase();
     const key=(await import("../env")).env.encryptionKey;
     const packet={...envelope,seal:createHmac("sha256",key).update("research-judge-packet-v1\0"+stableJudgeJson(envelope)).digest("hex")};

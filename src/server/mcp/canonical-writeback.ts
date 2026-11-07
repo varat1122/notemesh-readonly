@@ -99,7 +99,7 @@ function planned(input: z.infer<typeof canonicalInputSchema>,actor:string) {
   let judge:ReturnType<typeof evaluateResearchJudge>|null=null;
   if(researchJudge)try{judge=evaluateResearchJudge(clean,researchJudge,actor);}catch{
     judge={decision:"HOLD",reasons:["judge_packet_or_input_binding_hold"],criticRequired:false,criticStatus:"not_evaluated",
-      packetId:researchJudge.packet.packetId,packetDigest:researchJudge.packet.digest,resultDigest:null,history:[],expiresAt:0,
+      packetId:researchJudge.packet.packetId,packetDigest:researchJudge.packet.digest,resultDigest:null,history:[],retrieval:null,expiresAt:0,
       trust:{actorLabelSha256:"",actorProvenance:"not_established",session:"not_exposed",modelVersion:"not_exposed",judgeIdentity:"analyst_attested_unverified"},semanticTruthVerified:false,primaryAuthority:false};
   }
   const enrolled=currentJudgeGate(plan.planId);
@@ -125,7 +125,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
       previews.push({kind:source.kind,expectedSha256:source.expectedSha256,...p});
     }
     recordResearchJudgeGate(source.receiptKey,actor,{version:JUDGE_VERSION,intakeId:plan.planId,actor,decision:judge.decision,
-      packetDigest:judge.packetDigest,resultDigest:judge.resultDigest,expiresAt:judge.expiresAt,history:judge.history,
+      packetDigest:judge.packetDigest,resultDigest:judge.resultDigest,expiresAt:judge.expiresAt,history:judge.history,retrieval:judge.retrieval,
       targets:workflow.steps.map(s=>({path:s.path,sha256:s.expectedSha256,operationId:s.receiptKey,kind:s.kind,
         eligible:s.state==="needs_create"||s.state==="verified_existing"}))});
   }
