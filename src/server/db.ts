@@ -1,15 +1,20 @@
 import Database from "better-sqlite3";
 import { env, ensureDataDirs } from "./env";
+import { maintenanceActive, registerConnection } from "./maintenance";
 
 let _db: Database.Database | undefined;
 
 export function db(): Database.Database {
   if (!_db) {
+    // Opening runs migrations and may create directories: never in maintenance.
+    if (maintenanceActive()) throw Error("Maintenance is active; the database is not opened");
     ensureDataDirs();
     _db = new Database(env.dbPath);
     _db.pragma("journal_mode = WAL");
     _db.pragma("foreign_keys = ON");
     migrate(_db);
+    // Process-wide, so a drain in either router bundle fences both connections.
+    registerConnection(_db);
   }
   return _db;
 }

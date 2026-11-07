@@ -40,6 +40,8 @@ const input:WritebackInput={domain:"company",entities:["NVDA"],topic:"NVIDIA Q2 
 let root:string,vault:string;
 const protectedPaths=["05_Thesis/NVDA - Current Thesis.md","05_Thesis/NVDA - Evidence Register.md","01_Companies/NVDA - Company Evolution Timeline.md","06_Portfolio/Positions.md","06_Portfolio/Trades.md"];
 beforeEach(async()=>{
+  delete (globalThis as Record<symbol,unknown>)[Symbol.for("notemesh.maintenance.registry.v1")];
+  for(const k of ["NOTEMESH_MAINTENANCE","NOTEMESH_MAINTENANCE_RESUME","NOTEMESH_MAINTENANCE_RESUME_UNDRAINED"])delete process.env[k];
   root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),"ri-claims-")));vault=path.join(root,"vault");
   process.env.DATA_DIR=root;process.env.ENCRYPTION_KEY??=Buffer.alloc(32,8).toString("base64");
   process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";vi.resetModules();
@@ -49,7 +51,7 @@ beforeEach(async()=>{
     (await import("../vault/indexer")).reindexPath(p);
   }
 });
-afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();fs.rmSync(root,{recursive:true,force:true});for(const k of ["DATA_DIR","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER"])delete process.env[k];});
+afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();delete (globalThis as Record<symbol,unknown>)[Symbol.for("notemesh.maintenance.registry.v1")];fs.rmSync(root,{recursive:true,force:true});for(const k of ["DATA_DIR","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER","NOTEMESH_MAINTENANCE","NOTEMESH_MAINTENANCE_RESUME","NOTEMESH_MAINTENANCE_RESUME_UNDRAINED"])delete process.env[k];});
 async function plan(data:WritebackInput=input){return (await import("../vault/investment-writeback-router")).planInvestmentWriteback(data);}
 async function prepare(data:WritebackInput=input){return (await import("./canonical-writeback")).prepareCanonicalWriteback(data,actor);}
 async function apply(data:WritebackInput,p:Awaited<ReturnType<typeof prepare>>){return (await import("./canonical-writeback")).applyCanonicalWriteback({input:data,planId:p.planId,
@@ -81,6 +83,65 @@ async function addHistory(file:string,content:string,id="judge-history-delta-001
 }
 
 describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluation",()=>{
+  it("C1 integration: settled maintenance rejects Judge, Source-only and stale Safe Edit tokens without DB/Vault writes",async()=>{
+    const data=await judged(),p=await prepare(data);
+    const maintenance=await import("../maintenance");expect(maintenance.registerServer()).toBe(true);
+    const {trackToolExecution}=await import("./maintenance-tools");
+    const server=trackToolExecution((await import("./safe-edit-server")).createSafeEditMcpServer({read:true,write:false,label:actor,scopes:["vault:read","vault:edit"]}));
+    const [a,b]=InMemoryTransport.createLinkedPair(),client=new Client({name:"c1-maintenance-admission",version:"1"});
+    await server.connect(b);await client.connect(a);
+    try{
+      const result=await (await import("../maintenance-drain")).enterMaintenanceAndDrain({timeoutMs:3000});
+      expect(result.state).toBe("active");expect(result.drain).toMatchObject({pendingTools:0,dbConnections:1,dbFenced:1});
+      const snapshot=()=>{
+        const walk=(dir:string):string[]=>fs.readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(dir,e.name)):[path.join(dir,e.name)]);
+        return Object.fromEntries(walk(root).sort().map(f=>[path.relative(root,f),sha(fs.readFileSync(f))]));
+      };
+      const before=snapshot();
+      const token=p.previews[0];
+      for(const [name,args] of [
+        ["prepare_research_judge_packet",{input}],
+        ["prepare_canonical_writeback",{...input,captureOnly:true,claims:undefined,researchReview:undefined}],
+        ["create_note",{operationId:"c1-maintenance-blocked",path:"00_Inbox/ChatGPT/Blocked.md",reason:"Must refuse",content:"# Must not write"}],
+        ["apply_edit",{operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash}],
+        ["apply_canonical_writeback",{input:data,planId:p.planId,authorizations:p.previews.map(x=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}))}]
+      ] as const){
+        const response=await client.callTool({name,arguments:args});
+        expect(response.isError).toBe(true);expect(JSON.stringify(response.content)).toMatch(/Maintenance/);
+      }
+      expect(snapshot()).toEqual(before);expect(maintenance.pendingWork().count).toBe(0);assertProtected();
+    }finally{await client.close();await server.close();}
+  });
+  it.each(["complete","scope drift"])("C1 integration: disconnected canonical %s remains tracked until terminal persistence",async mode=>{
+    const data=await judged(),p=await prepare(data),maintenance=await import("../maintenance");
+    expect(maintenance.registerServer()).toBe(true);
+    let release=()=>{},started=()=>{};
+    const began=new Promise<void>(r=>{started=r;}),wait=new Promise<void>(r=>{release=r;});
+    vi.spyOn(await import("../safe-edit/sync"),"withPausedSync").mockImplementation(async run=>{started();await wait;return run();});
+    const {trackToolExecution}=await import("./maintenance-tools");
+    const server=trackToolExecution((await import("./safe-edit-server")).createSafeEditMcpServer({read:true,write:false,label:actor,scopes:["vault:read","vault:edit"]}));
+    const [a,b]=InMemoryTransport.createLinkedPair(),client=new Client({name:"c1-disconnected-canonical",version:"1"});
+    await server.connect(b);await client.connect(a);
+    try{
+      const pending=client.callTool({name:"apply_canonical_writeback",arguments:{input:data,planId:p.planId,
+        authorizations:p.previews.map(x=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}))}}).catch(()=>null);
+      await began;await client.close();
+      if(mode==="scope drift")await addHistory("10_Knowledge/Company Research/NVDA C1 adverse.md","# NVDA earnings\n## Counter-evidence\nNew external evidence during admitted tool.\n");
+      const settled=(await import("../maintenance-drain")).enterMaintenanceAndDrain({timeoutMs:3000});
+      await new Promise(r=>setTimeout(r,100));
+      expect(maintenance.pendingWork().kinds).toContain("mcp-tool");
+      expect(JSON.parse(fs.readFileSync(path.join(root,"maintenance.json"),"utf8")).state).toBe("draining");
+      release();const outcome=await settled;await pending;
+      expect(outcome.state).toBe("active");expect(outcome.drain).toMatchObject({pendingTools:0,safeEditWritingRows:0,dbFenced:1});
+      const rows=(await journal()).filter(x=>p.previews.some(t=>t.operationId===x.id));
+      expect(rows.filter(x=>x.status==="written")).toHaveLength(mode==="complete"?4:1);
+      for(const row of rows.filter(x=>x.status==="written")){
+        const receipt=(await import("../safe-edit/engine")).status(row.id,actor).receipt;
+        expect(receipt).toMatchObject({write:"written",readback:"verified",reindex:"verified"});
+      }
+      const source=p.previews[0];expect(fs.readFileSync(path.join(vault,source.path),"utf8")).toContain(excerpt);assertProtected();
+    }finally{release();await client.close();await server.close();}
+  });
   it.each(["issuer/generic","history/generic","history/canonical"])("F1 current-scope drift %s invalidates PASS after preview",async probe=>{
     const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
     expect(p.researchJudge?.decision).toBe("PASS");

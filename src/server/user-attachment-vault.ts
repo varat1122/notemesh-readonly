@@ -16,6 +16,7 @@ import { resolveNotePath, assertDescriptorInVault, openNoFollow } from "./vault/
 import { recordLocalModification } from "./vault/modified";
 import { reindexPath } from "./vault/indexer";
 import { assertEnabled } from "./safe-edit/engine";
+import { assertMutationAllowed } from "./maintenance";
 
 export type AttachmentType="image/jpeg"|"image/png"|"image/webp"|"application/pdf";
 const ext:Record<AttachmentType,string>={
@@ -86,6 +87,7 @@ export function storeUserAttachment({base64,contentType}:{
   base64:string;contentType:AttachmentType;
 }){
   assertEnabled();
+  assertMutationAllowed("attachment write");
   if(!allowed.has(contentType))throw Error("unsupported_attachment_content_type");
   const bytes=decode(base64);
   verifyFileType(bytes,contentType);

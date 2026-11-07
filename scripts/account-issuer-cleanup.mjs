@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -18,8 +19,30 @@ import { DatabaseSync } from 'node:sqlite';
 // See docs/SECURITY_BETTER_AUTH_177_STAGING.md for the backup/rollback gate.
 const INDEX = 'account_issuer_accountId_uidx';
 
+// Maintenance (docs/maintenance-barrier.md): --apply is a privileged DB
+// mutation and is NOT part of the strict no-mutation window. It is refused
+// while a maintenance record, an unfinished resume marker or
+// NOTEMESH_MAINTENANCE=1 exists, with no override: an operator id or variable
+// grants no write authority. Run it only outside maintenance, as its own
+// separately authorized procedure (app stopped, verified backup).
+// The absence of maintenance state must also be durable (DATA_DIR fsync), and
+// it is checked again inside the write transaction, under the database write
+// lock that a drain also takes after recording maintenance.
+function assertOutsideMaintenance(file) {
+  let active = process.env.NOTEMESH_MAINTENANCE === '1';
+  const dir = path.dirname(path.resolve(file));
+  for (const name of ['maintenance.json', 'maintenance-resume.json']) {
+    try { fs.lstatSync(path.join(dir, name)); active = true; } catch (e) { if (e?.code !== 'ENOENT') active = true; }
+  }
+  if (!active) {
+    try { const fd = fs.openSync(dir, 'r'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } } catch { active = true; }
+  }
+  if (active) throw Error('Maintenance is active: --apply is refused during the strict no-mutation window; run it only as a separately authorized procedure outside maintenance');
+}
+
 export function cleanupAccountIssuer(file, { apply = false } = {}) {
   if (!fs.existsSync(file)) throw Error(`No database at ${file}`);
+  if (apply) assertOutsideMaintenance(file);
   const wal = `${file}-wal`;
   if (apply && fs.existsSync(wal) && fs.statSync(wal).size > 0)
     throw Error('Write-ahead log is not empty: stop the app (or checkpoint) before --apply');
@@ -61,6 +84,7 @@ export function cleanupAccountIssuer(file, { apply = false } = {}) {
 
     db.exec('BEGIN IMMEDIATE');
     try {
+      assertOutsideMaintenance(file);
       db.exec(`DROP INDEX "${INDEX}"`);
       db.exec('ALTER TABLE account DROP COLUMN issuer');
       const after = { counts: counts(), otherSchemaSha256: otherSchema(), accountColumns: columns() };

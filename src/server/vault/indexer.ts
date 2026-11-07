@@ -8,6 +8,7 @@ import { db } from "../db";
 import { env } from "../env";
 import { toVaultRelative, isSafeVaultPath, openNoFollow, MAX_INDEX_BYTES } from "./paths";
 import { createdFor, modifiedFor } from "./modified";
+import { maintenanceActive } from "../maintenance";
 
 // Notes skipped for size. They are listed and readable but absent from the
 // index, and get_vault_info reports how many so the absence from search is
@@ -283,7 +284,10 @@ class VaultIndexer {
 
   private scheduleLinkResolve() {
     if (this.resolveTimer) clearTimeout(this.resolveTimer);
-    this.resolveTimer = setTimeout(() => resolveAllLinks(), 1_000);
+    this.resolveTimer = setTimeout(() => {
+      this.resolveTimer = null;
+      resolveAllLinks();
+    }, 1_000);
   }
 
   // Full rebuild, yielding to the event loop between batches. This used to be
@@ -292,6 +296,7 @@ class VaultIndexer {
   // dead. Callers can await it; readiness is exposed via `ready`.
   async rebuild(): Promise<void> {
     if (this.building) return this.building;
+    if (maintenanceActive()) throw Error("Maintenance is active; the index is not rebuilt");
     this.building = (async () => {
       // Cleared before the wipe, not after the first build only. It used to be
       // set once and never unset, so a rebuild from the Status tab — which
@@ -415,6 +420,17 @@ class VaultIndexer {
     await this.watcher?.close();
     this.watcher = null;
   }
+
+  /** Stop watching and drop a pending link pass; a running rebuild is waited for by drain. */
+  async stopForMaintenance() {
+    if (this.resolveTimer) clearTimeout(this.resolveTimer);
+    this.resolveTimer = null;
+    await this.stop();
+  }
+
+  isQuiescent(): boolean {
+    return !this.watcher && !this.building && !this.resolveTimer;
+  }
 }
 
 const globalKey = "__vaultIndexer";
@@ -429,7 +445,9 @@ let indexBootChecked = false;
 // request never waits on a full-vault scan. The rebuild yields to the event
 // loop, so requests are served (against a partial index) while it warms.
 export function ensureIndexerStarted() {
-  if (indexBootChecked) return;
+  // Before the latch: a process that booted into maintenance never wipes or
+  // rebuilds the derived index, and still starts normally after a resume.
+  if (indexBootChecked || maintenanceActive()) return;
   indexBootChecked = true;
   // The disk watcher rides the same first-request hook: the other thing the
   // process should be doing from its first request onward.
