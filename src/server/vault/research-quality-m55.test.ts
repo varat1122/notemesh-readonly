@@ -52,6 +52,37 @@ describe("M5.5 pre-write research contract",()=>{
       .toContain("explicit_verified_claim_requires_assessment");
     expect(validateResearchM55(memory,review)).toEqual([]);
   });
+  it.each([
+    "ไม่ใช่ Verified Fact",
+    "ไม่ถือเป็น Verified Fact",
+    "ไม่ถือว่าเป็น Verified Fact",
+    "ยังไม่ใช่ Verified Fact",
+    "This is not a verified fact",
+    "This isn't a verified fact",
+    "This does not constitute a verified fact",
+    "unverified fact",
+  ])("does not treat a negated or unverified fact phrase as an affirmative primary claim: %s",phrase=>{
+    const denial={...review,thesisImplicationTh:
+      `ข้อความสรุปนี้ ${phrase} จึงไม่เปลี่ยนสมมติฐานการลงทุนและต้องตรวจหลักฐานต้นฉบับก่อน`};
+    expect(validateResearchM55(memory,denial))
+      .not.toContain("explicit_verified_claim_requires_assessment");
+    const unresolved={entity:"MU",metric:"synthetic documentation",period:"2026",unit:"text",
+      competingValues:["unverified"],resolution:"unresolved" as const,conclusion:"no_change" as const};
+    expect(validateResearchM55(memory,{...denial,claimAssessments:[unresolved]}))
+      .not.toContain("unresolved_claim_asserted_as_verified");
+  });
+  it.each([
+    "เป็น Verified Fact",
+    "This is a verified fact",
+    "ไม่ใช่ Verified Fact; แต่ข้อมูลที่เหลือเป็น Verified Fact",
+    "not a verified fact; the following is a verified fact",
+    "ไม่ใช่ Verified Fact แต่ยืนยันแล้วว่ารายได้เพิ่มขึ้น",
+  ])("still requires assessment for an affirmative assertion in a mixed review: %s",phrase=>{
+    const asserted={...review,thesisImplicationTh:
+      `บทวิเคราะห์กล่าวว่า ${phrase} และต้องตรวจสอบสมมติฐานการลงทุนอย่างเป็นอิสระ`};
+    expect(validateResearchM55(memory,asserted))
+      .toContain("explicit_verified_claim_requires_assessment");
+  });
   it("requires an AI claim decision when submitted guidance is mislabeled as reported_fact",()=>{
     const renamed={...memory,sourceKind:"issuer_release",contentTypes:["reported_fact"]};
     const original="MU FY2027 revenue guidance +20% according to source A; source B reports -20%.";
