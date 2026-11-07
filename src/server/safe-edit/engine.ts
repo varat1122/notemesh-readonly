@@ -13,6 +13,7 @@ import { audit } from "../audit";
 import { previewSchema, applySchema, operationId as idSchema, type PreviewInput } from "./schema";
 
 import {assertReviewChronology,assertReviewPreviewAdmission,hasRuntimeReviewLineage} from "./research-lineage";
+import {assertProtectedRecord} from "./protected-records";
 import {assertResearchStateAuthority} from "../vault/research-state";
 import {assertDeclaredEvidenceAuthority,assertPrimaryMetadataAuthority} from "./primary-authority";
 import {assertResearchJudgeWrite,currentJudgeGate,type JudgeGate} from "./research-judge-gate";
@@ -62,6 +63,7 @@ function target(p:string) {
   if(p.split(/[\\/]/).includes("..")) throw Error("Traversal is not allowed");
   const abs=resolveNotePath(p), rel=toVaultRelative(abs);
   if(!rel.endsWith(".md")) throw Error("Only Markdown notes can be edited");
+  assertProtectedRecord(rel);
   if(/^(07_Sources|06_Portfolio)(\/|$)/i.test(rel)) throw Error("Source archives and portfolio records are protected; save a separate correction/review");
   if(!fs.statSync(path.dirname(abs)).isDirectory()) throw Error("Parent folder must already exist");
   return {abs,rel};
@@ -230,6 +232,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
       assertDeclaredEvidenceAuthority(p.evidence);
       assertPrimaryMetadataAuthority(document(existing.before_text).data,document(existing.after_text).data);
       assertResearchStateAuthority(document(existing.before_text).data,document(existing.after_text).data);
+      assertProtectedRecord(p.path,document(existing.before_text).data,document(existing.after_text).data);
       // A lost response must not strand a canonical source forever. Rotate the
       // one-use token for the SAME actor and payload; invalidate prior tokens
       // and any approval so the exact diff must be reviewed again. Never
@@ -252,6 +255,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
   if(p.change.kind==="create")assertReviewPreviewAdmission(after,canonical);
   assertPrimaryMetadataAuthority(beforeMetadata,afterMetadata);
   assertResearchStateAuthority(beforeMetadata,afterMetadata);
+  assertProtectedRecord(p.path,beforeMetadata,afterMetadata);
   warnings(before??"",after);
   // Body operations cannot silently introduce metadata or rewrite provenance.
   if(p.change.kind==="replace"||p.change.kind==="append") {
@@ -273,6 +277,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
 export function adminPreview(id:string) { assertEnabled();return publicPreview(row(id)); }
 export function approve(id:string,adminId:string,afterHash:string) {
   assertEnabled();const r=row(id);
+  assertProtectedRecord((JSON.parse(r.payload) as PreviewInput).path,document(r.before_text).data,document(r.after_text).data);
   if(r.status!=="preview"||Date.now()>r.expires||afterHash!==r.after_hash) throw Error("Approval expired or does not match the reviewed diff");
   store().prepare("UPDATE safe_edit_operations SET approval=? WHERE id=? AND status='preview'").run(`admin:${adminId}`,id);
   log(id,`admin:${adminId}`,"approved",{afterHash});return {approved:true};
@@ -343,6 +348,7 @@ export function apply(input:unknown,actor:string) {
     assertResearchJudgeWrite(p.path,current??"",r.after_text,actor,"apply");
     assertPrimaryMetadataAuthority(document(current??"").data,document(r.after_text).data);
     assertResearchStateAuthority(document(current??"").data,document(r.after_text).data);
+    assertProtectedRecord(p.path,document(current??"").data,document(r.after_text).data);
     assertHeadroom(Buffer.byteLength(r.before_text)*2+Buffer.byteLength(r.after_text)+64_000);
     backup(r,p);
     const receipt={operationId:r.id,path:p.path,beforeHash:r.before_hash,afterHash:r.after_hash,

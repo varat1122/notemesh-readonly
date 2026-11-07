@@ -94,6 +94,30 @@ reindex verification → durable receipt → restart Sync.
 - Audit events retain actor, required scope, reason, path, hashes, time and
   result. Access tokens, preview tokens and credential arguments are not logged.
 
+## Protected curated records — C1 boundary
+
+No accepted generic Safe Edit authorization exists for curated Company Evolution
+Timelines, the Investment Evolution Master or Decision Ledger. Server admission
+refuses their canonical basenames (including
+`08_Daily_Weekly/Research Indexes/Company Evolution - *.md`) and their typed
+metadata even under another name. Create, append, replace, frontmatter, rollback,
+preview retry, approval and apply all use the same boundary. Old pending tokens
+cannot authorize a write after this guard is installed; already-written receipts
+remain readable/idempotent and are never deleted or rewritten. Derived timeline
+read views and normal Source/Review writes remain available.
+
+Untyped basename aliases `Company Evolution Timeline.md`,
+`Company Evolution Timeline - *.md`, `Investment Decision Ledger.md` and
+`Investment Decision Ledger - *.md` use the same boundary, independent of folder
+or case. This is an anchored record-name rule, not a substring ban on Research
+notes that discuss timelines or decision ledgers.
+
+This does not invent a Timeline/admin permission. The existing structured-evidence
+and exact-diff admin workflow for `05_Thesis/` remains scoped there; a Current
+Thesis or Evidence Register moved/declared elsewhere cannot shed that boundary.
+A separate accepted workflow is required before adding curated Timeline/Decision
+write authority. Ordinary read access is not such authority.
+
 ## Evidence and thesis rules
 
 Review metadata separates source type, verification, claim identity,
@@ -107,10 +131,10 @@ linked into Evidence Register, Change Log and Current Thesis without being
 counted as three independent pieces of evidence. A known event cannot be
 resubmitted to the same target as `new_event`. Confirmation requires asserted
 independence and cannot use Archived AI as independent evidence. Primary
-verification requires a primary URL, actual verification date and a primary
-source review; the server validates these fields but cannot itself establish
-that a model has read a source. The workflow must read sources before claiming
-verification. Blind verification upgrades are refused.
+verification requires the existing server-validated primary receipt contract;
+a caller-supplied URL, date or verification label is not authority. Generic
+Safe Edit cannot promote a note to verified primary, even with declared
+evidence fields. Historical declarations remain data, not new verification.
 
 For an existing Current Thesis, record the review first in the sibling Evidence
 Register and Change Log. `append_section` includes the structured review and

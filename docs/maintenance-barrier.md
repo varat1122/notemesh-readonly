@@ -190,3 +190,26 @@ one is expected.
   state; it only re-owns `DATA_DIR` when it is not writable.
 - CI uses isolated fixtures and the built server; it is not runtime evidence on
   staging.
+
+
+## C1 delta: PriceStore PRAGMA fencing and remote completion
+
+For an admitted on-disk writable PriceStore, `pragma`, `prepare`, `exec` and
+mutating statement execution share the verified `BEGIN IMMEDIATE` write fence.
+PRAGMAs are not classified by `=` or by SQLite's statement `readonly` flag:
+parentheses can assign, argument-free operations can mutate, and connection
+settings can take effect at prepare time. Only an explicit read-only PRAGMA
+grammar bypasses the fence; unknown syntax/commands are refused outside the
+transaction. Introspection reads remain available. Existing writer admission,
+initial connection setup, lifetime lock and private in-memory Drive working-copy
+behavior remain as before. This is an application API guard, not a sandbox for
+arbitrary native SQLite clients or hostile JavaScript in the server process.
+
+**WORK acceptance requirement (F-04, unresolved by this CI-only delta):** a local
+Drive timeout/abort does not prove cancellation of a remote commit. Do not use
+that timeout alone as evidence of strict remote quiescence. Before a separately
+authorized staging cutover, WORK must inventory in-flight remote writes and
+establish operational containment/completion evidence; unresolved remote completion
+must remain HOLD for the strict guarantee. No live Drive requests were made and
+no Drive implementation was changed by this remediation. First cutover from a
+runtime without a barrier retains the residual risks above.

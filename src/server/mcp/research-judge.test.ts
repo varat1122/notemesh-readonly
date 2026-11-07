@@ -935,15 +935,15 @@ describe("C1 Draft trust integration (simulated assessment; no semantic acceptan
     for(const s of (await plan()).safeEditWorkflow!.steps.filter(s=>s.kind!=="source_intake"))expect(()=>engine.preview(s.safeEditRequest,actor)).toThrow(/research_judge/);
     assertProtected();
   });
-  it("same-version packet/gate without Draft policy stamp cannot authorize non-Source; fresh assessment restores eligibility",async()=>{
+  it.each([undefined,"RI001-DRAFT-1"])("same-version packet/gate with obsolete Draft policy %s cannot authorize non-Source; fresh assessment restores eligibility",async legacyPolicy=>{
     const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
     const gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
     const {researchStatePolicy:_,...legacy}=gate;void _;
-    engine.recordResearchJudgeGate(p.previews[0].operationId,actor,legacy as typeof gate);
+    engine.recordResearchJudgeGate(p.previews[0].operationId,actor,{...legacy,...(legacyPolicy?{researchStatePolicy:legacyPolicy}:{})} as typeof gate);
     await expect(apply(data,p)).rejects.toThrow(/prepare_required_or_superseded/);
     for(const t of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/contract_version/);
     const {stableJudgeJson}=await import("../vault/research-judge"),{seal:__,...envelope}=data.researchJudge.packet;void __;
-    const body=JSON.parse(envelope.body);delete body.researchStatePolicy;
+    const body=JSON.parse(envelope.body);delete body.researchStatePolicy;if(legacyPolicy)body.researchStatePolicy=legacyPolicy;
     envelope.body=stableJudgeJson(body);envelope.digest=sha(envelope.body);envelope.packetId="RJP-"+envelope.digest.slice(0,32).toUpperCase();
     const packet={...envelope,seal:createHmac("sha256",(await import("../env")).env.encryptionKey).update("research-judge-packet-v1\0"+stableJudgeJson(envelope)).digest("hex")};
     const stale=await prepare({...data,researchJudge:{packet}} as typeof data);expect(stale.researchJudge?.decision).toBe("HOLD");

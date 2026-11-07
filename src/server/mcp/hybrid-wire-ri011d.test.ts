@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import type {ResearchTrust} from "../vault/research-state";
 
 /** RI-011D: actual MCP in-memory protocol, isolated temp Vault, zero network or Vault writes. */
 let root: string;
@@ -75,8 +76,8 @@ function parseResponse(response: unknown) {
     boundaryNote: string;
     status: string;
     classification: string;
-    indexed: { exactMatches: number };
-    historical: { candidates: Array<{ path: string; title: string; snippet: string; readbackStartLine:number|null; provenance:{declaredVerification:string|null;linkedSourcePath:string|null;linkedSourceIndexed:boolean;linkedIntakeIdMatches:boolean|null;originalDocumentVerifiedThisRun:false} }>; notExhaustive: boolean };
+    indexed: { exactMatches: number; candidateTrust:Array<{path:string;researchTrust:ResearchTrust|null}> };
+    historical: { candidates: Array<{ path: string; title: string; snippet: string; researchTrust:ResearchTrust|null; trustBasis:string; readbackStartLine:number|null; provenance:{researchTrust:ResearchTrust|null;declaredVerification:string|null;linkedSourcePath:string|null;linkedSourceIndexed:boolean;linkedIntakeIdMatches:boolean|null;originalDocumentVerifiedThisRun:false} }>; notExhaustive: boolean };
     gates: {
       sourceAuthenticated: boolean; canAutoWrite: boolean;
       canEditThesis: boolean; canEditPortfolio: boolean;
@@ -220,6 +221,39 @@ describe("RI-011D hybrid reconciliation over real MCP read-only transport", () =
       expect(result.gates.claimVerifiedAgainstOriginal).toBe(false);
       expect(result.gates.canAutoWrite).toBe(false);
       expect(result.gates.canEditPortfolio).toBe(false);
+    }finally{await client.close();await server.close();}
+    expect(digest()).toBe(before);
+  });
+
+  it.each(["dated_evidence_review","research_map","import_review"])("G2: %s trust reaches historical and structured MCP candidates",async type=>{
+    const file="10_Knowledge/Company Research/MSFT "+type+".md";
+    await add(file,row.replace("---\nentity:","---\ntype: "+type+"\nsource_type: primary\nentity:"));
+    const before=digest(),{client,server}=await connect(true);
+    try{
+      const result=parseResponse(await client.callTool({name:"preview_hybrid_claim_reconciliation",arguments:baseArgs}));
+      const trust={research_status:"unclassified",usage_tier:"historical_analysis_only",independent_evidence_increment:0,
+        comparator_eligible:false,primary_authority:false,source_authentication:"not_established"};
+      const item=result.historical.candidates.find(x=>x.path===file);
+      expect(item).toMatchObject({researchTrust:trust,trustBasis:"note_readback",provenance:{researchTrust:trust}});
+      expect(result.indexed.candidateTrust.find(x=>x.path===file)?.researchTrust).toMatchObject(trust);
+      expect(result.gates.sourceAuthenticated).toBe(false);expect(result.gates.claimVerifiedAgainstOriginal).toBe(false);
+    }finally{await client.close();await server.close();}
+    expect(digest()).toBe(before);
+  });
+  it("G1/G2: a declared Source without a receipt is labelled as a declaration, including failed readback",async()=>{
+    const file="00_Inbox/ChatGPT/MSFT declared source.md";
+    await add(file,row.replace("---\nentity:","---\ntype: investment_source_intake\nentity:"));
+    const before=digest(),{client,server}=await connect(true);
+    const trust={research_status:"source_only",source_authentication:"not_established",source_label_basis:"note_type_declaration_not_receipt",primary_authority:false,comparator_eligible:false};
+    try{
+      const first=parseResponse(await client.callTool({name:"preview_hybrid_claim_reconciliation",arguments:baseArgs}));
+      expect(first.historical.candidates.find(x=>x.path===file)).toMatchObject({researchTrust:trust,trustBasis:"note_readback"});
+      const notes=await import("../vault/notes"),fault=vi.spyOn(notes,"readNoteRange").mockImplementation(()=>{throw Error("isolated readback fault");});
+      try{
+        const second=parseResponse(await client.callTool({name:"preview_hybrid_claim_reconciliation",arguments:baseArgs}));
+        expect(second.historical.candidates.find(x=>x.path===file)).toMatchObject({researchTrust:trust,trustBasis:"indexed_metadata_only",readbackMatchFound:false});
+        expect(second.gates.sourceAuthenticated).toBe(false);expect(second.gates.canAutoWrite).toBe(false);
+      }finally{fault.mockRestore();}
     }finally{await client.close();await server.close();}
     expect(digest()).toBe(before);
   });

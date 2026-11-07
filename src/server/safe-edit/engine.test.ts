@@ -141,7 +141,7 @@ it("rollback refuses a corrupted backup without overwriting the current note",()
 });
 
 
-it("P0 synthetic end-to-end: historical retrieval → raw capture → linked review → timeline → verified readback → idempotent retry",async()=>{
+it("P0 synthetic end-to-end: historical retrieval → raw capture → linked review → protected timeline refusal → idempotent retry",async()=>{
   // Synthetic-only fixture. No production Vault, broker claims or actual
   // company business data are touched by this test.
   const {reindexPath}=await import("../vault/indexer");
@@ -214,25 +214,21 @@ it("P0 synthetic end-to-end: historical retrieval → raw capture → linked rev
     "## Analysis",
     "A demo mention does not prove bookings, ARR, cash flow, or thesis change.",""
   ].join("\n")});
-  const timelineResult=reviewedWrite(timeline,{
-    kind:"append",heading:"Chronology",date:"2026-10-19",content:[
-      "Synthetic source submission — not an independently verified event",
-      "[["+review.replace(/\.md$/,"")+"|Source-attributed review]]",
-      "<!-- investment-intake:"+planned.planId+" -->"
-    ].join("\n")
-  });
+  const timelineBefore=readNote(timeline).content;
+  expect(()=>reviewedWrite(timeline,{kind:"append",heading:"Chronology",date:"2026-10-19",
+    content:"A generic reviewed token does not authorize a curated Timeline."})).toThrow(/protected_record/);
   expect(readNote(raw).content).toContain(text);
   expect(readNote(review).content).toContain(raw.replace(/\.md$/,""));
-  expect(readNote(timeline).content).toContain("<!-- investment-intake:"+planned.planId+" -->");
+  expect(readNote(timeline).content).toBe(timelineBefore);
 
   const repeated=planInvestmentWriteback(submission);
   expect(repeated.planId).toBe(planned.planId);
   expect(repeated.routes.find(x=>x.kind==="raw_input")?.action).toBe("link_existing_or_hold");
   expect(repeated.routes.find(x=>x.kind==="research_review")?.action).toBe("link_existing_or_hold");
-  expect(repeated.routes.find(x=>x.kind==="company_timeline_candidate")?.action).toBe("link_existing_or_hold");
-  // Stable apply receipt is safe to retry, with no additional append.
-  expect(apply(timelineResult.preview)).toEqual(timelineResult.receipt);
-  expect(readNote(timeline).content.match(/investment-intake:IN-/g)).toHaveLength(1);
+  expect(repeated.gates.canAutoWrite).toBe(false);
+  // Source/Review receipts remain safe to retry; no Timeline authorization exists.
+  expect(apply(reviewResult.preview)).toEqual(reviewResult.receipt);
+  expect(readNote(timeline).content).toBe(timelineBefore);
   expect(engine.status(original.preview.operationId,actor).status).toBe("written");
   expect(engine.status(reviewResult.preview.operationId,actor).status).toBe("written");
 });

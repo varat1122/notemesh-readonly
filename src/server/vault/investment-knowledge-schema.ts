@@ -5,7 +5,7 @@
  *
  * Input must already be parsed by the shared hardened splitFrontmatter parser.
  */
-import {researchTrust,type ResearchTrust} from "./research-state";
+import {isResearchReviewType,researchTrust,type ResearchTrust} from "./research-state";
 export interface SchemaInspection {
   researchTrust:ResearchTrust|null;
   status: "read_time_adapter_only";
@@ -66,9 +66,7 @@ function roleOfNote(path:string, fm:Data):SchemaInspection["role"] {
     return "historical_analysis";
   if(["knowledge_index","company_history_index","topic_history_index","macro_hub",
       "chat_transcript_index","historical_navigation_redirect"].includes(t??""))return "navigation";
-  if(["investment_research_review","news_thesis_review","investment_review","research_note","preferred_research_note",
-      "research_update","macro_research_note","dated_evidence_review","research_synthesis",
-      "research_map","import_review"].includes(t??""))return "review";
+  if(isResearchReviewType(t))return "review";
   if(t==="research_workflow"||path.startsWith("09_Templates/"))return "method";
   return "other";
 }
