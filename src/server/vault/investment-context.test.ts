@@ -26,6 +26,23 @@ async function tsmcHub(aliases="[TSM]"){
     "---\nverification: not_reverified\n---\n# TSMC original-source candidate");
 }
 describe("RI-001 issuer context resolution",()=>{
+  it("F1 failure detail truncation preserves operational HOLD and exact failure counts",async()=>{
+    const build=await fixture();
+    for(let i=0;i<85;i++)await addExtra(`10_Knowledge/Macro and Markets/Vietnam GDP risk ${i}.md`,
+      "---\ncountry: Vietnam\n---\n# Vietnam GDP\n## Risk\nUnverified economic context.\n");
+    const notes=await import("./notes"),read=notes.readNote;
+    const fault=vi.spyOn(notes,"readNote").mockImplementation(p=>{if(p.includes("Vietnam GDP risk"))throw Error("private failure");return read(p);});
+    try{
+      const pack=build({question:"Vietnam GDP risk",focus:"macro",industry:"Vietnam"});
+      expect(pack.retrieval.status).toBe("operational_hold");
+      expect(pack.retrieval.reads.failed).toBeGreaterThan(64);
+      expect(pack.retrieval.failures).toHaveLength(64);expect(pack.retrieval.failuresTruncated).toBe(true);
+      expect(pack.retrieval.reads.attempted).toBe(pack.retrieval.reads.read+pack.retrieval.reads.failed);
+      expect(pack.retrieval.selection.failed).toBeGreaterThan(64);
+      expect(pack.omitted.some(p=>p.includes("Vietnam GDP risk"))).toBe(false);
+      expect(JSON.stringify(pack.retrieval)).not.toContain("private failure");
+    }finally{fault.mockRestore();}
+  });
   it.each(["source_type","source_tier"])("RC4 caller %s primary and URL never fill macro primary-verification gap or add ranking bonus",async key=>{
     const build=await fixture();
     const rel="10_Knowledge/Macro and Markets/Vietnam GDP declaration.md";

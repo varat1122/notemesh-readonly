@@ -4,9 +4,10 @@ import { env } from "~/server/env";
 import { beginDriveConsent, DRIVE_CALLBACK_PATH, driveClient } from "~/server/market-prices/drive-auth";
 import { driveAdminHeaders as headers, htmlEscape as escape, claimDriveCredential } from "~/server/market-prices/drive-admin";
 import { readCachedPrices } from "~/server/market-prices/backend";
+import { tracked } from "~/server/maintenance";
 
 async function session(request: Request) { await runAuthMigrations(); return auth.api.getSession({ headers: request.headers }); }
-export async function GET({ request }: APIEvent) {
+async function handleGET({ request }: APIEvent) {
   const admin = await session(request);
   if (!admin) return new Response("Sign in to the existing Investment OS administrator dashboard, then reopen /api/market-prices-drive.", { status: 401, headers });
   const url = new URL(request.url);
@@ -30,10 +31,14 @@ export async function GET({ request }: APIEvent) {
     </main></body></html>`;
   return new Response(output, { headers });
 }
-export async function POST({ request }: APIEvent) {
+async function handlePOST({ request }: APIEvent) {
   if (request.headers.get("origin") !== env.baseUrl) return new Response("Forbidden origin", { status: 403, headers });
   const admin = await session(request);
   if (!admin) return new Response("Unauthorized", { status: 401, headers });
   try { return new Response(null, { status: 303, headers: { ...headers, Location: beginDriveConsent(admin.user.id) } }); }
   catch { return new Response("Drive OAuth client not ready. Check the dedicated Drive variables and HTTPS origin.", { status: 400, headers }); }
 }
+
+// Pending work until the handler settles, even if the client disconnects (maintenance drain).
+export const GET = tracked(handleGET);
+export const POST = tracked(handlePOST);

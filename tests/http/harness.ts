@@ -74,11 +74,21 @@ function assertBuildIsFresh() {
   }
 }
 
-export async function startServer(env: Record<string, string> = {}): Promise<Server> {
+/**
+ * `dataDir` reuses a volume across processes (a restart); `prepare` writes to
+ * it before the server boots; `keepDataDir` leaves it for the next process.
+ */
+export interface StartOptions {
+  dataDir?: string;
+  prepare?: (dataDir: string) => void;
+  keepDataDir?: boolean;
+}
+
+export async function startServer(env: Record<string, string> = {}, opts: StartOptions = {}): Promise<Server> {
   assertBuildIsFresh();
   for (let attempt = 1; ; attempt++) {
     try {
-      return await startServerOnce(env);
+      return await startServerOnce(env, opts);
     } catch (e) {
       if (attempt < 4 && /EADDRINUSE/.test(String((e as Error).message))) continue;
       throw e;
@@ -86,13 +96,14 @@ export async function startServer(env: Record<string, string> = {}): Promise<Ser
   }
 }
 
-async function startServerOnce(env: Record<string, string>): Promise<Server> {
+async function startServerOnce(env: Record<string, string>, opts: StartOptions): Promise<Server> {
   if (!fs.existsSync(BUILD)) {
     // Loud rather than skipped: a silently skipped integration suite is one
     // nobody notices has stopped running.
     throw new Error(`${BUILD} not found. Run \`pnpm build\` before the HTTP tests.`);
   }
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "notemesh-http-"));
+  const dataDir = opts.dataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "notemesh-http-"));
+  opts.prepare?.(dataDir);
   const port = await freePort();
   const url = `http://127.0.0.1:${port}`;
 
@@ -147,7 +158,7 @@ async function startServerOnce(env: Record<string, string>): Promise<Server> {
       child.kill("SIGTERM");
       await new Promise((r) => setTimeout(r, 300));
       if (child.exitCode === null) child.kill("SIGKILL");
-      fs.rmSync(dataDir, { recursive: true, force: true });
+      if (!opts.keepDataDir) fs.rmSync(dataDir, { recursive: true, force: true });
     },
   };
 }

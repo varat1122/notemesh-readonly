@@ -6,6 +6,7 @@ import { audit } from "~/server/audit";
 import { primaryAttestationSchema, primarySignedImportSchema,
   preparePrimaryEvidenceAttestation, importSignedPrimaryEvidence,
   revokePrimaryEvidenceReceipt } from "~/server/vault/primary-evidence-attestation-m551";
+import { tracked } from "~/server/maintenance";
 
 /** Admin-session-only import of TWO external signatures, never an MCP tool.
  * A valid vault:edit OAuth token or API key is not authorization here. */
@@ -32,7 +33,7 @@ async function boundedJson(request:Request):Promise<unknown>{
   }finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
-export async function POST({request}:APIEvent){
+async function handlePOST({request}:APIEvent){
   if(request.headers.get("origin")!==env.baseUrl)return json({error:"forbidden_origin"},403);
   if(!request.headers.get("content-type")?.startsWith("application/json"))
     return json({error:"json_required"},415);
@@ -52,4 +53,8 @@ export async function POST({request}:APIEvent){
     return json({error:"receipt_request_refused",reason:code.slice(0,160)},400);
   }
 }
-export async function GET(){return json({error:"post_only"},405);}
+async function handleGET(){return json({error:"post_only"},405);}
+
+// Pending work until the handler settles, even if the client disconnects (maintenance drain).
+export const POST = tracked(handlePOST);
+export const GET = tracked(handleGET);

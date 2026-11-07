@@ -31,7 +31,7 @@ export interface CanonicalSafeEditStep {
   path:string;
   expectedSha256:string;
   receiptKey:string;
-  state:"needs_create"|"verified_existing"|"hold_conflict"|"hold_event_review"|"hold_index_repair"|"hold_quality_gate"|"hold_archive_provenance"|"hold_archive_drift"|"hold_claim_gate"|"hold_review_lineage";
+  state:"needs_create"|"verified_existing"|"hold_conflict"|"hold_event_review"|"hold_index_repair"|"hold_quality_gate"|"hold_archive_provenance"|"hold_archive_drift"|"hold_claim_gate"|"hold_review_lineage"|"hold_research_judge";
   readbackVerified:boolean;
   indexed:boolean;
   searchable:boolean;
@@ -44,7 +44,7 @@ export interface CanonicalSafeEditWorkflow {
   version:"M5.3-recipe";
   status:"pending_safe_edit"|"saved_verified"|"pending_source_capture"|
     "source_saved_analysis_pending"|"hold_source_event_review"|
-    "hold_conflict_or_index"|"hold_research_quality"|"hold_archive_provenance"|"hold_archive_drift"|"hold_claim_persistence"|"hold_review_lineage";
+    "hold_conflict_or_index"|"hold_research_quality"|"hold_archive_provenance"|"hold_archive_drift"|"hold_claim_persistence"|"hold_review_lineage"|"hold_research_judge";
   sourceChat:string;
   steps:CanonicalSafeEditStep[];
   readyForNextNews:boolean;

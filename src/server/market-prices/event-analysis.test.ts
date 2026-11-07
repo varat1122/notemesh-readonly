@@ -2,11 +2,17 @@ import { beforeEach, afterEach, it, expect, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { PriceStore, priceDbPath } from "./store";
 import { analyzePriceEvent } from "./event-analysis";
 import { instrument, type PriceSnapshot } from "./model";
 
 let root: string, store: PriceStore;
+// Fixture edits bypass the store on purpose: its own connection refuses writes outside its fenced write path.
+const fixture = (sql: string, ...args: unknown[]) => {
+  const raw = new Database(store.filename);
+  try { raw.prepare(sql).run(...args); } finally { raw.close(); }
+};
 let stock: PriceSnapshot, benchmark: PriceSnapshot;
 const dates: string[] = [];
 for (let date = new Date("2026-01-05T12:00Z"); dates.length < 30; date = new Date(date.getTime() + 86400000)) {
@@ -43,7 +49,7 @@ it("does not calculate when publication timing or session alignment is unknown",
   expect(analyzePriceEvent(store, { ...request, horizons: [1], eventSessionDate: "2026-01-10" }).status).toBe("event_session_not_cached");
 });
 it("does not compress a missing stock day into an apparent N-day result", () => {
-  store.db.prepare("DELETE FROM bars WHERE instrument_id='US:NVDA' AND date=?").run(dates[21]);
+  fixture("DELETE FROM bars WHERE instrument_id='US:NVDA' AND date=?", dates[21]);
   const result = run();
   expect(result.windows[0].status).toBe("calculated");
   expect(result.windows[1].status).toBe("missing_stock_session");
@@ -60,7 +66,7 @@ it("refuses a cross-market comparator and keeps split-contaminated volume unavai
   expect(run().eventVolumeRatioVsPrior20).toBeNull();
 });
 it("distinguishes missing adjusted prices from missing future observations", () => {
-  store.db.prepare("UPDATE bars SET adjusted_close=NULL WHERE instrument_id='US:NVDA' AND date=?").run(dates[20]);
+  fixture("UPDATE bars SET adjusted_close=NULL WHERE instrument_id='US:NVDA' AND date=?", dates[20]);
   const result = analyzePriceEvent(store, { ...request, horizons: [1], basis: "adjustedClose" });
   expect(result.windows[0].status).toBe("return_basis_missing");
 });

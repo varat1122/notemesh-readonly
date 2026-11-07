@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import Database from "better-sqlite3";
 import { instrument, isoDate, PRICE_POLICY, PriceError, type InstrumentInput, type PriceBar, type PriceSnapshot } from "./model.ts";
+import { announceWriter, type WriterHandle } from "../maintenance.ts";
 
 export function priceDatabaseLimit(): number {
   const mb = Number(process.env.MARKET_PRICES_MAX_DB_MB ?? "4");
@@ -27,15 +28,47 @@ export function priceDbPath(): string {
   return path.join(dir, "prices.sqlite");
 }
 
+const refusal = (error: unknown): unknown =>
+  (error as { code?: string })?.code === "maintenance_active" && !(error instanceof PriceError) ? new PriceError("maintenance_active") : error;
+
+/**
+ * A writable on-disk store is a maintenance writer for its whole life: it is
+ * announced in the writer inventory before any file, directory or schema is
+ * created, so a drain (in any process) waits until close(). Every write runs
+ * in a BEGIN IMMEDIATE transaction that re-verifies maintenance, durable
+ * openness and its own announcement while holding the database write lock,
+ * which a drain also takes after recording maintenance. Statements that can
+ * write are refused outside that transaction, so no method — present or
+ * future — can write unchecked.
+ */
 export class PriceStore {
   readonly db: Database.Database;
   readonly filename: string;
   readonly writable: boolean;
   readonly memory: boolean;
+  private readonly writer: WriterHandle | null = null;
+  private writing = 0;
   constructor(filename: string | Buffer, writable = false) {
     this.memory = Buffer.isBuffer(filename) || filename === ":memory:";
     this.filename = typeof filename === "string" ? filename : ":memory:";
     this.writable = writable;
+    if (writable && !this.memory) {
+      try {
+        this.writer = announceWriter("price");
+      } catch (error) {
+        throw refusal(error);
+      }
+    }
+    try {
+      this.db = this.open(filename, writable);
+    } catch (error) {
+      (this as { db?: Database.Database }).db?.close();
+      this.writer?.release();
+      throw error;
+    }
+  }
+
+  private open(filename: string | Buffer, writable: boolean): Database.Database {
     if (!this.memory) try {
       const stats = fs.lstatSync(filename);
       if (stats.isSymbolicLink() || stats.nlink > 1) throw new PriceError("linked_price_database_refused");
@@ -45,15 +78,17 @@ export class PriceStore {
       fs.mkdirSync(path.dirname(this.filename), { recursive: true, mode: 0o700 });
       this.assertSpace();
     }
-    this.db = new Database(filename, { readonly: !writable, fileMustExist: !writable, timeout: 5000 });
-    this.db.pragma("foreign_keys = ON");
+    const db = new Database(filename, { readonly: !writable, fileMustExist: !writable, timeout: 5000 });
+    (this as { db: Database.Database }).db = db;
+    db.pragma("foreign_keys = ON");
     if (writable) {
       // DELETE journal bounds disk usage and allows safe read-only clients without creating a WAL.
-      this.db.pragma("journal_mode = DELETE");
-      this.db.pragma("synchronous = FULL");
-      const pageSize = this.db.pragma("page_size", { simple: true }) as number;
-      this.db.pragma(`max_page_count = ${Math.floor(priceDatabaseLimit() / pageSize)}`);
-      this.db.exec(`
+      db.pragma("journal_mode = DELETE");
+      db.pragma("synchronous = FULL");
+      const pageSize = db.pragma("page_size", { simple: true }) as number;
+      db.pragma(`max_page_count = ${Math.floor(priceDatabaseLimit() / pageSize)}`);
+      if (!this.memory) this.guard(db);
+      this.write(() => db.exec(`
         CREATE TABLE IF NOT EXISTS instruments (
           id TEXT PRIMARY KEY, market TEXT NOT NULL, symbol TEXT NOT NULL, yahoo_symbol TEXT NOT NULL,
           currency TEXT NOT NULL, time_zone TEXT NOT NULL
@@ -86,8 +121,52 @@ export class PriceStore {
           values_json TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, resolved_at TEXT,
           PRIMARY KEY(instrument_id,date,reason)
         );
-      `);
-    } else this.db.pragma("query_only = ON");
+      `));
+    } else db.pragma("query_only = ON");
+    return db;
+  }
+
+  /** Structural fence: a statement that can write runs only inside write(). */
+  private guard(db: Database.Database): void {
+    const inside = () => { if (!this.writing) throw new PriceError("unfenced_price_write"); };
+    const prepare = db.prepare.bind(db), exec = db.exec.bind(db), pragma = db.pragma.bind(db);
+    db.prepare = ((source: string) => {
+      const statement = prepare(source);
+      if (statement.readonly) return statement;
+      for (const method of ["run", "get", "all", "iterate"] as const) {
+        const original = (statement[method] as (...args: unknown[]) => unknown).bind(statement);
+        (statement as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => { inside(); return original(...args); };
+      }
+      return statement;
+    }) as typeof db.prepare;
+    db.exec = ((source: string) => { inside(); return exec(source); }) as typeof db.exec;
+    db.pragma = ((source: string, options?: { simple?: boolean }) => {
+      if (source.includes("=")) inside();
+      return pragma(source, options);
+    }) as typeof db.pragma;
+  }
+
+  /**
+   * The only way to write. On disk: BEGIN IMMEDIATE (the write lock a drain's
+   * barrier also takes), then verify inside it, then the work — all synchronous.
+   */
+  private write<T>(work: () => T): T {
+    if (!this.writable) throw new PriceError("read_only_price_store");
+    if (this.writing) return work();
+    if (this.memory) return this.db.transaction(work)();
+    return this.db.transaction(() => {
+      try {
+        this.writer!.verify();
+      } catch (error) {
+        throw refusal(error);
+      }
+      this.writing++;
+      try {
+        return work();
+      } finally {
+        this.writing--;
+      }
+    }).immediate();
   }
 
   assertSpace(): void {
@@ -107,23 +186,24 @@ export class PriceStore {
         requiredAvailableBytes: applicationReserveBytes + priceBudgetBytes });
   }
 
-  close(): void { this.db.close(); }
+  close(): void {
+    try { this.db.close(); } finally { this.writer?.release(); }
+  }
 
   acquireLease(now: Date): string | null {
-    if (!this.writable) throw new PriceError("read_only_price_store");
     const token = crypto.randomUUID();
-    const result = this.db.prepare(`INSERT INTO collector_lease VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET
+    const result = this.write(() => this.db.prepare(`INSERT INTO collector_lease VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET
       token=excluded.token,expires_at=excluded.expires_at WHERE collector_lease.expires_at<=?`)
-      .run(token, now.getTime() + 3 * 60 * 60 * 1000, now.getTime());
+      .run(token, now.getTime() + 3 * 60 * 60 * 1000, now.getTime()));
     return result.changes ? token : null;
   }
   releaseLease(token: string): void {
-    this.db.prepare("DELETE FROM collector_lease WHERE id=1 AND token=?").run(token);
+    this.write(() => this.db.prepare("DELETE FROM collector_lease WHERE id=1 AND token=?").run(token));
   }
 
   ensureInstrument(input: InstrumentInput): void {
     const i = instrument(input);
-    this.db.prepare(`INSERT OR IGNORE INTO instruments VALUES (?,?,?,?,?,?)`).run(i.id, i.market, i.symbol, i.yahooSymbol, i.currency, i.timeZone);
+    this.write(() => this.db.prepare(`INSERT OR IGNORE INTO instruments VALUES (?,?,?,?,?,?)`).run(i.id, i.market, i.symbol, i.yahooSymbol, i.currency, i.timeZone));
   }
 
   lastAttempt(input: InstrumentInput): { attempted_at: string; success: number; error_code: string | null } | undefined {
@@ -139,12 +219,12 @@ export class PriceStore {
   failure(input: InstrumentInput, code: string, now: Date): void {
     if (!this.writable) throw new PriceError("read_only_price_store");
     this.assertSpace();
-    this.db.transaction(() => {
+    this.write(() => {
       this.ensureInstrument(input);
       this.db.prepare("INSERT INTO refreshes(instrument_id,attempted_at,success,error_code) VALUES (?,?,0,?)")
         .run(instrument(input).id, now.toISOString(), code);
       this.pruneAudit();
-    })();
+    });
   }
 
   save(snapshot: PriceSnapshot): { inserted: number; revised: number; unchanged: number; rowCount: number } {
@@ -162,7 +242,7 @@ export class PriceStore {
       }
     }
     if (new Set(snapshot.bars.map(b => b.date)).size !== snapshot.bars.length) throw new PriceError("duplicate_snapshot_date");
-    return this.db.transaction(() => {
+    return this.write(() => {
       this.ensureInstrument(snapshot.instrument);
       const before = new Map((this.db.prepare(`SELECT date,open,high,low,close,volume,adjusted_close AS adjustedClose FROM bars WHERE instrument_id=?`).all(id) as PriceBar[])
         .map(bar => [bar.date, bar]));
@@ -210,7 +290,7 @@ export class PriceStore {
         VALUES (?,?,1,?,?,?,?,?,?)`).run(id, snapshot.fetchedAt, snapshot.bars.length, inserted, revised, snapshot.missingBars, snapshot.excludedCurrentSession, payloadHash);
       this.pruneAudit();
       return { inserted, revised, unchanged, rowCount: snapshot.bars.length };
-    })();
+    });
   }
 
   private pruneAudit(): void {

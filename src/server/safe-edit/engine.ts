@@ -14,6 +14,7 @@ import { previewSchema, applySchema, operationId as idSchema, type PreviewInput 
 
 import {assertReviewChronology,assertReviewPreviewAdmission,hasRuntimeReviewLineage} from "./research-lineage";
 import {assertDeclaredEvidenceAuthority,assertPrimaryMetadataAuthority} from "./primary-authority";
+import {assertResearchJudgeWrite,currentJudgeGate,type JudgeGate} from "./research-judge-gate";
 
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
 const MAX_BYTES = 100_000;
@@ -202,6 +203,13 @@ export function preview(input:unknown,actor:string) {return previewWithLineage(i
 /** Server-internal entrypoint: only canonical prepare supplies the freshly
  * planned Review. It is not an MCP argument, environment switch or wire flag. */
 export function previewCanonicalReview(input:unknown,actor:string) {return previewWithLineage(input,actor,true);}
+/** Internal canonical admission only; no caller-facing event/approval API. */
+export function recordResearchJudgeGate(sourceOperationId:string,actor:string,gate:JudgeGate){
+  assertEnabled();const source=owned(sourceOperationId,actor),target=gate.targets.find(t=>t.kind==="source_intake");
+  if(!target||target.operationId!==source.id||target.path!==JSON.parse(source.payload).path||target.sha256!==source.after_hash||
+    splitFrontmatter(source.after_text).data.intake_id!==gate.intakeId||gate.actor!==actor)throw Error("research_judge_source_admission_hold");
+  if(JSON.stringify(currentJudgeGate(gate.intakeId))!==JSON.stringify(gate))log(source.id,actor,"research_judge_gate",gate as unknown as Record<string,unknown>);
+}
 function checkStoredReviewLineage(r:RecordRow){
   if(JSON.parse(r.payload).change?.kind!=="create"||!hasRuntimeReviewLineage(r.after_text))return;
   const event=store().prepare("SELECT at FROM safe_edit_events WHERE operation_id=? AND actor=? AND event='preview' ORDER BY at LIMIT 1").get(r.id,r.actor) as {at:string}|undefined;
@@ -216,6 +224,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
   if(existing) {
     if(existing.actor!==actor||existing.payload!==JSON.stringify(p)) throw Error("Operation ID reused for different input or actor");
     if(existing.status==="preview") {
+      assertResearchJudgeWrite(p.path,existing.before_text,existing.after_text,actor,"preview");
       checkStoredReviewLineage(existing);
       assertDeclaredEvidenceAuthority(p.evidence);
       assertPrimaryMetadataAuthority(document(existing.before_text).data,document(existing.after_text).data);
@@ -236,6 +245,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
   if(size.n>=1000||size.bytes+200_000>20_000_000) throw Error("Safe Edit journal quota reached; administrator archival required");
   document(before??"");checkEvidence(p);
   const after=calculate(p,before??"",actor);
+  assertResearchJudgeWrite(p.path,before??"",after,actor,"preview");
   const afterMetadata=document(after).data,beforeMetadata=document(before??"").data;
   if(p.change.kind==="create")assertReviewPreviewAdmission(after,canonical);
   assertPrimaryMetadataAuthority(beforeMetadata,afterMetadata);
@@ -327,6 +337,7 @@ export function apply(input:unknown,actor:string) {
     const {abs}=target(p.path),current=read(abs);
     if((p.change.kind==="create"?current!==null:current===null)||sha256(current??"")!==r.before_hash) throw Error("Version conflict: re-preview; another writer changed this note");
     checkEvidence(p);
+    assertResearchJudgeWrite(p.path,current??"",r.after_text,actor,"apply");
     assertPrimaryMetadataAuthority(document(current??"").data,document(r.after_text).data);
     assertHeadroom(Buffer.byteLength(r.before_text)*2+Buffer.byteLength(r.after_text)+64_000);
     backup(r,p);
