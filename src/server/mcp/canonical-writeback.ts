@@ -103,7 +103,8 @@ function revokeMatchingJudge(raw:unknown,actor:string,planId?:unknown,forced?:"H
     body.version!==JUDGE_VERSION||body.researchStatePolicy!==RESEARCH_STATE_POLICY)return;
   let decision=forced;
   if(result){
-    if(result.packetDigest!==packet.digest||result.packetId!==packet.packetId||result.reviewDigest!==body.reviewDigest)return;
+    if(result.packetDigest!==packet.digest||result.packetId!==packet.packetId||result.reviewDigest!==body.reviewDigest||
+      (result.packetEnvelopeDigest!==undefined&&result.packetEnvelopeDigest!==gate.packetEnvelopeDigest))return;
     const exact=(actual:{key:string}[],expected:{key:string}[])=>Array.isArray(expected)&&actual.length===expected.length&&
       new Set(actual.map(x=>x.key)).size===actual.length&&expected.every(e=>actual.some(a=>a.key===e.key));
     // A truncated required bundle is itself HOLD, never permission to retain
@@ -149,7 +150,7 @@ function planned(input: z.infer<typeof canonicalInputSchema>,actor:string) {
   if(researchJudge)try{judge=evaluateResearchJudge(clean,researchJudge,actor);}catch{
     judge={decision:"HOLD",reasons:["judge_packet_or_input_binding_hold"],criticRequired:false,criticStatus:"not_evaluated",
       packetId:researchJudge.packet.packetId,packetDigest:researchJudge.packet.digest,resultDigest:null,history:[],retrieval:null,scopeWitness:null,expiresAt:0,
-      packetEnvelopeDigest:null,packetIssuedAt:null,
+      packetEnvelopeDigest:null,packetIssuedAt:null,resultEnvelopeDigest:null,
       trust:{actorLabelSha256:"",actorProvenance:"not_established",session:"not_exposed",modelVersion:"not_exposed",judgeIdentity:"analyst_attested_unverified"},semanticTruthVerified:false,primaryAuthority:false};
   }
   const enrolled=currentJudgeGate(plan.planId);
@@ -188,7 +189,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
       previews.push({kind:source.kind,expectedSha256:source.expectedSha256,...p});
     }
     recordResearchJudgeGate(source.receiptKey,actor,{version:JUDGE_VERSION,researchStatePolicy:RESEARCH_STATE_POLICY,intakeId:plan.planId,actor,decision:judge.decision,
-      packetEnvelopeDigest:judge.packetEnvelopeDigest,packetIssuedAt:judge.packetIssuedAt,
+      packetEnvelopeDigest:judge.packetEnvelopeDigest,packetIssuedAt:judge.packetIssuedAt,resultEnvelopeDigest:judge.resultEnvelopeDigest,
       packetDigest:judge.packetDigest,resultDigest:judge.resultDigest,expiresAt:judge.decision==="PASS"?judge.expiresAt:0,history:judge.history,retrieval:judge.retrieval,scopeWitness:judge.scopeWitness,
       targets:workflow.steps.map(s=>({path:s.path,sha256:s.expectedSha256,operationId:s.receiptKey,kind:s.kind,
         eligible:s.state==="needs_create"||s.state==="verified_existing"}))});

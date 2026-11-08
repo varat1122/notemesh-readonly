@@ -12,22 +12,35 @@ export interface JudgeGate {
   version:string;
   researchStatePolicy:string;
   intakeId:string;actor:string;decision:"PASS"|"HOLD"|"FAIL";packetDigest:string;resultDigest:string|null;expiresAt:number;
-  packetEnvelopeDigest:string|null;packetIssuedAt:number|null;
+  packetEnvelopeDigest:string|null;packetIssuedAt:number|null;resultEnvelopeDigest?:string|null;revokedAt?:number;
   history:{path:string;sha256:string}[];
   retrieval:RetrievalCoverage|null;
   scopeWitness:JudgeScope|null;
   targets:{path:string;sha256:string;operationId:string;kind:"source_intake"|"structured_claim"|"canonical_review";eligible:boolean}[];
 }
-export function assertJudgeAdmissionOrder(current:JudgeGate|null,next:Pick<JudgeGate,"packetEnvelopeDigest"|"packetIssuedAt"|"decision">){
+export function assertJudgeAdmissionOrder(current:JudgeGate|null,next:Pick<JudgeGate,"packetEnvelopeDigest"|"packetIssuedAt"|"resultEnvelopeDigest"|"decision">){
   if(!current?.packetEnvelopeDigest)return;
   const same=next.packetEnvelopeDigest===current.packetEnvelopeDigest;
+  // Non-PASS is terminal for this exact envelope, including a new result on
+  // the same envelope. Only a later sealed envelope + bound attestation recovers.
+  if(same&&current.decision!=="PASS"&&next.decision==="PASS")throw Error("research_judge_revoked_envelope_hold");
   if(!same&&(next.packetIssuedAt===null||next.packetIssuedAt<=(current.packetIssuedAt??0)))throw Error("research_judge_obsolete_admission_hold");
+  if(current.decision!=="PASS"&&next.decision==="PASS"){
+    if(!Number.isSafeInteger(current.revokedAt)||next.packetIssuedAt===null||next.packetIssuedAt<=current.revokedAt!)
+      throw Error("research_judge_reassessment_not_fresh_hold");
+    if(next.resultEnvelopeDigest!==next.packetEnvelopeDigest)throw Error("research_judge_fresh_assessment_binding_hold");
+  }
 }
 export function currentJudgeGate(intakeId:string):JudgeGate|null {
   if(!db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_events'").get())return null;
-  const row=db().prepare(`SELECT detail FROM safe_edit_events WHERE event='research_judge_gate'
-    AND json_extract(detail,'$.intakeId')=? ORDER BY rowid DESC LIMIT 1`).get(intakeId) as {detail:string}|undefined;
-  return row?JSON.parse(row.detail):null;
+  const row=db().prepare(`SELECT detail,at FROM safe_edit_events WHERE event='research_judge_gate'
+    AND json_extract(detail,'$.intakeId')=? ORDER BY rowid DESC LIMIT 1`).get(intakeId) as {detail:string;at:string}|undefined;
+  if(!row)return null;
+  const gate=JSON.parse(row.detail) as JudgeGate;
+  // Read legacy HOLD timestamps from their actual server journal, never rewrite
+  // old events or infer freshness from a caller's claimed assessment time.
+  if(gate.decision!=="PASS"&&gate.revokedAt===undefined)gate.revokedAt=Date.parse(row.at);
+  return gate;
 }
 function gateFor(path:string,before:string,after:string):JudgeGate|null {
   const ids=[before,after].map(s=>splitFrontmatter(s).data.intake_id).filter((x):x is string=>typeof x==="string"&&/^IN-[A-F0-9]{16}$/.test(x));

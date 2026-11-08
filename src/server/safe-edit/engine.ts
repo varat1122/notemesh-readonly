@@ -213,9 +213,16 @@ export function recordResearchJudgeGate(sourceOperationId:string,actor:string,ga
   assertNoMaintenance("research judge admission");assertEnabled();const source=owned(sourceOperationId,actor),target=gate.targets.find(t=>t.kind==="source_intake");
   if(!target||target.operationId!==source.id||target.path!==JSON.parse(source.payload).path||target.sha256!==source.after_hash||
     splitFrontmatter(source.after_text).data.intake_id!==gate.intakeId||gate.actor!==actor)throw Error("research_judge_source_admission_hold");
-  const current=currentJudgeGate(gate.intakeId);
-  assertJudgeAdmissionOrder(current,gate);
-  if(JSON.stringify(current)!==JSON.stringify(gate))log(source.id,actor,"research_judge_gate",gate as unknown as Record<string,unknown>);
+  // Serialize the authoritative re-read/check/append across connections. A
+  // concurrent HOLD must not be overwritten by a previously checked PASS retry.
+  store().transaction(()=>{
+    assertNoMaintenance("research judge admission journal");
+    const current=currentJudgeGate(gate.intakeId);
+    assertJudgeAdmissionOrder(current,gate);
+    const recorded={...gate,revokedAt:gate.decision==="PASS"?undefined:
+      current?.decision!=="PASS"&&current?.packetEnvelopeDigest===gate.packetEnvelopeDigest?current.revokedAt:Date.now()};
+    if(JSON.stringify(current)!==JSON.stringify(recorded))log(source.id,actor,"research_judge_gate",recorded as unknown as Record<string,unknown>);
+  }).immediate();
 }
 /** Internal canonical accounting; not a generic event writer or MCP operation.
  * SQLite transaction serializes retries. Existing DB maintenance fence applies.

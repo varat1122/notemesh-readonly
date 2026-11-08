@@ -69,12 +69,145 @@ async function judged(data:WritebackInput){
     references:[{key:"received_source",quote:data.extractedText,locator:`utf16:0:${data.extractedText.length}`,sourceSha256:sha(data.extractedText)}],
     checks:{entailment:"PASS" as const,numbersUnits:"PASS" as const,periodRoleAttributionVintage:"PASS" as const,identityRelationships:"PASS" as const,
       pointInTime:"PASS" as const,independenceCounterEvidence:"PASS" as const,injectionCoverage:"PASS" as const}});
-  const result:import("../vault/research-judge").JudgeResult={packetId:packet.packetId,packetDigest:packet.digest,reviewDigest:body.reviewDigest,
+  const result:import("../vault/research-judge").JudgeResult={packetEnvelopeDigest:(await import("../vault/research-judge")).judgeEnvelopeDigest(packet),packetId:packet.packetId,packetDigest:packet.digest,reviewDigest:body.reviewDigest,
     claims:body.claims.map((c:{key:string})=>row(c.key)),relationships:body.relationships.map((c:{key:string})=>row(c.key)),
     event:{...row("event"),classification:"new_event" as const},review:row("review"),materialRisk:false};
   return {...parsed,researchJudge:{packet,result}};
 }
 describe("RI001 general persistence convergence",()=>{
+  it.each(["HOLD","FAIL"] as const)("P-1 baseline: revoked %s envelope cannot re-admit original PASS",async verdict=>{
+    const data=await judged({...input,appearance}),p=await prepare(data),engine=await import("../safe-edit/engine");
+    const held=structuredClone(data);held.researchJudge.result.review.verdict=verdict;await prepare(held);
+    let retry:Awaited<ReturnType<typeof prepare>>|undefined,error:unknown;
+    try{retry=await prepare(data);}catch(e){error=e;}
+    const written=[];
+    if(retry)for(const t of retry.previews){
+      engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor);
+      if(t.kind!=="source_intake")written.push(t.kind);
+    }
+    expect(written).toEqual([]);expect(String(error)).toContain("research_judge_revoked_envelope_hold");
+    expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)).toMatchObject({decision:verdict,expiresAt:0});
+    expect(p.steps.filter(s=>s.kind!=="source_intake").every(s=>!fs.existsSync(path.join(vault,s.path)))).toBe(true);
+  });
+  it("P-1 baseline: real MCP refuses old PASS replay before generic apply",async()=>{
+    const data=await judged({...input,appearance}),p=await prepare(data),held=structuredClone(data);held.researchJudge.result.review.verdict="HOLD";
+    const server=(await import("./maintenance-tools")).trackToolExecution((await import("./safe-edit-server")).createSafeEditMcpServer({read:true,write:false,label:actor,scopes:["vault:read","vault:edit"]}));
+    const client=new Client({name:"envelope-replay-probe",version:"1"}),[a,b]=InMemoryTransport.createLinkedPair();await server.connect(b);await client.connect(a);
+    try{
+      expect((await client.callTool({name:"prepare_canonical_writeback",arguments:held})).isError).not.toBe(true);
+      const replay=await client.callTool({name:"prepare_canonical_writeback",arguments:data});
+      expect(replay.isError).toBe(true);expect(JSON.stringify(replay.content)).toContain("research_judge_revoked_envelope_hold");
+      for(const t of p.previews.filter(x=>x.kind!=="source_intake")){
+        expect((await client.callTool({name:"apply_edit",arguments:{operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash}})).isError).toBe(true);
+        expect(fs.existsSync(path.join(vault,t.path))).toBe(false);
+      }
+      expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)).toMatchObject({decision:"HOLD",expiresAt:0});
+    }finally{await client.close();await server.close();}
+  });
+  it("P-1 fresh envelope and bound reassessment recover; obsolete HOLD cannot revoke it",async()=>{
+    vi.useFakeTimers({toFake:["Date"]});const data=await judged({...input,appearance});await prepare(data);
+    const held=structuredClone(data);held.researchJudge.result.review.verdict="HOLD";
+    const saved=await apply(held,await prepare(held)),sourceBytes=fs.readFileSync(path.join(vault,saved.steps[0].path)),sourceReceipt=(await import("../safe-edit/engine")).status(saved.steps[0].receiptKey,actor).receipt;
+    expect(saved.receipts).toHaveLength(1);vi.setSystemTime(Date.now()+1000);
+    const fresh=await judged({...input,appearance}),p=await prepare(fresh),gates=await import("../safe-edit/research-judge-gate"),gate=gates.currentJudgeGate(p.planId);
+    expect(fresh.researchJudge.packet.digest).toBe(data.researchJudge.packet.digest);
+    expect(fresh.researchJudge.result.packetEnvelopeDigest).not.toBe(data.researchJudge.result.packetEnvelopeDigest);
+    expect(p.researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});
+    await prepare(held);expect(gates.currentJudgeGate(p.planId)).toEqual(gate);
+    const final=await apply(fresh,p);expect(final.status).toBe("saved_verified");expect(final.receipts).toHaveLength(3);
+    expect(fs.readFileSync(path.join(vault,saved.steps[0].path))).toEqual(sourceBytes);
+    expect((await import("../safe-edit/engine")).status(saved.steps[0].receiptKey,actor).receipt).toEqual(sourceReceipt);
+  });
+  it.each(["old binding","missing binding"])("P-1 fresh same-input envelope cannot reuse old assessment with %s",async fault=>{
+    vi.useFakeTimers({toFake:["Date"]});const data=await judged({...input,appearance});await prepare(data);
+    const held=structuredClone(data);held.researchJudge.result.review.verdict="HOLD";await prepare(held);vi.setSystemTime(Date.now()+1000);
+    const fresh=await judged({...input,appearance});fresh.researchJudge.result=structuredClone(data.researchJudge.result);
+    if(fault==="missing binding")delete fresh.researchJudge.result.packetEnvelopeDigest;
+    if(fault==="missing binding")await expect(prepare(fresh)).rejects.toThrow("research_judge_fresh_assessment_binding_hold");
+    else {const denied=await prepare(fresh);expect(denied.researchJudge?.reasons).toContain("judge_result_envelope_binding_mismatch");expect(denied.previews.every(t=>t.kind==="source_intake")).toBe(true);}
+    expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate((await import("../vault/investment-writeback-router")).planInvestmentWriteback(input).planId)?.decision).not.toBe("PASS");
+    expect((await rows()).filter((r:any)=>r.status==="written")).toHaveLength(0);
+  });
+  it("P-1 legacy HOLD journal derives withdrawal time read-only; fresh recovery remains available",async()=>{
+    vi.useFakeTimers({toFake:["Date"]});const data=await judged({...input,appearance}),p=await prepare(data),held=structuredClone(data);
+    held.researchJudge.result.review.verdict="HOLD";await prepare(held);const withdrawn=Date.now();
+    const sql=(await import("../db")).db(),original=sql.prepare.bind(sql),events=sql.prepare("SELECT * FROM safe_edit_events").all();
+    const spy=vi.spyOn(sql,"prepare").mockImplementation((query:string)=>{
+      const statement=original(query);
+      if(query.includes("SELECT detail,at FROM safe_edit_events WHERE event='research_judge_gate'")){
+        const get=statement.get.bind(statement);
+        return {...statement,get:(...args:unknown[])=>{
+          const row=get(...args) as {detail:string;at:string}|undefined;if(!row)return row;
+          const legacy=JSON.parse(row.detail);delete legacy.revokedAt;return {...row,detail:JSON.stringify(legacy)};
+        }} as typeof statement;
+      }
+      return statement;
+    });
+    try{
+      expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)?.revokedAt).toBe(withdrawn);
+      await expect(prepare(data)).rejects.toThrow("research_judge_revoked_envelope_hold");
+      expect(sql.prepare("SELECT * FROM safe_edit_events").all()).toEqual(events);
+      vi.setSystemTime(Date.now()+1000);const fresh=await judged({...input,appearance});
+      expect((await apply(fresh,await prepare(fresh))).status).toBe("saved_verified");
+    }finally{spy.mockRestore();}
+  });
+  it("P-1 packet issued before the withdrawal is not a fresh reassessment",async()=>{
+    vi.useFakeTimers({toFake:["Date"]});const data=await judged({...input,appearance}),p=await prepare(data);
+    vi.setSystemTime(Date.now()+1000);const preissued=await judged({...input,appearance});
+    vi.setSystemTime(Date.now()+1000);const held=structuredClone(data);held.researchJudge.result.review.verdict="HOLD";await prepare(held);
+    await expect(prepare(preissued)).rejects.toThrow("research_judge_reassessment_not_fresh_hold");
+    expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)).toMatchObject({decision:"HOLD",expiresAt:0});
+    expect((await rows()).some((r:any)=>r.status==="written")).toBe(false);
+  });
+  it.each(["identical tie","different tie","clock reversal"])("P-1 non-increasing issuance %s fails closed without changing the gate",async fault=>{
+    vi.useFakeTimers({toFake:["Date"]});const data=await judged({...input,appearance}),p=await prepare(data),held=structuredClone(data);
+    held.researchJudge.result.review.verdict="HOLD";await prepare(held);
+    const gates=await import("../safe-edit/research-judge-gate"),gate=gates.currentJudgeGate(p.planId);
+    if(fault==="clock reversal")vi.setSystemTime(Date.now()-1);
+    const fresh=await judged(fault==="different tie"?{...input,appearance:{...appearance,key:"another-appearance"}}:{...input,appearance});
+    await expect(prepare(fresh)).rejects.toThrow(fault==="identical tie"?"research_judge_revoked_envelope_hold":"research_judge_obsolete_admission_hold");
+    expect(gates.currentJudgeGate(p.planId)).toEqual(gate);expect((await rows()).some((r:any)=>r.status==="written")).toBe(false);
+  });
+  it("P-1 valid concurrent PASS retries remain idempotent before any HOLD",async()=>{
+    const data=await judged({...input,appearance});const previews=await Promise.all([prepare(data),prepare(data)]);
+    const saved=await apply(data,previews[1]);expect(saved.status).toBe("saved_verified");expect(saved.receipts).toHaveLength(4);
+    const journal=await rows(),retry=await apply(data,await prepare(data));expect(retry.receipts).toEqual([]);expect(await rows()).toEqual(journal);
+  });
+  it.each([true,false])("P-1 concurrent MCP HOLD/PASS retry order holdFirst=%s never leaves PASS authority",async holdFirst=>{
+    const data=await judged({...input,appearance}),p=await prepare(data),held=structuredClone(data);held.researchJudge.result.review.verdict="HOLD";
+    const server=(await import("./safe-edit-server")).createSafeEditMcpServer({read:true,write:false,label:actor,scopes:["vault:read","vault:edit"]});
+    const client=new Client({name:"concurrent-envelope-retry",version:"1"}),[a,b]=InMemoryTransport.createLinkedPair();await server.connect(b);await client.connect(a);
+    try{
+      await Promise.all((holdFirst?[held,data]:[data,held]).map(arguments_=>client.callTool({name:"prepare_canonical_writeback",arguments:arguments_})));
+      expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)).toMatchObject({decision:"HOLD",expiresAt:0});
+      for(const t of p.previews.filter(x=>x.kind!=="source_intake"))expect((await client.callTool({name:"apply_edit",arguments:{operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash}})).isError).toBe(true);
+      expect((await rows()).some((r:any)=>r.status==="written")).toBe(false);
+    }finally{await client.close();await server.close();}
+  });
+  it("P-1 journal rechecks a stale prevalidated PASS inside an immediate transaction",async()=>{
+    const data=await judged({...input,appearance}),p=await prepare(data),gates=await import("../safe-edit/research-judge-gate"),old=gates.currentJudgeGate(p.planId)!;
+    gates.assertJudgeAdmissionOrder(old,old); // Caller checked before concurrent withdrawal.
+    const held=structuredClone(data);held.researchJudge.result.review.verdict="HOLD";await prepare(held);
+    const engine=await import("../safe-edit/engine"),sql=(await import("../db")).db(),original=sql.prepare.bind(sql),Database=(await import("better-sqlite3")).default;
+    const other=new Database((await import("../env")).env.dbPath,{timeout:0});let checks=0;
+    const spy=vi.spyOn(sql,"prepare").mockImplementation((query:string)=>{
+      if(query.includes("SELECT detail,at FROM safe_edit_events WHERE event='research_judge_gate'")){
+        checks++;expect(sql.inTransaction).toBe(true);expect(()=>other.exec("BEGIN IMMEDIATE")).toThrow(/locked/);
+      }
+      return original(query);
+    });
+    try{expect(()=>(engine.recordResearchJudgeGate(old.targets[0].operationId,actor,old))).toThrow("research_judge_revoked_envelope_hold");}
+    finally{spy.mockRestore();if(other.inTransaction)other.exec("ROLLBACK");other.close();}
+    expect(checks).toBe(1);expect(gates.currentJudgeGate(p.planId)?.decision).toBe("HOLD");
+  });
+  it("P-1 pinned SDK exposes withdrawal hook; missing hook refuses endpoint startup",async()=>{
+    const {McpServer}=await import("@modelcontextprotocol/sdk/server/mcp.js"),{createSafeEditMcpServer}=await import("./safe-edit-server");
+    expect(JSON.parse(fs.readFileSync("package.json","utf8")).dependencies["@modelcontextprotocol/sdk"]).toBe("1.32.1");
+    const prototype=McpServer.prototype as unknown as {validateToolInput:unknown},original=prototype.validateToolInput;
+    expect(typeof original).toBe("function");
+    try{prototype.validateToolInput=undefined;expect(()=>createSafeEditMcpServer({read:true,write:false,label:actor,scopes:["vault:read","vault:edit"]})).toThrow("endpoint refused");}
+    finally{prototype.validateToolInput=original;}
+  });
   it("F-1 matching HOLD expires PASS before unrecorded appearance rejection and generic writes",async()=>{
     const data=await judged({...input,appearance}),p=await prepare(data),engine=await import("../safe-edit/engine");
     const source=p.previews.find(x=>x.kind==="source_intake")!;
@@ -197,11 +330,12 @@ describe("RI001 general persistence convergence",()=>{
     // Prepare again only to refresh any Source preview token; assessment is unchanged.
     expect((await apply(fresh,await prepare(fresh))).status).toBe("saved_verified");
   });
-  it.each(["forged seal","wrong result digest","wrong actor","wrong intake"])("F-1 %s does not withdraw an unrelated admission",async fault=>{
+  it.each(["forged seal","wrong result digest","wrong envelope result","wrong actor","wrong intake"])("F-1 %s does not withdraw an unrelated admission",async fault=>{
     const data=await judged({...input,appearance}),p=await prepare(data),gates=await import("../safe-edit/research-judge-gate"),before=gates.currentJudgeGate(p.planId);
     const bad=structuredClone(data);bad.researchJudge.result.review.verdict="FAIL";
     if(fault==="forged seal")bad.researchJudge.packet.seal="0".repeat(64);
     if(fault==="wrong result digest")bad.researchJudge.result.packetDigest="0".repeat(64);
+    if(fault==="wrong envelope result")bad.researchJudge.result.packetEnvelopeDigest="0".repeat(64);
     await expect((await import("./canonical-writeback")).applyCanonicalWriteback({input:bad,planId:fault==="wrong intake"?"IN-0000000000000000":p.planId,
       authorizations:p.previews.map(t=>({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash}))},fault==="wrong actor"?"oauth:other":actor)).rejects.toThrow();
     expect(gates.currentJudgeGate(p.planId)).toEqual(before);
@@ -254,7 +388,7 @@ describe("RI001 general persistence convergence",()=>{
     const sql=(await import("../db")).db(),original=sql.prepare.bind(sql);
     const spy=vi.spyOn(sql,"prepare").mockImplementation((query:string)=>{
       const statement=original(query);
-      if(query.includes("SELECT detail FROM safe_edit_events WHERE event='research_judge_gate'")){
+      if(query.includes("SELECT detail,at FROM safe_edit_events WHERE event='research_judge_gate'")){
         const {packetEnvelopeDigest:_,packetIssuedAt:__,...legacy}=gate;void _;void __;
         return {...statement,get:()=>({detail:JSON.stringify(legacy)})} as typeof statement;
       }

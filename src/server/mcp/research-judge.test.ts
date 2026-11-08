@@ -71,7 +71,7 @@ async function judged(data:WritebackInput=input){
     references:[{key:"received_source",quote:data.extractedText.slice(0,60),locator:`utf16:0:${Math.min(data.extractedText.length,60)}`,sourceSha256:sha(data.extractedText)}],
     checks:{entailment:"PASS" as const,numbersUnits:"PASS" as const,periodRoleAttributionVintage:"PASS" as const,
       identityRelationships:"PASS" as const,pointInTime:"PASS" as const,independenceCounterEvidence:"PASS" as const,injectionCoverage:"PASS" as const}});
-  const result:import("../vault/research-judge").JudgeResult={packetId:packet.packetId,packetDigest:packet.digest,reviewDigest:body.reviewDigest,
+  const result:import("../vault/research-judge").JudgeResult={packetEnvelopeDigest:(await import("../vault/research-judge")).judgeEnvelopeDigest(packet),packetId:packet.packetId,packetDigest:packet.digest,reviewDigest:body.reviewDigest,
     claims:body.claims.map((c:{key:string})=>assessment(c.key)),relationships:body.relationships.map((c:{key:string})=>assessment(c.key)),
     event:{...assessment("event"),classification:"new_event"},review:assessment("review"),materialRisk:false};
   return {...normalized,researchJudge:{packet,result}};
@@ -130,9 +130,11 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const replay=structuredClone(fresh);replay.researchJudge.result=stalePass;
     const denied=await prepare(replay);expect(denied.researchJudge?.decision).toBe("HOLD");expect(denied.previews).toEqual([]);
     expect(denied.researchJudge?.reasons).toContain("judge_result_binding_mismatch");
-    const eligible=await prepare(fresh);expect(eligible.researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});
+    // The invalid result consumed that envelope as HOLD. Reassess a new one.
+    const reassessed=await judged(revised);
+    const eligible=await prepare(reassessed);expect(eligible.researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});
     expect(eligible.previews.map(x=>x.kind)).toEqual(["structured_claim","canonical_review"]);
-    expect((await apply(fresh,eligible)).status).toBe("saved_verified");
+    expect((await apply(reassessed,eligible)).status).toBe("saved_verified");
     expect(fs.readFileSync(path.join(vault,held.steps[0].path))).toEqual(source);expect(await journal()).toContainEqual(sourceRow);assertProtected();
   });
   it.each(["claim","review"])("C1 All-or-Hold: canonical authorization cannot silently omit a pending %s",async omit=>{
@@ -723,11 +725,12 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-11-06T12:00:00Z"));
     const data=await judged();data.researchJudge.result.review.verdict="HOLD";
     const held=await apply(data,await prepare(data)),before=await journal(),source=fs.readFileSync(path.join(vault,held.steps[0].path));
-    // A new analyst attestation, not a rewritten historical write receipt.
-    data.researchJudge.result.review.verdict="PASS";
-    const p=await prepare(data);expect(p.previews.map(x=>x.kind)).toEqual(["structured_claim","structured_claim","canonical_review"]);
+    // A later sealed envelope plus new attestation; never reactivate the HOLD envelope.
+    vi.setSystemTime(new Date("2026-11-06T12:00:01Z"));
+    const fresh=await judged();
+    const p=await prepare(fresh);expect(p.previews.map(x=>x.kind)).toEqual(["structured_claim","structured_claim","canonical_review"]);
     vi.setSystemTime(new Date("2026-11-06T12:02:00Z"));
-    expect((await apply(data,p)).status).toBe("saved_verified");
+    expect((await apply(fresh,p)).status).toBe("saved_verified");
     expect(fs.readFileSync(path.join(vault,held.steps[0].path))).toEqual(source);for(const receipt of before)expect(await journal()).toContainEqual(receipt);assertProtected();
   });
   it("partial write remains recoverable through the same judge-bound canonical workflow",async()=>{
@@ -862,6 +865,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
       };
       const packet=(await call("prepare_research_judge_packet",{input})).packet;
       const data=await judged();data.researchJudge.packet=packet;
+      data.researchJudge.result.packetEnvelopeDigest=(await import("../vault/research-judge")).judgeEnvelopeDigest(packet);
       const echoed=await call("research_judge_result_contract",data.researchJudge.result);
       expect(echoed.semanticEvaluationPerformed).toBe(false);expect(echoed.provenance).toBe("analyst_attested_unverified");
       const p=await call("prepare_canonical_writeback",data);expect(p.previews).toHaveLength(4);

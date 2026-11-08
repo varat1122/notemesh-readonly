@@ -467,8 +467,11 @@ validation remain. Withdrawal binds actor, Intake, Source operation, body digest
 exact envelope fingerprint (including issue time/seal), result binding and the
 existing target manifest. It never adds targets or grants PASS. An older envelope
 cannot revoke a later admission even when their stable packet bodies are equal.
-Same unchanged evidence may be explicitly re-assessed/re-prepared; changed input,
-including appearance, still requires a fresh packet and assessment. Pending gates
+A non-PASS envelope cannot be reactivated by replaying or editing its PASS result.
+Reassessment, even of unchanged input, requires a fresh server-sealed envelope
+with `issuedAt` strictly later than both the prior envelope and withdrawal, and a new analyst result explicitly bound to
+that exact envelope. Changed input, including appearance, also requires fresh
+packet/assessment. Pending gates
 without the new envelope fingerprint/issue time cannot authorize non-Source
 writes; Source preservation and existing receipts remain independently checkable.
 
@@ -521,3 +524,39 @@ authorized coordinated restore/reconciliation plan that accounts for all later
 appearances, Notes and receipts; this is not permission to discard later writes.
 Do not run migrations, downgrade Claim IDs, rewrite receipts or auto-convert
 RI001-2 to RI001-1. If these conditions are unproven, remain stopped before writes.
+
+
+### P-1 same-envelope replay and reassessment
+
+`assertJudgeAdmissionOrder` treats HOLD/FAIL as terminal for an exact envelope.
+A valid PASS retry before any HOLD remains idempotent; a held/revoked envelope
+cannot become PASS, even with an edited rationale. Pre-issued packets from before
+the withdrawal cannot recover authority; legacy HOLD time is read from the
+original server journal without rewriting it. An obsolete envelope cannot
+withdraw a newer admission. The journal re-reads the current admission and checks
+ordering inside one SQLite `BEGIN IMMEDIATE` transaction before appending, so a
+concurrent stale PASS check cannot overwrite a committed withdrawal.
+
+The packet tool returns `packetEnvelopeDigest` separately from the stable body
+digest. After HOLD/FAIL, the connected analyst must request a later packet,
+reassess its evidence and echo this digest as `researchJudge.result.packetEnvelopeDigest`.
+Copying the prior result onto a fresh same-input envelope fails binding. A supplied
+wrong envelope digest always HOLDs; missing envelope binding cannot recover a
+non-PASS admission. For compatibility, an otherwise valid legacy initial PASS
+and its retries before any HOLD remain supported. No historical receipt is
+rewritten. Descriptor refresh is needed for clients performing reassessment.
+
+Issuance uses real server time; no backdating or artificial future timestamps.
+Identical same-millisecond input may produce the same envelope, which remains
+revoked; a distinct envelope with a tied/older issue time is refused. Request a
+packet once the server clock is later. Clock rollback fails closed. Source-only
+preservation remains separate under existing rights and maintenance controls.
+
+The echoed digest proves exact-envelope attestation, **not** that a fresh human
+or LLM reasoning pass occurred, nor the truth of an investment claim. The current
+actor/session and independent-critic limitations remain unchanged. Tests use
+simulated results solely to prove deterministic admission/replay behavior.
+
+MCP SDK is pinned to the existing resolved `1.32.1` (no upgrade). Real MCP tests
+exercise validation-before-handler behavior; a missing validation hook refuses
+endpoint construction. Any future SDK change requires this compatibility check.
