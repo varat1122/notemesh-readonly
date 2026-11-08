@@ -209,7 +209,7 @@ export function preview(input:unknown,actor:string) {return previewWithLineage(i
  * planned Review. It is not an MCP argument, environment switch or wire flag. */
 export function previewCanonicalReview(input:unknown,actor:string) {return previewWithLineage(input,actor,true);}
 /** Internal canonical admission only; no caller-facing event/approval API. */
-export function recordResearchJudgeGate(sourceOperationId:string,actor:string,gate:JudgeGate){
+export function recordResearchJudgeGate(sourceOperationId:string,actor:string,gate:JudgeGate,withdrawal?:{current:JudgeGate;sourceTextSha256?:string}){
   assertNoMaintenance("research judge admission");assertEnabled();const source=owned(sourceOperationId,actor),target=gate.targets.find(t=>t.kind==="source_intake");
   if(!target||target.operationId!==source.id||target.path!==JSON.parse(source.payload).path||target.sha256!==source.after_hash||
     splitFrontmatter(source.after_text).data.intake_id!==gate.intakeId||gate.actor!==actor)throw Error("research_judge_source_admission_hold");
@@ -218,6 +218,15 @@ export function recordResearchJudgeGate(sourceOperationId:string,actor:string,ga
   store().transaction(()=>{
     assertNoMaintenance("research judge admission journal");
     const current=currentJudgeGate(gate.intakeId);
+    // A withdrawal authenticated against an earlier snapshot cannot replace a
+    // newer admission. Recheck under the same SQLite IMMEDIATE lock as append.
+    if(withdrawal){
+      if(gate.decision==="PASS"||JSON.stringify(current)!==JSON.stringify(withdrawal.current))throw Error("research_judge_withdrawal_superseded_hold");
+      if(withdrawal.sourceTextSha256!==undefined&&
+        (JSON.parse(source.payload).change?.kind!=="create"||!["preview","written"].includes(source.status)||
+        splitFrontmatter(source.after_text).data.source_text_sha256!==withdrawal.sourceTextSha256||sha256(source.after_text)!==source.after_hash))
+        throw Error("research_judge_source_admission_hold");
+    }
     assertJudgeAdmissionOrder(current,gate);
     const recorded={...gate,revokedAt:gate.decision==="PASS"?undefined:
       current?.decision!=="PASS"&&current?.packetEnvelopeDigest===gate.packetEnvelopeDigest?current.revokedAt:Date.now()};

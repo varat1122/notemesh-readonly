@@ -8,6 +8,8 @@ import path from "node:path";
 import {execFileSync} from "node:child_process";
 import type {canonicalInputSchema,prepareCanonicalWriteback} from "./canonical-writeback";
 import type {z} from "zod";
+import {Client} from "@modelcontextprotocol/sdk/client/index.js";
+import {InMemoryTransport} from "@modelcontextprotocol/sdk/inMemory.js";
 
 vi.mock("../safe-edit/sync",()=>({withPausedSync:async<T>(run:()=>T)=>run()}));
 const BASE="6cd9c3cd558dac3d67e9202d8652b406cfdc332a",KEY=Buffer.alloc(32,8).toString("base64");
@@ -31,7 +33,7 @@ beforeAll(()=>{
   // Reuse the old fixture/input/assessment helper and real Safe Edit engine.
   // Only the test harness is added. The runtime modules are byte-identical Git objects.
   const producer=prefix+`
-it.each([['HOLD',false],['FAIL',false],['HOLD',true],['FAIL',true],['SAVED',true]] as const)('export actual legacy %s/source=%s',async(verdict,sourceWritten)=>{
+it.each([['HOLD',false],['FAIL',false],['HOLD',true],['FAIL',true],['SAVED',true],['PASS',false],['PASS',true]] as const)('export actual legacy %s/source=%s',async(verdict,sourceWritten)=>{
   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(${T});
   const original=await judged(),preview=await prepare(original),engine=await import('../safe-edit/engine');
   const source=preview.previews.find(t=>t.kind==='source_intake')!;
@@ -40,7 +42,7 @@ it.each([['HOLD',false],['FAIL',false],['HOLD',true],['FAIL',true],['SAVED',true
   vi.setSystemTime(${T+2000});const heldInput=structuredClone(original);
   let held=preview;
   if(verdict==='SAVED')expect((await apply(original,preview)).status).toBe('saved_verified');
-  else {heldInput.researchJudge.result.review.verdict=verdict;held=await prepare(heldInput);
+  else if(verdict!=='PASS') {heldInput.researchJudge.result.review.verdict=verdict;held=await prepare(heldInput);
     const gate=(await import('../safe-edit/research-judge-gate')).currentJudgeGate(preview.planId)!;
     expect(gate.decision).toBe(verdict);expect(gate).not.toHaveProperty('packetEnvelopeDigest');}
   assertProtected();(await import('../db')).db().close();
@@ -51,7 +53,7 @@ it.each([['HOLD',false],['FAIL',false],['HOLD',true],['FAIL',true],['SAVED',true
   fs.writeFileSync(path.join(old,"src/server/mcp/legacy-producer.test.ts"),producer);
   const log=execFileSync(process.execPath,[path.resolve("node_modules/vitest/vitest.mjs"),"run","src/server/mcp/legacy-producer.test.ts","--maxWorkers=1"],{
     cwd:old,env:{...process.env,ENCRYPTION_KEY:KEY,RI001_LEGACY_EXPORT_DIR:path.join(root,"exports")},timeout:60000,maxBuffer:8*1024*1024,encoding:"utf8"});
-  expect(log).toContain("5 passed");
+  expect(log).toContain("7 passed");
 },65000);
 afterAll(()=>{if(root)fs.rmSync(root,{recursive:true,force:true});});
 beforeEach(()=>{
@@ -94,12 +96,12 @@ async function originalGateUnchanged(before:Awaited<ReturnType<typeof events>>){
   // Refusal/Source preview audit entries are allowed, never a replacement grant.
   expect(after.filter(e=>e.event==="research_judge_gate")).toEqual(before.filter(e=>e.event==="research_judge_gate"));
 }
-async function denyGeneric(){
+async function denyGeneric(applyFailure=/research_judge/){
   const engine=await import("../safe-edit/engine"),sql=(await import("../db")).db();
   for(const t of manifest.preview.previews.filter(t=>t.kind!=="source_intake")){
     const payload=(sql.prepare("SELECT payload FROM safe_edit_operations WHERE id=?").get(t.operationId) as {payload:string}).payload;
     expect(()=>engine.preview(JSON.parse(payload),actor)).toThrow(/research_judge/);
-    expect(()=>engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
+    expect(()=>engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(applyFailure);
     expect(fs.existsSync(path.join(dataRoot,"vault",t.path))).toBe(false);
   }
   expect(await writtenNonSource()).toEqual({n:0});
@@ -175,4 +177,152 @@ it("P1-LEGACY actual old Source + RI001-1 Claims + Review receipts remain cold-r
     if(step.kind==="structured_claim"){expect(bytes).toContain('claim_persistence_version: "RI001-1"');expect(readPersistedClaim(step.path).receiptKey).toBe(step.receiptKey);}
   }
   expect(sql.prepare("SELECT * FROM safe_edit_operations ORDER BY id").all()).toEqual(rows);expect(await events()).toEqual(before);
+});
+
+// L2 fixtures are PASS-only journals produced by the immutable legacy runtime.
+function withdrawal(verdict:"HOLD"|"FAIL") {
+  const input=structuredClone(manifest.original);input.researchJudge!.result!.review.verdict=verdict;return input;
+}
+it.each(["HOLD","FAIL"] as const)("L2 baseline: legacy PASS withdrawal via new Apply (%s) survives appearance rejection",async verdict=>{
+  const api=await openFixture("PASS-false"),input=withdrawal(verdict);
+  input.appearance={key:"not-recorded",channel:"chat",locator:"chat:isolated/L2",receivedAt:null};
+  await expect(api.applyCanonicalWriteback({input,planId:manifest.preview.planId,authorizations:[]},actor)).rejects.toThrow();
+  // Exercise the harmful replay before asserting state: the parent writes 3 non-Source files.
+  try{const replay=api.prepareCanonicalWriteback(manifest.original,actor);
+    await api.applyCanonicalWriteback({input:manifest.original,planId:replay.planId,authorizations:authorizations(replay)},actor);
+  }catch{/* Expected only after fix. */}
+  expect(await writtenNonSource()).toEqual({n:0});
+  expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(manifest.preview.planId)?.decision).toBe(verdict);
+  await denyGeneric();
+});
+it.each([false,true])("L2-A legacy withdrawal precedes invalid tokens/sourceWritten=%s",async saved=>{
+  const api=await openFixture("PASS-"+saved),before=await events(),input=withdrawal("HOLD");
+  await expect(api.applyCanonicalWriteback({input,planId:manifest.preview.planId,authorizations:"invalid"},actor)).rejects.toThrow();
+  expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(manifest.preview.planId)).toMatchObject({decision:"HOLD",expiresAt:0,revokedAt:T+5000});
+  for(const row of before)expect(await events()).toContainEqual(row);
+  expect(()=>api.prepareCanonicalWriteback(manifest.original,actor)).toThrow(/research_judge/);await denyGeneric();
+});
+async function withMcp(run:(client:Client)=>Promise<void>,label=actor){
+  const server=(await import("./maintenance-tools")).trackToolExecution((await import("./safe-edit-server")).createSafeEditMcpServer({read:true,write:false,label,scopes:["vault:read","vault:edit"]}));
+  const client=new Client({name:"legacy-withdrawal-probe",version:"1"}),[a,b]=InMemoryTransport.createLinkedPair();await server.connect(b);await client.connect(a);
+  try{await run(client);}finally{await client.close();await server.close();}
+}
+it.each([["HOLD","appearance"],["FAIL","appearance"],["HOLD","tokens"],["FAIL","tokens"],["HOLD","missing planId"],["FAIL","missing planId"]] as const)("L2-C actual MCP %s withdrawal before SDK-invalid %s",async(verdict,fault)=>{
+  await openFixture("PASS-false");const input=withdrawal(verdict);
+  const args:Record<string,unknown>={input,planId:manifest.preview.planId,authorizations:[]};
+  if(fault==="appearance")Object.assign(input,{appearance:{key:"invalid"}});else if(fault==="missing planId")delete args.planId;else args.authorizations="invalid";
+  await withMcp(async client=>{
+    expect((await client.callTool({name:"apply_canonical_writeback",arguments:args})).isError).toBe(true);
+    expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(manifest.preview.planId)?.decision).toBe(verdict);
+    expect((await client.callTool({name:"prepare_canonical_writeback",arguments:manifest.original})).isError).toBe(true);
+    for(const t of manifest.preview.previews.filter(t=>t.kind!=="source_intake"))expect((await client.callTool({name:"apply_edit",arguments:{operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash}})).isError).toBe(true);
+  });await denyGeneric();
+});
+it.each(["HOLD","FAIL"] as const)("L2-D/F new Prepare retains %s withdrawal and later fresh recovery",async verdict=>{
+  const api=await openFixture("PASS-true"),engine=await import("../safe-edit/engine"),source=manifest.preview.steps[0];
+  const receipt=engine.status(source.receiptKey,actor).receipt,bytes=fs.readFileSync(path.join(dataRoot,"vault",source.path)),before=await events();
+  expect(api.prepareCanonicalWriteback(withdrawal(verdict),actor).researchJudge?.decision).toBe(verdict);
+  await denyGeneric();expect(()=>api.prepareCanonicalWriteback(manifest.original,actor)).toThrow(/research_judge/);
+  vi.setSystemTime(T+6000);const fresh=await freshInput(),p=api.prepareCanonicalWriteback(fresh,actor);
+  expect(p.researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});
+  const saved=await api.applyCanonicalWriteback({input:fresh,planId:p.planId,authorizations:authorizations(p)},actor);
+  expect(saved.status).toBe("saved_verified");expect(saved.receipts).toHaveLength(3);
+  expect(engine.status(source.receiptKey,actor).receipt).toEqual(receipt);expect(fs.readFileSync(path.join(dataRoot,"vault",source.path))).toEqual(bytes);
+  for(const row of before)expect(await events()).toContainEqual(row);
+});
+it("L2-F fresh assessment after new Apply withdrawal succeeds; obsolete withdrawal cannot affect it",async()=>{
+  const api=await openFixture("PASS-false"),held=withdrawal("HOLD");
+  await expect(api.applyCanonicalWriteback({input:held,planId:manifest.preview.planId,authorizations:"invalid"},actor)).rejects.toThrow();
+  vi.setSystemTime(T+6000);const fresh=await freshInput(),p=api.prepareCanonicalWriteback(fresh,actor);
+  const gates=await import("../safe-edit/research-judge-gate"),before=gates.currentJudgeGate(p.planId);
+  await expect(api.applyCanonicalWriteback({input:held,planId:p.planId,authorizations:"invalid"},actor)).rejects.toThrow();
+  expect(gates.currentJudgeGate(p.planId)).toEqual(before);
+  const saved=await api.applyCanonicalWriteback({input:fresh,planId:p.planId,authorizations:authorizations(p)},actor);
+  expect(saved.status).toBe("saved_verified");expect(saved.receipts).toHaveLength(4);
+});
+it.each(["forged seal","missing seal","wrong actor","wrong intake","wrong source","wrong packet digest","wrong packet id","wrong result digest","wrong result id","wrong review","wrong result envelope","missing result","wrong policy","expired","future","rotated key","missing key"])("L2-G/J unauthenticated %s cannot withdraw legacy authority",async fault=>{
+  await openFixture("PASS-false");const before=await events(),input=withdrawal("HOLD"),packet=input.researchJudge!.packet,result=input.researchJudge!.result!;
+  let label=actor,planId=manifest.preview.planId;
+  if(fault==="forged seal")packet.seal="0".repeat(64);
+  if(fault==="missing seal")delete (packet as {seal?:string}).seal;
+  if(fault==="wrong actor")label="oauth:unrelated";
+  if(fault==="wrong intake")planId="IN-0000000000000000";
+  if(fault==="wrong source"){const body=JSON.parse(packet.body);body.source.text+="different source";packet.body=JSON.stringify(body);}
+  if(fault==="wrong policy"){const body=JSON.parse(packet.body);body.researchStatePolicy="untrusted";packet.body=JSON.stringify(body);}
+  if(fault==="wrong packet digest")packet.digest="0".repeat(64);
+  if(fault==="wrong packet id")packet.packetId="RJP-"+"0".repeat(32);
+  if(fault==="wrong result digest")result.packetDigest="0".repeat(64);
+  if(fault==="wrong result id")result.packetId="RJP-"+"0".repeat(32);
+  if(fault==="wrong review")result.reviewDigest="0".repeat(64);
+  if(fault==="wrong result envelope")result.packetEnvelopeDigest="0".repeat(64);
+  if(fault==="missing result")delete input.researchJudge!.result;
+  if(fault==="expired")vi.setSystemTime(packet.expiresAt+1);
+  if(fault==="future")vi.setSystemTime(packet.issuedAt-1);
+  if(fault==="rotated key")process.env.ENCRYPTION_KEY=Buffer.alloc(32,9).toString("base64");
+  if(fault==="missing key")delete process.env.ENCRYPTION_KEY;
+  try{
+    await withMcp(async client=>expect((await client.callTool({name:"apply_canonical_writeback",arguments:{input,planId,authorizations:"invalid"}})).isError).toBe(true),label);
+    expect(await events()).toEqual(before);expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(manifest.preview.planId)?.decision).toBe("PASS");
+    await denyGeneric(fault==="expired"?/Preview expired/:/research_judge/);
+  }finally{process.env.ENCRYPTION_KEY=KEY;}
+});
+it("L2-I Source-only preservation remains eligible after authenticated Apply withdrawal",async()=>{
+  const api=await openFixture("PASS-false"),held=withdrawal("HOLD"),before=await events();
+  await expect(api.applyCanonicalWriteback({input:held,planId:manifest.preview.planId,authorizations:"invalid"},actor)).rejects.toThrow();
+  const input={...manifest.original,researchJudge:undefined,claims:undefined,researchReview:undefined,captureOnly:true};
+  const p=api.prepareCanonicalWriteback(input,actor),saved=await api.applyCanonicalWriteback({input,planId:p.planId,authorizations:authorizations(p)},actor);
+  expect(saved.receipts).toHaveLength(1);expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)?.decision).toBe("HOLD");
+  for(const row of before)expect(await events()).toContainEqual(row);await denyGeneric();
+});
+it("L2-H concurrent matching legacy withdrawals and PASS retries cannot leave PASS",async()=>{
+  const api=await openFixture("PASS-false"),input=withdrawal("HOLD");
+  await Promise.allSettled([api.applyCanonicalWriteback({input,planId:manifest.preview.planId,authorizations:"invalid"},actor),
+    Promise.resolve().then(()=>api.prepareCanonicalWriteback(manifest.original,actor)),
+    api.applyCanonicalWriteback({input,planId:manifest.preview.planId,authorizations:"invalid"},actor)]);
+  expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(manifest.preview.planId)?.decision).toBe("HOLD");await denyGeneric();
+});
+it("L2-H authoritative transactional recheck rejects a withdrawal against superseded legacy snapshot",async()=>{
+  const api=await openFixture("PASS-false"),gates=await import("../safe-edit/research-judge-gate"),old=gates.currentJudgeGate(manifest.preview.planId)!;
+  const fresh=await freshInput();api.prepareCanonicalWriteback(fresh,actor);const current=gates.currentJudgeGate(manifest.preview.planId),before=await events();
+  const engine=await import("../safe-edit/engine"),sql=(await import("../db")).db(),prepare=sql.prepare.bind(sql),Database=(await import("better-sqlite3")).default;
+  const other=new Database((await import("../env")).env.dbPath,{timeout:0});let checked=0;
+  const spy=vi.spyOn(sql,"prepare").mockImplementation((query:string)=>{
+    if(query.includes("SELECT detail,at,rowid FROM safe_edit_events WHERE event='research_judge_gate'")){
+      checked++;expect(sql.inTransaction).toBe(true);expect(()=>other.exec("BEGIN IMMEDIATE")).toThrow(/locked/);
+    }return prepare(query);
+  });
+  try{expect(()=>engine.recordResearchJudgeGate(old.targets[0].operationId,actor,{...old,decision:"HOLD",expiresAt:0},{current:old})).toThrow("research_judge_withdrawal_superseded_hold");}
+  finally{spy.mockRestore();if(other.inTransaction)other.exec("ROLLBACK");other.close();}
+  expect(checked).toBe(1);expect(gates.currentJudgeGate(manifest.preview.planId)).toEqual(current);expect(await events()).toEqual(before);
+});
+
+it("L2-H same-clock HOLD then FAIL is restrictive, idempotent, and recoverable only by fresh assessment",async()=>{
+  const api=await openFixture("PASS-false"),old=await events();
+  for(const verdict of ["HOLD","FAIL","HOLD"] as const){
+    await expect(api.applyCanonicalWriteback({input:withdrawal(verdict),planId:manifest.preview.planId,authorizations:"invalid"},actor)).rejects.toThrow();
+  }
+  const gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(manifest.preview.planId)!;
+  expect(gate).toMatchObject({decision:"FAIL",revokedAt:T+5000,packetIssuedAt:T});
+  expect(gate.packetEnvelopeDigest).toBe((await import("../vault/research-judge")).judgeEnvelopeDigest(manifest.original.researchJudge!.packet));
+  await denyGeneric();expect(()=>api.prepareCanonicalWriteback(manifest.original,actor)).toThrow(/research_judge_revoked_envelope_hold/);
+  vi.setSystemTime(T+6000);const fresh=await freshInput();expect(api.prepareCanonicalWriteback(fresh,actor).researchJudge?.decision).toBe("PASS");
+  for(const row of old)expect(await events()).toContainEqual(row);
+});
+
+it.each(["source", "actor"])("L2-G independently sealed other %s packet cannot withdraw enrolled legacy PASS",async fault=>{
+  const api=await openFixture("PASS-false"),before=await events(),clean=api.canonicalInputSchema.parse({...manifest.original,researchJudge:undefined});
+  if(fault==="source")clean.sourceUrl="https://example.org/different-source";
+  const judge=await import("../vault/research-judge"),built=judge.buildResearchJudgePacket(clean,fault==="actor"?"oauth:other":actor),body=JSON.parse(built.packet.body);
+  const result={...withdrawal("HOLD").researchJudge!.result!,packetId:built.packet.packetId,packetDigest:built.packet.digest,reviewDigest:body.reviewDigest,packetEnvelopeDigest:built.packetEnvelopeDigest};
+  await expect(api.applyCanonicalWriteback({input:{...clean,researchJudge:{packet:built.packet,result}},planId:manifest.preview.planId,authorizations:"invalid"},actor)).rejects.toThrow();
+  expect(await events()).toEqual(before);await denyGeneric();
+});
+it("L2 normal authentic legacy PASS without withdrawal remains eligible and idempotent",async()=>{
+  const api=await openFixture("PASS-false"),before=await events(),p=api.prepareCanonicalWriteback(manifest.original,actor);
+  expect(p.researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});
+  const saved=await api.applyCanonicalWriteback({input:manifest.original,planId:p.planId,authorizations:authorizations(p)},actor);
+  expect(saved.status).toBe("saved_verified");expect(saved.receipts).toHaveLength(4);
+  const retry=api.prepareCanonicalWriteback(manifest.original,actor);
+  expect((await api.applyCanonicalWriteback({input:manifest.original,planId:retry.planId,authorizations:authorizations(retry)},actor)).receipts).toEqual([]);
+  for(const row of before)expect(await events()).toContainEqual(row);
 });

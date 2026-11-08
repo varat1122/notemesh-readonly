@@ -586,10 +586,49 @@ and Source-preview audit events may be appended; they are not new Claim/Review
 writes or replacement Judge grants.
 
 The permanent cross-version test archives the exact old Git commit and executes
-its actual Judge/canonical/Safe Edit code to produce five disposable DB/Vault/key
-states (HOLD/FAIL with pending/saved Source, plus fully saved RI001-1 history).
+its actual Judge/canonical/Safe Edit code to produce seven disposable DB/Vault/key
+states (PASS/HOLD/FAIL with pending/saved Source, plus fully saved RI001-1 history).
 The current reader opens copies of those real states. No legacy gate is simulated
 by deleting new-format fields, and no receipt is manufactured. Timestamp damage
 is injected only into disposable old gate events for negative tests. CI fetches
 that single exact base object; absence/mismatch fails rather than substituting
 current code. Simulated analyst results still do not establish semantic quality.
+
+
+### L2: authenticated withdrawal of a legacy PASS at new Apply
+
+An authentic HOLD/FAIL for an enrolled legacy PASS must be recorded before
+appearance checks, planner/token rejection or MCP SDK argument validation. The
+new-format path still authenticates the exact enrolled envelope fingerprint.
+Legacy gates have no fingerprint, so body-digest equality alone is insufficient:
+the shared envelope verifier validates the original HMAC using the authorized
+server key, actor label, packet body digest/ID, policy/version and validity times.
+The result must bind that packet and Review; required-bundle verdicts retain the
+existing All-or-Hold rules. Targets come only from the original enrolled gate,
+never the malformed request. The original actor-owned Source operation must
+match intake, path, after-bytes SHA and received-text SHA.
+
+Withdrawal appends a restrictive event with the authenticated envelope identity
+and the actual withdrawal time. It does not modify the legacy event or convert
+its PASS into new write authority. The original gate snapshot is checked again
+under the existing SQLite IMMEDIATE transaction before append; a superseding
+admission cannot be overwritten by an earlier authenticated withdrawal. Repeated
+same-clock withdrawals remain restrictive and FAIL is not downgraded to HOLD.
+Fresh reassessment after withdrawal still requires a later sealed envelope and
+matching result-envelope binding. Source-only eligibility remains independent.
+
+Unlike an already fingerprinted gate, a legacy PASS cannot authenticate a
+withdrawal if the original packet has expired, its seal is invalid, or the
+original ENCRYPTION_KEY is unavailable/rotated. Such requests are refused without
+inventing a seal or modifying an unrelated gate. Pending legacy non-Source writes
+remain blocked by the existing missing-envelope admission guard. Retain key
+continuity; do not mistake request rejection or an unchanged historical PASS
+label for current non-Source write authorization. No automatic key recovery or
+historical repair is provided.
+
+Cross-version tests create PASS-only fixtures with actual `6cd9c3cd` modules,
+then exercise both direct canonical and real MCP Apply (including SDK-invalid
+appearance/token arguments), replay denial, fresh recovery, Source preservation,
+forged/expired/wrong-actor packets, concurrent retries and transactional recheck.
+All original event/receipt bytes and protected files remain unchanged in fixtures.
+These simulated results prove enforcement, not fresh LLM reasoning or fact truth.

@@ -12,7 +12,7 @@ import { planInvestmentWriteback } from "../vault/investment-writeback-router";
 import { apply, preview, previewCanonicalReview, recordResearchJudgeGate, recordCanonicalAppearance, status } from "../safe-edit/engine";
 import {appearanceSchema,canonicalAppearance,requireAppearance,checkAppearanceRetry,appearanceReadback} from "../vault/intake-appearances";
 import { withPausedSync } from "../safe-edit/sync";
-import {JUDGE_VERSION,judgeSubmissionSchema,evaluateResearchJudge,judgeEnvelopeDigest,judgeHash,stableJudgeJson} from "../vault/research-judge";
+import {JUDGE_VERSION,judgeSubmissionSchema,evaluateResearchJudge,verifyResearchJudgeEnvelope,judgeEnvelopeDigest,judgeHash,stableJudgeJson} from "../vault/research-judge";
 import {RESEARCH_STATE_POLICY} from "../vault/research-state";
 import {currentJudgeGate,assertJudgeAdmissionOrder} from "../safe-edit/research-judge-gate";
 
@@ -87,7 +87,8 @@ export const canonicalApplySchema = z.object({
 /** Restrictive withdrawal uses the exact previously admitted envelope, NOT the
  * new appearance, planner, tokens or caller-derived target paths. This remains
  * possible if the encryption key is unavailable/rotated: the existing journal
- * fingerprint authenticates only this withdrawal, never a new PASS. */
+ * fingerprint authenticates only this withdrawal, never a new PASS. Legacy
+ * gates have no fingerprint: require the original HMAC/key/time contract instead. */
 function revokeMatchingJudge(raw:unknown,actor:string,planId?:unknown,forced?:"HOLD"|"FAIL"){
   if(!raw||typeof raw!=="object")return;
   const parsed=judgeSubmissionSchema.safeParse((raw as {researchJudge?:unknown}).researchJudge);
@@ -98,13 +99,20 @@ function revokeMatchingJudge(raw:unknown,actor:string,planId?:unknown,forced?:"H
   if(typeof intakeId!=="string"||!/^IN-[A-F0-9]{16}$/.test(intakeId)||(planId!==undefined&&planId!==intakeId))return;
   const gate=currentJudgeGate(intakeId);
   if(!gate||gate.actor!==actor||packet.actorLabelSha256!==judgeHash(actor)||gate.packetDigest!==packet.digest||
-    gate.packetEnvelopeDigest!==judgeEnvelopeDigest(packet)||gate.packetIssuedAt!==packet.issuedAt||
     packet.digest!==judgeHash(packet.body)||packet.packetId!=="RJP-"+packet.digest.slice(0,32).toUpperCase()||
-    body.version!==JUDGE_VERSION||body.researchStatePolicy!==RESEARCH_STATE_POLICY)return;
+    body.version!==JUDGE_VERSION||body.researchStatePolicy!==RESEARCH_STATE_POLICY||
+    gate.version!==body.version||gate.researchStatePolicy!==body.researchStatePolicy)return;
+  const envelopeDigest=judgeEnvelopeDigest(packet),legacy=!gate.packetEnvelopeDigest&&gate.packetIssuedAt==null;
+  if(legacy){
+    // Digest equality alone is caller-controlled. Authenticate the server seal
+    // before accepting any legacy withdrawal; current policy/actor/time apply.
+    try{body=verifyResearchJudgeEnvelope(packet,actor);}catch{return;}
+    if(!result||body.source.sha256!==judgeHash(body.source.text))return;
+  }else if(gate.packetEnvelopeDigest!==envelopeDigest||gate.packetIssuedAt!==packet.issuedAt)return;
   let decision=forced;
   if(result){
     if(result.packetDigest!==packet.digest||result.packetId!==packet.packetId||result.reviewDigest!==body.reviewDigest||
-      (result.packetEnvelopeDigest!==undefined&&result.packetEnvelopeDigest!==gate.packetEnvelopeDigest))return;
+      (result.packetEnvelopeDigest!==undefined&&result.packetEnvelopeDigest!==envelopeDigest))return;
     const exact=(actual:{key:string}[],expected:{key:string}[])=>Array.isArray(expected)&&actual.length===expected.length&&
       new Set(actual.map(x=>x.key)).size===actual.length&&expected.every(e=>actual.some(a=>a.key===e.key));
     // A truncated required bundle is itself HOLD, never permission to retain
@@ -118,8 +126,11 @@ function revokeMatchingJudge(raw:unknown,actor:string,planId?:unknown,forced?:"H
   if(!decision)return;
   const source=gate.targets.find(t=>t.kind==="source_intake");
   if(!source)throw Error("research_judge_source_admission_hold");
-  recordResearchJudgeGate(source.operationId,actor,{...gate,decision:gate.decision==="FAIL"?"FAIL":decision,expiresAt:0,
-    resultDigest:result?judgeHash(stableJudgeJson(result)):null});
+  // Append newly authenticated withdrawal evidence; never rewrite the legacy
+  // event or upgrade its PASS. This identity also keeps repeated withdrawals
+  // idempotent without relying on same-millisecond legacy journal ordering.
+  recordResearchJudgeGate(source.operationId,actor,{...gate,...(legacy?{packetEnvelopeDigest:envelopeDigest,packetIssuedAt:packet.issuedAt}:{}),decision:gate.decision==="FAIL"?"FAIL":decision,expiresAt:0,
+    resultDigest:result?judgeHash(stableJudgeJson(result)):null},{current:gate,...(legacy?{sourceTextSha256:body.source.sha256}:{})});
 }
 /** Restrictive admission hook also used before the MCP SDK validates the rest
  * of a canonical request. This never prepares targets or issues authority. */
@@ -127,7 +138,10 @@ export function withdrawCanonicalJudge(tool:string,raw:unknown,actor:string){
   if(tool==="prepare_canonical_writeback")revokeMatchingJudge(raw,actor);
   else if(tool==="apply_canonical_writeback"&&raw&&typeof raw==="object"){
     const request=raw as {input?:unknown;planId?:unknown};
-    if(request.planId!==undefined)revokeMatchingJudge(request.input,actor,request.planId);
+    // A missing outer planId is an SDK error, not permission to discard a
+    // withdrawal scoped by an authenticated packet. A supplied mismatch still
+    // cannot target another intake.
+    revokeMatchingJudge(request.input,actor,request.planId);
   }
 }
 
