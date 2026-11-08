@@ -560,3 +560,36 @@ simulated results solely to prove deterministic admission/replay behavior.
 MCP SDK is pinned to the existing resolved `1.32.1` (no upgrade). Real MCP tests
 exercise validation-before-handler behavior; a missing validation hook refuses
 endpoint construction. Any future SDK change requires this compatibility check.
+
+### P1-LEGACY: cross-version terminal admission
+
+A HOLD/FAIL written by `6cd9c3cd558dac3d67e9202d8652b406cfdc332a` is
+restrictive even though that format has no `packetEnvelopeDigest` or
+`packetIssuedAt`. Missing envelope identity is not missing withdrawal authority.
+The shared admission guard applies terminal-state/fresh-assessment requirements
+before any version-specific ordering allowance. A new PASS must carry a valid
+fresh sealed packet issued strictly after the server-recorded withdrawal and a
+result bound to that exact envelope. Existing new-format ordering checks remain.
+
+For the old format, the reader derives withdrawal time only from the original
+server event. It must be canonical UTC ISO with milliseconds. If a preceding
+admission exists, the withdrawal must be strictly later; missing, ambiguous,
+corrupt, tied or reversed chronology HOLDs. Unknown withdrawal time cannot be
+washed away by submitting another HOLD; a pre-issued packet cannot replace the
+restriction with an earlier recovery clock. These cases need separately reviewed
+reconciliation, not an inferred time, edited journal or automatic re-sealing.
+The reader does not add envelope fields to old records or rewrite any event.
+
+Source-only preservation remains separately eligible under existing controls.
+Historical Source/RI001-1/Review bytes and real receipts remain readable. Refusal
+and Source-preview audit events may be appended; they are not new Claim/Review
+writes or replacement Judge grants.
+
+The permanent cross-version test archives the exact old Git commit and executes
+its actual Judge/canonical/Safe Edit code to produce five disposable DB/Vault/key
+states (HOLD/FAIL with pending/saved Source, plus fully saved RI001-1 history).
+The current reader opens copies of those real states. No legacy gate is simulated
+by deleting new-format fields, and no receipt is manufactured. Timestamp damage
+is injected only into disposable old gate events for negative tests. CI fetches
+that single exact base object; absence/mismatch fails rather than substituting
+current code. Simulated analyst results still do not establish semantic quality.

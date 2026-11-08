@@ -134,7 +134,7 @@ describe("RI001 general persistence convergence",()=>{
     const sql=(await import("../db")).db(),original=sql.prepare.bind(sql),events=sql.prepare("SELECT * FROM safe_edit_events").all();
     const spy=vi.spyOn(sql,"prepare").mockImplementation((query:string)=>{
       const statement=original(query);
-      if(query.includes("SELECT detail,at FROM safe_edit_events WHERE event='research_judge_gate'")){
+      if(query.includes("SELECT detail,at,rowid FROM safe_edit_events WHERE event='research_judge_gate'")){
         const get=statement.get.bind(statement);
         return {...statement,get:(...args:unknown[])=>{
           const row=get(...args) as {detail:string;at:string}|undefined;if(!row)return row;
@@ -191,7 +191,7 @@ describe("RI001 general persistence convergence",()=>{
     const engine=await import("../safe-edit/engine"),sql=(await import("../db")).db(),original=sql.prepare.bind(sql),Database=(await import("better-sqlite3")).default;
     const other=new Database((await import("../env")).env.dbPath,{timeout:0});let checks=0;
     const spy=vi.spyOn(sql,"prepare").mockImplementation((query:string)=>{
-      if(query.includes("SELECT detail,at FROM safe_edit_events WHERE event='research_judge_gate'")){
+      if(query.includes("SELECT detail,at,rowid FROM safe_edit_events WHERE event='research_judge_gate'")){
         checks++;expect(sql.inTransaction).toBe(true);expect(()=>other.exec("BEGIN IMMEDIATE")).toThrow(/locked/);
       }
       return original(query);
@@ -388,7 +388,7 @@ describe("RI001 general persistence convergence",()=>{
     const sql=(await import("../db")).db(),original=sql.prepare.bind(sql);
     const spy=vi.spyOn(sql,"prepare").mockImplementation((query:string)=>{
       const statement=original(query);
-      if(query.includes("SELECT detail,at FROM safe_edit_events WHERE event='research_judge_gate'")){
+      if(query.includes("SELECT detail,at,rowid FROM safe_edit_events WHERE event='research_judge_gate'")){
         const {packetEnvelopeDigest:_,packetIssuedAt:__,...legacy}=gate;void _;void __;
         return {...statement,get:()=>({detail:JSON.stringify(legacy)})} as typeof statement;
       }

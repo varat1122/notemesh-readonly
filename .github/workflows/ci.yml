@@ -50,6 +50,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Fetch exact legacy code for disposable cross-version Judge tests
+        run: git fetch --no-tags --depth=1 origin 6cd9c3cd558dac3d67e9202d8652b406cfdc332a
+
       - name: Test
         run: pnpm test
 

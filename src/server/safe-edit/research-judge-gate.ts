@@ -19,27 +19,44 @@ export interface JudgeGate {
   targets:{path:string;sha256:string;operationId:string;kind:"source_intake"|"structured_claim"|"canonical_review";eligible:boolean}[];
 }
 export function assertJudgeAdmissionOrder(current:JudgeGate|null,next:Pick<JudgeGate,"packetEnvelopeDigest"|"packetIssuedAt"|"resultEnvelopeDigest"|"decision">){
-  if(!current?.packetEnvelopeDigest)return;
-  const same=next.packetEnvelopeDigest===current.packetEnvelopeDigest;
+  if(!current)return;
+  // Legacy gates lack envelope identity, not terminal-state authority. Never
+  // let missing identity (or an invalid withdrawal clock) erase HOLD/FAIL.
+  if(current.decision!=="PASS"&&!Number.isSafeInteger(current.revokedAt))throw Error("research_judge_withdrawal_time_hold");
+  const same=!!current.packetEnvelopeDigest&&next.packetEnvelopeDigest===current.packetEnvelopeDigest;
   // Non-PASS is terminal for this exact envelope, including a new result on
   // the same envelope. Only a later sealed envelope + bound attestation recovers.
   if(same&&current.decision!=="PASS"&&next.decision==="PASS")throw Error("research_judge_revoked_envelope_hold");
-  if(!same&&(next.packetIssuedAt===null||next.packetIssuedAt<=(current.packetIssuedAt??0)))throw Error("research_judge_obsolete_admission_hold");
-  if(current.decision!=="PASS"&&next.decision==="PASS"){
-    if(!Number.isSafeInteger(current.revokedAt)||next.packetIssuedAt===null||next.packetIssuedAt<=current.revokedAt!)
+  if(current.packetEnvelopeDigest&&!same&&(next.packetIssuedAt===null||next.packetIssuedAt<=(current.packetIssuedAt??0)))throw Error("research_judge_obsolete_admission_hold");
+  if(current.decision!=="PASS"&&(next.decision==="PASS"||!same&&next.packetEnvelopeDigest)){
+    if(typeof next.packetIssuedAt!=="number"||!Number.isSafeInteger(next.packetIssuedAt)||next.packetIssuedAt<=current.revokedAt!)
       throw Error("research_judge_reassessment_not_fresh_hold");
-    if(next.resultEnvelopeDigest!==next.packetEnvelopeDigest)throw Error("research_judge_fresh_assessment_binding_hold");
+    if(next.decision==="PASS"&&(!next.packetEnvelopeDigest||next.resultEnvelopeDigest!==next.packetEnvelopeDigest))
+      throw Error("research_judge_fresh_assessment_binding_hold");
   }
+}
+function journalTime(value:unknown):number {
+  if(typeof value!=="string")return NaN;
+  const time=Date.parse(value);
+  return Number.isSafeInteger(time)&&new Date(time).toISOString()===value?time:NaN;
 }
 export function currentJudgeGate(intakeId:string):JudgeGate|null {
   if(!db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_events'").get())return null;
-  const row=db().prepare(`SELECT detail,at FROM safe_edit_events WHERE event='research_judge_gate'
-    AND json_extract(detail,'$.intakeId')=? ORDER BY rowid DESC LIMIT 1`).get(intakeId) as {detail:string;at:string}|undefined;
+  const row=db().prepare(`SELECT detail,at,rowid FROM safe_edit_events WHERE event='research_judge_gate'
+    AND json_extract(detail,'$.intakeId')=? ORDER BY rowid DESC LIMIT 1`).get(intakeId) as {detail:string;at:string;rowid:number}|undefined;
   if(!row)return null;
   const gate=JSON.parse(row.detail) as JudgeGate;
   // Read legacy HOLD timestamps from their actual server journal, never rewrite
   // old events or infer freshness from a caller's claimed assessment time.
-  if(gate.decision!=="PASS"&&gate.revokedAt===undefined)gate.revokedAt=Date.parse(row.at);
+  if(gate.decision!=="PASS"&&gate.revokedAt===undefined)gate.revokedAt=journalTime(row.at);
+  if(gate.decision!=="PASS"&&!gate.packetEnvelopeDigest){
+    // Old format has only the server event time. Do not invent envelope fields
+    // or accept ambiguous/reversed legacy admission chronology. Read-only.
+    const previous=db().prepare(`SELECT at FROM safe_edit_events WHERE event='research_judge_gate'
+      AND json_extract(detail,'$.intakeId')=? AND rowid<? ORDER BY rowid DESC LIMIT 1`).get(intakeId,row.rowid) as {at:string}|undefined;
+    const at=journalTime(row.at),before=previous?journalTime(previous.at):-Infinity;
+    gate.revokedAt=at>before?at:NaN;
+  }
   return gate;
 }
 function gateFor(path:string,before:string,after:string):JudgeGate|null {
