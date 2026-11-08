@@ -1,3 +1,4 @@
+import {assertReceivedClaimWrite} from "../vault/canonical-claims";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -270,6 +271,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
     if(existing.actor!==actor||existing.payload!==JSON.stringify(p)) throw Error("Operation ID reused for different input or actor");
     if(existing.status==="preview") {
       assertResearchJudgeWrite(p.path,existing.before_text,existing.after_text,actor,"preview");
+      assertReceivedClaimWrite(p.path,existing.before_text,existing.after_text,actor,"preview");
       checkStoredReviewLineage(existing);
       assertDeclaredEvidenceAuthority(p.evidence);
       assertPrimaryMetadataAuthority(document(existing.before_text).data,document(existing.after_text).data);
@@ -293,6 +295,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
   document(before??"");checkEvidence(p);
   const after=calculate(p,before??"",actor);
   assertResearchJudgeWrite(p.path,before??"",after,actor,"preview");
+  assertReceivedClaimWrite(p.path,before??"",after,actor,"preview");
   const afterMetadata=document(after).data,beforeMetadata=document(before??"").data;
   if(p.change.kind==="create")assertReviewPreviewAdmission(after,canonical);
   assertPrimaryMetadataAuthority(beforeMetadata,afterMetadata);
@@ -388,6 +391,7 @@ export function apply(input:unknown,actor:string) {
     if((p.change.kind==="create"?current!==null:current===null)||sha256(current??"")!==r.before_hash) throw Error("Version conflict: re-preview; another writer changed this note");
     checkEvidence(p);
     assertResearchJudgeWrite(p.path,current??"",r.after_text,actor,"apply");
+    assertReceivedClaimWrite(p.path,current??"",r.after_text,actor,"apply");
     assertPrimaryMetadataAuthority(document(current??"").data,document(r.after_text).data);
     assertResearchStateAuthority(document(current??"").data,document(r.after_text).data);
     assertProtectedRecord(p.path,document(current??"").data,document(r.after_text).data);

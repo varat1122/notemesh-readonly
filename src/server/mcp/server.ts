@@ -567,7 +567,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         evidenceClass:evidenceClassSchema.optional().describe("Exact evidence class for persisted observations: actual is not management guidance. Omit only for unclassified historical discovery; no cross-class duplicate verdict."),
         estimate:estimateSchema.optional(),accountingBasis:accountingBasisSchema.optional(),
         period: z.string().min(1).max(120).describe("Explicit source reporting period or event period, never a chat import date"),
-        originalSource: z.string().min(1).max(1000).describe("Canonical primary/original source URL or archival identifier; do not invent"),
+        originalSource: z.string().min(1).max(1000).describe("Original source URL or exact Canonical Source path for a no-URL received-text claim; do not invent a publisher URL"),
         statement: z.string().min(8).max(2500).describe("Incoming factual claim text to compare, with definition and period"),
         value: z.string().max(150).optional().describe("Optional original-source numerical value as a literal string, no unit conversion"),
         unit: z.string().max(80).optional().describe("Optional unit/currency for safe like-for-like comparison"),
@@ -589,9 +589,11 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       return json(withBoundary({
         ...reviewed,
         matchingClaims:fenceEach(reviewed.matchingClaims,"claimId","value","unit","metric","period","sourceLocator","sourceExcerpt","statement","qualification")
-          .map(item=>({...item,estimate:fenceDeep(item.estimate),accountingBasis:fenceDeep(item.accountingBasis)})),
+          .map(item=>({...item,estimate:fenceDeep(item.estimate),accountingBasis:fenceDeep(item.accountingBasis),
+            ...(item.sourceBinding?{sourceBinding:{...item.sourceBinding,quote:fenceDeep(item.sourceBinding.quote)}}:{})})),
         relatedEventClaims:fenceEach(reviewed.relatedEventClaims,"claimId","value","unit","metric","period","sourceLocator","sourceExcerpt","statement","qualification")
-          .map(item=>({...item,estimate:fenceDeep(item.estimate),accountingBasis:fenceDeep(item.accountingBasis)})),
+          .map(item=>({...item,estimate:fenceDeep(item.estimate),accountingBasis:fenceDeep(item.accountingBasis),
+            ...(item.sourceBinding?{sourceBinding:{...item.sourceBinding,quote:fenceDeep(item.sourceBinding.quote)}}:{})})),
         decisionPacket:packet
       }));
     }),

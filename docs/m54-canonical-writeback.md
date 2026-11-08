@@ -671,3 +671,51 @@ is introduced. The existing mandatory critic HOLD for material added detail or
 contradiction is unchanged. Mechanical binding tests do not prove semantic
 entailment: orders 100 and pilot shipment 20 are separate input evidence and are
 not automatically summed or declared independent confirmations.
+
+### N2: no-URL received-text claims (RI001-3)
+
+An explicitly requested structured observation may cite a received LINE,
+Telegram or user-supplied text without inventing an original publisher URL.
+The existing canonical intake/Safe Edit flow writes Source, Claims and optional
+Thai Draft. Feed Only without `claims` still writes only the Source. No connector,
+writer, database migration, issuer permission or verification tier is added.
+
+No-URL claims use a separate `RI001-3` identity namespace with the existing
+intake/entity/metric/period/unit/evidence-class/provider/vintage/basis dimensions.
+URL-backed RI001-1/RI001-2 identities and serialized bytes are unchanged. The new
+reader accepts all three versions and never rewrites old receipts. Older readers
+cannot validate RI001-3: retain a reader with this extension after the first
+RI001-3 write; do not claim an app-only downgrade preserves claim readback.
+
+`origin=received_user_source`, `original_source=null` and
+`original_publisher_url=null` describe the received appearance, not the ultimate
+publisher. The binding records canonical Source path/intake, full Source-note SHA,
+exact preserved-text SHA and a deterministic Source operation reference. That
+reference is explicitly a **durable receipt requirement**, not an issued receipt.
+Preview may use the same actor's exact prepared Source; Apply, under the existing
+Safe Edit lock, requires actual Source bytes, complete indexed body and authentic
+existing create receipt/audit. Cold read repeats these checks. Both generic and
+canonical Claim routes use the same guard; no caller can supply a substitute
+receipt. New-format Claim bytes are immutable; reconciliation is separate.
+
+The server records an exact UTF-16 quote span in the preserved received text
+(first literal occurrence, with no semantic disambiguation claim). The original
+free-text locator is retained as `declaredLocator`, never authenticated as a PDF
+page, original publisher location or message-channel identity. Numeric boundaries
+continue to be checked against the full Source. MCP retrieval fences untrusted
+quote/locator text. Use the exact canonical Source path as `originalSource` in
+`review_investment_claim` for same-received-source matching; the returned original
+publisher URL remains null. A later company/primary URL cannot replace this origin.
+
+Claims remain caller-attributed/unverified, with zero independent evidence
+increment and comparator eligibility false in the existing trust projection.
+Several Claims or appearances of one Source do not constitute independent
+confirmation. Draft remains historical-analysis-only. Opt-in Judge All-or-Hold,
+actor/CAS/token checks, critic requirements and Protected Record boundaries are
+unchanged; removing Judge input after a HOLD/FAIL cannot authorize a Draft fallback.
+Persistence/receipt tests prove mechanical integrity, not semantic fidelity.
+
+The existing offline anchor-compatibility script remains explicitly scoped to
+RI001-1/RI001-2 and reports RI001-3 as unsupported/HOLD; it is not a replacement
+for RI001-3 receipt/index/link validation by this reader. No historical scan or
+live data migration is performed by this change.

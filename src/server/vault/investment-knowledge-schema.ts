@@ -140,7 +140,10 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   if(role==="structured_claim"){
     if(!asText(fm.domain))claimIssues.push("missing_domain");
     if(!asText(fm.entity))claimIssues.push("missing_top_level_entity");
-    if(!originalSource&&!sourceUrlAlias)claimIssues.push("missing_source_locator");
+    const received=fm.claim_persistence_version==="RI001-3"&&fm.origin==="received_user_source"&&fm.original_source===null&&
+      typeof fm.intake_id==="string"&&/^IN-[A-F0-9]{16}$/.test(fm.intake_id)&&fm.original_source_path===`00_Inbox/ChatGPT/Investment Intake - ${fm.intake_id}.md`;
+    if(received)warnings.push("received_source_reference_requires_receipt_readback");
+    if(!received&&!originalSource&&!sourceUrlAlias)claimIssues.push("missing_source_locator");
     if(!asText(fm.event_key))warnings.push("missing_event_key_needs_resolution");
     if(!claims.length)claimIssues.push("missing_claims");
     for(let i=0;i<Math.min(claims.length,100);i++){
@@ -152,7 +155,7 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
       if(!asText(c.unit))claimIssues.push(tag+"missing_unit");
       if(!asText(c.value))claimIssues.push(tag+"missing_literal_value");
       if(!asText(c.entity)&&!asText(fm.entity))claimIssues.push(tag+"missing_entity");
-      if(!asText(c.original_source)&&!asText(c.source_url)&&!originalSource&&!sourceUrlAlias)
+      if(!(received&&c.source_path===fm.original_source_path&&isObj(c.source_binding)&&c.source_binding.origin==="received_user_source")&&!asText(c.original_source)&&!asText(c.source_url)&&!originalSource&&!sourceUrlAlias)
         claimIssues.push(tag+"missing_source");
       // A child issuer intentionally overrides the parent. Never silently
       // attribute the child claim to the parent issuer for matching.

@@ -117,9 +117,6 @@ export function buildCanonicalSafeEditWorkflow(
       "10_Knowledge/Industry and Concepts";
   const reviewPath=`${folder}/Investment Review - ${safeSubject(subject)} - ${plan.planId}.md`;
   const tag="InvestmentIntake"+plan.planId.slice(3);
-  const claimNotes=planClaimNotes(input,plan.planId,rawPath);
-  const {metadata:researchLineage,issues:lineageIssues}=captureOnly?{metadata:{},issues:[]}:lineageMetadata(input,reviewPath,rawPath,claimNotes);
-  const claimIssues=[...new Set(claimNotes.flatMap(c=>c.issues))];
   const event=plan.chronology.eventDate,published=plan.chronology.publicationDate;
   const attachment=plan.sourceCapture.attachmentVerified?"hash_readback_verified_user_bytes":"not_verified";
   const proposedSourceContent=[
@@ -151,6 +148,9 @@ export function buildCanonicalSafeEditWorkflow(
   }
   const companyLinks=plan.routingV2.companyHubs.map(x=>`- ${wiki(x.path)} — ${x.role??"mentioned"}, caller-declared`);
   const themeLinks=plan.routingV2.industryHubs.map(x=>`- ${wiki(x.path)} — existing industry context`);
+  const claimNotes=planClaimNotes(input,plan.planId,rawPath,sourceContent);
+  const {metadata:researchLineage,issues:lineageIssues}=captureOnly?{metadata:{},issues:[]}:lineageMetadata(input,reviewPath,rawPath,claimNotes);
+  const claimIssues=[...new Set(claimNotes.flatMap(c=>c.issues))];
   const qualityIssues=input.researchReview?validateResearchM55({
     domain:plan.domain,subject,contentTypes:input.contentTypes??[],
     resolvedSubjectPath:plan.routingV2.reviewScope==="industry"?plan.routingV2.industryHubs[0]?.path:

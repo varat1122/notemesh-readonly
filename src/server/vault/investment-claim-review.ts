@@ -39,6 +39,7 @@ interface StructuredRecord extends ClaimDimensions {
   evidenceClass?:string;sourceLocator?:string;sourceExcerpt?:string;statement?:string;qualification?:string|null;
   sourcePath?:string;receiptKey?:string;sourceReceiptKey?:string;reviewReferences?:string[];reviewScanComplete?:boolean;
   persistence?:"receipt_readback_index_link_verified";originIndependenceIncrement?:0;
+  sourceBinding?:Record<string,unknown>;
   interpretationBoundary?:ReturnType<typeof readPersistedClaim>["interpretationBoundary"];
 }
 export interface ClaimReview {
@@ -148,6 +149,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
           estimate:c.estimate??undefined,accountingBasis:c.accounting_basis??undefined,
           statement:c.statement,qualification:c.qualification,sourcePath:persisted.sourcePath,receiptKey:persisted.receiptKey,sourceReceiptKey:persisted.sourceReceiptKey,
           reviewReferences:persisted.reviewReferences,reviewScanComplete:persisted.reviewScanComplete,
+          ...(c.source_binding?{sourceBinding:c.source_binding}:{}),
           persistence:persisted.bindingStatus,originIndependenceIncrement:0,interpretationBoundary:persisted.interpretationBoundary});
         if(input.evidenceClass&&v.evidenceClass!==input.evidenceClass)continue;
       }
@@ -164,8 +166,10 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
     }
   }
   const strict=selected.filter(x=>norm(x.metric)===norm(metric));
-  const sameSource=strict.filter(x=>x.originalSource&&sourceKey(x.originalSource)===sourceKey(originalSource));
-  const matchedSourceSamePeriodOtherMetric=selected.filter(x=>norm(x.metric)!==norm(metric)&&x.originalSource&&sourceKey(x.originalSource)===sourceKey(originalSource));
+  const matchesSource=(x:StructuredRecord)=>x.originalSource?sourceKey(x.originalSource)===sourceKey(originalSource):
+    x.persistence==="receipt_readback_index_link_verified"&&x.sourceBinding?.origin==="received_user_source"&&x.sourcePath===originalSource;
+  const sameSource=strict.filter(matchesSource);
+  const matchedSourceSamePeriodOtherMetric=selected.filter(x=>norm(x.metric)!==norm(metric)&&matchesSource(x));
   const otherSource=strict.filter(x=>x.originalSource&&sourceKey(x.originalSource)!==sourceKey(originalSource));
   // Numerical equality/conflict requires explicit, identical unit strings
   // on both sides. Missing unit is never proof of an equivalent metric.
