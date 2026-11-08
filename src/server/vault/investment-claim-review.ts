@@ -2,6 +2,7 @@ import {researchTrust,type ResearchTrust} from "./research-state";
 import {canonicalHttpSourceUrl} from "../source-url";
 import { db } from "../db";
 import {readPersistedClaim,type IntakeClaim} from "./canonical-claims";
+import {dimensionKey,estimateIdentityComplete,type ClaimDimensions} from "./claim-dimensions";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 
 /**
@@ -14,7 +15,7 @@ export type ReviewClass =
   | "duplicate_candidate" | "possible_correction_or_contradiction"
   | "confirmation_candidate_not_independent" | "added_detail_candidate"
   | "unresolved";
-export interface IncomingClaim {
+export interface IncomingClaim extends ClaimDimensions {
   domain: Domain;
   entity: string;
   metric: string;
@@ -30,7 +31,7 @@ export interface IncomingClaim {
   evidenceClass?:IntakeClaim["evidenceClass"];
 }
 interface IndexedRow { path:string; frontmatter:string|null }
-interface StructuredRecord {
+interface StructuredRecord extends ClaimDimensions {
   researchTrust:ResearchTrust|null;
   path:string; claimId:string|null; originalSource:string|null;
   metric:string; period:string; value:string|null; unit:string|null;
@@ -120,9 +121,10 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
     // Exclude it from Claim classification; the dedicated receipt gate handles it.
     if(fm?.type==="primary_source_verification_receipt")continue;
     if(!fm||typeof fm!=="object"||Array.isArray(fm)||!sameEntity(fm,input))continue;
+    if(fm.claim_persistence_version!==undefined&&fm.domain!==input.domain)continue;
     eligibleEntityNotes++;
     let persisted:ReturnType<typeof readPersistedClaim>|null=null;
-    if(fm.claim_persistence_version==="RI001-1")try{persisted=readPersistedClaim(row.path);}catch{
+    if(fm.claim_persistence_version!==undefined)try{persisted=readPersistedClaim(row.path);}catch{
       if(claimBindingHolds.length<12)claimBindingHolds.push({path:row.path,reason:"claim_receipt_readback_index_link_unverified"});continue;
     }
     const noteSource=stringOrNull(fm.original_source)||stringOrNull(fm.source_url)||stringOrNull(fm.primary_url);
@@ -143,6 +145,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
       if(v&&persisted){
         const c=persisted.claim;
         Object.assign(v,{evidenceClass:c.evidence_class,sourceLocator:c.source_locator,sourceExcerpt:c.source_excerpt,
+          estimate:c.estimate??undefined,accountingBasis:c.accounting_basis??undefined,
           statement:c.statement,qualification:c.qualification,sourcePath:persisted.sourcePath,receiptKey:persisted.receiptKey,sourceReceiptKey:persisted.sourceReceiptKey,
           reviewReferences:persisted.reviewReferences,reviewScanComplete:persisted.reviewScanComplete,
           persistence:persisted.bindingStatus,originIndependenceIncrement:0,interpretationBoundary:persisted.interpretationBoundary});
@@ -166,7 +169,8 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   const otherSource=strict.filter(x=>x.originalSource&&sourceKey(x.originalSource)!==sourceKey(originalSource));
   // Numerical equality/conflict requires explicit, identical unit strings
   // on both sides. Missing unit is never proof of an equivalent metric.
-  const comparable=(a:StructuredRecord)=>(a.evidenceClass===input.evidenceClass)&&!!input.unit&&!!a.unit&&norm(a.unit)===norm(input.unit);
+  const comparable=(a:StructuredRecord)=>(a.evidenceClass===input.evidenceClass)&&!!input.unit&&!!a.unit&&norm(a.unit)===norm(input.unit)&&
+    dimensionKey(a)===dimensionKey(input)&&(input.evidenceClass!=="analyst_estimate"||(estimateIdentityComplete(input)&&estimateIdentityComplete(a)));
   const exact=sameSource.filter(comparable).map(a=>amountEqual(a.value,input.value??null));
   let classification:ReviewClass="unresolved";
   // A single conflicting same-source record prevents a misleading 'duplicate'
@@ -200,6 +204,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   ];
   if(claimBindingHolds.length)evidenceNeeded.unshift("Generated claim records failed current receipt/readback/index/link checks; historical claim completeness is not established.");
   if(classification==="unresolved")evidenceNeeded.unshift("No conclusive structured claim match; do not infer this is a new event or a novel claim.");
+  if(input.evidenceClass==="analyst_estimate"&&!estimateIdentityComplete(input))evidenceNeeded.unshift("Estimate provider, role or forecast vintage unresolved; no cross-vintage/provider duplicate or corroboration inference.");
   if(sourceLinkedUnstructuredPaths.length)
     evidenceNeeded.unshift("A prior note cites the same original source but lacks a comparable structured claim; read the whole note before deciding novelty.");
   if(indexedNotesWithMetadata>rows.length)

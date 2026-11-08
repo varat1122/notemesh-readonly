@@ -9,7 +9,8 @@ import { z } from "zod";
 import {intakeClaimsSchema,researchLineageSchema} from "../vault/canonical-claims";
 import {researchReviewSchema} from "./research-review-schema";
 import { planInvestmentWriteback } from "../vault/investment-writeback-router";
-import { apply, preview, previewCanonicalReview, recordResearchJudgeGate, status } from "../safe-edit/engine";
+import { apply, preview, previewCanonicalReview, recordResearchJudgeGate, recordCanonicalAppearance, status } from "../safe-edit/engine";
+import {appearanceSchema,canonicalAppearance,requireAppearance} from "../vault/intake-appearances";
 import { withPausedSync } from "../safe-edit/sync";
 import {JUDGE_VERSION,judgeSubmissionSchema,evaluateResearchJudge} from "../vault/research-judge";
 import {RESEARCH_STATE_POLICY} from "../vault/research-state";
@@ -25,6 +26,7 @@ const canonicalBaseSchema = z.object({
     "user_commentary", "archived_chat", "social_repost", "industry_research", "official_macro", "unknown"]),
   extractedText: nonempty.max(12000),
   sourceChat: nonempty.max(120),
+  appearance:appearanceSchema.optional(),
   existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional(),
   completedAnalysis: nonempty.max(30000).optional(),
   researchReview: researchReviewSchema,
@@ -91,7 +93,7 @@ function planned(input: z.infer<typeof canonicalInputSchema>,actor:string) {
   // an environment-variable bypass for untyped completedAnalysis.
   for(const step of workflow.steps){
     const allowed = step.kind === "source_intake" ? /^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/ :
-      step.kind==="structured_claim" ? /^10_Knowledge\/Company Research\/Investment Claim - ICL-[A-F0-9]{32}\.md$/ :
+      step.kind==="structured_claim" ? /^10_Knowledge\/(Company Research|Industry and Concepts|Macro and Markets)\/Investment Claim - ICL-[A-F0-9]{32}\.md$/ :
       /^10_Knowledge\/(Company Research|Industry and Concepts|Macro and Markets)\/Investment Review - [^/]+\.md$/;
     if(!allowed.test(step.path) || (step.safeEditRequest &&
       (step.safeEditRequest.path !== step.path || step.safeEditRequest.change.kind !== "create")))
@@ -138,7 +140,9 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
     if(!p.previewToken) throw Error("Safe Edit did not issue a fresh preview token");
     previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p});
   }
-  return {phase:"preview_only",planId:plan.planId,workflowStatus:workflow.status,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
+  const appearancePayload=canonicalAppearance(input,source,plan.planId,actor);
+  const appearance=appearancePayload?recordCanonicalAppearance(appearancePayload,actor):null;
+  return {phase:"preview_only",appearance,planId:plan.planId,workflowStatus:workflow.status,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     qualityIssues:workflow.qualityIssues,claimIssues:workflow.claimIssues,lineageIssues:workflow.lineageIssues,claimInterpretationBoundary:workflow.claimInterpretationBoundary,readyForNextNews:workflow.readyForNextNews,
     archiveProvenanceStatus:workflow.archiveProvenanceStatus,archiveProvenanceReason:workflow.archiveProvenanceReason,
     steps:workflow.steps.map(({kind,path,state,expectedSha256,receiptKey,researchTrust})=>({kind,path,state,expectedSha256,receiptKey,researchTrust})),
@@ -150,6 +154,8 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   const args=canonicalApplySchema.parse(raw);
   const {plan,workflow,judge,enrolled}=planned(args.input,actor);
   if(plan.planId!==args.planId) throw Error("Plan identity mismatch; original source or chronology changed");
+  const appearancePayload=canonicalAppearance(args.input,workflow.steps.find(s=>s.kind==="source_intake")!,plan.planId,actor);
+  if(appearancePayload)requireAppearance(appearancePayload);
   // Apply can receive a newer HOLD/FAIL without another prepare. Revoke the
   // matching bundle authority before any await or write (even if the submitted
   // token set is refused below), otherwise generic apply could retain its old
@@ -202,7 +208,7 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   // Re-plan from the unchanged source input; trust disk hash/FTS readback, not
   // mere Safe Edit success or a stale pre-write plan.
   const after=planned(args.input,actor).workflow;
-  return {phase:"apply_verified_or_pending",planId:plan.planId,
+  return {phase:"apply_verified_or_pending",appearance:appearancePayload?requireAppearance(appearancePayload):null,planId:plan.planId,
     status:after.status,readyForNextNews:after.readyForNextNews,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     qualityIssues:after.qualityIssues,claimIssues:after.claimIssues,lineageIssues:after.lineageIssues,claimInterpretationBoundary:after.claimInterpretationBoundary,
     archiveProvenanceStatus:after.archiveProvenanceStatus,archiveProvenanceReason:after.archiveProvenanceReason,

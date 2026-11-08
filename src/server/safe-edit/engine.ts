@@ -17,6 +17,8 @@ import {assertProtectedRecord} from "./protected-records";
 import {assertResearchStateAuthority} from "../vault/research-state";
 import {assertDeclaredEvidenceAuthority,assertPrimaryMetadataAuthority} from "./primary-authority";
 import {assertResearchJudgeWrite,currentJudgeGate,type JudgeGate} from "./research-judge-gate";
+import {appearancePayloadSchema,appearanceRows,requireAppearance,sealAppearance,type AppearancePayload} from "../vault/intake-appearances";
+import {assertNoMaintenance} from "../maintenance";
 
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
 const MAX_BYTES = 100_000;
@@ -212,6 +214,28 @@ export function recordResearchJudgeGate(sourceOperationId:string,actor:string,ga
   if(!target||target.operationId!==source.id||target.path!==JSON.parse(source.payload).path||target.sha256!==source.after_hash||
     splitFrontmatter(source.after_text).data.intake_id!==gate.intakeId||gate.actor!==actor)throw Error("research_judge_source_admission_hold");
   if(JSON.stringify(currentJudgeGate(gate.intakeId))!==JSON.stringify(gate))log(source.id,actor,"research_judge_gate",gate as unknown as Record<string,unknown>);
+}
+/** Internal canonical accounting; not a generic event writer or MCP operation.
+ * SQLite transaction serializes retries. Existing DB maintenance fence applies.
+ * The source operation owns the proposed bytes; a pending event is not a receipt. */
+export function recordCanonicalAppearance(raw:AppearancePayload,actor:string){
+  assertNoMaintenance("canonical appearance admission");assertEnabled();const p=appearancePayloadSchema.parse(raw),source=row(p.sourceOperationId);
+  if(!actor.startsWith("oauth:")||sha256(actor)!==p.actorSha256||
+    (source.status!=="written"&&source.actor!==actor)||!["preview","written"].includes(source.status)||
+    JSON.parse(source.payload).change?.kind!=="create"||JSON.parse(source.payload).path!==p.sourcePath||source.after_hash!==p.sourceNoteSha256||
+    document(source.after_text).data.intake_id!==p.intakeId||document(source.after_text).data.source_text_sha256!==p.receivedTextSha256)
+    throw Error("appearance_source_admission_hold");
+  assertHeadroom(Buffer.byteLength(JSON.stringify(p))*3+32000);
+  return store().transaction(()=>{
+    assertNoMaintenance("canonical appearance journal");
+    const rows=appearanceRows(p.appearanceId);
+    if(rows.length)return requireAppearance(p);
+    const recordedAt=new Date().toISOString();
+    store().prepare("INSERT INTO safe_edit_events VALUES(?,?,?,?,?)").run(recordedAt,source.id,actor,"raw_appearance",JSON.stringify(sealAppearance(p,recordedAt)));
+    // Source text and locators stay out of operator logs.
+    audit("safe_edit_raw_appearance",{operationId:source.id,appearanceId:p.appearanceId,intakeId:p.intakeId});
+    return requireAppearance(p);
+  })();
 }
 function checkStoredReviewLineage(r:RecordRow){
   if(JSON.parse(r.payload).change?.kind!=="create"||!hasRuntimeReviewLineage(r.after_text))return;

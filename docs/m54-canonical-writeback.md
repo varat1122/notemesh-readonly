@@ -358,3 +358,101 @@ index, (5) no protected-file mutation, and (6) honest mobile Sync status.
 Then repeat for Macro, PDF with real attachment bytes, Feed Only and multi-item
 ordering. A regression test with synthetic content is not proof of automatic
 behavior in a fresh ChatGPT conversation.
+
+## RI-001 general persistence convergence (CI candidate)
+
+This extends existing canonical prepare/apply and Safe Edit, not a new writer,
+database or automatic research promotion. Master 2.0.0 and frozen evaluation
+fixtures are unchanged. Source identity v3, Judge-5 and Draft-2 remain in force.
+
+### Received appearances
+
+`appearance` is an optional, explicit intake input with `key`, `channel`,
+`locator`, and `receivedAt` (offset-aware timestamp or null). Reuse the same
+occurrence key on retry; use a new key for a separately received message/file.
+Keys are scoped to the server's OAuth actor label, not a verified human/session.
+Caller locators, publisher attribution and reported receipt time are unverified.
+No key/time is inferred from document publication or from an LLM.
+
+Canonical prepare records `RI001-APPEARANCE-1` as an append-only event in the
+existing `safe_edit_events` journal, owned by the exact canonical Source operation.
+The event retains original received text/hash, format, attachment reference/hash,
+channel/message/file locator, source attribution, proposed Source pointer and
+runtime `recordedAt`. Its HMAC binds the payload and runtime timestamp using the
+existing server key; it is NOT publisher authentication or a Primary Receipt.
+Existing key-retention/backup requirements apply; unavailable/changed signing
+key causes a readback HOLD, never automatic resealing of historical records.
+
+Current disposition is `pending_source` until the ordinary Source write receipt,
+readback, index and hash validate; then `source_bound`. Damage/interrupted writes
+produce `binding_hold`. A prepared event alone never proves Vault persistence.
+Repeated identical calls reuse one appearance. A conflicting retry key is refused;
+separate occurrences can link the same immutable Source without another Source
+write. Event recording requires normal Safe Edit settings and refuses maintenance.
+
+Read-only `inspect_intake_appearances(intakeId, appearanceId?, offset?)` returns
+25 records plus a pagination sentinel; specifying an appearance ID recovers the
+exact received text. It does not initialize or migrate a historical ledger.
+Source/receipt bytes are never patched. Original Source authenticity and economic
+independence remain unverified; independence increment is always zero.
+
+Accounting covers **admitted canonical submissions with explicit appearance
+metadata**. Legacy calls without metadata have no inferred appearance history.
+Schema/provenance-invalid submissions are explicitly refused before accounting;
+callers must retain rejected input. In particular, an unverified format/kind
+change against an existing Source remains `M56_SOURCE_PROVENANCE_CONFLICT`, not
+an invented same-source relationship. Different received bytes are not normalized
+away; the existing new-Source/event-reconciliation rules still apply. This is
+not a general channel-ingestion archive, archival retention service, or automatic
+grouping of differing formats. No legacy importer is used.
+
+### Structured estimate and accounting dimensions
+
+Optional `estimate` contains `{role, provider, forecastVintage}`. Role is
+`broker_estimate`, `consensus` or `unspecified`; provider/vintage are explicit
+nullable strings. `forecastVintage` reuses the nullable attributed-vintage concept
+of Research Decision V2; no date/provider is inferred from that shadow assessment.
+An estimate role requires `evidenceClass=analyst_estimate`; management guidance
+and reported actual remain distinct classes. Provider/vintage/role omissions
+remain unresolved for duplicate/corroboration comparison, including legacy
+unscoped analyst estimates. They may persist only as unverified observations.
+
+Optional `accountingBasis` contains nullable `standard`, `shareBasis`, `scope`,
+and `definition` labels. These distinguish explicitly supplied GAAP/non-GAAP,
+basic/diluted, segment/consolidated, or differing FCF definitions. The backend
+does not derive these labels from financial wording or verify that they are true.
+Metric strings that already differ continue to distinguish legacy identities.
+
+Company claims without either new object remain **RI001-1 byte/ID compatible**.
+Explicit dimensions use **RI001-2**: domain + original Source intake + normalized
+entity/metric/period/unit/evidence class + all explicit dimension values determine
+identity. New domain-scoped claims also use RI001-2, in the existing Company
+Research, Industry and Concepts, or Macro and Markets folders; Asset research
+stays in Research, never Portfolio/Trade. Missing folders still refuse writes.
+No migration/backfill/automatic upgrade of RI001-1 notes or receipts occurs.
+Reading new RI001-2 identities requires these upgraded readers. Backward readback
+of RI001-1 is covered; this does not certify an older application rollback after
+new RI001-2 writes. Refresh connector descriptors before using the new inputs or
+appearance inspector. No runtime rollout is authorized by this CI candidate.
+
+Different providers/vintages/bases coexist; changing a value within the same
+identity is a conflict requiring reviewed correction, not overwrite. Rounding
+is not adjudicated automatically. Readback recomputes versioned identity and
+checks the original Source, receipt, index and links. `review_investment_claim`
+returns the dimensions and compares only identical, sufficiently specified
+estimate identities. Values across providers/vintages are not contradictory
+merely because they differ. The read-only anchor compatibility script recognizes
+both versions but remains scoped to the existing Company Research directory;
+it does not certify dimensions, Primary Receipt authority or all-domain coverage.
+
+Judge input digests already cover the complete input, including new dimensions
+and appearance metadata. Changes require a fresh packet/assessment; no old PASS
+is reused for a changed claim bundle. Same-intake writes retain existing receipt
+prerequisites and All-or-Hold controls. Primary corroboration is a separate
+reference/receipt: it never rewrites received user/broker/social origin, and
+revocation does not delete historical Source/Claim/Review bytes. Drafts remain
+historical-only, non-comparator, and zero independent-evidence increment.
+
+Task-local PC-1…PC-6/GREG-01…GREG-20 text was not available during implementation;
+named engineering probes are not claimed as those Gold evaluations. Synthetic
+Judge results test binding/admission only, not semantic research quality.

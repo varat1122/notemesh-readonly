@@ -51,6 +51,7 @@ interface PacketBody {
   scope:{domain:string;entities:string[];topic:string;contentTypes:unknown};
   source:{intakeId:string;sha256:string;url:string|null;publisher:string|null;text:string;provenance:string};
   provenance:{sourceKind:string;sourceLanguage:string|null;sourceChannel:string|null;attributedOrigin:string|null;
+    receivedAppearance:unknown;
     inputFormat:string;declaredAccess:string|null;brokerVintage:unknown;attachment:unknown;authority:string};
   claims:{key:string;candidate:unknown}[];relationships:{key:string;candidate:unknown}[];
   proposedThaiReview:unknown;dates:{event:string|null;publication:string|null;analysisAsOf:string|null;analysisCreatedAt:null};
@@ -108,6 +109,7 @@ export function buildResearchJudgePacket(input:WritebackInput,actor:string){
     source:{intakeId:plan.planId,sha256:judgeHash(clean.extractedText),url:clean.sourceUrl??null,publisher:clean.publisher??null,text:clean.extractedText,
       provenance:"exact_received_text_not_publisher_authentication"},
     provenance:{sourceKind:clean.sourceKind,sourceLanguage:clean.sourceLanguage??null,sourceChannel:clean.sourceChannel??null,
+      receivedAppearance:clean.appearance?{...clean.appearance,authority:"caller_declared_not_source_authentication"}:null,
       attributedOrigin:clean.attributedOrigin??null,inputFormat:clean.inputFormat,declaredAccess:clean.originalDocumentAccess??null,
       brokerVintage:clean.brokerUpdate??null,attachment:{path:clean.rawAttachmentPath??null,sha256:clean.rawAttachmentSha256??null},
       authority:"caller_declared_not_primary_verification_or_independent_origin"},

@@ -10,6 +10,7 @@ import {splitFrontmatter} from "./markdown";
 import {indexedRead,createReceipt} from "./investment-research-context";
 import {claimSourceAnchorIssues} from "./claim-value-anchor";
 import type {WritebackInput} from "./investment-writeback-router";
+import {estimateSchema,accountingBasisSchema,dimensionKey,hasClaimDimensions,estimateIdentityComplete} from "./claim-dimensions";
 
 const text=(max:number)=>z.string().trim().min(1).max(max);
 export const evidenceClassSchema=z.enum(["reported_actual","management_guidance","analyst_estimate","unverified_claim"]);
@@ -17,6 +18,7 @@ export const intakeClaimsSchema=z.array(z.object({
   entity:text(120),metric:text(140),value:text(150),unit:text(80),period:text(120),
   evidenceClass:evidenceClassSchema,statement:text(2500),
   sourceLocator:text(500),sourceExcerpt:text(3000),qualification:text(200).optional(),
+  estimate:estimateSchema.optional(),accountingBasis:accountingBasisSchema.optional(),
   verification:z.literal("unverified").default("unverified")
 }).strict()).min(1).max(8).optional().describe("Up to 8 source-anchored claim observations, persisted through existing Safe Edit only. Actual and management guidance are different identities. sourceExcerpt must occur verbatim in extractedText; values/qualifications must appear literally. Statements and evidence-class labels are caller-attributed/unverified; literal excerpt anchoring does not validate semantic fidelity, issuer authenticity or investment conclusions. Semantic fidelity requires a reviewer. This does not issue primary receipts or relationship edges. Do not combine with legacy singular claim.");
 const date=z.string().datetime({offset:true}).nullable();
@@ -26,8 +28,15 @@ export type IntakeClaim=NonNullable<z.infer<typeof intakeClaimsSchema>>[number];
 export type ResearchLineage=z.infer<typeof researchLineageSchema>;
 const sha=(s:string)=>createHash("sha256").update(s).digest("hex");
 const norm=(s:string)=>s.trim().normalize("NFC").toLowerCase().replace(/\s+/g," ");
-export const claimPath=(id:string)=>`10_Knowledge/Company Research/Investment Claim - ${id}.md`;
-const idFor=(intakeId:string,c:IntakeClaim)=>"ICL-"+sha(JSON.stringify([intakeId,norm(c.entity),norm(c.metric),norm(c.period),norm(c.unit),c.evidenceClass])).slice(0,32).toUpperCase();
+const domainSchema=z.enum(["company","industry","macro","asset"]);
+type ClaimDomain=z.infer<typeof domainSchema>;
+const claimFolder=(domain:ClaimDomain)=>domain==="company"?"Company Research":domain==="macro"?"Macro and Markets":"Industry and Concepts";
+export const claimPath=(id:string,domain:ClaimDomain="company")=>`10_Knowledge/${claimFolder(domain)}/Investment Claim - ${id}.md`;
+const v2=(c:IntakeClaim,domain:ClaimDomain)=>hasClaimDimensions(c)||domain!=="company";
+const idFor=(intakeId:string,c:IntakeClaim,domain:ClaimDomain="company")=>{
+  const legacy=[intakeId,norm(c.entity),norm(c.metric),norm(c.period),norm(c.unit),c.evidenceClass];
+  return "ICL-"+sha(JSON.stringify(v2(c,domain)?["RI001-2",domain,...legacy,dimensionKey(c)]:legacy)).slice(0,32).toUpperCase();
+};
 const fence=(value:string)=>{const ticks="`".repeat(Math.max(2,...(value.match(/`+/g)??[]).map(s=>s.length))+1);return `${ticks}text\n${value}\n${ticks}`;};
 /** Public read-time boundary, deliberately not added to immutable claim bytes. */
 export const claimInterpretationBoundary={statementStatus:"caller_attributed_unverified",
@@ -90,19 +99,23 @@ export function lineageMetadata(input:WritebackInput,reviewPath:string,sourcePat
 export function planClaimNotes(input:WritebackInput,intakeId:string,sourcePath:string){
   const parsed=intakeClaimsSchema.parse(input.claims);
   if(!parsed)return [];
-  if(input.claim||input.domain!=="company")throw Error("claim_persistence_requires_company_scope_and_no_legacy_claim");
+  if(input.claim)throw Error("claim_persistence_requires_no_legacy_claim");
+  const domain=domainSchema.parse(input.domain);
   const url=input.sourceUrl?canonicalHttpSourceUrl(input.sourceUrl):null;
   if(!url)throw Error("claim_source_url_required");
   const records=new Map<string,{id:string;path:string;content:string;issues:string[]}>();
   for(const c of parsed){
+    if(c.estimate&&c.evidenceClass!=="analyst_estimate")throw Error("estimate_role_requires_analyst_estimate_class");
     if(!input.entities.some(e=>norm(e)===norm(c.entity)))throw Error("claim_entity_outside_source_scope");
-    const id=idFor(intakeId,c),path=claimPath(id),issues:string[]=[];
+    const id=idFor(intakeId,c,domain),path=claimPath(id,domain),issues:string[]=[];
     issues.push(...claimSourceAnchorIssues(input.extractedText,c.sourceExcerpt,c.value,c.qualification));
     const row={claim_id:id,entity:c.entity,metric:c.metric,value:c.value,unit:c.unit,period:c.period,
       evidence_class:c.evidenceClass,qualification:c.qualification??null,statement:c.statement,
       source_locator:c.sourceLocator,source_excerpt:c.sourceExcerpt,original_source:url,
-      source_path:sourcePath,verification:"unverified",origin_independence_increment:0};
-    const fm={type:"investment_structured_claim_register",claim_persistence_version:"RI001-1",domain:"company",entity:c.entity,
+      source_path:sourcePath,verification:"unverified",origin_independence_increment:0,
+      ...(v2(c,domain)?{estimate:c.estimate??null,accounting_basis:c.accountingBasis??null,
+        identity_dimensions_status:c.evidenceClass==="analyst_estimate"&&!estimateIdentityComplete(c)?"unresolved":"caller_declared_not_verified"}: {})};
+    const fm={type:"investment_structured_claim_register",claim_persistence_version:v2(c,domain)?"RI001-2":"RI001-1",domain,entity:c.entity,
       intake_id:intakeId,source_type:"attributed",verification:"unverified",original_source:url,
       original_source_path:sourcePath,source_text_sha256:sha(input.extractedText),
       event_date:input.eventDate??null,published_at:input.publicationDate??null,
@@ -120,15 +133,20 @@ export function planClaimNotes(input:WritebackInput,intakeId:string,sourcePath:s
 
 /** Fresh binding witness for generated claims only. Never initialize receipts. */
 export function readPersistedClaim(path:string){
-  if(!/^10_Knowledge\/Company Research\/Investment Claim - ICL-[A-F0-9]{32}\.md$/.test(path))throw Error("claim_path_invalid");
+  if(!/^10_Knowledge\/(Company Research|Industry and Concepts|Macro and Markets)\/Investment Claim - ICL-[A-F0-9]{32}\.md$/.test(path))throw Error("claim_path_invalid");
   const note=indexedRead(path),fm=note.fm,claims=fm.claims as Record<string,unknown>[];
-  if(fm.type!=="investment_structured_claim_register"||fm.claim_persistence_version!=="RI001-1"||!Array.isArray(claims)||claims.length!==1)throw Error("claim_metadata_invalid");
+  if(fm.type!=="investment_structured_claim_register"||!["RI001-1","RI001-2"].includes(String(fm.claim_persistence_version))||!Array.isArray(claims)||claims.length!==1)throw Error("claim_metadata_invalid");
+  const domain=domainSchema.parse(fm.domain);
   const c=claims[0],intakeId=String(fm.intake_id),sourcePath=`00_Inbox/ChatGPT/Investment Intake - ${intakeId}.md`;
   if(!/^IN-[A-F0-9]{16}$/.test(intakeId)||fm.original_source_path!==sourcePath||c.source_path!==sourcePath||c.verification!=="unverified"||fm.verification!=="unverified")throw Error("claim_source_binding_invalid");
   const input=intakeClaimsSchema.parse([{entity:c.entity,metric:c.metric,value:c.value,unit:c.unit,period:c.period,
     evidenceClass:c.evidence_class,statement:c.statement,sourceLocator:c.source_locator,sourceExcerpt:c.source_excerpt,
-    qualification:c.qualification??undefined,verification:c.verification}])![0];
-  if(c.claim_id!==idFor(intakeId,input)||claimPath(String(c.claim_id))!==path||fm.entity!==c.entity||fm.original_source!==c.original_source)throw Error("claim_identity_invalid");
+    qualification:c.qualification??undefined,verification:c.verification,
+    ...(fm.claim_persistence_version==="RI001-2"?{estimate:c.estimate??undefined,accountingBasis:c.accounting_basis??undefined}:{})}])![0];
+  if((fm.claim_persistence_version==="RI001-2")!==v2(input,domain)||
+    (fm.claim_persistence_version==="RI001-1"&&(c.estimate!==undefined||c.accounting_basis!==undefined))||
+    (input.estimate&&input.evidenceClass!=="analyst_estimate"))throw Error("claim_dimension_version_invalid");
+  if(c.claim_id!==idFor(intakeId,input,domain)||claimPath(String(c.claim_id),domain)!==path||fm.entity!==c.entity||fm.original_source!==c.original_source)throw Error("claim_identity_invalid");
   const source=indexedRead(sourcePath);
   if(source.fm.intake_id!==intakeId||source.fm.type!=="investment_source_intake"||source.fm.source_text_sha256!==fm.source_text_sha256||
     canonicalHttpSourceUrl(String(source.fm.source_url))!==c.original_source)throw Error("claim_source_binding_invalid");
@@ -148,7 +166,7 @@ export function readPersistedClaim(path:string){
   for(const link of inbound.slice(0,8))try{
     const r=indexedRead(link.source_path);
     if(r.fm.type!=="investment_research_review")continue;
-    if(!/^10_Knowledge\/Company Research\/Investment Review - [^/]+ - IN-[A-F0-9]{16}\.md$/.test(link.source_path)||r.fm.review_scope!=="company"||r.fm.intake_id!==intakeId||r.fm.original_source_path!==sourcePath||!Array.isArray(r.fm.claim_ids)||!r.fm.claim_ids.includes(c.claim_id))throw Error("review_claim_binding_invalid");
+    if(!/^10_Knowledge\/(Company Research|Industry and Concepts|Macro and Markets)\/Investment Review - [^/]+ - IN-[A-F0-9]{16}\.md$/.test(link.source_path)||r.fm.review_scope!==domain||r.fm.intake_id!==intakeId||r.fm.original_source_path!==sourcePath||!Array.isArray(r.fm.claim_ids)||!r.fm.claim_ids.includes(c.claim_id))throw Error("review_claim_binding_invalid");
     const reviewReceipt=createReceipt("canonical_review",link.source_path,r.raw);
     const journal=db().prepare("SELECT * FROM safe_edit_operations WHERE id=?").get(reviewReceipt) as ReviewLineageRecord;
     const event=db().prepare("SELECT at FROM safe_edit_events WHERE operation_id=? AND actor=? AND event='preview' ORDER BY at LIMIT 1").get(reviewReceipt,journal.actor) as {at:string}|undefined;
