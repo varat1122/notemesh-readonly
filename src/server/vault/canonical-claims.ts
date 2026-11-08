@@ -1,16 +1,18 @@
 /** Source-scoped observations using the existing structured-claim Note contract.
  * Pure planning / SELECT-only validation. Safe Edit is the sole writer. */
 import {createHash} from "node:crypto";
+import fs from "node:fs";
 import {z} from "zod";
 import {db} from "../db";
 import {assertReviewChronology,type ReviewLineageRecord} from "../safe-edit/research-lineage";
 import {readNote} from "./notes";
+import {resolveNotePath} from "./paths";
 import {canonicalHttpSourceUrl} from "../source-url";
 import {splitFrontmatter} from "./markdown";
 import {indexedRead,createReceipt} from "./investment-research-context";
 import {claimSourceAnchorIssues} from "./claim-value-anchor";
 import type {WritebackInput} from "./investment-writeback-router";
-import {estimateSchema,accountingBasisSchema,dimensionKey,hasClaimDimensions,estimateIdentityComplete} from "./claim-dimensions";
+import {estimateSchema,accountingBasisSchema,dimensionKey,hasClaimDimensions,estimateIdentityComplete,omitEmptyDimensions} from "./claim-dimensions";
 
 const text=(max:number)=>z.string().trim().min(1).max(max);
 export const evidenceClassSchema=z.enum(["reported_actual","management_guidance","analyst_estimate","unverified_claim"]);
@@ -104,10 +106,23 @@ export function planClaimNotes(input:WritebackInput,intakeId:string,sourcePath:s
   const url=input.sourceUrl?canonicalHttpSourceUrl(input.sourceUrl):null;
   if(!url)throw Error("claim_source_url_required");
   const records=new Map<string,{id:string;path:string;content:string;issues:string[]}>();
-  for(const c of parsed){
+  for(const raw of parsed){
+    const c=omitEmptyDimensions(raw);
     if(c.estimate&&c.evidenceClass!=="analyst_estimate")throw Error("estimate_role_requires_analyst_estimate_class");
     if(!input.entities.some(e=>norm(e)===norm(c.entity)))throw Error("claim_entity_outside_source_scope");
     const id=idFor(intakeId,c,domain),path=claimPath(id,domain),issues:string[]=[];
+    // At most three historical all-unknown aliases. Never migrate/rebind an
+    // already written RI001-2 identity or create a duplicate beside it.
+    const estimates=c.estimate?[c.estimate]:[undefined,{role:"unspecified" as const,provider:null,forecastVintage:null}];
+    const bases=c.accountingBasis?[c.accountingBasis]:[undefined,{standard:null,shareBasis:null,scope:null,definition:null}];
+    for(const estimate of estimates)for(const accountingBasis of bases){
+      const oldPath=claimPath(idFor(intakeId,{...c,estimate,accountingBasis},domain),domain);
+      if(oldPath===path)continue;
+      if(fs.existsSync(resolveNotePath(oldPath))||db().prepare("SELECT 1 FROM notes WHERE path=?").get(oldPath)||
+        (db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_operations'").get()&&
+          db().prepare("SELECT 1 FROM safe_edit_operations WHERE status='written' AND json_valid(payload) AND json_extract(payload,'$.path')=? LIMIT 1").get(oldPath)))
+        throw Error("legacy_empty_claim_dimensions_reconciliation_hold");
+    }
     issues.push(...claimSourceAnchorIssues(input.extractedText,c.sourceExcerpt,c.value,c.qualification));
     const row={claim_id:id,entity:c.entity,metric:c.metric,value:c.value,unit:c.unit,period:c.period,
       evidence_class:c.evidenceClass,qualification:c.qualification??null,statement:c.statement,

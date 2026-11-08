@@ -44,6 +44,9 @@ export const judgeEnvelopeSchema=z.object({body:z.string().min(1).max(250000),di
 export const judgeSubmissionSchema=z.object({packet:judgeEnvelopeSchema,result:judgeResultSchema.optional()}).strict();
 export type JudgeSubmission=z.infer<typeof judgeSubmissionSchema>;
 export type JudgeResult=z.infer<typeof judgeResultSchema>;
+/** Exact admitted envelope, including issue time/seal, not just its stable body
+ * digest. Used only to restrict an existing grant, never to mint PASS authority. */
+export const judgeEnvelopeDigest=(packet:JudgeSubmission["packet"])=>judgeHash(stableJudgeJson(packet));
 interface History {researchTrust:ResearchTrust|null;key:string;path:string;sha256:string;excerpt:string;citationSpans:{start:number;end:number;text:string}[];counterEvidence:boolean;use:"historical_context_only"|"unverified_candidate";dates:Record<string,unknown>}
 interface HistoryFailure {key:string;path:string;reason:string}
 interface PacketBody {
@@ -188,6 +191,7 @@ export function evaluateResearchJudge(input:WritebackInput,submission:JudgeSubmi
   if(input.researchReview?.claimAssessments?.some(c=>c.resolution==="verified_primary"||c.conclusion==="confirmed"))reasons.push("judge_cannot_authorize_primary_promotion");
   if(reasons.length&&decision!=="FAIL")decision="HOLD";
   return {decision,reasons:[...new Set(reasons)],criticRequired,criticStatus:criticRequired?"not_independently_verified":"not_required",
+    packetEnvelopeDigest:judgeEnvelopeDigest(submission.packet) as string|null,packetIssuedAt:submission.packet.issuedAt as number|null,
     packetId:submission.packet.packetId,packetDigest:submission.packet.digest,resultDigest:r?judgeHash(stableJudgeJson(r)):null,
     scopeWitness:body.scopeWitness,history:body.history.map(h=>({path:h.path,sha256:h.sha256})),retrieval:body.coverage.retrieval as RetrievalCoverage|null,expiresAt:submission.packet.expiresAt,
     trust:body.trust,semanticTruthVerified:false,primaryAuthority:false};

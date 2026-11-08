@@ -456,3 +456,68 @@ historical-only, non-comparator, and zero independent-evidence increment.
 Task-local PC-1…PC-6/GREG-01…GREG-20 text was not available during implementation;
 named engineering probes are not claimed as those Gold evaluations. Synthetic
 Judge results test binding/admission only, not semantic research quality.
+
+### PR #167 corrective admission and recovery contract
+
+A valid HOLD/FAIL for the **currently admitted exact Judge envelope** withdraws
+its non-Source grant before appearance validation, request-token validation or
+re-planning. The SDK ingress hook applies only to the two canonical tools, after
+OAuth scope and maintenance admission; normal typed descriptors and full
+validation remain. Withdrawal binds actor, Intake, Source operation, body digest,
+exact envelope fingerprint (including issue time/seal), result binding and the
+existing target manifest. It never adds targets or grants PASS. An older envelope
+cannot revoke a later admission even when their stable packet bodies are equal.
+Same unchanged evidence may be explicitly re-assessed/re-prepared; changed input,
+including appearance, still requires a fresh packet and assessment. Pending gates
+without the new envelope fingerprint/issue time cannot authorize non-Source
+writes; Source preservation and existing receipts remain independently checkable.
+
+Withdrawal can restrict a previously admitted grant after key loss/rotation
+using its server-recorded envelope fingerprint. This is **not** a way to validate
+a new packet or re-seal any appearance under a replacement key. Post-write
+appearance/re-plan failures return the collected receipts and explicit
+verification HOLD; they do not turn a completed write into a reported no-write.
+Unconfirmed write attempts are reported as unknown, never as proof of no mutation.
+
+Appearance inspection isolates each malformed/HMAC-invalid/binding-invalid row
+as HOLD. Diagnostics expose only a stable journal-row reference and bounded
+reason, with no raw text, locator, actor or key material. Owning Source-operation
+scope keeps malformed appearance JSON in its pagination position. Missing Source
+operation ownership raises an unscoped journal HOLD rather than guessing scope.
+Valid neighbors remain readable. Known conflicting retries are rejected before
+new Preview rows; a restrictive Judge withdrawal may still be journaled first.
+No repair, deletion, skipped corrupt scoped row or automatic re-sealing occurs.
+
+New plans treat all-unknown `estimate`/`accountingBasis` objects like omission;
+partial supplied dimensions remain explicit. RI001-1 IDs and bytes do not change.
+Historical RI001-2 empty-object identities are still decoded using the original
+identity formula. If one already exists, an equivalent normalized plan explicitly
+HOLDs for reconciliation instead of creating a second Claim or rewriting a receipt.
+
+**F-4 release STOP before the first RI001-2 staging write:** WORK/ORCH must verify
+the exact independently accepted corrective PR #167 image and all claim readers,
+refresh connected client descriptors, confirm a current-generation coordinated
+backup/recovery set, and establish encryption-key continuity. This CI task performs
+none of those live operations. RI001-2 decoding first appeared at
+`b8008c0e2acebd5d18f5ab45878a06b6c271f8b3`; that candidate has the rejected F-1
+admission defect and is **not** an approved write/rollback target. Operational
+minimum is the accepted corrected successor, pinned by exact commit/tree/image.
+The `6cd9c3cd558dac3d67e9202d8652b406cfdc332a` reader lacks RI001-2 receipt-bound
+classification and must not be pointed at RI001-2 data for research acceptance.
+
+The required recovery set covers matching Vault/attachments/archive bytes, the
+application DB with a consistent WAL state, Safe Edit operation/event journals,
+receipts, exact code version and the corresponding securely retained
+`ENCRYPTION_KEY`. Keep key material out of repository/logs/reports. It authenticates
+appearance records and existing application data; retaining DB/Notes without the
+matching key is insufficient. Rotation/multi-key verification is not implemented.
+Lost/changed keys mean HOLD and a separately authorized recovery procedure, never
+editing seals or historical receipts to obtain PASS.
+
+After RI001-2 writes, an application-only rollback to #166 or another old reader
+is prohibited. Prefer forward recovery with a compatible corrected reader and
+unchanged data/key. Any return to a pre-RI001-2 generation requires a separately
+authorized coordinated restore/reconciliation plan that accounts for all later
+appearances, Notes and receipts; this is not permission to discard later writes.
+Do not run migrations, downgrade Claim IDs, rewrite receipts or auto-convert
+RI001-2 to RI001-1. If these conditions are unproven, remain stopped before writes.

@@ -40,10 +40,10 @@ export function sealAppearance(payload:AppearancePayload,recordedAt:string){
 }
 export function appearanceRows(appearanceId:string){
   if(!db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_events'").get())return [];
-  return db().prepare(`SELECT at,operation_id,actor,detail FROM safe_edit_events WHERE event='raw_appearance'
-    AND json_valid(detail) AND json_extract(detail,'$.appearanceId')=? LIMIT 2`).all(appearanceId) as AppearanceRow[];
+  return db().prepare(`SELECT rowid,at,operation_id,actor,detail FROM safe_edit_events WHERE event='raw_appearance'
+    AND CASE WHEN json_valid(detail) THEN json_extract(detail,'$.appearanceId') END=? ORDER BY rowid LIMIT 2`).all(appearanceId) as AppearanceRow[];
 }
-interface AppearanceRow {at:string;operation_id:string;actor:string;detail:string}
+interface AppearanceRow {rowid:number;at:string;operation_id:string;actor:string;detail:string}
 function decode(row:AppearanceRow){
   const envelope=z.object({appearanceId:z.string(),body:z.string().max(100000),recordedAt:z.string().datetime(),seal:digest}).strict().parse(JSON.parse(row.detail));
   const seal=createHmac("sha256",env.encryptionKey).update("raw-appearance-v1\0"+envelope.recordedAt+"\0"+envelope.body).digest("hex");
@@ -59,6 +59,23 @@ export function requireAppearance(payload:AppearancePayload){
   const rows=appearanceRows(payload.appearanceId);
   if(rows.length!==1||JSON.stringify(decode(rows[0]))!==JSON.stringify(payload))throw Error("appearance_missing_or_conflicting_retry_hold");
   return appearanceView(rows[0],false);
+}
+/** No journal creation. Known conflicting/corrupt retries fail before Preview.
+ * A malformed scoped row cannot be silently bypassed by issuing another ID. */
+export function checkAppearanceRetry(payload:AppearancePayload){
+  const rows=appearanceRows(payload.appearanceId);
+  if(rows.length)requireAppearance(payload);
+  if(!db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_events'").get())return;
+  const unreadable=db().prepare(`SELECT 1 FROM safe_edit_events WHERE event='raw_appearance' AND operation_id=?
+    AND CASE WHEN json_valid(detail) THEN json_type(detail,'$.appearanceId')='text' AND json_valid(json_extract(detail,'$.body')) ELSE 0 END IS NOT 1 LIMIT 1`).get(payload.sourceOperationId);
+  if(unreadable)throw Error("appearance_scoped_journal_unreadable_hold");
+}
+function failureReason(error:unknown){
+  return error instanceof Error&&["appearance_journal_integrity_hold","appearance_journal_binding_hold","appearance_missing_or_conflicting_retry_hold"].includes(error.message)?error.message:"appearance_journal_readback_hold";
+}
+export function appearanceReadback(payload:AppearancePayload){
+  try{return requireAppearance(payload);}catch(error){return {appearanceId:payload.appearanceId,intakeId:payload.intakeId,
+    disposition:"binding_hold" as const,reason:failureReason(error),originIndependenceIncrement:0,sourceAuthenticity:"not_verified"};}
 }
 function appearanceView(row:AppearanceRow,includeText:boolean){
   const p=decode(row);
@@ -76,15 +93,32 @@ function appearanceView(row:AppearanceRow,includeText:boolean){
     disposition,reason,originIndependenceIncrement:0,sourceAuthenticity:"not_verified",locatorAuthority:"caller_declared",
     bindingMeaning:"exact_preserved_source_receipt_only_not_verified_economic_event"};
 }
+type InspectionAppearance=Partial<Omit<ReturnType<typeof appearanceView>,"appearanceId">>&{
+  recordRef:string;appearanceId:string|null;intakeId:string;disposition:"pending_source"|"source_bound"|"binding_hold";reason:string|null};
 export function inspectIntakeAppearances(intakeId:string,appearanceId?:string,offset=0){
   z.string().regex(/^IN-[A-F0-9]{16}$/).parse(intakeId);
   if(appearanceId)z.string().regex(/^IAP-[A-F0-9]{32}$/).parse(appearanceId);
   z.number().int().min(0).max(100000).parse(offset);
   const exists=db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_events'").get();
-  const rows=exists?db().prepare(`SELECT at,operation_id,actor,detail FROM safe_edit_events WHERE event='raw_appearance' AND json_valid(detail)
-    AND json_valid(json_extract(detail,'$.body')) AND json_extract(json_extract(detail,'$.body'),'$.intakeId')=?
-    AND (? IS NULL OR json_extract(detail,'$.appearanceId')=?) ORDER BY rowid LIMIT 26 OFFSET ?`).all(intakeId,appearanceId??null,appearanceId??null,offset) as AppearanceRow[]:[];
-  const items=rows.slice(0,25).map(row=>appearanceView(row,!!appearanceId));
-  return {version:"RI001-APPEARANCE-1",intakeId,items,offset,hasMore:rows.length>25,
+  // Scope through the existing owning Source operation, not corruptible JSON
+  // inside the appearance. Malformed rows retain their place in pagination.
+  const rows=exists?db().prepare(`SELECT e.rowid,e.at,e.operation_id,e.actor,e.detail FROM safe_edit_events e
+    JOIN safe_edit_operations o ON o.id=e.operation_id WHERE e.event='raw_appearance'
+    AND CASE WHEN json_valid(o.payload) THEN json_extract(o.payload,'$.path') END=?
+    AND (? IS NULL OR CASE WHEN json_valid(e.detail) THEN json_extract(e.detail,'$.appearanceId') END=?
+      OR CASE WHEN json_valid(e.detail) THEN json_extract(e.detail,'$.appearanceId') END IS NULL)
+    ORDER BY e.rowid LIMIT 26 OFFSET ?`).all(`00_Inbox/ChatGPT/Investment Intake - ${intakeId}.md`,appearanceId??null,appearanceId??null,offset) as AppearanceRow[]:[];
+  const items:InspectionAppearance[]=rows.slice(0,25).map(row=>{
+    try{const view=appearanceView(row,!!appearanceId);if(view.intakeId!==intakeId)throw Error("appearance_journal_binding_hold");
+      return {...view,recordRef:`appearance-event:${row.rowid}`};}
+    catch(error){return {recordRef:`appearance-event:${row.rowid}`,appearanceId:null,intakeId,disposition:"binding_hold" as const,
+      reason:failureReason(error),originIndependenceIncrement:0,sourceAuthenticity:"not_verified"};}
+  });
+  // If even Source-operation ownership is damaged, do not guess an Intake or
+  // claim a complete clean journal. Valid scoped rows remain individually usable.
+  const unscopedJournalHold=!!(exists&&db().prepare(`SELECT 1 FROM safe_edit_events e LEFT JOIN safe_edit_operations o ON o.id=e.operation_id
+    WHERE e.event='raw_appearance' AND (o.id IS NULL OR CASE WHEN json_valid(o.payload) THEN json_type(o.payload,'$.path')='text' ELSE 0 END IS NOT 1) LIMIT 1`).get());
+  return {version:"RI001-APPEARANCE-1",intakeId,items,offset,hasMore:rows.length>25,integrityHolds:items.filter(x=>x.disposition==="binding_hold").length,
+    unscopedJournalHold,
     coverage:"recorded_canonical_appearances_only_no_historical_backfill",writesPerformed:false};
 }

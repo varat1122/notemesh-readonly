@@ -12,10 +12,16 @@ export interface JudgeGate {
   version:string;
   researchStatePolicy:string;
   intakeId:string;actor:string;decision:"PASS"|"HOLD"|"FAIL";packetDigest:string;resultDigest:string|null;expiresAt:number;
+  packetEnvelopeDigest:string|null;packetIssuedAt:number|null;
   history:{path:string;sha256:string}[];
   retrieval:RetrievalCoverage|null;
   scopeWitness:JudgeScope|null;
   targets:{path:string;sha256:string;operationId:string;kind:"source_intake"|"structured_claim"|"canonical_review";eligible:boolean}[];
+}
+export function assertJudgeAdmissionOrder(current:JudgeGate|null,next:Pick<JudgeGate,"packetEnvelopeDigest"|"packetIssuedAt"|"decision">){
+  if(!current?.packetEnvelopeDigest)return;
+  const same=next.packetEnvelopeDigest===current.packetEnvelopeDigest;
+  if(!same&&(next.packetIssuedAt===null||next.packetIssuedAt<=(current.packetIssuedAt??0)))throw Error("research_judge_obsolete_admission_hold");
 }
 export function currentJudgeGate(intakeId:string):JudgeGate|null {
   if(!db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_events'").get())return null;
@@ -48,6 +54,9 @@ export function assertResearchJudgeWrite(path:string,before:string,after:string,
   // spans (v1). Preserve their journal/receipts, but never reuse that authority for
   // a pending Claim/Review write after the contract upgrade.
   if(g.version!==JUDGE_VERSION||g.researchStatePolicy!==RESEARCH_STATE_POLICY)throw Error("research_judge_contract_version_hold");
+  // Pending pre-remediation gates lack an exact envelope/admission binding.
+  // Re-prepare with a valid packet; do not upgrade historical journal entries.
+  if(!g.packetEnvelopeDigest||!(/^[a-f0-9]{64}$/).test(g.packetEnvelopeDigest)||!Number.isSafeInteger(g.packetIssuedAt))throw Error("research_judge_admission_binding_hold");
   if(g.decision!=="PASS"||Date.now()>g.expiresAt||!judgeHistoryCurrent(g.history)||!judgeScopeCurrent(g.scopeWitness,g.retrieval,g.targets,g.intakeId,g.actor))throw Error("research_judge_semantic_or_stale_hold");
   if(stage==="apply")for(const prerequisite of g.targets.filter(t=>t.kind==="source_intake"||target.kind==="canonical_review"&&t.kind==="structured_claim")){
     const read=m2VaultReadDeps.readIndexed(prerequisite.path);

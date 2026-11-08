@@ -10,11 +10,11 @@ import {intakeClaimsSchema,researchLineageSchema} from "../vault/canonical-claim
 import {researchReviewSchema} from "./research-review-schema";
 import { planInvestmentWriteback } from "../vault/investment-writeback-router";
 import { apply, preview, previewCanonicalReview, recordResearchJudgeGate, recordCanonicalAppearance, status } from "../safe-edit/engine";
-import {appearanceSchema,canonicalAppearance,requireAppearance} from "../vault/intake-appearances";
+import {appearanceSchema,canonicalAppearance,requireAppearance,checkAppearanceRetry,appearanceReadback} from "../vault/intake-appearances";
 import { withPausedSync } from "../safe-edit/sync";
-import {JUDGE_VERSION,judgeSubmissionSchema,evaluateResearchJudge} from "../vault/research-judge";
+import {JUDGE_VERSION,judgeSubmissionSchema,evaluateResearchJudge,judgeEnvelopeDigest,judgeHash,stableJudgeJson} from "../vault/research-judge";
 import {RESEARCH_STATE_POLICY} from "../vault/research-state";
-import {currentJudgeGate} from "../safe-edit/research-judge-gate";
+import {currentJudgeGate,assertJudgeAdmissionOrder} from "../safe-edit/research-judge-gate";
 
 const nonempty = z.string().min(1);
 const canonicalBaseSchema = z.object({
@@ -84,6 +84,52 @@ export const canonicalApplySchema = z.object({
   authorizations: z.array(canonicalAuthorizationSchema).max(10),
 }).strict();
 
+/** Restrictive withdrawal uses the exact previously admitted envelope, NOT the
+ * new appearance, planner, tokens or caller-derived target paths. This remains
+ * possible if the encryption key is unavailable/rotated: the existing journal
+ * fingerprint authenticates only this withdrawal, never a new PASS. */
+function revokeMatchingJudge(raw:unknown,actor:string,planId?:unknown,forced?:"HOLD"|"FAIL"){
+  if(!raw||typeof raw!=="object")return;
+  const parsed=judgeSubmissionSchema.safeParse((raw as {researchJudge?:unknown}).researchJudge);
+  if(!parsed.success)return;
+  const {packet,result}=parsed.data;
+  let body;try{body=JSON.parse(packet.body);}catch{return;}
+  const intakeId=body?.source?.intakeId;
+  if(typeof intakeId!=="string"||!/^IN-[A-F0-9]{16}$/.test(intakeId)||(planId!==undefined&&planId!==intakeId))return;
+  const gate=currentJudgeGate(intakeId);
+  if(!gate||gate.actor!==actor||packet.actorLabelSha256!==judgeHash(actor)||gate.packetDigest!==packet.digest||
+    gate.packetEnvelopeDigest!==judgeEnvelopeDigest(packet)||gate.packetIssuedAt!==packet.issuedAt||
+    packet.digest!==judgeHash(packet.body)||packet.packetId!=="RJP-"+packet.digest.slice(0,32).toUpperCase()||
+    body.version!==JUDGE_VERSION||body.researchStatePolicy!==RESEARCH_STATE_POLICY)return;
+  let decision=forced;
+  if(result){
+    if(result.packetDigest!==packet.digest||result.packetId!==packet.packetId||result.reviewDigest!==body.reviewDigest)return;
+    const exact=(actual:{key:string}[],expected:{key:string}[])=>Array.isArray(expected)&&actual.length===expected.length&&
+      new Set(actual.map(x=>x.key)).size===actual.length&&expected.every(e=>actual.some(a=>a.key===e.key));
+    // A truncated required bundle is itself HOLD, never permission to retain
+    // the prior PASS. Result/packet/actor binding above must still be exact.
+    if(!exact(result.claims,body.claims)||!exact(result.relationships,body.relationships)||result.event.key!=="event"||result.review.key!=="review")decision="HOLD";
+    const statuses=[...result.claims,...result.relationships,result.event,result.review].flatMap(x=>[x.verdict,...Object.values(x.checks)]);
+    if(statuses.includes("FAIL"))decision="FAIL";
+    else if(statuses.includes("HOLD")||result.materialRisk||["added_detail","correction","contradiction","unresolved"].includes(result.event.classification)||
+      (result.critic&&result.critic.verdict!=="PASS"))decision="HOLD";
+  }
+  if(!decision)return;
+  const source=gate.targets.find(t=>t.kind==="source_intake");
+  if(!source)throw Error("research_judge_source_admission_hold");
+  recordResearchJudgeGate(source.operationId,actor,{...gate,decision:gate.decision==="FAIL"?"FAIL":decision,expiresAt:0,
+    resultDigest:result?judgeHash(stableJudgeJson(result)):null});
+}
+/** Restrictive admission hook also used before the MCP SDK validates the rest
+ * of a canonical request. This never prepares targets or issues authority. */
+export function withdrawCanonicalJudge(tool:string,raw:unknown,actor:string){
+  if(tool==="prepare_canonical_writeback")revokeMatchingJudge(raw,actor);
+  else if(tool==="apply_canonical_writeback"&&raw&&typeof raw==="object"){
+    const request=raw as {input?:unknown;planId?:unknown};
+    if(request.planId!==undefined)revokeMatchingJudge(request.input,actor,request.planId);
+  }
+}
+
 function planned(input: z.infer<typeof canonicalInputSchema>,actor:string) {
   const {researchJudge,...clean}=input;
   const plan = planInvestmentWriteback(clean);
@@ -103,6 +149,7 @@ function planned(input: z.infer<typeof canonicalInputSchema>,actor:string) {
   if(researchJudge)try{judge=evaluateResearchJudge(clean,researchJudge,actor);}catch{
     judge={decision:"HOLD",reasons:["judge_packet_or_input_binding_hold"],criticRequired:false,criticStatus:"not_evaluated",
       packetId:researchJudge.packet.packetId,packetDigest:researchJudge.packet.digest,resultDigest:null,history:[],retrieval:null,scopeWitness:null,expiresAt:0,
+      packetEnvelopeDigest:null,packetIssuedAt:null,
       trust:{actorLabelSha256:"",actorProvenance:"not_established",session:"not_exposed",modelVersion:"not_exposed",judgeIdentity:"analyst_attested_unverified"},semanticTruthVerified:false,primaryAuthority:false};
   }
   const enrolled=currentJudgeGate(plan.planId);
@@ -116,19 +163,33 @@ function planned(input: z.infer<typeof canonicalInputSchema>,actor:string) {
 }
 
 export function prepareCanonicalWriteback(raw:unknown,actor:string) {
+  withdrawCanonicalJudge("prepare_canonical_writeback",raw,actor);
   const input=canonicalInputSchema.parse(raw);
   const {plan,workflow,judge,enrolled}=planned(input,actor);
+  if(judge&&judge.decision!=="PASS")revokeMatchingJudge(input,actor,plan.planId,judge.decision);
   const previews=[];
   // Admit the exact Source first, then record semantic eligibility in the
   // existing event journal before ANY Claim/Review preview can be issued.
   const source=workflow.steps.find(s=>s.kind==="source_intake")!;
-  if(input.researchJudge&&judge&&(source.state==="needs_create"||source.state==="verified_existing")){
+  const appearancePayload=canonicalAppearance(input,source,plan.planId,actor);
+  if(appearancePayload)checkAppearanceRetry(appearancePayload);
+  let currentAssessment=true;
+  if(judge?.packetEnvelopeDigest)try{assertJudgeAdmissionOrder(enrolled,judge);}catch(error){
+    if(judge.decision==="PASS")throw error;
+    currentAssessment=false; // Return HOLD diagnostics, never replace newer authority.
+  }
+  // Invalid packets cannot replace a currently admitted assessment. A matching
+  // withdrawal has already expired it above, retaining its exact targets.
+  if(input.researchJudge&&judge&&currentAssessment&&(!enrolled||judge.packetEnvelopeDigest)&&
+    !(enrolled&&judge.decision!=="PASS"&&judge.packetEnvelopeDigest===enrolled.packetEnvelopeDigest)&&
+    (source.state==="needs_create"||source.state==="verified_existing")){
     if(source.state==="needs_create"){
       const p=preview(source.safeEditRequest,actor);
       previews.push({kind:source.kind,expectedSha256:source.expectedSha256,...p});
     }
     recordResearchJudgeGate(source.receiptKey,actor,{version:JUDGE_VERSION,researchStatePolicy:RESEARCH_STATE_POLICY,intakeId:plan.planId,actor,decision:judge.decision,
-      packetDigest:judge.packetDigest,resultDigest:judge.resultDigest,expiresAt:judge.expiresAt,history:judge.history,retrieval:judge.retrieval,scopeWitness:judge.scopeWitness,
+      packetEnvelopeDigest:judge.packetEnvelopeDigest,packetIssuedAt:judge.packetIssuedAt,
+      packetDigest:judge.packetDigest,resultDigest:judge.resultDigest,expiresAt:judge.decision==="PASS"?judge.expiresAt:0,history:judge.history,retrieval:judge.retrieval,scopeWitness:judge.scopeWitness,
       targets:workflow.steps.map(s=>({path:s.path,sha256:s.expectedSha256,operationId:s.receiptKey,kind:s.kind,
         eligible:s.state==="needs_create"||s.state==="verified_existing"}))});
   }
@@ -140,7 +201,6 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
     if(!p.previewToken) throw Error("Safe Edit did not issue a fresh preview token");
     previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p});
   }
-  const appearancePayload=canonicalAppearance(input,source,plan.planId,actor);
   const appearance=appearancePayload?recordCanonicalAppearance(appearancePayload,actor):null;
   return {phase:"preview_only",appearance,planId:plan.planId,workflowStatus:workflow.status,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     qualityIssues:workflow.qualityIssues,claimIssues:workflow.claimIssues,lineageIssues:workflow.lineageIssues,claimInterpretationBoundary:workflow.claimInterpretationBoundary,readyForNextNews:workflow.readyForNextNews,
@@ -151,24 +211,16 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
 }
 
 export async function applyCanonicalWriteback(raw:unknown,actor:string) {
+  withdrawCanonicalJudge("apply_canonical_writeback",raw,actor);
   const args=canonicalApplySchema.parse(raw);
   const {plan,workflow,judge,enrolled}=planned(args.input,actor);
   if(plan.planId!==args.planId) throw Error("Plan identity mismatch; original source or chronology changed");
+  if(enrolled&&judge&&enrolled.actor!==actor)throw Error("Operation belongs to another OAuth client");
+  if(judge&&judge.decision!=="PASS")revokeMatchingJudge(args.input,actor,plan.planId,judge.decision);
   const appearancePayload=canonicalAppearance(args.input,workflow.steps.find(s=>s.kind==="source_intake")!,plan.planId,actor);
   if(appearancePayload)requireAppearance(appearancePayload);
-  // Apply can receive a newer HOLD/FAIL without another prepare. Revoke the
-  // matching bundle authority before any await or write (even if the submitted
-  // token set is refused below), otherwise generic apply could retain its old
-  // PASS. This only expires the old envelope; it does not approve new targets
-  // or attest the changed input. Source preservation remains independently
-  // eligible. An obsolete packet must not revoke a newer assessment of a
-  // different scope. The journal enforces the original Source/actor binding.
-  if(enrolled&&judge&&judge.decision!=="PASS"&&enrolled.packetDigest===judge.packetDigest){
-    const source=enrolled.targets.find(t=>t.kind==="source_intake");
-    if(!source)throw Error("research_judge_source_admission_hold");
-    recordResearchJudgeGate(source.operationId,actor,{...enrolled,decision:judge.decision,expiresAt:0});
-  }
-  if(judge?.decision==="PASS"&&(!enrolled||enrolled.version!==JUDGE_VERSION||enrolled.researchStatePolicy!==RESEARCH_STATE_POLICY||enrolled.packetDigest!==judge.packetDigest||enrolled.resultDigest!==judge.resultDigest||enrolled.decision!=="PASS"))
+  // A PASS still requires a fresh matching admission, including the envelope.
+  if(judge?.decision==="PASS"&&(!enrolled||enrolled.version!==JUDGE_VERSION||enrolled.researchStatePolicy!==RESEARCH_STATE_POLICY||enrolled.packetDigest!==judge.packetDigest||enrolled.packetEnvelopeDigest!==judge.packetEnvelopeDigest||enrolled.resultDigest!==judge.resultDigest||enrolled.decision!=="PASS"))
     throw Error("research_judge_prepare_required_or_superseded");
   const pending=workflow.steps.filter(s=>s.state==="needs_create");
   const ids=pending.map(s=>s.receiptKey);
@@ -184,6 +236,7 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
       throw Error("Stale or mismatched canonical preview; prepare again and inspect the new diff");
   }
   const receipts:unknown[]=[];
+  let writeAttempts=0;
   let interrupted:string|null=null;
   if(pending.length) {
     try {
@@ -198,7 +251,7 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
             if(current?.state!=="needs_create"||current.receiptKey!==step.receiptKey||
               current.expectedSha256!==step.expectedSha256)
               throw Error("Canonical state or archive provenance changed; prepare again");
-            receipts.push(apply(a,actor));
+            writeAttempts++;receipts.push(apply(a,actor));
           }
           catch(e) {interrupted=e instanceof Error?e.message:"Safe Edit operation failed";break;}
         }
@@ -207,15 +260,21 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   }
   // Re-plan from the unchanged source input; trust disk hash/FTS readback, not
   // mere Safe Edit success or a stale pre-write plan.
-  const after=planned(args.input,actor).workflow;
-  return {phase:"apply_verified_or_pending",appearance:appearancePayload?requireAppearance(appearancePayload):null,planId:plan.planId,
-    status:after.status,readyForNextNews:after.readyForNextNews,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
+  let after=workflow,workflowVerificationHold=false;
+  try{after=planned(args.input,actor).workflow;}catch{workflowVerificationHold=true;}
+  const appearance=appearancePayload?appearanceReadback(appearancePayload):null;
+  const verificationHold=workflowVerificationHold||appearance?.disposition==="binding_hold";
+  return {phase:"apply_verified_or_pending",appearance,planId:plan.planId,
+    status:verificationHold?"hold_post_write_verification":after.status,readyForNextNews:!verificationHold&&after.readyForNextNews,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     qualityIssues:after.qualityIssues,claimIssues:after.claimIssues,lineageIssues:after.lineageIssues,claimInterpretationBoundary:after.claimInterpretationBoundary,
     archiveProvenanceStatus:after.archiveProvenanceStatus,archiveProvenanceReason:after.archiveProvenanceReason,
     steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable,researchTrust})=>
-      ({kind,path,state,receiptKey,readbackVerified,indexed,searchable,researchTrust})),
-    receipts,interrupted,protectedNotesTouched:false,perDeviceSync:"unverified",
-    outcome:after.status==="saved_verified"?"saved_verified":
+      ({kind,path,state:workflowVerificationHold?"post_write_verification_hold":state,receiptKey,
+        readbackVerified:!workflowVerificationHold&&readbackVerified,indexed:!workflowVerificationHold&&indexed,searchable:!workflowVerificationHold&&searchable,researchTrust})),
+    receipts,interrupted,writesPerformed:receipts.length>0?true:writeAttempts>0?"unknown":false,
+    writeAttempts,completedWriteReceipts:receipts.length,unverifiedWriteAttempts:writeAttempts-receipts.length,
+    workflowVerification:workflowVerificationHold?"HOLD":"readback_completed",protectedNotesTouched:false,perDeviceSync:"unverified",
+    outcome:verificationHold?"written_or_pending_verification_hold":after.status==="saved_verified"?"saved_verified":
       after.status==="source_saved_analysis_pending"?"source_saved_analysis_pending":"pending_or_blocked",
     note:"Partial source writes are retained and independently verifiable; retry only pending steps after a fresh preview. Device Sync is not proven."};
 }

@@ -16,7 +16,7 @@ import {assertReviewChronology,assertReviewPreviewAdmission,hasRuntimeReviewLine
 import {assertProtectedRecord} from "./protected-records";
 import {assertResearchStateAuthority} from "../vault/research-state";
 import {assertDeclaredEvidenceAuthority,assertPrimaryMetadataAuthority} from "./primary-authority";
-import {assertResearchJudgeWrite,currentJudgeGate,type JudgeGate} from "./research-judge-gate";
+import {assertResearchJudgeWrite,currentJudgeGate,assertJudgeAdmissionOrder,type JudgeGate} from "./research-judge-gate";
 import {appearancePayloadSchema,appearanceRows,requireAppearance,sealAppearance,type AppearancePayload} from "../vault/intake-appearances";
 import {assertNoMaintenance} from "../maintenance";
 
@@ -210,10 +210,12 @@ export function preview(input:unknown,actor:string) {return previewWithLineage(i
 export function previewCanonicalReview(input:unknown,actor:string) {return previewWithLineage(input,actor,true);}
 /** Internal canonical admission only; no caller-facing event/approval API. */
 export function recordResearchJudgeGate(sourceOperationId:string,actor:string,gate:JudgeGate){
-  assertEnabled();const source=owned(sourceOperationId,actor),target=gate.targets.find(t=>t.kind==="source_intake");
+  assertNoMaintenance("research judge admission");assertEnabled();const source=owned(sourceOperationId,actor),target=gate.targets.find(t=>t.kind==="source_intake");
   if(!target||target.operationId!==source.id||target.path!==JSON.parse(source.payload).path||target.sha256!==source.after_hash||
     splitFrontmatter(source.after_text).data.intake_id!==gate.intakeId||gate.actor!==actor)throw Error("research_judge_source_admission_hold");
-  if(JSON.stringify(currentJudgeGate(gate.intakeId))!==JSON.stringify(gate))log(source.id,actor,"research_judge_gate",gate as unknown as Record<string,unknown>);
+  const current=currentJudgeGate(gate.intakeId);
+  assertJudgeAdmissionOrder(current,gate);
+  if(JSON.stringify(current)!==JSON.stringify(gate))log(source.id,actor,"research_judge_gate",gate as unknown as Record<string,unknown>);
 }
 /** Internal canonical accounting; not a generic event writer or MCP operation.
  * SQLite transaction serializes retries. Existing DB maintenance fence applies.

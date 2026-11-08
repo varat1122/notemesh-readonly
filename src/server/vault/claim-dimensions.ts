@@ -19,4 +19,12 @@ export function dimensionKey(c:ClaimDimensions){
     c.accountingBasis?[norm(c.accountingBasis.standard),norm(c.accountingBasis.shareBasis),norm(c.accountingBasis.scope),norm(c.accountingBasis.definition)]:null]);
 }
 export const hasClaimDimensions=(c:ClaimDimensions)=>c.estimate!==undefined||c.accountingBasis!==undefined;
+/** Only planning normalizes absence of information. Historical RI001-2 identity
+ * readback deliberately continues using its original stored dimensions. */
+export function omitEmptyDimensions<T extends ClaimDimensions>(claim:T):T{
+  const out={...claim};
+  if(out.estimate?.role==="unspecified"&&out.estimate.provider===null&&out.estimate.forecastVintage===null)delete out.estimate;
+  if(out.accountingBasis&&Object.values(out.accountingBasis).every(x=>x===null))delete out.accountingBasis;
+  return out;
+}
 export const estimateIdentityComplete=(c:ClaimDimensions)=>!!c.estimate&&c.estimate.role!=="unspecified"&&!!c.estimate.provider&&!!c.estimate.forecastVintage;
