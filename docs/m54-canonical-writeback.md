@@ -358,3 +358,277 @@ index, (5) no protected-file mutation, and (6) honest mobile Sync status.
 Then repeat for Macro, PDF with real attachment bytes, Feed Only and multi-item
 ordering. A regression test with synthetic content is not proof of automatic
 behavior in a fresh ChatGPT conversation.
+
+## RI-001 general persistence convergence (CI candidate)
+
+This extends existing canonical prepare/apply and Safe Edit, not a new writer,
+database or automatic research promotion. Master 2.0.0 and frozen evaluation
+fixtures are unchanged. Source identity v3, Judge-5 and Draft-2 remain in force.
+
+### Received appearances
+
+`appearance` is an optional, explicit intake input with `key`, `channel`,
+`locator`, and `receivedAt` (offset-aware timestamp or null). Reuse the same
+occurrence key on retry; use a new key for a separately received message/file.
+Keys are scoped to the server's OAuth actor label, not a verified human/session.
+Caller locators, publisher attribution and reported receipt time are unverified.
+No key/time is inferred from document publication or from an LLM.
+
+Canonical prepare records `RI001-APPEARANCE-1` as an append-only event in the
+existing `safe_edit_events` journal, owned by the exact canonical Source operation.
+The event retains original received text/hash, format, attachment reference/hash,
+channel/message/file locator, source attribution, proposed Source pointer and
+runtime `recordedAt`. Its HMAC binds the payload and runtime timestamp using the
+existing server key; it is NOT publisher authentication or a Primary Receipt.
+Existing key-retention/backup requirements apply; unavailable/changed signing
+key causes a readback HOLD, never automatic resealing of historical records.
+
+Current disposition is `pending_source` until the ordinary Source write receipt,
+readback, index and hash validate; then `source_bound`. Damage/interrupted writes
+produce `binding_hold`. A prepared event alone never proves Vault persistence.
+Repeated identical calls reuse one appearance. A conflicting retry key is refused;
+separate occurrences can link the same immutable Source without another Source
+write. Event recording requires normal Safe Edit settings and refuses maintenance.
+
+Read-only `inspect_intake_appearances(intakeId, appearanceId?, offset?)` returns
+25 records plus a pagination sentinel; specifying an appearance ID recovers the
+exact received text. It does not initialize or migrate a historical ledger.
+Source/receipt bytes are never patched. Original Source authenticity and economic
+independence remain unverified; independence increment is always zero.
+
+Accounting covers **admitted canonical submissions with explicit appearance
+metadata**. Legacy calls without metadata have no inferred appearance history.
+Schema/provenance-invalid submissions are explicitly refused before accounting;
+callers must retain rejected input. In particular, an unverified format/kind
+change against an existing Source remains `M56_SOURCE_PROVENANCE_CONFLICT`, not
+an invented same-source relationship. Different received bytes are not normalized
+away; the existing new-Source/event-reconciliation rules still apply. This is
+not a general channel-ingestion archive, archival retention service, or automatic
+grouping of differing formats. No legacy importer is used.
+
+### Structured estimate and accounting dimensions
+
+Optional `estimate` contains `{role, provider, forecastVintage}`. Role is
+`broker_estimate`, `consensus` or `unspecified`; provider/vintage are explicit
+nullable strings. `forecastVintage` reuses the nullable attributed-vintage concept
+of Research Decision V2; no date/provider is inferred from that shadow assessment.
+An estimate role requires `evidenceClass=analyst_estimate`; management guidance
+and reported actual remain distinct classes. Provider/vintage/role omissions
+remain unresolved for duplicate/corroboration comparison, including legacy
+unscoped analyst estimates. They may persist only as unverified observations.
+
+Optional `accountingBasis` contains nullable `standard`, `shareBasis`, `scope`,
+and `definition` labels. These distinguish explicitly supplied GAAP/non-GAAP,
+basic/diluted, segment/consolidated, or differing FCF definitions. The backend
+does not derive these labels from financial wording or verify that they are true.
+Metric strings that already differ continue to distinguish legacy identities.
+
+Company claims without either new object remain **RI001-1 byte/ID compatible**.
+Explicit dimensions use **RI001-2**: domain + original Source intake + normalized
+entity/metric/period/unit/evidence class + all explicit dimension values determine
+identity. New domain-scoped claims also use RI001-2, in the existing Company
+Research, Industry and Concepts, or Macro and Markets folders; Asset research
+stays in Research, never Portfolio/Trade. Missing folders still refuse writes.
+No migration/backfill/automatic upgrade of RI001-1 notes or receipts occurs.
+Reading new RI001-2 identities requires these upgraded readers. Backward readback
+of RI001-1 is covered; this does not certify an older application rollback after
+new RI001-2 writes. Refresh connector descriptors before using the new inputs or
+appearance inspector. No runtime rollout is authorized by this CI candidate.
+
+Different providers/vintages/bases coexist; changing a value within the same
+identity is a conflict requiring reviewed correction, not overwrite. Rounding
+is not adjudicated automatically. Readback recomputes versioned identity and
+checks the original Source, receipt, index and links. `review_investment_claim`
+returns the dimensions and compares only identical, sufficiently specified
+estimate identities. Values across providers/vintages are not contradictory
+merely because they differ. The read-only anchor compatibility script recognizes
+both versions but remains scoped to the existing Company Research directory;
+it does not certify dimensions, Primary Receipt authority or all-domain coverage.
+
+Judge input digests already cover the complete input, including new dimensions
+and appearance metadata. Changes require a fresh packet/assessment; no old PASS
+is reused for a changed claim bundle. Same-intake writes retain existing receipt
+prerequisites and All-or-Hold controls. Primary corroboration is a separate
+reference/receipt: it never rewrites received user/broker/social origin, and
+revocation does not delete historical Source/Claim/Review bytes. Drafts remain
+historical-only, non-comparator, and zero independent-evidence increment.
+
+Task-local PC-1…PC-6/GREG-01…GREG-20 text was not available during implementation;
+named engineering probes are not claimed as those Gold evaluations. Synthetic
+Judge results test binding/admission only, not semantic research quality.
+
+### PR #167 corrective admission and recovery contract
+
+A valid HOLD/FAIL for the **currently admitted exact Judge envelope** withdraws
+its non-Source grant before appearance validation, request-token validation or
+re-planning. The SDK ingress hook applies only to the two canonical tools, after
+OAuth scope and maintenance admission; normal typed descriptors and full
+validation remain. Withdrawal binds actor, Intake, Source operation, body digest,
+exact envelope fingerprint (including issue time/seal), result binding and the
+existing target manifest. It never adds targets or grants PASS. An older envelope
+cannot revoke a later admission even when their stable packet bodies are equal.
+A non-PASS envelope cannot be reactivated by replaying or editing its PASS result.
+Reassessment, even of unchanged input, requires a fresh server-sealed envelope
+with `issuedAt` strictly later than both the prior envelope and withdrawal, and a new analyst result explicitly bound to
+that exact envelope. Changed input, including appearance, also requires fresh
+packet/assessment. Pending gates
+without the new envelope fingerprint/issue time cannot authorize non-Source
+writes; Source preservation and existing receipts remain independently checkable.
+
+Withdrawal can restrict a previously admitted grant after key loss/rotation
+using its server-recorded envelope fingerprint. This is **not** a way to validate
+a new packet or re-seal any appearance under a replacement key. Post-write
+appearance/re-plan failures return the collected receipts and explicit
+verification HOLD; they do not turn a completed write into a reported no-write.
+Unconfirmed write attempts are reported as unknown, never as proof of no mutation.
+
+Appearance inspection isolates each malformed/HMAC-invalid/binding-invalid row
+as HOLD. Diagnostics expose only a stable journal-row reference and bounded
+reason, with no raw text, locator, actor or key material. Owning Source-operation
+scope keeps malformed appearance JSON in its pagination position. Missing Source
+operation ownership raises an unscoped journal HOLD rather than guessing scope.
+Valid neighbors remain readable. Known conflicting retries are rejected before
+new Preview rows; a restrictive Judge withdrawal may still be journaled first.
+No repair, deletion, skipped corrupt scoped row or automatic re-sealing occurs.
+
+New plans treat all-unknown `estimate`/`accountingBasis` objects like omission;
+partial supplied dimensions remain explicit. RI001-1 IDs and bytes do not change.
+Historical RI001-2 empty-object identities are still decoded using the original
+identity formula. If one already exists, an equivalent normalized plan explicitly
+HOLDs for reconciliation instead of creating a second Claim or rewriting a receipt.
+
+**F-4 release STOP before the first RI001-2 staging write:** WORK/ORCH must verify
+the exact independently accepted corrective PR #167 image and all claim readers,
+refresh connected client descriptors, confirm a current-generation coordinated
+backup/recovery set, and establish encryption-key continuity. This CI task performs
+none of those live operations. RI001-2 decoding first appeared at
+`b8008c0e2acebd5d18f5ab45878a06b6c271f8b3`; that candidate has the rejected F-1
+admission defect and is **not** an approved write/rollback target. Operational
+minimum is the accepted corrected successor, pinned by exact commit/tree/image.
+The `6cd9c3cd558dac3d67e9202d8652b406cfdc332a` reader lacks RI001-2 receipt-bound
+classification and must not be pointed at RI001-2 data for research acceptance.
+
+The required recovery set covers matching Vault/attachments/archive bytes, the
+application DB with a consistent WAL state, Safe Edit operation/event journals,
+receipts, exact code version and the corresponding securely retained
+`ENCRYPTION_KEY`. Keep key material out of repository/logs/reports. It authenticates
+appearance records and existing application data; retaining DB/Notes without the
+matching key is insufficient. Rotation/multi-key verification is not implemented.
+Lost/changed keys mean HOLD and a separately authorized recovery procedure, never
+editing seals or historical receipts to obtain PASS.
+
+After RI001-2 writes, an application-only rollback to #166 or another old reader
+is prohibited. Prefer forward recovery with a compatible corrected reader and
+unchanged data/key. Any return to a pre-RI001-2 generation requires a separately
+authorized coordinated restore/reconciliation plan that accounts for all later
+appearances, Notes and receipts; this is not permission to discard later writes.
+Do not run migrations, downgrade Claim IDs, rewrite receipts or auto-convert
+RI001-2 to RI001-1. If these conditions are unproven, remain stopped before writes.
+
+
+### P-1 same-envelope replay and reassessment
+
+`assertJudgeAdmissionOrder` treats HOLD/FAIL as terminal for an exact envelope.
+A valid PASS retry before any HOLD remains idempotent; a held/revoked envelope
+cannot become PASS, even with an edited rationale. Pre-issued packets from before
+the withdrawal cannot recover authority; legacy HOLD time is read from the
+original server journal without rewriting it. An obsolete envelope cannot
+withdraw a newer admission. The journal re-reads the current admission and checks
+ordering inside one SQLite `BEGIN IMMEDIATE` transaction before appending, so a
+concurrent stale PASS check cannot overwrite a committed withdrawal.
+
+The packet tool returns `packetEnvelopeDigest` separately from the stable body
+digest. After HOLD/FAIL, the connected analyst must request a later packet,
+reassess its evidence and echo this digest as `researchJudge.result.packetEnvelopeDigest`.
+Copying the prior result onto a fresh same-input envelope fails binding. A supplied
+wrong envelope digest always HOLDs; missing envelope binding cannot recover a
+non-PASS admission. For compatibility, an otherwise valid legacy initial PASS
+and its retries before any HOLD remain supported. No historical receipt is
+rewritten. Descriptor refresh is needed for clients performing reassessment.
+
+Issuance uses real server time; no backdating or artificial future timestamps.
+Identical same-millisecond input may produce the same envelope, which remains
+revoked; a distinct envelope with a tied/older issue time is refused. Request a
+packet once the server clock is later. Clock rollback fails closed. Source-only
+preservation remains separate under existing rights and maintenance controls.
+
+The echoed digest proves exact-envelope attestation, **not** that a fresh human
+or LLM reasoning pass occurred, nor the truth of an investment claim. The current
+actor/session and independent-critic limitations remain unchanged. Tests use
+simulated results solely to prove deterministic admission/replay behavior.
+
+MCP SDK is pinned to the existing resolved `1.32.1` (no upgrade). Real MCP tests
+exercise validation-before-handler behavior; a missing validation hook refuses
+endpoint construction. Any future SDK change requires this compatibility check.
+
+### P1-LEGACY: cross-version terminal admission
+
+A HOLD/FAIL written by `6cd9c3cd558dac3d67e9202d8652b406cfdc332a` is
+restrictive even though that format has no `packetEnvelopeDigest` or
+`packetIssuedAt`. Missing envelope identity is not missing withdrawal authority.
+The shared admission guard applies terminal-state/fresh-assessment requirements
+before any version-specific ordering allowance. A new PASS must carry a valid
+fresh sealed packet issued strictly after the server-recorded withdrawal and a
+result bound to that exact envelope. Existing new-format ordering checks remain.
+
+For the old format, the reader derives withdrawal time only from the original
+server event. It must be canonical UTC ISO with milliseconds. If a preceding
+admission exists, the withdrawal must be strictly later; missing, ambiguous,
+corrupt, tied or reversed chronology HOLDs. Unknown withdrawal time cannot be
+washed away by submitting another HOLD; a pre-issued packet cannot replace the
+restriction with an earlier recovery clock. These cases need separately reviewed
+reconciliation, not an inferred time, edited journal or automatic re-sealing.
+The reader does not add envelope fields to old records or rewrite any event.
+
+Source-only preservation remains separately eligible under existing controls.
+Historical Source/RI001-1/Review bytes and real receipts remain readable. Refusal
+and Source-preview audit events may be appended; they are not new Claim/Review
+writes or replacement Judge grants.
+
+The permanent cross-version test archives the exact old Git commit and executes
+its actual Judge/canonical/Safe Edit code to produce seven disposable DB/Vault/key
+states (PASS/HOLD/FAIL with pending/saved Source, plus fully saved RI001-1 history).
+The current reader opens copies of those real states. No legacy gate is simulated
+by deleting new-format fields, and no receipt is manufactured. Timestamp damage
+is injected only into disposable old gate events for negative tests. CI fetches
+that single exact base object; absence/mismatch fails rather than substituting
+current code. Simulated analyst results still do not establish semantic quality.
+
+
+### L2: authenticated withdrawal of a legacy PASS at new Apply
+
+An authentic HOLD/FAIL for an enrolled legacy PASS must be recorded before
+appearance checks, planner/token rejection or MCP SDK argument validation. The
+new-format path still authenticates the exact enrolled envelope fingerprint.
+Legacy gates have no fingerprint, so body-digest equality alone is insufficient:
+the shared envelope verifier validates the original HMAC using the authorized
+server key, actor label, packet body digest/ID, policy/version and validity times.
+The result must bind that packet and Review; required-bundle verdicts retain the
+existing All-or-Hold rules. Targets come only from the original enrolled gate,
+never the malformed request. The original actor-owned Source operation must
+match intake, path, after-bytes SHA and received-text SHA.
+
+Withdrawal appends a restrictive event with the authenticated envelope identity
+and the actual withdrawal time. It does not modify the legacy event or convert
+its PASS into new write authority. The original gate snapshot is checked again
+under the existing SQLite IMMEDIATE transaction before append; a superseding
+admission cannot be overwritten by an earlier authenticated withdrawal. Repeated
+same-clock withdrawals remain restrictive and FAIL is not downgraded to HOLD.
+Fresh reassessment after withdrawal still requires a later sealed envelope and
+matching result-envelope binding. Source-only eligibility remains independent.
+
+Unlike an already fingerprinted gate, a legacy PASS cannot authenticate a
+withdrawal if the original packet has expired, its seal is invalid, or the
+original ENCRYPTION_KEY is unavailable/rotated. Such requests are refused without
+inventing a seal or modifying an unrelated gate. Pending legacy non-Source writes
+remain blocked by the existing missing-envelope admission guard. Retain key
+continuity; do not mistake request rejection or an unchanged historical PASS
+label for current non-Source write authorization. No automatic key recovery or
+historical repair is provided.
+
+Cross-version tests create PASS-only fixtures with actual `6cd9c3cd` modules,
+then exercise both direct canonical and real MCP Apply (including SDK-invalid
+appearance/token arguments), replay denial, fresh recovery, Source preservation,
+forged/expired/wrong-actor packets, concurrent retries and transactional recheck.
+All original event/receipt bytes and protected files remain unchanged in fixtures.
+These simulated results prove enforcement, not fresh LLM reasoning or fact truth.

@@ -18,10 +18,12 @@ import type {IntakeClaim,ResearchLineage} from "./canonical-claims";
 import type { ThaiResearchReview } from "./research-quality-m55";
 import {resolveSourceIdentityM56, type SourceIdentityResolution} from "./source-identity-m56";
 import {inspectSourceArchiveProvenance,type SourceArchiveProvenance} from "./source-archive-provenance-p0";
+import type {AppearanceInput} from "./intake-appearances";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
 export interface WritebackInput {
+  appearance?:AppearanceInput;
   domain:Domain;
   entities:string[];
   topic:string;

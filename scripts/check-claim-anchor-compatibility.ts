@@ -53,7 +53,7 @@ export function scanClaimAnchors(vault:string){
     const rel=`${folder}/${name}`;let reasons:string[]=[];
     try{
       const raw=readBounded(root,rel),fm=frontmatter(raw).data,id=fm.intake_id;
-      if(fm.claim_persistence_version!=="RI001-1"||fm.type!=="investment_structured_claim_register"||
+      if(!["RI001-1","RI001-2"].includes(String(fm.claim_persistence_version))||fm.type!=="investment_structured_claim_register"||
         typeof id!=="string"||!/^IN-[A-F0-9]{16}$/.test(id)||!Array.isArray(fm.claims)||fm.claims.length!==1)throw Error("claim_metadata_invalid");
       const c=fm.claims[0];
       if(!c||typeof c!=="object"||typeof c.value!=="string"||!c.value||typeof c.source_excerpt!=="string"||
@@ -75,7 +75,7 @@ export function scanClaimAnchors(vault:string){
   });
   const directoryAfter=fs.statSync(dirPath);
   complete=complete&&directoryBefore.ino===directoryAfter.ino&&directoryBefore.mtimeMs===directoryAfter.mtimeMs&&directoryBefore.ctimeMs===directoryAfter.ctimeMs;
-  return {scope:"RI001-1 canonical claim anchor compatibility only",status:!complete?"SCAN_INCOMPLETE":rows.some(r=>r.status==="HOLD")?"HOLD":"ANCHOR_COMPATIBLE",
+  return {scope:"RI001-1/RI001-2 canonical claim anchor compatibility only (not dimension/receipt verification)",status:!complete?"SCAN_INCOMPLETE":rows.some(r=>r.status==="HOLD")?"HOLD":"ANCHOR_COMPATIBLE",
     scanComplete:complete,scanned:rows.length,held:rows.filter(r=>r.status==="HOLD").length,
     bound:{directoryEntries:5000,claims:1000,noteBytes:100000},writesPerformed:false,receiptIndexPrimaryValidity:"not_assessed",rows};
 }

@@ -10,13 +10,27 @@ import { fetchAndArchiveOfficialSource } from "../research-source-fetch";
 import { inspectOriginalSourceHistory } from "../research-source-archive";
 import { syncBackend } from "../sync";
 import { storeUserAttachment, inspectUserAttachment, MAX_USER_ATTACHMENT_BYTES } from "../user-attachment-vault";
-import { canonicalInputShape, canonicalInputSchema, canonicalApplySchema, prepareCanonicalWriteback, applyCanonicalWriteback } from "./canonical-writeback";
+import { canonicalInputShape, canonicalInputSchema, canonicalApplySchema, prepareCanonicalWriteback, applyCanonicalWriteback, withdrawCanonicalJudge } from "./canonical-writeback";
+import {assertMutationAllowed,beginWork,endWork} from "../maintenance";
 import {buildResearchJudgePacket,judgeResultSchema} from "../vault/research-judge";
 import { researchDecisionV2Schema, preflightResearchDecisionV2 } from "../vault/research-decision-v2";
 const securitySchemes=[{type:"oauth2",scopes:["vault:read","vault:edit"]}];
 const base=previewSchema.omit({change:true}).shape;
 export function createSafeEditMcpServer(access:McpAccess) {
   const server=new McpServer({name:"investment-os-safe-edit",title:"Investment OS — Safe Edit",version:"1.0.0"});
+  // The SDK validates tool arguments BEFORE executeToolHandler. A valid bound
+  // withdrawal must survive unrelated malformed appearance/token fields. Keep
+  // full typed descriptors/validation, scope this hook to canonical requests,
+  // and track it like normal tool work (never tied to response/socket lifetime).
+  type Validate=(this:unknown,tool:unknown,args:unknown,name:string)=>Promise<unknown>;
+  const ingress=server as unknown as {validateToolInput?:Validate},validate=ingress.validateToolInput;
+  if(typeof validate!=="function")throw Error("Canonical withdrawal admission cannot be tracked; endpoint refused");
+  ingress.validateToolInput=async function(this:unknown,tool,args,name){
+    if(!canSafeEdit(access)||!["prepare_canonical_writeback","apply_canonical_writeback"].includes(name))return validate.call(this,tool,args,name);
+    assertMutationAllowed("canonical withdrawal admission");const work=beginWork("mcp-tool");
+    try{withdrawCanonicalJudge(name,args,access.label);return await validate.call(this,tool,args,name);}
+    finally{endWork(work);}
+  };
   const invoke=async(run:()=>unknown|Promise<unknown>)=>{
     if(!canSafeEdit(access)) return {isError:true,content:[{type:"text" as const,text:"Safe Edit requires new vault:edit OAuth consent; existing grants cannot edit"}],_meta:{"mcp/www_authenticate":[oauthChallenge("safe-edit",true)]}};
     try {

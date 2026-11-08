@@ -50,6 +50,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Fetch exact legacy code for disposable cross-version Judge tests
+        run: git fetch --no-tags --depth=1 origin 6cd9c3cd558dac3d67e9202d8652b406cfdc332a
+
       - name: Test
         run: pnpm test
 
@@ -144,7 +147,7 @@ jobs:
           test "$pid1" = "tini"
           # By command line, not by the Name: field: Node 24 names its main
           # thread, so status reports MainThread rather than node.
-          children=$(docker exec nm sh -c 'for p in /proc/[0-9]*; do grep -q "^PPid:[[:space:]]*1$" "$p/status" 2>/dev/null && tr "\\0" " " < "$p/cmdline" && echo; done')
+          children=$(docker exec nm sh -c 'for p in /proc/[0-9]*; do if grep -q "^PPid:[[:space:]]*1$" "$p/status" 2>/dev/null; then tr "\\0" " " < "$p/cmdline" && echo; fi; done')
           echo "children of PID 1: $children"
           echo "$children" | grep -q "^node "
 

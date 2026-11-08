@@ -453,4 +453,14 @@ Add-only linked notes require vault:read and inbox:submit. Cannot modify an exis
 
 Read the intake receipt with vault:read and inbox:submit. Does not prove remote device Sync.
 
+### inspect_intake_appearances — read
+
+Inspect explicitly recorded canonical appearances by Intake ID, with up to 25
+results per page and a `hasMore` sentinel. Supply an exact appearance ID to recover
+its preserved received text. Reports caller-declared channel/locator/arrival
+time, server admission time, and current Source receipt/readback disposition.
+No historical backfill, publisher authentication, economic independence increase,
+Vault write or receipt creation. See docs/m54-canonical-writeback.md for the
+opt-in canonical input and retry contract.
+
 Safe Edit is a separate resource; its seven tools and permissions are documented in docs/SAFE_EDIT.md.

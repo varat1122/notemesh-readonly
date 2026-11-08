@@ -49,6 +49,7 @@ const READ_TOOLS = [
   "get_links",
   "get_outline",
   "get_vault_info",
+  "inspect_intake_appearances",
   "investment_context_pack",
   "list_attachments",
   "list_directory",
