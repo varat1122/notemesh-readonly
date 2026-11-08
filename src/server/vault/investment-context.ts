@@ -1,3 +1,5 @@
+import {preservedSubmittedText} from "./research-decision-v2";
+import {discoverStandaloneSources,type StandaloneSourceBinding,type StandaloneSourceScan} from "./standalone-source-context";
 import fs from "node:fs";
 import {createHash} from "node:crypto";
 import {RetrievalObserver,type RetrievalCoverage} from "./investment-retrieval-coverage";
@@ -32,8 +34,8 @@ export interface IdentityHoldDiscovery {
 export interface MacroCoverage {scope:string;subjectEvidence:Coverage;counterEvidence:Coverage}
 type DeclaredDate={status:"DECLARED"|"UNKNOWN";value:string|null};
 export interface ResearchChronology {eventDate:DeclaredDate;publicationDate:DeclaredDate;analysisDate:DeclaredDate;importDate:DeclaredDate}
-export interface Item { researchTrust:SchemaInspection["researchTrust"]; contentSha256:string; path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
-export interface Pack { retrieval:RetrievalCoverage; status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
+export interface Item { sourceBinding?:StandaloneSourceBinding; researchTrust:SchemaInspection["researchTrust"]; contentSha256:string; path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
+export interface Pack { standaloneSources:StandaloneSourceScan[]; retrieval:RetrievalCoverage; status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
 function resolveIssuers(requested:string[],observer:RetrievalObserver):IssuerResolution[]{
   if(!requested.length)return [];
@@ -282,6 +284,10 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
       if(review.bundle.status==="BOUND_SOURCE_REVIEW"&&review.bundle.sourcePath)pool.set(review.bundle.sourcePath,194-i*3);
     }
   }
+  const standalone=discoverStandaloneSources(subjectScopes.filter(s=>s.resolved.some(r=>["exact_existing_title","indexed_alias"].includes(r.status))).map(s=>({contextKey:s.key,
+    labels:[s.key,...s.resolved.map(r=>r.requested),...aliasResolution.filter(r=>r.contextKey===s.key).map(r=>r.requested)]})),[...new Set(researchScans.flatMap(scan=>scan.reviews.map(r=>`00_Inbox/ChatGPT/Investment Intake - ${r.intakeId}.md`)))],observer,judgePolicy,req.intakeId);
+  for(const scan of standalone.scans)for(const reason of scan.reasons)limits.add(`${scan.contextKey}: ${reason}`);
+  for(const path of standalone.bindings.keys())pool.set(path,120);
   const search=(query:string,opts:Parameters<typeof searchVault>[1])=>{
     const result=observer.search("search",query,opts?.folder,()=>searchVault(query,opts,judgePolicy));
     if(result.total>result.hits.length)limits.add("Search window truncated: "+query);
@@ -408,7 +414,7 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
         // FTS cannot bypass failed canonical readback, the scoped read bound,
         // or an explicitly requested intake. Source pairing is receipt-bound.
         if(issuerScoped&&isCanonicalResearchPath(h.path)&&!canonicalReviews.has(h.path))continue;
-        if(issuerScoped&&h.path.startsWith("00_Inbox/ChatGPT/Investment Intake - ")&&!boundSources.has(h.path))continue;
+        if(issuerScoped&&h.path.startsWith("00_Inbox/ChatGPT/Investment Intake - ")&&!boundSources.has(h.path)&&!standalone.bindings.has(h.path))continue;
         const role=roleOf(h.path);
         const scopedIssuerNames=namedIssuers(h.path);
         if(issuers.length && scopedIssuerNames.length &&
@@ -539,10 +545,19 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
         const raw=readNote(row.path).content;
         const current=splitFrontmatter(raw).data;
         if(macroScope&&row.role!=="rules"&&!matchedMacroScopes.some(scope=>explicitMacroScope(row.path,scope,current)))throw Error("macro_scope_readback");
-        const excerpt=selectedLines(raw,searchTerms,Math.min(2000,remaining,macroScope?Math.floor(budget/Math.max(2,macroScopes.length*2)):2000),row.role);
+        const sourceBinding=standalone.bindings.get(row.path);
+        if(sourceBinding&&createHash("sha256").update(raw).digest("hex")!==sourceBinding.sourceSha256)throw Error("standalone_source_selection_changed");
+        const original=sourceBinding?preservedSubmittedText(raw):null;
+        const excerpt=selectedLines(original??raw,searchTerms,Math.min(2000,remaining,macroScope?Math.floor(budget/Math.max(2,macroScopes.length*2)):2000),row.role);
+        if(original!==null){
+          const start=raw.indexOf(original,raw.indexOf("\n## User-supplied original language text\n\n"));
+          const offset=raw.slice(0,start).split("\n").length-1;
+          excerpt.line+=offset;
+          excerpt.excerpt=excerpt.excerpt.replace(/([Ss]ource lines )(\d+)-(\d+)/g,(_,label,a,b)=>label+(Number(a)+offset)+"-"+(Number(b)+offset));
+        }
         if(!excerpt.excerpt.trim()){omitted.push(row.path);return;}
         const historical=canonicalReviews.get(row.path)?.legacy||row.historical||historicalOnly(row.path,splitFrontmatter(raw).data);
-        items.push({contentSha256:createHash("sha256").update(raw).digest("hex"),path:row.path,role:row.role,matchedMacroScopes:matchedMacroScopes.filter(scope=>explicitMacroScope(row.path,scope,current)),evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
+        items.push({...(standalone.bindings.has(row.path)?{sourceBinding:standalone.bindings.get(row.path)}:{}),contentSha256:createHash("sha256").update(raw).digest("hex"),path:row.path,role:row.role,matchedMacroScopes:matchedMacroScopes.filter(scope=>explicitMacroScope(row.path,scope,current)),evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
         if(archivalSelection)historicalCount++;
         if(background)for(const scope of matchedMacroScopes)macroBackgroundCounts.set(scope,(macroBackgroundCounts.get(scope)||0)+1);
         roleCounts.set(row.role,n+1);remaining-=excerpt.excerpt.length;
@@ -623,11 +638,12 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   }
   if(failed.length)incomplete.push("Search failed on terms: "+failed.join(", "));
   return {
-    retrieval,status:"retrieval_only_not_verified",question,issuers:requestedIssuers,issuerResolution,issuerCoverage,identityHoldDiscovery,macroCoverage,researchCoverage,
+    standaloneSources:standalone.scans,retrieval,status:"retrieval_only_not_verified",question,issuers:requestedIssuers,issuerResolution,issuerCoverage,identityHoldDiscovery,macroCoverage,researchCoverage,
     contextBundles:researchScans.flatMap(scan=>scan.reviews.map(review=>review.bundle)),focus,industry:req.industry?.slice(0,140)||null,
     items,considered:rank.length,selected:items.length,excerptChars:budget-remaining,
     incomplete,omitted:omitted.slice(0,15),
     warnings:[
+      "Receipted standalone Sources establish literal mentions of resolved Hub labels only, not primary subject, event equivalence or independent evidence; Source receipts do not authenticate publishers or claims.",
       "Bounded FTS5 lexical discovery, not semantic recall or full Vault coverage. Missing/omitted notes may contain counter-evidence.",
       "Verification fields are note-declared metadata, NOT freshly reverified primary facts. File modified time is NOT event date.",
       "Event/publication/analysis/import dates are separate declarations; missing or invalid dates are UNKNOWN. Nearby relevance scores use declared publication for display ordering only; overlapping/unknown dates do not establish latest or event order.",

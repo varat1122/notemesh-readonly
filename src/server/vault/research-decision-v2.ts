@@ -112,7 +112,7 @@ export const m2VaultReadDeps:M2ReadDeps={
 
 type SourceCheck={path:string;status:"source_quote_bound_not_primary"|"unbound";issues:string[];warnings:string[]};
 const unique=<T>(a:T[])=>[...new Set(a)];
-function preservedSubmittedText(body:string):string|null {
+export function preservedSubmittedText(body:string):string|null {
   const marker="\n## User-supplied original language text\n\n";
   const at=body.indexOf(marker);
   if(at<0||body.indexOf(marker,at+1)>=0)return null;

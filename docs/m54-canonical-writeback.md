@@ -632,3 +632,42 @@ appearance/token arguments), replay denial, fresh recovery, Source preservation,
 forged/expired/wrong-actor packets, concurrent retries and transactional recheck.
 All original event/receipt bytes and protected files remain unchanged in fixtures.
 These simulated results prove enforcement, not fresh LLM reasoning or fact truth.
+
+### N3: receipted standalone Sources in bounded Judge history
+
+Issuer-scoped context can discover an original Source before any Review exists.
+It uses an FTS body query under the exact canonical Source path family, stable
+path order, at most sixteen candidates per resolved issuer and one sentinel.
+Only current, readback-checked Hub titles and unambiguous indexed aliases supply
+query labels. The label must occur as a full identifier in preserved original
+text, not only in publisher/frontmatter/URL. This is **lexical relevance**, not
+proof of a primary subject, issuer/instrument equivalence, claim truth or event
+identity. Multi-issuer mentions remain mentions; semantic attribution is for the
+analyst/Judge. No-URL Sources are eligible without inventing an origin URL.
+
+Admission checks the existing exact create receipt/audit, canonical path/intake,
+physical/index metadata, complete FTS body and original-text digest. It never
+issues a replacement receipt. Receipt-bound chronology and publisher/source URL
+remain attributed declarations. `sourceBinding` describes this provenance and
+keeps `independentEvidenceIncrement=0`, `primaryVerification=not_performed` and
+`economicEventEquivalence=not_established`. Repost appearances do not create extra
+history entries for the same Source path. Already paired Source/Review paths are
+not added again. The original received text supplies the bounded excerpt with
+full-note line/span locations; metadata cannot displace it as the quote anchor.
+
+Attempted read/search/receipt/index failures are operational HOLDs in the existing
+coverage observer. Candidate-window and selection-quota omissions remain explicit
+bounded coverage, not an exhaustive-search assertion or blanket HOLD. Invalid
+in-scope records are never silently trusted. Files outside the canonical family
+and unmentioned issuers cannot contribute this binding. Unrelated changes and
+intentional omissions do not invalidate an unchanged effective selection.
+
+The existing sealed selection manifest, source hashes, issuer witness and shared
+Safe Edit apply-time revalidation protect this history too. Exact own-intake
+writes are excluded using the existing server-owned target/actor/receipt rules
+before discovery bounds. New selected evidence or invalidated bindings require a
+fresh packet/assessment. No new writer, permission, migration or Judge exception
+is introduced. The existing mandatory critic HOLD for material added detail or
+contradiction is unchanged. Mechanical binding tests do not prove semantic
+entailment: orders 100 and pilot shipment 20 are separate input evidence and are
+not automatically summed or declared independent confirmations.

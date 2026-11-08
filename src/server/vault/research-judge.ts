@@ -1,3 +1,4 @@
+import type {StandaloneSourceBinding,StandaloneSourceScan} from "./standalone-source-context";
 /** Chat-first, opt-in semantic review. No model invocation, writes or primary
  * authority. A server seal authenticates packet bytes, NEVER the LLM reasoning. */
 import {RESEARCH_STATE_POLICY,researchTrust,type ResearchTrust} from "./research-state";
@@ -48,7 +49,7 @@ export type JudgeResult=z.infer<typeof judgeResultSchema>;
 /** Exact admitted envelope, including issue time/seal, not just its stable body
  * digest. Binding evidence only; never proof of semantic truth or LLM identity. */
 export const judgeEnvelopeDigest=(packet:JudgeSubmission["packet"])=>judgeHash(stableJudgeJson(packet));
-interface History {researchTrust:ResearchTrust|null;key:string;path:string;sha256:string;excerpt:string;citationSpans:{start:number;end:number;text:string}[];counterEvidence:boolean;use:"historical_context_only"|"unverified_candidate";dates:Record<string,unknown>}
+interface History {sourceBinding?:StandaloneSourceBinding;researchTrust:ResearchTrust|null;key:string;path:string;sha256:string;excerpt:string;citationSpans:{start:number;end:number;text:string}[];counterEvidence:boolean;use:"historical_context_only"|"unverified_candidate";dates:Record<string,unknown>}
 interface HistoryFailure {key:string;path:string;reason:string}
 interface PacketBody {
   researchStatePolicy:typeof RESEARCH_STATE_POLICY;version:string;framework:typeof M2_POLICY;inputDigest:string;reviewDigest:string;
@@ -59,7 +60,7 @@ interface PacketBody {
     inputFormat:string;declaredAccess:string|null;brokerVintage:unknown;attachment:unknown;authority:string};
   claims:{key:string;candidate:unknown}[];relationships:{key:string;candidate:unknown}[];
   proposedThaiReview:unknown;dates:{event:string|null;publication:string|null;analysisAsOf:string|null;analysisCreatedAt:null};
-  scopeWitness:JudgeScope|null;history:History[];coverage:{retrieval:RetrievalCoverage;status:string;incomplete:string[];omitted:string[];issuerResolution:unknown;researchCoverage:unknown;macroCoverage:unknown;
+  scopeWitness:JudgeScope|null;history:History[];coverage:{standaloneSources?:StandaloneSourceScan[];retrieval:RetrievalCoverage;status:string;incomplete:string[];omitted:string[];issuerResolution:unknown;researchCoverage:unknown;macroCoverage:unknown;
     selectedHistory:{status:"readback_complete"|"readback_hold";selected:number;read:number;failures:HistoryFailure[]}};
   citationContract:{format:string;offsets:string;authority:string;declaredLocators:string};
   constraints:string[];trust:{actorLabelSha256:string;actorProvenance:string;session:string;modelVersion:string;judgeIdentity:string};
@@ -91,7 +92,7 @@ export function buildResearchJudgePacket(input:WritebackInput,actor:string){
       const citationSpans=[...new Set(item.excerpt.split(/\r?\n/))].filter(s=>s.trim()).slice(0,64).flatMap(text=>{
         const start=note.content.indexOf(text);return start<0?[]:[{start,end:start+text.length,text}];
       });
-      history.push({researchTrust:researchTrust(item.path,fm),key,path:item.path,sha256:judgeHash(note.content),excerpt:item.excerpt,citationSpans,
+      history.push({...(item.sourceBinding?{sourceBinding:item.sourceBinding}:{}),researchTrust:researchTrust(item.path,fm),key,path:item.path,sha256:judgeHash(note.content),excerpt:item.excerpt,citationSpans,
         counterEvidence:item.counterEvidenceExcerptIncluded,use:item.evidenceUse,
         dates:{event:fm.event_date??null,publication:fm.published_at??null,analysis:fm.analysis_created_at??null,provenance:"declared_not_verified"}});
     }catch{incomplete.push("historical_readback_unavailable");failures.push({key,path:item.path,reason:reason||"readback_failed"});}
@@ -121,7 +122,7 @@ export function buildResearchJudgePacket(input:WritebackInput,actor:string){
     relationships:(clean.entityRoles??[]).map((candidate,i)=>({key:`relationship_${i}`,candidate})),
     proposedThaiReview:clean.researchReview??null,dates:{event:clean.eventDate??null,publication:clean.publicationDate??null,
       analysisAsOf:cutoff??null,analysisCreatedAt:null},scopeWitness,history,
-    coverage:{retrieval:context.retrieval,status:"bounded_not_exhaustive",incomplete:incomplete.slice(0,30),omitted:context.omitted.slice(0,30),
+    coverage:{standaloneSources:context.standaloneSources,retrieval:context.retrieval,status:"bounded_not_exhaustive",incomplete:incomplete.slice(0,30),omitted:context.omitted.slice(0,30),
       issuerResolution:context.issuerResolution,researchCoverage:context.researchCoverage,macroCoverage:context.macroCoverage,
       selectedHistory:{status:failures.length?"readback_hold":"readback_complete",selected:selected.length,read:history.length,failures}},
     citationContract:{format:"utf16:START:END",offsets:"zero_based_end_exclusive_in_exact_received_text_or_full_historical_note",

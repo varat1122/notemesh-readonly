@@ -10,7 +10,7 @@ export const retrievalScopeSchema=z.object({question:z.string().min(3).max(1200)
   issuers:z.array(z.string().max(120)).max(6).optional(),intakeId:z.string().optional(),
   industry:z.string().max(1200).optional(),focus:z.enum(["earnings","broker","tam","macro","thesis","general"]),
   maxNotes:z.number().int().min(5).max(16),maxChars:z.number().int().min(4500).max(18000)}).strict();
-type Stage="issuer_identity"|"literal_discovery"|"canonical_review"|"bound_source"|"macro_counter"|"selection"|"search";
+type Stage="standalone_source"|"issuer_identity"|"literal_discovery"|"canonical_review"|"bound_source"|"macro_counter"|"selection"|"search";
 export const retrievalCoverageSchema=z.object({version:z.literal(1),scope:retrievalScopeSchema,
   status:z.enum(["operational_complete","operational_hold"]),reads:tally,searches:tally,
   selection:tally.extend({selected:count,omitted:count}).strict(),
