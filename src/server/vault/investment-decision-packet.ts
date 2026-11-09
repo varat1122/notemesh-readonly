@@ -1,6 +1,7 @@
 import { buildInvestmentContextPack, type Focus, type Role, type Item, type IssuerResolution, type IssuerCoverage, type ResearchCoverage, type IdentityHoldDiscovery, type MacroCoverage } from "./investment-context";
+import {isGeneratedClaimPath} from "./canonical-claims";
 import type {ContextBundle} from "./investment-research-context";
-import type { IncomingClaim, ClaimReview, Domain, ReviewClass } from "./investment-claim-review";
+import { claimIntegrityCoverage, claimIntegrityWarning, type ClaimIntegrityCoverage, type IncomingClaim, type ClaimReview, type Domain, type ReviewClass } from "./investment-claim-review";
 import { buildEvidenceVerificationLedger, type EvidenceVerificationLedger } from "./evidence-verification-ledger";
 
 /**
@@ -30,8 +31,8 @@ export interface InvestmentDecisionPacket {
   status:"analyst_review_packet_not_verified";
   domain:Domain;entity:string;period:string;originalSource:string;
   evidenceVerificationLedger:EvidenceVerificationLedger;
-  claimGate:{
-    classification:ReviewClass;
+  claimGate:ClaimIntegrityCoverage & {
+    classification:ReviewClass;rawCandidateClassification:ReviewClass;
     exactMetricCandidates:number;
     otherSameEventMetricCandidates:number;
     historicalScanTruncated:boolean;
@@ -144,6 +145,7 @@ function priority(metric:string,stages:Stage[],domain:Domain):string[]{
   return stages.slice(0,3).map(s=>s.id);
 }
 export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimReview):InvestmentDecisionPacket{
+  const integrity=claimIntegrityCoverage(review),classification=integrity.integrityHold?"unresolved":review.classification;
   // Candidate retrieval is read-only. Do not parse or execute note instructions.
   const scoped=buildInvestmentContextPack({
     question:input.statement,
@@ -152,7 +154,9 @@ export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimRe
     focus:input.focus??(input.domain==="macro"?"macro":input.domain==="industry"?"tam":input.domain==="company"?"thesis":"general") as Focus,
     maxNotes:10,maxChars:10000
   });
-  const pointers:ContextRef[]=scoped.items.map(x=>({
+  const validatedPaths=new Set([...review.matchingClaims,...review.relatedEventClaims,...review.possibleHistoricalPaths].map(x=>x.path));
+  const failedPaths=new Set(review.claimBindingHolds.map(x=>x.path));
+  const pointers:ContextRef[]=scoped.items.filter(x=>!failedPaths.has(x.path)&&(!isGeneratedClaimPath(x.path)||validatedPaths.has(x.path))).map(x=>({
     path:x.path,role:x.role,evidenceUse:x.evidenceUse,researchTrust:x.researchTrust,declaredVerification:x.declaredVerification,
     declaredSourceType:x.declaredSourceType,
     declaredEventDate:x.declaredEventDate,declaredPublishedAt:x.declaredPublishedAt,
@@ -170,8 +174,9 @@ export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimRe
   if(!counterHints.length)missing.push("No explicit counter-evidence section was selected; search contrary sources.");
   if(input.domain==="company"&&!thesisPaths.length)
     missing.push("Protected Current Thesis not available in selected historical context; do not infer an endorsed view.");
+  if(integrity.integrityHold)missing.unshift(claimIntegrityWarning(integrity));
   const nextActions=[
-    review.classification==="duplicate_candidate"
+    integrity.integrityHold?claimIntegrityWarning(integrity):review.classification==="duplicate_candidate"
       ?"Check full notes and original documents; treat matching field as an already tracked candidate, not a second independent event."
       :review.classification==="possible_correction_or_contradiction"
       ?"Adjudicate the apparent numeric/source discrepancy against the original document and correction chronology before analysis."
@@ -189,20 +194,20 @@ export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimRe
     domain:input.domain,entity:input.entity,period:input.period,originalSource:input.originalSource,
     evidenceVerificationLedger:buildEvidenceVerificationLedger(input,review),
     claimGate:{
-      classification:review.classification,exactMetricCandidates:review.matchingClaims.length,
+      ...integrity,classification,rawCandidateClassification:review.classification,exactMetricCandidates:review.matchingClaims.length,
       otherSameEventMetricCandidates:review.relatedEventClaims.length,
       historicalScanTruncated:review.metadataScan.truncated,
       externalPrimaryVerification:"not_performed",sourceIndependence:"not_assessed"
     },
     historicalContext:{
-      retrieval:"bounded_lexical_only",selected:scoped.selected,considered:scoped.considered,
+      retrieval:"bounded_lexical_only",selected:pointers.length,considered:scoped.considered,
       issuerResolution:scoped.issuerResolution,issuerCoverage:scoped.issuerCoverage,
       researchCoverage:scoped.researchCoverage,contextBundles:scoped.contextBundles,
       identityHoldDiscovery:scoped.identityHoldDiscovery,macroCoverage:scoped.macroCoverage,
       sourcePointers:pointers,noteDeclaredPrimaryCandidates:primaryCandidates,
       primaryVerification:{status:"not_performed",serverVerifiedPrimaryPaths:[],gap:"exact_scope_pev_validation_required"},
       protectedThesisPaths:thesisPaths,historicalThesisOwnerApproval:"not_established",
-      missing,truncatedOrOmitted:scoped.omitted.length>0 || pointers.some(p=>p.truncated)
+      missing,truncatedOrOmitted:pointers.length<scoped.items.length || scoped.omitted.length>0 || pointers.some(p=>p.truncated)
     },
     businessTransmission:{
       status:"not_assessed",scope:input.domain,
@@ -226,12 +231,13 @@ export function buildInvestmentDecisionPacket(input:IncomingClaim,review:ClaimRe
     changeLogDraft:{
       status:"draft_not_approved_or_written",eventDate:input.eventDate??null,
       publishedAt:input.publishedAt??null,reviewDate:null,
-      classification:review.classification,originalSource:input.originalSource,
+      classification,originalSource:input.originalSource,
       entity:input.entity,metric:input.metric,period:input.period,
       matchedClaimIds:[...new Set(review.matchingClaims.flatMap(x=>x.claimId?[x.claimId]:[]))].slice(0,12),
       sourcePaths:[...new Set([...review.matchingClaims.map(x=>x.path),
         ...review.sourceLinkedUnstructuredPaths,...thesisPaths,...primaryCandidates])].slice(0,16),
       requiredBeforeWrite:[
+        ...(integrity.integrityHold?[claimIntegrityWarning(integrity)]:[]),
         "External primary source verification + event/metric/period/source dedup",
         "Full historical Thesis/Evidence Register read and counter-evidence assessment",
         "Explicit analyst hypothesis with causal impact, confidence and invalidation",

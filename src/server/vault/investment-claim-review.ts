@@ -61,6 +61,24 @@ export interface ClaimReview {
   canAutoUpdateThesis:false;
   caveats:string[];
 }
+/** Shared read-consumer projection. A candidate classification never cancels
+ * incomplete history; not_checked is distinct from an inspected bounded scan. */
+export interface ClaimIntegrityCoverage {
+  coverage:ClaimReview["metadataScan"]["coverage"]|"not_checked";
+  integrityHoldCount:number|null;integrityHoldsTruncated:boolean|null;
+  integrityHold:boolean|null;
+  integrityReason:"unknown_scope_claim_binding_hold"|"historical_claim_coverage_incomplete"|null;
+}
+export function claimIntegrityCoverage(review?:ClaimReview):ClaimIntegrityCoverage{
+  if(!review)return {coverage:"not_checked",integrityHoldCount:null,integrityHoldsTruncated:null,integrityHold:null,integrityReason:null};
+  const s=review.metadataScan,hold=s.coverage==="incomplete"||s.integrityHoldCount>0||s.integrityHoldsTruncated||s.truncated;
+  return {coverage:hold?"incomplete":s.coverage,integrityHoldCount:s.integrityHoldCount,integrityHoldsTruncated:s.integrityHoldsTruncated,
+    integrityHold:hold,integrityReason:hold?s.integrityHoldCount>0?"unknown_scope_claim_binding_hold":"historical_claim_coverage_incomplete":null};
+}
+export function claimIntegrityWarning(c:ClaimIntegrityCoverage):string{
+  return (c.integrityReason==="unknown_scope_claim_binding_hold"?"Unknown-scope integrity HOLD":"Historical claim coverage HOLD")+
+    ": incomplete history cannot establish novelty, duplication or contradiction resolution; retain valid rows only as unadjudicated candidates.";
+}
 const trim=(x:string)=>x.trim().normalize("NFC");
 const norm=(x:string)=>trim(x).toLowerCase().replace(/\s+/g," ");
 function sourceKey(src:string){

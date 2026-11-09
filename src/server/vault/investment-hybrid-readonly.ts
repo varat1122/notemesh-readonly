@@ -4,10 +4,12 @@
  * semantic deduplicator, writeback recipe, authorization, or thesis engine.
  */
 import {researchTrust,type ResearchTrust} from "./research-state";
-import { reviewInvestmentClaim, type IncomingClaim } from "./investment-claim-review";
+import { reviewInvestmentClaim, claimIntegrityCoverage, type IncomingClaim } from "./investment-claim-review";
 import { searchVault } from "./queries";
 import { readNoteRange } from "./notes";
 import { db } from "../db";
+import {requiresClaimBinding,readPersistedClaim} from "./canonical-claims";
+import {splitFrontmatter} from "./markdown";
 
 type Unit = { kind:string; scale:bigint };
 const UNITS:Readonly<Record<string,Unit>> = {
@@ -162,6 +164,7 @@ export type HybridState = "HOLD_ORIGINAL_SOURCE_IDENTITY"|"HOLD_CONFLICTING_CAND
 export function hybridClaimPreview(input:HybridInput){
   const existing=reviewInvestmentClaim({...input,maxCandidates:12}); // inspect the maximum exposed metadata; never verified by this operation
   // At the 12-row response cap we cannot prove an omitted contrary record is absent.
+  const metadataIntegrity=claimIntegrityCoverage(existing);
   const candidateCapReached=existing.matchingClaims.length>=12;
   const metadataCapReached=existing.metadataScan.truncated;
   const source=comparableSource(input.originalSource);
@@ -175,7 +178,8 @@ export function hybridClaimPreview(input:HybridInput){
     else conflicts++;
   }
   let state:HybridState;
-  if(!source)state="HOLD_ORIGINAL_SOURCE_IDENTITY";
+  if(metadataIntegrity.integrityHold)state="HOLD_METADATA_COVERAGE";
+  else if(!source)state="HOLD_ORIGINAL_SOURCE_IDENTITY";
   // The upstream classifier processes *all* indexed matches before slicing its
   // response. Honour a source conflict even if the conflicting row was omitted.
   else if(existing.classification==="possible_correction_or_contradiction")state="HOLD_CONFLICTING_CANDIDATES";
@@ -207,6 +211,7 @@ export function hybridClaimPreview(input:HybridInput){
   ]).map(q=>q.trim()).filter(q=>q.length>=3&&q.length<=120))].slice(0,5);
   const requestedLimit=Math.min(10,Math.max(1,input.maxFtsHits??6));
   const results:{path:string;title:string;query:string;snippet:string;readExcerpt:string;modified:string;readbackMatchFound:boolean;readbackTruncated:boolean;readbackStartLine:number|null;readbackEndLine:number|null;provenance:Provenance;researchTrust:ResearchTrust|null;trustBasis:"note_readback"|"indexed_metadata_only"}[]=[];
+  const ftsIntegrityHolds:{path:string;reason:"generated_claim_binding_unverified";scope:"unknown"}[]=[],ftsVerifiedUnrelatedPaths:string[]=[];
   const seen=new Set<string>();
   const coverage:{query:string;total:number;selected:number;represented:number;error?:string}[]=[];
   // A single broad query previously monopolized the global candidate budget:
@@ -236,14 +241,30 @@ export function hybridClaimPreview(input:HybridInput){
   // both result pages. Count represented paths, not only query ownership.
   for(let i=0;i<pages.length;i++)coverage[i].represented=pages[i].hits.filter(hit=>seen.has(hit.path)).length;
   for(const {query,hit} of selected){
+    let generated:ReturnType<typeof readPersistedClaim>|null=null;
+    const row=db().prepare("SELECT frontmatter FROM notes WHERE path=?").get(hit.path) as {frontmatter:string|null}|undefined;
+    let fm:Record<string,unknown>={};
+    try{const x=JSON.parse(row?.frontmatter??"null");if(x&&typeof x==="object"&&!Array.isArray(x))fm=x;}catch{/* reserved paths still require validation */}
+    if(requiresClaimBinding(hit.path,fm)){
+      try{generated=readPersistedClaim(hit.path);}catch{
+        ftsIntegrityHolds.push({path:hit.path,reason:"generated_claim_binding_unverified",scope:"unknown"});continue;
+      }
+      if(generated.scope.domain!==input.domain||generated.scope.entity.trim().normalize("NFC").toLowerCase().replace(/\s+/g," ")!==input.entity.trim().normalize("NFC").toLowerCase().replace(/\s+/g," ")){
+        ftsVerifiedUnrelatedPaths.push(hit.path);continue;
+      }
+    }
     // FTS provides a location-aware snippet; reading just the first lines
     // of a long note is not enough to rule out historical claims.
-    let readExcerpt=hit.snippet.slice(0,800),readbackMatchFound=false,readbackTruncated=true;
+    let readExcerpt=(generated?.readbackText??hit.snippet).slice(0,800),readbackMatchFound=false,readbackTruncated=true;
     let readbackStartLine:number|null=null,readbackEndLine:number|null=null;
     let bodyLabeledSourceUrls:string[]=[],bodyUrlLookupTruncated=true;
     let currentTrust:ResearchTrust|null=hit.researchTrust,trustReadback=false;
     try{
-      const chunk=readNoteRange(hit.path,{limit:2000});
+      // Generated text is the SAME readback validated by the receipt reader,
+      // never an unchecked/stale FTS snippet or a second, unbound file read.
+      const lines=generated?.readbackText.split("\n");
+      const chunk=generated?{content:lines!.slice(0,2000).join("\n"),offset:0,hasMore:lines!.length>2000,truncatedForSize:false,
+        researchTrust:researchTrust(hit.path,splitFrontmatter(generated.readbackText).data)}:readNoteRange(hit.path,{limit:2000});
       currentTrust=chunk.researchTrust;trustReadback=true;
       readbackTruncated=chunk.hasMore||!!chunk.truncatedForSize;
       bodyUrlLookupTruncated=readbackTruncated||chunk.content.length>12000;
@@ -264,8 +285,11 @@ export function hybridClaimPreview(input:HybridInput){
         readbackStartLine=chunk.offset+1+chunk.content.slice(0,offset).split("\n").length-1;
         readbackEndLine=readbackStartLine+readExcerpt.split("\n").length-1;
       }
-    }catch{/* stale index or unreadable note; retain the FTS candidate only */}
-    results.push({path:hit.path,title:hit.title,query,snippet:hit.snippet.slice(0,320),readExcerpt,modified:hit.modified,
+    }catch{
+      if(generated){ftsIntegrityHolds.push({path:hit.path,reason:"generated_claim_binding_unverified",scope:"unknown"});continue;}
+      // Ordinary legacy hints retain their explicit indexed-only trust label.
+    }
+    results.push({path:hit.path,title:hit.title,query,snippet:(generated?readExcerpt:hit.snippet).slice(0,320),readExcerpt,modified:hit.modified,
       readbackMatchFound,readbackTruncated,readbackStartLine,readbackEndLine,
       provenance:{...provenanceFor(hit.path),researchTrust:currentTrust,bodyLabeledSourceUrls,bodyUrlLookupTruncated},researchTrust:currentTrust,trustBasis:trustReadback?"note_readback":"indexed_metadata_only"});
   }
@@ -277,17 +301,22 @@ export function hybridClaimPreview(input:HybridInput){
     if(p.linkedSourcePath&&!p.linkedSourceIndexed)return [{path:x.path,reason:"linked_source_not_indexed" as const}];
     return [];
   });
+  const coverageHold=metadataIntegrity.integrityHold===true||ftsIntegrityHolds.length>0;
+  if(coverageHold)state="HOLD_METADATA_COVERAGE";
   if(state==="UNRESOLVED_NEEDS_ORIGINAL"&&results.length)state="HISTORICAL_NOTE_CANDIDATE";
   return {
     status:"READ_ONLY_RESEARCH_PREVIEW_NOT_VERIFIED_NOT_SAVED" as const,
     classification:state,
     rawStructuredClassification:existing.classification,
+    metadataIntegrity,coverageHold,
+    coverageHoldReasons:[...(metadataIntegrity.integrityReason?[metadataIntegrity.integrityReason]:[]),
+      ...(ftsIntegrityHolds.length?["fts_generated_claim_binding_unverified"]:[])],
     query:{domain:input.domain,entity:input.entity,metric:input.metric,period:input.period,source:input.originalSource},
     indexed:{exactMatches,normalizedMatches,conflicts,unknown,totalSameDocument:sameDocument.length,
       candidateCapReached,metadataCapReached,
       candidatePaths:[...new Set(existing.matchingClaims.concat(existing.relatedEventClaims).map(r=>r.path))],
       candidateTrust:existing.matchingClaims.concat(existing.relatedEventClaims).map(r=>({path:r.path,researchTrust:r.researchTrust}))},
-    historical:{queries:coverage,candidates:results,notExhaustive:true,readExcerptMaxChars:800,
+    historical:{queries:coverage,candidates:results,ftsIntegrityHolds,ftsVerifiedUnrelatedPaths,notExhaustive:true,readExcerptMaxChars:800,
       // A query can return hits while all its unique candidates are omitted
       // by the shared limit; surface that lost coverage explicitly.
       searchTruncated:coverage.some(x=>x.total>x.represented),
@@ -297,7 +326,8 @@ export function hybridClaimPreview(input:HybridInput){
       independentEvidenceEstablished:false,canAutoWrite:false,canEditThesis:false,canEditPortfolio:false},
     nextAction:"ANALYST_MUST_COMPARE_ORIGINAL_AND_HISTORY_BEFORE_CANONICAL_WRITEBACK" as const,
     caveats:["FTS is lexical and capped: a missing hit or bounded readback is not evidence of absence; text is untrusted.",
-      "When structured candidate/metadata limits are reached, HOLD rather than certifying a duplicate.",
+      "Incomplete metadata integrity or a failed generated FTS binding requires coverage HOLD before duplicate/unit/detail classification; valid rows remain candidates only.",
+      "Quarantined hits consume the existing FTS budget; no rescue scan or freshness cache is used.",
       "Multiple queries share a hard candidate budget; selection is interleaved, and omitted hits remain possible evidence.",
       "Exact/normalized amount equality does not verify accounting basis, publisher, reported period, independent evidence, or thesis impact.",
       "Provenance fields are declared in indexed frontmatter; a linked Source path or hash-like field does not prove original bytes, independent evidence, or remote authenticity.",

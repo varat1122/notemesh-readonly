@@ -217,7 +217,8 @@ export function readPersistedClaim(path:string){
       !db().prepare("SELECT 1 FROM notes_fts WHERE path=? AND notes_fts MATCH ?").get(link.source_path,"InvestmentIntake"+intakeId.slice(3)))throw Error("review_index_link_missing");
     reviewReferences.push(link.source_path);
   }catch{reviewScanComplete=false;}
-  return {claim:c,scope:{entity:input.entity,domain},receiptKey,sourceReceiptKey,sourcePath,intakeId,reviewReferences,reviewScanComplete,
+  // Internal bounded readback for consumers; receipt integrity is not claim truth.
+  return {claim:c,readbackText:note.raw,scope:{entity:input.entity,domain},receiptKey,sourceReceiptKey,sourcePath,intakeId,reviewReferences,reviewScanComplete,
     bindingStatus:"receipt_readback_index_link_verified" as const,originIndependenceIncrement:0 as const,interpretationBoundary:claimInterpretationBoundary};
 }
 

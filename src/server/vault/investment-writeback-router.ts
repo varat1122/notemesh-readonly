@@ -9,7 +9,7 @@ import { readNote } from "./notes";
 import {canonicalHttpSourceUrl as canonicalSourceUrl} from "../source-url";
 import { db } from "../db";
 import { buildInvestmentContextPack, type Focus, type IdentityHoldDiscovery } from "./investment-context";
-import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
+import { reviewInvestmentClaim, claimIntegrityCoverage, claimIntegrityWarning, type ClaimIntegrityCoverage, type Domain, type ReviewClass } from "./investment-claim-review";
 import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
 import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTag,
   type BrokerUpdate } from "./investment-routing-v2";
@@ -105,7 +105,7 @@ export interface WritebackPlan {
     scanTruncated:boolean;
     duplicateAdjudicated:false;
   };
-  exactClaimReview:{status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
+  exactClaimReview:ClaimIntegrityCoverage & {status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
     classification:ReviewClass|null;matchingClaimPaths:string[];scanTruncated:boolean|null};
   routingV2:RoutingV2;
   safeEditWorkflow?:CanonicalSafeEditWorkflow;
@@ -268,17 +268,20 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const claimReady=Boolean(claim&&T(claim.metric)&&T(claim.period)&&T(claim.statement).length>=8&&
     claim.value?.trim()&&claim.unit?.trim()&&input.sourceUrl?.trim()&&entities.length===1);
   let classification:ReviewClass|null=null,matched:string[]=[],truncated:boolean|null=null;
+  let integrity=claimIntegrityCoverage();
   if(claimReady&&claim){
     const c=reviewInvestmentClaim({
       domain:input.domain,entity:entities[0],metric:claim.metric,period:claim.period,
       statement:claim.statement,originalSource:input.sourceUrl!,value:claim.value,unit:claim.unit,
       eventDate, publishedAt:publicationDate,focus,maxCandidates:8
     });
-    classification=c.classification;
+    integrity=claimIntegrityCoverage(c);
+    classification=integrity.integrityHold?"unresolved":c.classification;
     matched=[...new Set(c.matchingClaims.map(x=>x.path))].slice(0,8);
     truncated=c.metadataScan.truncated;
   }
-  const duplicates=classification==="duplicate_candidate";
+  const integrityHold=integrity.integrityHold===true;
+  const duplicates=!integrityHold&&classification==="duplicate_candidate";
   const warnings=[
     "Input and any source labels are user/analyst supplied; no issuer, broker report, translation or number independently verified.",
     "Input language is only caller-declared; do not silently translate, paraphrase or claim unreadable screenshot portions were extracted.",
@@ -287,6 +290,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     "Dates are supplied, not inferred from the chat date. Owner-approved thesis and market price-in require separate evidence.",
     "Historical pointers are bounded lexical discovery; missed prior broker PTs, same-event reposts and counter-evidence remain possible."
   ];
+  if(integrityHold)warnings.unshift(claimIntegrityWarning(integrity));
   if(input.sourceKind==="broker_research")
     warnings.push("Broker model/version dedup requires exact bank, report date, prior same-bank PT, EPS vintage and actual report; 'reiterates' is not a new PT raise.");
   if(routingV2.unresolvedEntities.length||routingV2.unresolvedThemes.length)
@@ -307,16 +311,16 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const routes:Route[]=[
     {kind:"raw_input",action:rawExists?"link_existing_or_hold":"candidate_create",path:rawPath,
       reason:rawExists?"A note with the deterministic intake ID already exists; inspect identity/hash before linking.":"Preserve exact supplied text and attribution with a traceable link to actual image/PDF if available.",requiresReview:true},
-    {kind:"research_review",action:reviewExists?"link_existing_or_hold":"candidate_create",path:reviewPath,
-      reason:candidateEventPaths.length?
+    {kind:"research_review",action:reviewExists||integrityHold?"link_existing_or_hold":"candidate_create",path:reviewPath,
+      reason:integrityHold?claimIntegrityWarning(integrity):candidateEventPaths.length?
         "Possible prior event research exists: inspect original source, event date, metric and period before creating a distinct analysis; never count reposts twice.":
         "Separate sourced statements, user input, broker/management commentary, AI interpretation, contrary evidence, event chronology and thesis delta.",requiresReview:true}
   ];
   if(timelinePath)
     routes.push({kind:"company_timeline_candidate",
-      action:timelineExists&&!duplicates&&!timelineRecorded&&!sameSourceEvent?"candidate_append_after_review":"link_existing_or_hold",
+      action:timelineExists&&!integrityHold&&!duplicates&&!timelineRecorded&&!sameSourceEvent?"candidate_append_after_review":"link_existing_or_hold",
       path:timelinePath,requiresReview:true,
-      reason:timelineRecorded?"Intake ID already recorded in this Timeline; do not append the same text a second time.":
+      reason:integrityHold?claimIntegrityWarning(integrity):timelineRecorded?"Intake ID already recorded in this Timeline; do not append the same text a second time.":
         sameSourceEvent?"Same declared issuer, event date, and original source URL already referenced by existing notes: inspect candidatePaths and do NOT add a new Timeline event until source-level adjudication.":
         duplicates?"Exact numeric claim duplicate candidate: link existing event, no repeated timeline proof.":
         timelineExists?"Timeline exists; append only when dated source/event dedup and materiality confirmed; include <!-- investment-intake:"+planId+" --> in the approved append for idempotent retries.":
@@ -325,13 +329,13 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     path:routingV2.industryHubs.length===1?routingV2.industryHubs[0].path:null,requiresReview:true,
     reason:"Multi-issuer, non-ticker or macro item: use existing indexed Industry/Macro hubs only after dated source/event review; this is a link candidate, not an auto-append."});
   if(claimReady&&!duplicates&&!input.claims)
-    routes.push({kind:"claim_registry_candidate",action:"candidate_create",path:null,requiresReview:true,
-      reason:"Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
+    routes.push({kind:"claim_registry_candidate",action:integrityHold?"link_existing_or_hold":"candidate_create",path:null,requiresReview:true,
+      reason:integrityHold?claimIntegrityWarning(integrity):"Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
   const needed=[
     "Preserve user text verbatim in a non-protected raw intake note using separately authorized Safe Edit and verify its receipt.",
     verifiedAttachment?"Link the hash-verified original user attachment in the raw intake note; preserve original language and distinguish source attribution.":"For screenshot/PDF, archive its actual bytes with Safe Edit store_user_attachment and inspect it before claiming raw attachment preservation.",
     "Read selected historical notes in full; confirm same event, same broker/model vintage, report date, primary provenance and conflicting evidence.",
-    duplicates?"Link the already registered matching Claim ID; do not add a second structured metric or mark an old event as new.":
+    integrityHold?claimIntegrityWarning(integrity):duplicates?"Link the already registered matching Claim ID; do not add a second structured metric or mark an old event as new.":
       "Resolve duplicate/new/added_detail/correction/unresolved before writing an event or new structured claim.",
     "Draft independent research analysis in the same input language where appropriate, using clearly attributed source and AI interpretation.",
     "Preview/approve/apply one non-protected write at a time; verify readback, reindex, links, retry identity and rollback capability.",
@@ -364,7 +368,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
         "same_explicit_unscoped_event_date_and_canonical_source_url",
       scanTruncated:sourceMatches.scanTruncated,duplicateAdjudicated:false
     },
-    exactClaimReview:{status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
+    exactClaimReview:{...integrity,status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
     routingV2,
     routes,gates:{

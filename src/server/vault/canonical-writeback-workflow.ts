@@ -291,6 +291,14 @@ export function buildCanonicalSafeEditWorkflow(
     if(step.state==="verified_existing")try{readPersistedClaim(c.path);}catch{step.state="hold_index_repair";step.safeEditRequest=null;claimIssues.push("claim_receipt_readback_index_link_unverified");}
     return step;
   });
+  // Only an actually checked, incomplete claim history blocks a pending
+  // evidence-dependent recipe. Source capture and historical receipts remain independent.
+  const historyBlocked=plan.exactClaimReview.integrityHold===true&&
+    [reviewStep,...claimSteps].some(s=>s?.state==="needs_create");
+  if(historyBlocked){
+    claimIssues.push("historical_claim_integrity_hold");
+    for(const step of [reviewStep,...claimSteps])if(step?.state==="needs_create"){step.state="hold_claim_gate";step.safeEditRequest=null;}
+  }
   const claimHeld=claimSteps.some(s=>s.state!=="needs_create"&&s.state!=="verified_existing");
   if(reviewStep&&claimHeld){if(reviewStep.state==="needs_create"||reviewStep.state==="verified_existing")reviewStep.state="hold_claim_gate";reviewStep.safeEditRequest=null;}
   if(reviewStep?.state==="verified_existing")for(const c of claimNotes){
@@ -309,7 +317,7 @@ export function buildCanonicalSafeEditWorkflow(
   const archiveState=reviewStep?.state==="hold_archive_drift"||reviewStep?.state==="hold_archive_provenance"?reviewStep.state:null;
   return {
     version:"M5.3-recipe",status:lineageIssues.length?"hold_review_lineage":blocked?"hold_conflict_or_index":
-      (reviewHeld||claimSteps.some(s=>s.state==="hold_event_review"))&&claimHeld?"hold_source_event_review":claimHeld?"hold_claim_persistence":captureOnly?(saved?"source_saved_analysis_pending":"pending_source_capture"):
+      (reviewHeld||claimSteps.some(s=>s.state==="hold_event_review"))&&claimHeld?"hold_source_event_review":claimHeld||historyBlocked?"hold_claim_persistence":captureOnly?(saved?"source_saved_analysis_pending":"pending_source_capture"):
       archiveState??(qualityHeld?"hold_research_quality":
       saved?"saved_verified":
       reviewHeld?"hold_source_event_review":"pending_safe_edit"),

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
+import { reviewInvestmentClaim, claimIntegrityCoverage, claimIntegrityWarning, type ClaimIntegrityCoverage, type Domain, type ReviewClass } from "./investment-claim-review";
 import { findSourceObservationReceipts, type SourceReceiptGateResult } from "./source-observation-receipt";
 import { inspectOriginalSourceHistory } from "../research-source-archive";
 
@@ -56,6 +56,7 @@ export interface ThesisProposalQualityResult {
   warnings:string[];
   sourceAttestation:"analyst_assertion_not_independently_verified";
   historicalClaimClassification:ReviewClass;
+  historicalIntegrity:ClaimIntegrityCoverage;
   evidenceClaimsCheckedForScope:number;
   sourceReceiptGate:{status:"receipt_metadata_and_excerpt_integrity_only";validReceipts:number;rejectedReceipts:number;receiptPaths:string[];externalSourceFetchedThisCall:false;sourceDocumentBytesArchivedAndVerified:false;receiptReviewerIdentityCryptographicallyVerified:false};
   sourceByteArchive:{status:"not_archived"|"stored_byte_history_unverified";
@@ -198,6 +199,10 @@ export function assessThesisProposal(input:ThesisProposalInput):ThesisProposalQu
     statement:input.statement,originalSource:input.originalSource,
     value:input.value,unit:input.unit,eventDate:input.eventDate,publishedAt:input.publishedAt
   });
+  const historicalIntegrity=claimIntegrityCoverage(classify);
+  if(historicalIntegrity.integrityHold){
+    const warning=claimIntegrityWarning(historicalIntegrity);warnings.push(warning);issue(warning);
+  }
   if(classify.classification==="possible_correction_or_contradiction")
     issue("Indexed source/metric conflict is unresolved; reconcile original document and correction vintage.");
   if(classify.metadataScan.truncated)
@@ -216,7 +221,7 @@ export function assessThesisProposal(input:ThesisProposalInput):ThesisProposalQu
     readiness:ready?"ready_for_owner_review_not_approved":"blocked_missing_evidence",
     blockers,warnings,
     sourceAttestation:"analyst_assertion_not_independently_verified",
-    historicalClaimClassification:classify.classification,
+    historicalClaimClassification:historicalIntegrity.integrityHold?"unresolved":classify.classification,historicalIntegrity,
     evidenceClaimsCheckedForScope:scoped,
     sourceReceiptGate:{status:"receipt_metadata_and_excerpt_integrity_only",
       validReceipts:receiptRows.length,rejectedReceipts:receiptRejects.length,
