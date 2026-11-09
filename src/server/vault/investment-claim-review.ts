@@ -1,7 +1,7 @@
 import {researchTrust,type ResearchTrust} from "./research-state";
 import {canonicalHttpSourceUrl} from "../source-url";
 import { db } from "../db";
-import {readPersistedClaim,type IntakeClaim} from "./canonical-claims";
+import {readPersistedClaim,requiresClaimBinding,type IntakeClaim} from "./canonical-claims";
 import {dimensionKey,estimateIdentityComplete,type ClaimDimensions} from "./claim-dimensions";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 
@@ -110,22 +110,31 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   const claimBindingHolds:ClaimReview["claimBindingHolds"]=[];
   const sourceLinkedUnstructuredPaths:string[]=[];
   const MAX_METADATA_SCAN=25000;
-  const indexedNotesWithMetadata=(db().prepare("SELECT COUNT(*) AS n FROM notes WHERE frontmatter IS NOT NULL").get() as {n:number}).n;
-  const rows=db().prepare("SELECT path, frontmatter FROM notes WHERE frontmatter IS NOT NULL ORDER BY path LIMIT ?")
+  const indexedNotesWithMetadata=(db().prepare("SELECT COUNT(*) AS n FROM notes WHERE frontmatter IS NOT NULL OR path GLOB '10_Knowledge/*/Investment Claim - ICL-*.md'").get() as {n:number}).n;
+  const rows=db().prepare("SELECT path, frontmatter FROM notes WHERE frontmatter IS NOT NULL OR path GLOB '10_Knowledge/*/Investment Claim - ICL-*.md' ORDER BY path LIMIT ?")
     .all(MAX_METADATA_SCAN) as IndexedRow[];
+  const matchesSource=(x:StructuredRecord)=>x.originalSource?sourceKey(x.originalSource)===sourceKey(originalSource):
+    x.persistence==="receipt_readback_index_link_verified"&&x.sourceBinding?.origin==="received_user_source"&&x.sourcePath===originalSource;
   let eligibleEntityNotes=0;
   for(const row of rows){
     let fm:Record<string,unknown>;
-    try{fm=JSON.parse(row.frontmatter??"null") as Record<string,unknown>}catch{continue;}
-    // An audit receipt is not a new issuer claim or independent evidence.
-    // It may repeat the exact same value and URL solely to document a check.
-    // Exclude it from Claim classification; the dedicated receipt gate handles it.
-    if(fm?.type==="primary_source_verification_receipt")continue;
-    if(!fm||typeof fm!=="object"||Array.isArray(fm)||!sameEntity(fm,input))continue;
-    if(fm.claim_persistence_version!==undefined&&fm.domain!==input.domain)continue;
+    try{const parsed=JSON.parse(row.frontmatter??"null");fm=parsed&&typeof parsed==="object"&&!Array.isArray(parsed)?parsed:{};}catch{fm={};}
+    const bound=requiresClaimBinding(row.path,fm);
+    // Audit receipts are not issuer claims. A caller-declared receipt type must
+    // not suppress validation of the reserved generated path or received markers.
+    if(!bound&&fm.type==="primary_source_verification_receipt")continue;
+    if(!sameEntity(fm,input)){
+      const identities=[fm,...(Array.isArray(fm.claims)?fm.claims:[])].filter(x=>x&&typeof x==="object"&&!Array.isArray(x));
+      const hasIdentity=identities.some(x=>[x.entity,x.ticker,x.canonical_entity,x.issuer,x.country,x.industry,x.asset]
+        .flatMap(v=>Array.isArray(v)?v:[v]).some(v=>stringOrNull(v)!==null));
+      // Missing identity cannot be used to hide a corrupt generated note. Keep
+      // unknown scope explicit; known other entities stay outside this query.
+      if(!bound||(!identities.some(x=>sameEntity(x,input))&&hasIdentity))continue;
+    }
+    if(bound&&fm.domain!==undefined&&fm.domain!==input.domain)continue;
     eligibleEntityNotes++;
     let persisted:ReturnType<typeof readPersistedClaim>|null=null;
-    if(fm.claim_persistence_version!==undefined)try{persisted=readPersistedClaim(row.path);}catch{
+    if(bound)try{persisted=readPersistedClaim(row.path);}catch{
       if(claimBindingHolds.length<12)claimBindingHolds.push({path:row.path,reason:"claim_receipt_readback_index_link_unverified"});continue;
     }
     const noteSource=stringOrNull(fm.original_source)||stringOrNull(fm.source_url)||stringOrNull(fm.primary_url);
@@ -155,7 +164,7 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
       }
       if(!v||norm(v.period)!==norm(period))continue;
       hasComparableStructuredRecord=true;
-      if(norm(v.metric)!==norm(metric)&&(!v.originalSource||sourceKey(v.originalSource)!==sourceKey(originalSource)))continue;
+      if(norm(v.metric)!==norm(metric)&&!matchesSource(v))continue;
       selected.push(v);
     }
     // A Note with a matching primary URL but no comparable claim is worth a
@@ -166,8 +175,6 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
     }
   }
   const strict=selected.filter(x=>norm(x.metric)===norm(metric));
-  const matchesSource=(x:StructuredRecord)=>x.originalSource?sourceKey(x.originalSource)===sourceKey(originalSource):
-    x.persistence==="receipt_readback_index_link_verified"&&x.sourceBinding?.origin==="received_user_source"&&x.sourcePath===originalSource;
   const sameSource=strict.filter(matchesSource);
   const matchedSourceSamePeriodOtherMetric=selected.filter(x=>norm(x.metric)!==norm(metric)&&matchesSource(x));
   const otherSource=strict.filter(x=>x.originalSource&&sourceKey(x.originalSource)!==sourceKey(originalSource));

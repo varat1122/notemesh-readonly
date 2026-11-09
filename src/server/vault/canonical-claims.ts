@@ -152,11 +152,21 @@ export function planClaimNotes(input:WritebackInput,intakeId:string,sourcePath:s
   return [...records.values()].sort((a,b)=>a.id.localeCompare(b.id));
 }
 
-/** Fresh binding witness for generated claims only. Never initialize receipts. */
-export function readPersistedClaim(path:string){
-  if(!/^10_Knowledge\/(Company Research|Industry and Concepts|Macro and Markets)\/Investment Claim - ICL-[A-F0-9]{32}\.md$/.test(path))throw Error("claim_path_invalid");
-  const note=indexedRead(path),fm=note.fm,claims=fm.claims as Record<string,unknown>[];
-  if(fm.type!=="investment_structured_claim_register"||!["RI001-1","RI001-2","RI001-3"].includes(String(fm.claim_persistence_version))||!Array.isArray(claims)||claims.length!==1)throw Error("claim_metadata_invalid");
+/** Reserved generated identity is independent of caller-declared type/version.
+ * Ordinary unversioned historical notes outside this namespace remain readable. */
+export const isGeneratedClaimPath=(path:string)=>/^10_Knowledge\/(Company Research|Industry and Concepts|Macro and Markets)\/Investment Claim - ICL-[A-F0-9]{32}\.md$/.test(path);
+function hasReceivedClaimMarkers(fm:Record<string,unknown>):boolean{
+  const marked=(x:Record<string,unknown>)=>x.origin==="received_user_source"||Object.hasOwn(x,"source_binding");
+  return marked(fm)||(Array.isArray(fm.claims)&&fm.claims.some(c=>c&&typeof c==="object"&&!Array.isArray(c)&&marked(c)));
+}
+export const requiresClaimBinding=(path:string,fm:Record<string,unknown>)=>
+  isGeneratedClaimPath(path)||Object.hasOwn(fm,"claim_persistence_version")||hasReceivedClaimMarkers(fm);
+/** Shared identity validation for admission and retrieval. No I/O or receipts. */
+function claimMetadata(path:string,fm:Record<string,unknown>){
+  if(!isGeneratedClaimPath(path))throw Error("claim_path_invalid");
+  const claims=fm.claims as Record<string,unknown>[];
+  if(fm.type!=="investment_structured_claim_register"||!["RI001-1","RI001-2","RI001-3"].includes(String(fm.claim_persistence_version))||!Array.isArray(claims)||claims.length!==1||!claims[0]||typeof claims[0]!=="object"||Array.isArray(claims[0]))throw Error("claim_metadata_invalid");
+  if(hasReceivedClaimMarkers(fm)&&fm.claim_persistence_version!=="RI001-3")throw Error("received_claim_version_required");
   const domain=domainSchema.parse(fm.domain);
   const c=claims[0],intakeId=String(fm.intake_id),sourcePath=`00_Inbox/ChatGPT/Investment Intake - ${intakeId}.md`;
   if(!/^IN-[A-F0-9]{16}$/.test(intakeId)||fm.original_source_path!==sourcePath||c.source_path!==sourcePath||c.verification!=="unverified"||fm.verification!=="unverified")throw Error("claim_source_binding_invalid");
@@ -170,6 +180,13 @@ export function readPersistedClaim(path:string){
     (input.estimate&&input.evidenceClass!=="analyst_estimate"))throw Error("claim_dimension_version_invalid");
   if(c.claim_id!==idFor(intakeId,input,domain,received)||claimPath(String(c.claim_id),domain)!==path||fm.entity!==c.entity||fm.original_source!==c.original_source)throw Error("claim_identity_invalid");
   if(!received&&(typeof c.original_source!=="string"||!canonicalHttpSourceUrl(c.original_source)))throw Error("claim_source_binding_invalid");
+  return {c,input,domain,intakeId,sourcePath,received};
+}
+/** Fresh binding witness for generated claims only. Never initialize receipts. */
+export function readPersistedClaim(path:string){
+  if(!isGeneratedClaimPath(path))throw Error("claim_path_invalid");
+  const note=indexedRead(path),fm=note.fm;
+  const {c,input,domain,intakeId,sourcePath,received}=claimMetadata(path,fm);
   const source=indexedRead(sourcePath);
   if(source.fm.intake_id!==intakeId||source.fm.type!=="investment_source_intake"||source.fm.source_text_sha256!==fm.source_text_sha256||
     (received?c.original_source!==null:canonicalHttpSourceUrl(String(source.fm.source_url))!==c.original_source))throw Error("claim_source_binding_invalid");
@@ -208,17 +225,12 @@ export function readPersistedClaim(path:string){
 export function assertReceivedClaimWrite(path:string,before:string,after:string,actor:string|undefined,stage:"preview"|"apply"){
   const fm=splitFrontmatter(after).data,old=splitFrontmatter(before).data;
   if(old.claim_persistence_version==="RI001-3"&&before!==after)throw Error("received_claim_immutable_reconciliation_required");
-  if(fm.claim_persistence_version!=="RI001-3"){
-    if(fm.type==="investment_structured_claim_register"&&fm.claim_persistence_version!==undefined&&fm.original_source==null)throw Error("received_claim_version_required");
-    return;
-  }
-  const cs=fm.claims as Record<string,unknown>[];
-  if(fm.type!=="investment_structured_claim_register"||!Array.isArray(cs)||cs.length!==1)throw Error("received_claim_metadata_hold");
-  const c=cs[0],proof=verifyReceivedClaimSource(c.source_binding,stage,actor),b=proof.binding;
-  const parsed=intakeClaimsSchema.parse([{entity:c.entity,metric:c.metric,value:c.value,unit:c.unit,period:c.period,evidenceClass:c.evidence_class,
-    statement:c.statement,sourceLocator:c.source_locator,sourceExcerpt:c.source_excerpt,qualification:c.qualification??undefined,
-    estimate:c.estimate??undefined,accountingBasis:c.accounting_basis??undefined,verification:c.verification}])![0];
-  const domain=domainSchema.parse(fm.domain);
+  if(!requiresClaimBinding(path,fm)&&!requiresClaimBinding(path,old))return;
+  // Do not let stripping markers or inventing a URL disguise a received ID as
+  // RI001-1/2. Verify version-specific identity even for URL-backed proposals.
+  const {c, input:parsed, domain, received}=claimMetadata(path,fm);
+  if(!received)return;
+  const proof=verifyReceivedClaimSource(c.source_binding,stage,actor),b=proof.binding;
   if(fm.intake_id!==b.intakeId||fm.original_source_path!==b.sourcePath||c.source_path!==b.sourcePath||fm.source_text_sha256!==b.preservedTextSha256||
     c.claim_id!==idFor(b.intakeId,parsed,domain,true)||claimPath(String(c.claim_id),domain)!==path||fm.entity!==c.entity||
     fm.origin!=="received_user_source"||c.origin!==fm.origin||fm.original_source!==null||c.original_source!==null||
