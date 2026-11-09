@@ -121,7 +121,7 @@ it.each(corruptions)("P1 indexed %s is an explicit binding HOLD, not legacy evid
  fs.writeFileSync(path.join(vault,c.path),damaged);(await import("../vault/indexer")).reindexPath(c.path);
  const found=await query(saved.steps[0].path);
  expect(found.matchingClaims).toHaveLength(0);expect(found.relatedEventClaims).toHaveLength(0);expect(found.classification).toBe("unresolved");
- expect(found.claimBindingHolds).toEqual([{path:c.path,reason:"claim_receipt_readback_index_link_unverified"}]);
+ expect(found.claimBindingHolds).toEqual([{path:c.path,reason:"claim_receipt_readback_index_link_unverified",scope:"unknown"}]);
  expect(found.sourceLinkedUnstructuredPaths).not.toContain(c.path);
  expect(engine.status(c.receiptKey!,actor).receipt).toEqual(receipt);expect(fs.readFileSync(path.join(vault,c.path),"utf8")).toBe(damaged);
  if(kind==="missing_version"){

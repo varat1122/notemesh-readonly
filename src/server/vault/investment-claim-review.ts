@@ -1,7 +1,7 @@
 import {researchTrust,type ResearchTrust} from "./research-state";
 import {canonicalHttpSourceUrl} from "../source-url";
 import { db } from "../db";
-import {readPersistedClaim,requiresClaimBinding,type IntakeClaim} from "./canonical-claims";
+import {readPersistedClaim,requiresClaimBinding,isGeneratedClaimPath,type IntakeClaim} from "./canonical-claims";
 import {dimensionKey,estimateIdentityComplete,type ClaimDimensions} from "./claim-dimensions";
 import { buildInvestmentContextPack, type Focus } from "./investment-context";
 
@@ -49,10 +49,12 @@ export interface ClaimReview {
   eventDate:string|null; publishedAt:string|null;
   originalSource:string;
   matchingClaims:StructuredRecord[];
-  claimBindingHolds:{path:string;reason:"claim_receipt_readback_index_link_unverified"}[];
+  claimBindingHolds:{path:string;reason:"claim_receipt_readback_index_link_unverified";scope:"unknown"}[];
   relatedEventClaims:StructuredRecord[];
   sourceLinkedUnstructuredPaths:string[];
-  metadataScan:{indexedNotesWithMetadata:number;notesScanned:number;truncated:boolean;eligibleEntityNotes:number};
+  metadataScan:{indexedNotesWithMetadata:number;notesScanned:number;truncated:boolean;eligibleEntityNotes:number;
+    verifiedUnrelatedClaims:number;integrityHoldCount:number;integrityHoldsTruncated:boolean;
+    coverage:"incomplete"|"bounded_scan_no_integrity_hold"};
   possibleHistoricalPaths:{path:string;role:string;declaredVerification:string|null;line:number;researchTrust:ResearchTrust|null}[];
   evidenceNeeded:string[];
   suggestedThesisAction:"maintain_pending_review";
@@ -109,36 +111,42 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   const selected:StructuredRecord[]=[];
   const claimBindingHolds:ClaimReview["claimBindingHolds"]=[];
   const sourceLinkedUnstructuredPaths:string[]=[];
-  const MAX_METADATA_SCAN=25000;
+  const MAX_METADATA_SCAN=25000,MAX_INTEGRITY_HOLDS=12;
+  const unavailableBindings=new Set<string>(),verifiedScopePaths=new Set<string>();
   const indexedNotesWithMetadata=(db().prepare("SELECT COUNT(*) AS n FROM notes WHERE frontmatter IS NOT NULL OR path GLOB '10_Knowledge/*/Investment Claim - ICL-*.md'").get() as {n:number}).n;
-  const rows=db().prepare("SELECT path, frontmatter FROM notes WHERE frontmatter IS NOT NULL OR path GLOB '10_Knowledge/*/Investment Claim - ICL-*.md' ORDER BY path LIMIT ?")
-    .all(MAX_METADATA_SCAN) as IndexedRow[];
+  const page=db().prepare("SELECT path, frontmatter FROM notes WHERE frontmatter IS NOT NULL OR path GLOB '10_Knowledge/*/Investment Claim - ICL-*.md' ORDER BY path LIMIT ?")
+    .all(MAX_METADATA_SCAN+1) as IndexedRow[];
+  // The sentinel is never validated or returned as evidence. Keep the existing
+  // scan bound; the count also catches known coverage beyond the current page.
+  const rows=page.slice(0,MAX_METADATA_SCAN),truncated=page.length>MAX_METADATA_SCAN||indexedNotesWithMetadata>rows.length;
   const matchesSource=(x:StructuredRecord)=>x.originalSource?sourceKey(x.originalSource)===sourceKey(originalSource):
     x.persistence==="receipt_readback_index_link_verified"&&x.sourceBinding?.origin==="received_user_source"&&x.sourcePath===originalSource;
-  let eligibleEntityNotes=0;
+  let eligibleEntityNotes=0,verifiedUnrelatedClaims=0,integrityHoldCount=0;
   for(const row of rows){
     let fm:Record<string,unknown>;
     try{const parsed=JSON.parse(row.frontmatter??"null");fm=parsed&&typeof parsed==="object"&&!Array.isArray(parsed)?parsed:{};}catch{fm={};}
     const bound=requiresClaimBinding(row.path,fm);
-    // Audit receipts are not issuer claims. A caller-declared receipt type must
-    // not suppress validation of the reserved generated path or received markers.
-    if(!bound&&fm.type==="primary_source_verification_receipt")continue;
-    if(!sameEntity(fm,input)){
-      const identities=[fm,...(Array.isArray(fm.claims)?fm.claims:[])].filter(x=>x&&typeof x==="object"&&!Array.isArray(x));
-      const hasIdentity=identities.some(x=>[x.entity,x.ticker,x.canonical_entity,x.issuer,x.country,x.industry,x.asset]
-        .flatMap(v=>Array.isArray(v)?v:[v]).some(v=>stringOrNull(v)!==null));
-      // Missing identity cannot be used to hide a corrupt generated note. Keep
-      // unknown scope explicit; known other entities stay outside this query.
-      if(!bound||(!identities.some(x=>sameEntity(x,input))&&hasIdentity))continue;
-    }
-    if(bound&&fm.domain!==undefined&&fm.domain!==input.domain)continue;
-    eligibleEntityNotes++;
     let persisted:ReturnType<typeof readPersistedClaim>|null=null;
-    if(bound)try{persisted=readPersistedClaim(row.path);}catch{
-      if(claimBindingHolds.length<12)claimBindingHolds.push({path:row.path,reason:"claim_receipt_readback_index_link_unverified"});continue;
+    if(bound){
+      // Validate physical/index/identity/Source/receipt bindings BEFORE trusting
+      // any scope metadata. A failed record cannot prove that it is unrelated.
+      try{persisted=readPersistedClaim(row.path);}catch{
+        integrityHoldCount++;unavailableBindings.add(row.path);
+        if(claimBindingHolds.length<MAX_INTEGRITY_HOLDS)claimBindingHolds.push({path:row.path,reason:"claim_receipt_readback_index_link_unverified",scope:"unknown"});
+        continue;
+      }
+      if(persisted.scope.domain!==input.domain||norm(persisted.scope.entity)!==norm(entity)){
+        verifiedUnrelatedClaims++;unavailableBindings.add(row.path);continue;
+      }
+      verifiedScopePaths.add(row.path);
+    }else{
+      // Ordinary legacy notes retain their declared scope and unverified status.
+      // A receipt is not a separate issuer claim or independent evidence.
+      if(fm.type==="primary_source_verification_receipt"||!sameEntity(fm,input))continue;
     }
-    const noteSource=stringOrNull(fm.original_source)||stringOrNull(fm.source_url)||stringOrNull(fm.primary_url);
-    const claims=Array.isArray(fm.claims)?fm.claims:[fm];
+    eligibleEntityNotes++;
+    const noteSource=persisted?stringOrNull(persisted.claim.original_source):stringOrNull(fm.original_source)||stringOrNull(fm.source_url)||stringOrNull(fm.primary_url);
+    const claims=persisted?[persisted.claim]:Array.isArray(fm.claims)?fm.claims:[fm];
     let hasComparableStructuredRecord=false;
     for(const raw of claims){
       if(!raw||typeof raw!=="object"||Array.isArray(raw))continue;
@@ -206,19 +214,24 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
   });
   const paths=[...new Set(selected.map(x=>x.path))];
   const possible=[...scoped.items.map(x=>({path:x.path,role:x.role,declaredVerification:x.declaredVerification,line:x.line,researchTrust:x.researchTrust}))]
-    .filter(x=>!paths.includes(x.path)).slice(0,limit);
+    // Context hints must not reintroduce failed/unscanned generated claims as
+    // legacy evidence, including failures omitted from the bounded HOLD details.
+    .filter(x=>!paths.includes(x.path)&&!unavailableBindings.has(x.path)&&
+      (!isGeneratedClaimPath(x.path)||verifiedScopePaths.has(x.path))).slice(0,limit);
   const evidenceNeeded=[
     "Read full original sources, verify numerical units and period; indexed metadata is not primary-source verification.",
     "Reconcile candidate paths and claim IDs at original-source/event/metric/reporting-period level.",
     "Check independent counter-evidence and date/vintage; do not promote archived AI or repeat issuer press releases.",
     "Use a separate human-reviewed Safe Edit preview and Change Log before any Protected Thesis modification."
   ];
-  if(claimBindingHolds.length)evidenceNeeded.unshift("Generated claim records failed current receipt/readback/index/link checks; historical claim completeness is not established.");
+  const integrityHoldsTruncated=integrityHoldCount>claimBindingHolds.length;
+  if(integrityHoldCount)evidenceNeeded.unshift("Unknown-scope integrity HOLD: generated claim bindings failed; their entity/domain cannot be trusted and historical coverage is incomplete.");
+  if(integrityHoldsTruncated)evidenceNeeded.unshift("Integrity HOLD details are truncated; integrityHoldCount counts failures only within the bounded metadata scan.");
   if(classification==="unresolved")evidenceNeeded.unshift("No conclusive structured claim match; do not infer this is a new event or a novel claim.");
   if(input.evidenceClass==="analyst_estimate"&&!estimateIdentityComplete(input))evidenceNeeded.unshift("Estimate provider, role or forecast vintage unresolved; no cross-vintage/provider duplicate or corroboration inference.");
   if(sourceLinkedUnstructuredPaths.length)
     evidenceNeeded.unshift("A prior note cites the same original source but lacks a comparable structured claim; read the whole note before deciding novelty.");
-  if(indexedNotesWithMetadata>rows.length)
+  if(truncated)
     evidenceNeeded.unshift("Metadata scan capped before full coverage; unresolved historical claims could be outside the scanned range.");
   return {
     status:"review_only_not_verified",classification,domain:input.domain,
@@ -227,7 +240,8 @@ export function reviewInvestmentClaim(input:IncomingClaim):ClaimReview{
     relatedEventClaims:matchedSourceSamePeriodOtherMetric.slice(0,limit),
     sourceLinkedUnstructuredPaths,
     metadataScan:{indexedNotesWithMetadata,notesScanned:rows.length,
-      truncated:indexedNotesWithMetadata>rows.length,eligibleEntityNotes},
+      truncated,eligibleEntityNotes,verifiedUnrelatedClaims,integrityHoldCount,integrityHoldsTruncated,
+      coverage:truncated||integrityHoldCount>0?"incomplete":"bounded_scan_no_integrity_hold"},
     possibleHistoricalPaths:possible,
     evidenceNeeded,suggestedThesisAction:"maintain_pending_review",canAutoUpdateThesis:false,
     caveats:[
