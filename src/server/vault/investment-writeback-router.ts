@@ -248,6 +248,15 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
     focus,maxNotes:10,maxChars:8500
   });
+  // A ticker-shaped label is not authority to append to a Company Timeline.
+  // Require the same current existing Hub to resolve in routing AND history.
+  // Curated aliases are navigational hints, never issuer identity evidence.
+  const timelineHub=subject?routingV2.companyHubs.find(h=>
+    h.path==="01_Companies/"+subject+".md"&&h.resolution!=="curated_alias"):undefined;
+  const timelineIdentityReady=Boolean(timelineHub&&
+    pack.issuerResolution.some(i=>i.hubPath===timelineHub.path&&
+      (i.status==="exact_existing_title"||i.status==="indexed_alias")));
+
   // Preserve literal historical hints when identity resolution HOLDs, without
   // treating them as mapped issuers. Otherwise retain the existing high-score
   // Company Research candidates. Neither path adjudicates event equivalence.
@@ -318,9 +327,10 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   ];
   if(timelinePath)
     routes.push({kind:"company_timeline_candidate",
-      action:timelineExists&&!integrityHold&&!duplicates&&!timelineRecorded&&!sameSourceEvent?"candidate_append_after_review":"link_existing_or_hold",
+      action:timelineExists&&timelineIdentityReady&&!integrityHold&&!duplicates&&!timelineRecorded&&!sameSourceEvent?"candidate_append_after_review":"link_existing_or_hold",
       path:timelinePath,requiresReview:true,
-      reason:integrityHold?claimIntegrityWarning(integrity):timelineRecorded?"Intake ID already recorded in this Timeline; do not append the same text a second time.":
+      reason:!timelineIdentityReady?"Company identity unresolved or inconsistent across current Hub routing and historical readback: preserve Source, resolve issuer onboarding before proposing a Timeline append.":
+        integrityHold?claimIntegrityWarning(integrity):timelineRecorded?"Intake ID already recorded in this Timeline; do not append the same text a second time.":
         sameSourceEvent?"Same declared issuer, event date, and original source URL already referenced by existing notes: inspect candidatePaths and do NOT add a new Timeline event until source-level adjudication.":
         duplicates?"Exact numeric claim duplicate candidate: link existing event, no repeated timeline proof.":
         timelineExists?"Timeline exists; append only when dated source/event dedup and materiality confirmed; include <!-- investment-intake:"+planId+" --> in the approved append for idempotent retries.":
