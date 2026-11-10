@@ -184,12 +184,41 @@ describe("P0 new-intake reconciliation against archived company events", () => {
 });
 
 
+describe("N5 issuer identity protects Timeline suggestions",()=>{
+ it("does not propose an append when no current Company Hub exists",async()=>{
+  await add("08_Daily_Weekly/Research Indexes/Company Evolution - ABSENT.md","# historical note without Hub");
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const plan=route({domain:"company",entities:["ABSENT"],topic:"Unverified issuer event",
+    inputFormat:"text",sourceKind:"user_commentary",
+    extractedText:"Synthetic supplied event for ABSENT; issuer identity not established."});
+  expect(plan.routes.find(x=>x.kind==="company_timeline_candidate")).toMatchObject({
+    action:"link_existing_or_hold",requiresReview:true});
+  expect(plan.routes.find(x=>x.kind==="company_timeline_candidate")?.reason).toContain("identity unresolved");
+  expect(plan.routes.find(x=>x.kind==="raw_input")?.action).toBe("candidate_create");
+  expect(plan.gates.canAutoWrite).toBe(false);
+ });
+ it("holds existing Timeline despite exact-title versus indexed-alias collision",async()=>{
+  await add("01_Companies/TSM.md","# TSM Company Hub");
+  await add("01_Companies/OTHER.md","---\naliases: [TSM]\n---\n# OTHER");
+  await add("08_Daily_Weekly/Research Indexes/Company Evolution - TSM.md","# Historical TSM Timeline");
+  const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
+  const plan=route({domain:"company",entities:["TSM"],topic:"Unverified same-label issuer event",
+    inputFormat:"text",sourceKind:"user_commentary",
+    extractedText:"Synthetic supplied event with conflicting indexed issuer alias."});
+  expect(plan.routingV2.companyHubs).toEqual([]);
+  expect(plan.routes.find(x=>x.kind==="company_timeline_candidate")?.action).toBe("link_existing_or_hold");
+  expect(plan.historical.identityHoldDiscovery[0]?.mappingVerified).toBe(false);
+  expect(plan.gates.canAutoWrite).toBe(false);
+ });
+});
+
 describe("intake identity marker blocks repeat Timeline append", () => {
  it("routes repeated identical intake to existing Timeline link without a duplicate event", async () => {
   const {planInvestmentWriteback:route}=await import("./investment-writeback-router");
   const request={domain:"company" as const,entities:["MCKT"],topic:"Synthetic one-off milestone 2026-10-19",
    inputFormat:"text" as const,sourceKind:"user_commentary" as const,
    extractedText:"Synthetic MCKT milestone supplied by user for test purposes, no independent issuer verification."};
+  await add("01_Companies/MCKT.md","# Synthetic MCKT Company Hub");
   const first=route(request);
   const timeline="08_Daily_Weekly/Research Indexes/Company Evolution - MCKT.md";
   await add(timeline,"# Synthetic MCKT Timeline\n## Chronology\nExisting archival item only.\n");
@@ -244,6 +273,7 @@ describe("same-source economic event reconciliation despite changed input text",
    expect(tracked.sourceEventReview.candidatePaths).toContain(evidence);
  });
  it("does not merge different event dates from a reused source URL",async()=>{
+   await add("01_Companies/SMTC.md","# Synthetic Semtech Company Hub");
    await add(timeline,"# SMTC chronology.");
    await add(evidence,[
      "---","company: SMTC","event_date: 2026-10-15","verification: not_reverified",
