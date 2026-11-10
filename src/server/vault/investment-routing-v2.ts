@@ -107,8 +107,13 @@ function findHub(label:string, indexed:ReturnType<typeof indexedTopLevelHubs>, a
   const candidates=indexed.filter(x=>key(x.title)===wanted||
     indexedAliases(x.frontmatter).some(a=>key(a)===wanted));
   if(candidates.length>1)return null;
-  if(candidates.length===1&&currentHubAliases(candidates[0]))return {path:candidates[0].path,
-    resolution:key(candidates[0].title)===wanted?"exact_existing_title" as const:"indexed_alias" as const};
+  if(candidates.length===1){
+    // An indexed candidate with stale/missing on-disk metadata must HOLD.
+    // Never fall through to a curated alias after a failed readback.
+    if(!currentHubAliases(candidates[0]))return null;
+    return {path:candidates[0].path,
+      resolution:key(candidates[0].title)===wanted?"exact_existing_title" as const:"indexed_alias" as const};
+  }
   const canonical=allowCurated?curatedAliases[wanted]:undefined;
   if(!canonical)return null;
   // Curated aliases are navigational hints, never evidence that overrides
