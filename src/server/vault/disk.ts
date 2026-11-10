@@ -1,3 +1,4 @@
+import { denyPilotRawWriter } from "../c1-pilot";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -198,6 +199,7 @@ export interface WriteOptions {
 }
 
 export function writeVaultFile(abs: string, content: string, opts: WriteOptions = {}): void {
+  denyPilotRawWriter();
   const bytes = Buffer.from(content, "utf8");
   assertHeadroom(bytes.length);
   const sync = opts.sync !== false;

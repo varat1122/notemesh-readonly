@@ -1,3 +1,4 @@
+import { denyPilotRawWriter } from "../c1-pilot";
 import fs from "node:fs";
 import path from "node:path";
 import { env } from "../env";
@@ -46,6 +47,7 @@ function filesBeneath(dir: string, out: string[], depth = 0) {
  * knows who linked where.
  */
 export function moveFolder(folder: string, newFolder: string): FolderMove {
+  denyPilotRawWriter();
   const absFrom = resolveExistingFolder(folder);
   const absTo = resolveFolderPath(newFolder);
   assertNoReservedSegments(absTo);
@@ -83,6 +85,7 @@ export function moveFolder(folder: string, newFolder: string): FolderMove {
 
 /** Removes an empty folder. Anything inside it is a reason to refuse. */
 export function deleteFolder(folder: string): string {
+  denyPilotRawWriter();
   const abs = resolveExistingFolder(folder);
   const entries = fs.readdirSync(abs);
   if (entries.length > 0) {

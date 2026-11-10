@@ -1,3 +1,4 @@
+import { c1Pilot } from "../c1-pilot";
 import { acquireGitMutationLock } from "./mutation-lock";
 import { maintenanceActive } from "../maintenance";
 import { redactRemote, remoteHasCredentials, validateRemoteUrl } from "./remote";
@@ -261,6 +262,7 @@ export class GitBackend implements SyncBackend {
   }
 
   start() {
+    if (c1Pilot()) return;
     if (maintenanceActive()) {
       this.note("[git] maintenance is active; sync not started", "warn");
       return;

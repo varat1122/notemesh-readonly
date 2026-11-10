@@ -320,3 +320,119 @@ Neither group establishes live semantic or deployment acceptance. No general
 Research Product Acceptance is claimed. The D1 upgrade regression additionally
 executes actual 44efef94 modules to produce pre-fix broker/routine PASS gates,
 then verifies restrictive upgrade admission and immutable Source receipts.
+
+### Disposable analyst-assisted checkpoint — C1-ANALYST-REVIEW-1
+
+This opt-in successor of PR #168 is an experimental **whole-instance** restriction,
+not a change to Master 2.0.0, RISK-1.1, shared legacy permissions, or a production
+release. With `C1_RESEARCH_PILOT` absent, existing workflows retain their behavior.
+`C1_RESEARCH_PILOT=disposable` requires an owner-created, exclusive temporary
+`DATA_DIR` named `ios-c1-pilot-*` beneath the OS temporary directory, its own
+`vault/`, no symlinks, and no Railway project/service environment. Other values
+fail closed. Do not enable/disable this mode on an existing running/shared writer.
+Use one process/replica, the existing single-writer Safe Edit permission, a fresh
+fixture database, no external Sync/desktop/importer/CLI writer and no live data.
+A directory name is **not** an OS sandbox: root access, direct SQL/filesystem
+access and an uncooperative external process remain outside this contract.
+
+The server, rather than a local controller, enforces:
+
+1. Canonical Source-only preview records an internal Source-admission event;
+   its exact add-only Source bytes may be applied independently of research
+   eligibility. Caller-declared Source metadata cannot create this admission.
+2. Every non-Source target must belong to a current, exact, eligible Judge PASS
+   bundle. Fresh unenrolled intakes cannot use an unjudged Draft fallback in this
+   instance. Generic create/append/frontmatter/replace/rollback cannot introduce
+   another target or change protected records.
+3. Canonical preparation can produce exact **review-only previews** before the
+   checkpoint. A preview token alone is not write authority. The existing
+   `approvalUrl` presents ALL target diffs, exact received Source, sealed packet,
+   selected history, assessments and materiality findings as untrusted text.
+   Previews are journal records, not Vault writes or write receipts.
+4. The existing authenticated dashboard session (not a caller-supplied OAuth/MCP
+   reviewer label) submits an explicit decision, semantic preflight verdict,
+   materiality disposition and rationale bound to the displayed digest.
+   `approve` cannot override semantic HOLD/FAIL, material/unresolved risk, backend
+   Judge HOLD/FAIL, missing coverage, expired input or changed history. A recorded
+   restrictive preflight also blocks further non-Source preparation for that
+   envelope. A fresh sealed packet, fresh bound assessment and new explicit
+   review are required to recover; a new preview is insufficient.
+5. A signed checkpoint binds policy, instance, OAuth actor, Source/Claim/Draft
+   paths and bytes, exact packet/result, selected history/scope, every before/after
+   diff, token hashes and preview expiries. Its expiry is at most fifteen minutes
+   and never beyond the existing packet/preview expiry. Existing Safe Edit locks,
+   CAS, Judge/history/source/receipt checks are repeated before **each** non-Source
+   publication. Preview rotation invalidates the checkpoint. Same-intake actual
+   writes retain existing narrowly receipt-bound freshness exclusions.
+6. Reviewer decisions, enrollment and preview rotation use the existing write
+   lock and IMMEDIATE journal transaction. Busy/stale locks refuse admission;
+   they never expire themselves or prove another writer is gone. Existing
+   single-process/exclusive-writer prerequisites remain mandatory.
+7. Existing canonical receipts are byte/schema-compatible. Additional
+   `c1_pilot_*` journal events record assessment, reviewer decision and admission;
+   an admission event is **not** a write/readback/index receipt. Only the existing
+   engine produces the latter. Partial Source persistence is reported truthfully;
+   re-prepare remaining targets and review the new exact bundle before retry.
+
+The shared raw Markdown writer, direct create/move/delete and folder operations,
+legacy intake importer/enqueue, Git and Obsidian command/sync entrypoints are
+fenced in this instance. The pilot Safe Edit sync branch requires locally
+quiescent Git/Obsidian/intake workers, since it deliberately has no device Sync.
+It does not claim remote sync or cross-machine exclusion. Original attachments
+and source archives retain their existing separate source-preservation controls;
+index/auth/journal bookkeeping remains necessary. No new write engine, database
+schema, primary receipt, external LLM service or paid resource is introduced.
+
+**Trust boundary:** the semantic preflight is an analyst/reviewer judgment of
+Source AND History AND proposed Draft, not a backend economic classifier and not
+`preflight_research_decision_v2` (which checks reference integrity). The dashboard
+records a session attestation, with `humanPresence=not_verified` and
+`criticIndependence=not_verified`. A test-created session/approval is explicitly
+simulated. An approved but dishonest semantic judgment cannot be disproven by
+these mechanical bindings. No independent critic, real human presence, verified
+financial fact, comparator eligibility, approved Thesis or general Research
+Product Acceptance is established. Draft retains its existing restrictive trust
+labels. A material case cannot borrow this checkpoint to waive RISK-1.1.
+
+#### Client handoff and evidence limits
+
+The current shared **NoteMesh M4 Safe Edit Web** and **Investment OS Safe Edit Chat**
+tool descriptors inspected on 2026-11-10 have typed Review fields but lack
+`researchJudge`; neither exposes the current packet handoff. They cannot perform
+this pilot by installing a local controller or calling a differently named tool.
+No shared connector was called or modified during development.
+
+Owner-controlled prerequisites for an actual ChatGPT-room test (not performed):
+
+- Authorize a separate disposable HTTPS origin running the exact reviewed
+  candidate with the isolation/single-writer prerequisites above. Do not replace
+  shared staging, attach its volume/key or connect an existing live writer.
+- Register/connect a separate ChatGPT connector to `<origin>/api/safe-edit` and
+  refresh its descriptors. Protected-resource discovery is
+  `<origin>/.well-known/oauth-protected-resource/api/safe-edit`; OAuth issuer is
+  `<origin>/api/auth`, resource/audience is exactly `<origin>/api/safe-edit`,
+  scopes `vault:read vault:edit`, using the existing authorization-code/PKCE and
+  owner consent flow. A read-only/API-key credential cannot grant edit/review.
+- Expose existing `prepare_research_judge_packet`,
+  `research_judge_result_contract`, typed `prepare_canonical_writeback` and
+  `apply_canonical_writeback`. Both canonical schemas must retain complete
+  `researchReview`, claims/lineage/appearance and `researchJudge.packet/result`:
+  body/digest/packetId/actorLabelSha256/issuedAt/expiresAt/seal, exact result
+  envelope/review digests, checks, references and RISK-1.1 inventory/findings.
+  Do not reduce nested fields to a stale M4 descriptor. Refresh OAuth consent
+  where audience/scopes changed. No new audience or reviewer MCP tool is added.
+- Use the authenticated dashboard approval URL for explicit semantic/diff review.
+  No MCP approval tool, OAuth payload field or old exact-hash-only approval can
+  impersonate this reviewer session. Then apply unchanged authorized targets.
+- Verify actual ChatGPT rendering, handoff, explicit review, refusal cases and
+  cold retrieval on that authorized disposable endpoint. This is **PENDING**.
+
+Local tests cover actual HTTP on loopback, real OAuth/PKCE/consent and emitted
+server bundles as well as SDK InMemoryTransport. Neither is a ChatGPT room nor an
+externally reachable authorized endpoint. The Quay/Vela/Arbor/Birch tests are
+**NEW synthetic mechanism fixtures** from ORCH's scenario contract, not the
+unavailable original WORK corpus. WORK's historical controller-only 27/27 remains
+separate reported evidence. Quay/Vela preflight HOLD judgments are supplied and
+bound; CI proves their enforcement, not autonomous economic reasoning. Arbor
+persists an attributed Draft after explicit simulated review; Birch's benign
+planned date still encounters the accepted RISK-1.1 backend HOLD. No Gold changes.

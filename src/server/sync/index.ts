@@ -1,3 +1,4 @@
+import { c1Pilot } from "../c1-pilot";
 import { getSetting } from "../db";
 import { maintenanceActive } from "../maintenance";
 import { supervisor } from "../ob/supervisor";
@@ -31,6 +32,7 @@ export function syncBackend(): SyncBackend {
 // Sync.
 let bootChecked = false;
 export function ensureSyncStarted() {
+  if (c1Pilot()) return;
   // Checked before the DB is touched, and without latching, so a process that
   // booted into maintenance starts nothing until it is restarted after resume.
   if (bootChecked || maintenanceActive()) return;

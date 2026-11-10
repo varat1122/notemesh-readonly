@@ -1,3 +1,4 @@
+import { c1Pilot } from "../c1-pilot";
 import { execa, type ResultPromise } from "execa";
 import fs from "node:fs";
 import path from "node:path";
@@ -161,6 +162,7 @@ export class SyncSupervisor implements SyncBackend {
   }
 
   start() {
+    if (c1Pilot()) return;
     // Also covers the restart in withPausedForEdit's finally and the backoff
     // timer: neither may bring the daemon back during maintenance.
     if (maintenanceActive()) {

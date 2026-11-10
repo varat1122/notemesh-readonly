@@ -1,3 +1,4 @@
+import { denyPilotRawWriter } from "./c1-pilot";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { db } from "./db";
@@ -23,6 +24,7 @@ function table() {
   return d;
 }
 export function enqueue(input: unknown) {
+  denyPilotRawWriter();
   const payload = JSON.stringify(intakeSchema.parse(input));
   if (Buffer.byteLength(payload) > 300000) throw Error("Package exceeds 300 KB; split into smaller batches");
   const id = crypto.createHash("sha256").update(payload).digest("hex");
