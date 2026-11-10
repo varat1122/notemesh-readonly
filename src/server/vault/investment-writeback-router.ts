@@ -19,6 +19,7 @@ import type { ThaiResearchReview } from "./research-quality-m55";
 import {resolveSourceIdentityM56, type SourceIdentityResolution} from "./source-identity-m56";
 import {inspectSourceArchiveProvenance,type SourceArchiveProvenance} from "./source-archive-provenance-p0";
 import type {AppearanceInput} from "./intake-appearances";
+import {proposeCompanyOnboarding,type CompanyOnboardingPlan} from "./company-onboarding-plan";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
@@ -108,6 +109,7 @@ export interface WritebackPlan {
   exactClaimReview:ClaimIntegrityCoverage & {status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
     classification:ReviewClass|null;matchingClaimPaths:string[];scanTruncated:boolean|null};
   routingV2:RoutingV2;
+  companyOnboarding:CompanyOnboardingPlan|null;
   safeEditWorkflow?:CanonicalSafeEditWorkflow;
   routes:Route[];
   gates:{
@@ -241,15 +243,20 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const focus=input.focus??(input.sourceKind==="broker_research"?"broker":input.domain==="macro"?"macro":"general");
   const pack=buildInvestmentContextPack({
     question:(T(input.topic)+" "+entities.join(" ")+" "+text.slice(0,450)).slice(0,1150),
-    issuers:[...new Set([
-      ...routingV2.companyHubs.map(x=>x.path.slice("01_Companies/".length,-3)),
-      ...(input.domain==="company"?entities.map(x=>safeTicker(x)).filter((x):x is string=>!!x):[])
-    ])].filter(x=>/^[A-Z][A-Z0-9.-]{0,11}$/.test(x)).slice(0,6),
+    // Company labels are already bounded to six inputs. Preserve the raw
+    // labels so the shared resolver can report named, qualified and invalid
+    // identities; reducing them to ticker-shaped Hub titles erases HOLDs.
+    issuers:input.domain==="company"?input.entities:[...new Set(
+      routingV2.companyHubs.map(x=>x.path.slice("01_Companies/".length,-3))
+    )].filter(x=>/^[A-Z][A-Z0-9.-]{0,11}$/.test(x)).slice(0,6),
     industry:routingV2.industryHubs.length?
       routingV2.industryHubs.map(x=>x.label).join(" / ").slice(0,140):
       input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
     focus,maxNotes:10,maxChars:8500
   });
+  const companyOnboarding=input.domain==="company"?
+    proposeCompanyOnboarding(input.entities,routingV2,pack.issuerResolution):null;
+  const claimIdentityHold=Boolean(companyOnboarding?.missingOrHeld);
   // A ticker-shaped label is not authority to append to a Company Timeline.
   // Require the same current existing Hub to resolve in routing AND history.
   // Curated aliases are navigational hints, never issuer identity evidence.
@@ -305,6 +312,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(timelineReadbackHold)warnings.push("Indexed Company Timeline readback failed: hold Timeline suggestions; raw Source capture remains independent.");
   if(input.sourceKind==="broker_research")
     warnings.push("Broker model/version dedup requires exact bank, report date, prior same-bank PT, EPS vintage and actual report; 'reiterates' is not a new PT raise.");
+  if(companyOnboarding?.missingOrHeld)
+    warnings.push("Issuer onboarding/identity review required before creating Company Hub, treating a listing/DR as an issuer, or proposing an issuer-specific claim; raw Source capture stays separate.");
   if(routingV2.unresolvedEntities.length||routingV2.unresolvedThemes.length)
     warnings.push("M5.2 hub links use only existing indexed titles or explicit aliases; unresolved names must be adjudicated, never created or mapped by guesswork.");
   if(input.brokerUpdate)
@@ -343,8 +352,10 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     path:routingV2.industryHubs.length===1?routingV2.industryHubs[0].path:null,requiresReview:true,
     reason:"Multi-issuer, non-ticker or macro item: use existing indexed Industry/Macro hubs only after dated source/event review; this is a link candidate, not an auto-append."});
   if(claimReady&&!duplicates&&!input.claims)
-    routes.push({kind:"claim_registry_candidate",action:integrityHold?"link_existing_or_hold":"candidate_create",path:null,requiresReview:true,
-      reason:integrityHold?claimIntegrityWarning(integrity):"Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
+    routes.push({kind:"claim_registry_candidate",action:integrityHold||claimIdentityHold?"link_existing_or_hold":"candidate_create",path:null,requiresReview:true,
+      reason:integrityHold?claimIntegrityWarning(integrity):claimIdentityHold?
+        "Company identity requires onboarding or current Hub reconciliation before proposing a new issuer-specific claim; preserve the Source independently.":
+        "Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
   const needed=[
     "Preserve user text verbatim in a non-protected raw intake note using separately authorized Safe Edit and verify its receipt.",
     verifiedAttachment?"Link the hash-verified original user attachment in the raw intake note; preserve original language and distinguish source attribution.":"For screenshot/PDF, archive its actual bytes with Safe Edit store_user_attachment and inspect it before claiming raw attachment preservation.",
@@ -384,7 +395,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     },
     exactClaimReview:{...integrity,status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
-    routingV2,
+    routingV2,companyOnboarding,
     routes,gates:{
       fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,
