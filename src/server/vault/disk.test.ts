@@ -78,14 +78,22 @@ describe("diskStatus", () => {
 
   it("reports the breakdown even when the filesystem cannot be read", async () => {
     const s = await status();
-    // Simulate statfs failing by pointing at a directory that is gone.
-    fs.rmSync(root, { recursive: true, force: true });
+    // statfs unavailability is distinct from losing the instance itself.
+    const statfs=vi.spyOn(fs,"statfsSync").mockImplementation(()=>{throw Error("ENOSYS");});
     const { diskStatus } = await import("./disk");
-    // The database handle is already open, so the breakdown still answers; the
-    // filesystem half degrades to null rather than throwing.
-    const after = diskStatus();
-    expect(after.filesystem).toBeNull();
-    expect(after.noteCount).toBe(s.noteCount);
+    try{
+      const after = diskStatus();
+      expect(after.filesystem).toBeNull();
+      expect(after.noteCount).toBe(s.noteCount);
+    }finally{statfs.mockRestore();}
+  });
+
+  it("refuses a disappeared instance instead of reporting its old cached DB as current",async()=>{
+    await status();
+    const d=(await import("../db")).db();
+    fs.rmSync(root,{recursive:true,force:true});
+    try{await expect(status()).rejects.toThrow(/c1_pilot_instance_changed_hold/);}
+    finally{d.close();}
   });
 });
 
