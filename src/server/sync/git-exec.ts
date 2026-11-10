@@ -1,3 +1,4 @@
+import { denyPilotRawWriter } from "../c1-pilot";
 import { execa } from "execa";
 import { env } from "../env";
 import { getGitCredentials } from "./git-credentials";
@@ -33,6 +34,7 @@ export async function runGit(
   args: string[],
   opts: { cwd?: string; authenticated?: boolean; timeoutMs?: number } = {},
 ): Promise<GitResult> {
+  denyPilotRawWriter();
   // After maintenance settles nothing may run git, including a late
   // continuation of a reconcile that was still in flight when the drain ended.
   if (mutationFenced()) return { ok: false, stdout: "", stderr: "maintenance", combined: "Maintenance is active; git refused", code: null };
@@ -73,6 +75,7 @@ export async function runGitBuffer(
   args: string[],
   opts: { cwd?: string; timeoutMs?: number } = {},
 ): Promise<{ ok: boolean; stdout: Buffer }> {
+  denyPilotRawWriter();
   try {
     const res = await execa("git", args, {
       cwd: opts.cwd ?? env.vaultDir,

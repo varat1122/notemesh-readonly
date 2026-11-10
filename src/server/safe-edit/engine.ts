@@ -20,6 +20,8 @@ import {assertDeclaredEvidenceAuthority,assertPrimaryMetadataAuthority} from "./
 import {assertResearchJudgeWrite,currentJudgeGate,assertJudgeAdmissionOrder,type JudgeGate} from "./research-judge-gate";
 import {appearancePayloadSchema,appearanceRows,requireAppearance,sealAppearance,type AppearancePayload} from "../vault/intake-appearances";
 import {assertNoMaintenance} from "../maintenance";
+import {c1Pilot,withPilotAdmissionLock} from "../c1-pilot";
+import {assertPilotPreview,assertPilotApply,recordPilotSource} from "./c1-pilot-review";
 
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
 const MAX_BYTES = 100_000;
@@ -194,6 +196,7 @@ function publicPreview(r:RecordRow) {
     diff:diff(r.before_text,r.after_text),warnings:warnings(r.before_text,r.after_text),
     evidenceEventKey:input.evidence?eventKey(input.evidence):null,
     requiresAdminApproval:requiresApproval(r),approved:Boolean(r.approval),
+    ...(c1Pilot()?{pilotReviewRequired:!/^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/.test(input.path),humanPresence:"not_verified"}:{}),
     approvalUrl:`${env.baseUrl}/api/safe-edit-approval?id=${r.id}`};
 }
 function requiresApproval(r:RecordRow) {
@@ -205,10 +208,14 @@ function requiresApproval(r:RecordRow) {
     return data.user_endorsed===true || data.user_endorsed==="true" || data.status==="user_endorsed";
   });
 }
-export function preview(input:unknown,actor:string) {return previewWithLineage(input,actor,false);}
+export function preview(input:unknown,actor:string) {return withPilotAdmissionLock(()=>previewWithLineage(input,actor,false));}
+/** Internal canonical Source recipe, not a public Safe Edit flag. */
+export function previewCanonicalSource(input:unknown,actor:string) {return withPilotAdmissionLock(()=>{
+ const result=previewWithLineage(input,actor,false,true);recordPilotSource(result.operationId,actor);return result;
+});}
 /** Server-internal entrypoint: only canonical prepare supplies the freshly
  * planned Review. It is not an MCP argument, environment switch or wire flag. */
-export function previewCanonicalReview(input:unknown,actor:string) {return previewWithLineage(input,actor,true);}
+export function previewCanonicalReview(input:unknown,actor:string) {return withPilotAdmissionLock(()=>previewWithLineage(input,actor,true));}
 /** Internal canonical admission only; no caller-facing event/approval API. */
 export function recordResearchJudgeGate(sourceOperationId:string,actor:string,gate:JudgeGate,withdrawal?:{current:JudgeGate;sourceTextSha256?:string}){
   assertNoMaintenance("research judge admission");assertEnabled();const source=owned(sourceOperationId,actor),target=gate.targets.find(t=>t.kind==="source_intake");
@@ -216,7 +223,7 @@ export function recordResearchJudgeGate(sourceOperationId:string,actor:string,ga
     splitFrontmatter(source.after_text).data.intake_id!==gate.intakeId||gate.actor!==actor)throw Error("research_judge_source_admission_hold");
   // Serialize the authoritative re-read/check/append across connections. A
   // concurrent HOLD must not be overwritten by a previously checked PASS retry.
-  store().transaction(()=>{
+  withPilotAdmissionLock(()=>store().transaction(()=>{
     assertNoMaintenance("research judge admission journal");
     const current=currentJudgeGate(gate.intakeId);
     // A withdrawal authenticated against an earlier snapshot cannot replace a
@@ -232,7 +239,7 @@ export function recordResearchJudgeGate(sourceOperationId:string,actor:string,ga
     const recorded={...gate,revokedAt:gate.decision==="PASS"?undefined:
       current?.decision!=="PASS"&&current?.packetEnvelopeDigest===gate.packetEnvelopeDigest?current.revokedAt:Date.now()};
     if(JSON.stringify(current)!==JSON.stringify(recorded))log(source.id,actor,"research_judge_gate",recorded as unknown as Record<string,unknown>);
-  }).immediate();
+  }).immediate());
 }
 /** Internal canonical accounting; not a generic event writer or MCP operation.
  * SQLite transaction serializes retries. Existing DB maintenance fence applies.
@@ -261,7 +268,7 @@ function checkStoredReviewLineage(r:RecordRow){
   const event=store().prepare("SELECT at FROM safe_edit_events WHERE operation_id=? AND actor=? AND event='preview' ORDER BY at LIMIT 1").get(r.id,r.actor) as {at:string}|undefined;
   assertReviewChronology(r,event?.at);
 }
-function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
+function previewWithLineage(input:unknown,actor:string,canonical:boolean,canonicalSource=false) {
   assertEnabled();const p=previewSchema.parse(input);const t=target(p.path);p.path=t.rel;
   if(store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND status='writing' LIMIT 1").get(p.path)) throw Error("This path has an interrupted operation; administrator recovery required");
   const before=read(t.abs);
@@ -271,6 +278,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
     if(existing.actor!==actor||existing.payload!==JSON.stringify(p)) throw Error("Operation ID reused for different input or actor");
     if(existing.status==="preview") {
       assertResearchJudgeWrite(p.path,existing.before_text,existing.after_text,actor,"preview");
+      assertPilotPreview(p.operationId,p.path,existing.before_text,existing.after_text,actor,canonicalSource);
       assertReceivedClaimWrite(p.path,existing.before_text,existing.after_text,actor,"preview");
       checkStoredReviewLineage(existing);
       assertDeclaredEvidenceAuthority(p.evidence);
@@ -295,6 +303,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
   document(before??"");checkEvidence(p);
   const after=calculate(p,before??"",actor);
   assertResearchJudgeWrite(p.path,before??"",after,actor,"preview");
+  assertPilotPreview(p.operationId,p.path,before??"",after,actor,canonicalSource);
   assertReceivedClaimWrite(p.path,before??"",after,actor,"preview");
   const afterMetadata=document(after).data,beforeMetadata=document(before??"").data;
   if(p.change.kind==="create")assertReviewPreviewAdmission(after,canonical);
@@ -321,6 +330,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean) {
 }
 export function adminPreview(id:string) { assertEnabled();return publicPreview(row(id)); }
 export function approve(id:string,adminId:string,afterHash:string) {
+  if(c1Pilot())throw Error("c1_pilot_explicit_bundle_review_required");
   assertEnabled();const r=row(id);
   assertProtectedRecord((JSON.parse(r.payload) as PreviewInput).path,document(r.before_text).data,document(r.after_text).data);
   if(r.status!=="preview"||Date.now()>r.expires||afterHash!==r.after_hash) throw Error("Approval expired or does not match the reviewed diff");
@@ -391,6 +401,7 @@ export function apply(input:unknown,actor:string) {
     if((p.change.kind==="create"?current!==null:current===null)||sha256(current??"")!==r.before_hash) throw Error("Version conflict: re-preview; another writer changed this note");
     checkEvidence(p);
     assertResearchJudgeWrite(p.path,current??"",r.after_text,actor,"apply");
+    assertPilotApply(r.id,p.path,current??"",r.after_text,actor);
     assertReceivedClaimWrite(p.path,current??"",r.after_text,actor,"apply");
     assertPrimaryMetadataAuthority(document(current??"").data,document(r.after_text).data);
     assertResearchStateAuthority(document(current??"").data,document(r.after_text).data);

@@ -1,3 +1,4 @@
+import { denyPilotRawWriter } from "../c1-pilot";
 import path from "node:path";
 import fs from "node:fs";
 import { runGit, runGitBuffer } from "./git-exec";
@@ -90,6 +91,7 @@ export interface ResolveOptions {
 // sync cycle proceeds normally rather than finding a half-finished merge — and
 // so the caller has nothing to wait on. A handled conflict is not a state.
 export async function resolveConflict(opts: ResolveOptions): Promise<ConflictOutcome> {
+  denyPilotRawWriter();
   const { dir, remoteRef, paths } = opts;
   const now = opts.now ?? new Date();
   const local = (await runGit(["rev-parse", "HEAD"], { cwd: dir })).stdout.trim();

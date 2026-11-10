@@ -1,3 +1,4 @@
+import { denyPilotRawWriter } from "../c1-pilot";
 import {researchTrust,type ResearchTrust} from "./research-state";
 import fs from "node:fs";
 import path from "node:path";
@@ -291,6 +292,7 @@ export function assertNoReservedSegments(abs: string) {
 }
 
 export function createNote(notePath: string, content: string): string {
+  denyPilotRawWriter();
   const abs = resolveNotePath(notePath);
   assertNoReservedSegments(abs);
   if (fs.existsSync(abs)) {
@@ -832,6 +834,7 @@ function clipLine(line: string): string {
 }
 
 export function moveNote(notePath: string, newPath: string): { from: string; to: string } {
+  denyPilotRawWriter();
   const absFrom = resolveNotePath(notePath);
   const absTo = resolveNotePath(newPath);
   if (!fs.existsSync(absFrom)) throw new VaultPathError(`Note not found: ${notePath}`);
@@ -844,6 +847,7 @@ export function moveNote(notePath: string, newPath: string): { from: string; to:
 }
 
 export function deleteNote(notePath: string): string {
+  denyPilotRawWriter();
   const abs = resolveNotePath(notePath);
   if (!fs.existsSync(abs)) throw new VaultPathError(`Note not found: ${notePath}`);
   fs.rmSync(abs);

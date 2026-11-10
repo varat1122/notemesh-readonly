@@ -1,3 +1,4 @@
+import { c1Pilot } from "./c1-pilot";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -26,6 +27,7 @@ export function cloudIntakeStatus() {
 // One synchronous consumer in this single-replica deployment. The old worker
 // endpoint is disabled in cloud mode, so a desktop cannot race this importer.
 export function processCloudIntake() {
+  if (c1Pilot()) return;
   if (maintenanceActive() || !cloudIntakeEnabled() || state().busy || getSetting("vault_configured") !== "true" || syncKind() !== "obsidian") return;
   const sync = syncBackend();
   const status = sync.status();
@@ -60,6 +62,7 @@ export function processCloudIntake() {
 }
 
 export function ensureCloudIntakeStarted() {
+  if (c1Pilot()) return;
   const w = state();
   if (!cloudIntakeEnabled() || w.timer || maintenanceActive()) return;
   const tick = () => { try { processCloudIntake(); } catch { lastResult = "retrying"; } };

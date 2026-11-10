@@ -19,6 +19,8 @@ if [ "${NOTEMESH_MAINTENANCE:-}" = "1" ] || [ -e "$DATA_DIR/maintenance.json" ] 
   fi
   exec setpriv --reuid=node --regid=node --init-groups "$@"
 fi
+# Refuse a missing pilot mode before mkdir/chown or application initialization.
+DATA_DIR="$DATA_DIR" node -e 'require("/app/scripts/c1-pilot-identity.cjs").assertPilotIdentity(process.env.DATA_DIR)'
 mkdir -p "$DATA_DIR"
 if ! setpriv --reuid=node --regid=node --init-groups test -w "$DATA_DIR"; then
   echo "[entrypoint] making $DATA_DIR writable by node" >&2
