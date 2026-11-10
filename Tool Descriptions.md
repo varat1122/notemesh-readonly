@@ -150,6 +150,27 @@ Exact-scale unit comparison is only for declared USD/EUR million/billion, VND tr
 
 Outputs: source-scoped `indexed` candidate counts and paths, bounded multi-query interleaved `historical` FTS hits and readback excerpts, source-note line offsets when present, and **indexed, untrusted provenance hints** (declared source kind, event/publication/receipt dates, evidence-access labels and existing Source→Review links). Read-only lineage checks flag missing linked Source notes and differing intake IDs; source-labelled HTTPS URLs in the beginning of legacy note bodies are exposed as **unverified follow-up locators**, not authenticated issuer documents. A stored text SHA field is **not** proof of original bytes or issuer authentication. These are retrieval aids for the LLM analyst, not deterministic semantic conclusions. The explainable `classification` (duplicate/unit-equivalent/conflict/added detail/historical/HOLD) and explicit `gates` (`canAutoWrite=false`, `canEditThesis=false`, `canEditPortfolio=false`) never authorize writes. Historical text/titles are fenced as untrusted. Zero DB or Vault writes. Independent blind accuracy, original-source verification, and staging approval remain separate gates.
 
+### preview_supply_chain_relationships — read
+
+Discovers bounded, receipted Source text for one to six explicit company labels,
+or checks up to eight caller-proposed supply chain relationships. Arguments are
+`question`, `issuers`, optional `industry`, optional `asOf` with a timezone, and
+optional `candidates`. Omit candidates for discovery without inferred edges.
+
+Candidates carry a typed predicate, direction, assertion origin, lifecycle,
+validity, mechanism, stage-specific transmission, exact original-text Source
+quotes and optional matching Claim/Review references. A matching hash or receipt
+does not verify a commercial relationship; co-mention cannot establish one.
+Potential beneficiaries remain hypotheses, exposure magnitude stays unknown,
+and repeated reviews add no independent evidence.
+
+`asOf` filters evidence availability in the current index using validated
+recording times and separate publication dates. It does not reconstruct the
+historical Vault. Future or invalid references redact the affected candidate;
+eligible contradiction/retraction links remain visible while held. The tool
+never writes a note, graph edge, receipt, protected record, portfolio or order.
+See `docs/investment-os/N7-supply-chain-preview.md` for exact limits and states.
+
 ### investment_context_pack — read
 
 Constructs a bounded, **read-only** research context from the Investment_OS Vault for a question, one or more companies, or an industry/macro theme. It prioritizes Current Thesis, Evidence Register, Company Evolution, source evidence, industry context, and contrary evidence over repeated archived ChatGPT discussions. It is **lexical retrieval**, not guaranteed semantic recall or a complete proof of all evidence. The server reports coverage limits and missing evidence; check original sources before treating a claim as verified.

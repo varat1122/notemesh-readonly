@@ -10,6 +10,7 @@ import { buildInvestmentContextPack, type Focus } from "../vault/investment-cont
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { hybridClaimPreview, type HybridInput } from "../vault/investment-hybrid-readonly";
+import { previewSupplyChainRelationships, supplyChainInputSchema } from "../vault/supply-chain-intelligence";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import {planDuplicateSourceLinkM56} from "../vault/event-review-relation-m56";
 import {discoverNearDuplicateSourcesM56,planReviewRevisionM56} from "../vault/review-discovery-m56";
@@ -392,6 +393,28 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     }) => {
       const pack = buildInvestmentContextPack({question,issuers,intakeId,industry,focus,maxNotes,maxChars});
       return json(withBoundary({...pack,items:fenceEach(pack.items,"excerpt")}));
+    }),
+  );
+  server.registerTool(
+    "preview_supply_chain_relationships",
+    {
+      title: "Preview evidence-bound supply chain relationship candidates",
+      annotations: READ,
+      description: "Read-only IOS research preview. Omit candidates to discover bounded receipted Source text for explicitly named issuers; supply typed candidates to check identity, exact quotes, hashes, Source/Claim/Review bindings and evidence availability. Co-mention is not a commercial relationship. All relationship meaning, direction, transmission and magnitude remain caller-proposed and unadjudicated. asOf is a current-index availability filter, not a reconstructed historical graph. Never creates graph edges, receipts, notes, decisions or orders.",
+      inputSchema: supplyChainInputSchema.shape,
+    },
+    safe((args) => {
+      const preview=previewSupplyChainRelationships(args);
+      const candidates=preview.candidates.map(candidate=>({...candidate,
+        proposal:candidate.proposal?{
+          ...fenceEach([candidate.proposal],"mechanism","confidenceBasis","invalidation","ambiguity")[0],
+          transmission:fenceEach(candidate.proposal.transmission,"mechanism","proposedMagnitude"),
+        }:null,
+        bindings:fenceEach(candidate.bindings,"quote","documentLocator"),
+      }));
+      return json(withBoundary({...preview,candidates,
+        sourceCatalog:fenceEach(preview.sourceCatalog,"quotePreview","publisher","sourceKind"),
+      }));
     }),
   );
   // RI-011 is intentionally read-only. Candidate results cannot authorize source
