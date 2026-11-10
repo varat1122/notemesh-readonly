@@ -6,6 +6,18 @@ import {spawn} from "node:child_process";
 import {createHash} from "node:crypto";
 import {startServer,claimAdmin,markConfigured,rpc,type Server} from "./harness";
 import {DRAFT_RISK_POLICY,riskDimensions,judgeHash} from "../../src/server/vault/research-judge-contract";
+it("never-enrolled legacy emitted server initializes auth/index and restarts without a pilot flag",async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"legacy-c1-http-")),key=Buffer.alloc(32,9).toString("base64");let s:Server|undefined;
+ try{
+  fs.mkdirSync(path.join(root,"vault"));fs.writeFileSync(path.join(root,"vault/Legacy.md"),"# Legacy fixture\n");
+  s=await startServer({ENCRYPTION_KEY:key},{dataDir:root,keepDataDir:true});
+  const cookie=await claimAdmin(s);await markConfigured(s);expect((await rpc(s,"rebuildIndex",[],cookie)).status).toBe(200);
+  await s.stop();s=undefined;
+  s=await startServer({ENCRYPTION_KEY:key},{dataDir:root,keepDataDir:true});
+  expect((await fetch(s.url+"/api/health")).status).toBe(200);
+  expect(fs.readFileSync(path.join(root,"vault/Legacy.md"),"utf8")).toBe("# Legacy fixture\n");
+ }finally{await s?.stop();fs.rmSync(root,{recursive:true,force:true});}
+},30000);
 it("C1 local network: audience/descriptor, explicit dashboard review, raw/generic refusal, Source and Draft",async()=>{
  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),"ios-c1-pilot-http-")));let s:Server|undefined;
  try{

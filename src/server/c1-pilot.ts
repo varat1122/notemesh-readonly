@@ -4,12 +4,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import {env} from "./env";
 import {assertPilotIdentity} from "../../scripts/c1-pilot-identity.cjs";
 export const C1_PILOT_POLICY="C1-ANALYST-REVIEW-1";
 export function c1Pilot(){
  const mode=process.env.C1_RESEARCH_PILOT;
- assertPilotIdentity(env.dataDir,mode);
+ assertPilotIdentity(env.dataDir,mode,Database);
  if(mode===undefined)return false;
  if(mode!=="disposable")throw Error("c1_pilot_invalid_mode_hold");
  const root=fs.realpathSync(env.dataDir),tmp=fs.realpathSync(os.tmpdir());
