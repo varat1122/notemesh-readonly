@@ -162,3 +162,84 @@ describe("RI-001 chronology and Hub scope bounds",()=>{
     expect(protectedPaths.map(p=>fs.readFileSync(path.join(vault,p)))).toEqual(bytes);
   });
 });
+
+describe("N5 safe issuer onboarding — routing and historical identity must agree",()=>{
+  const routeInput=(issuer:string)=>({
+    domain:"company" as const,entities:[issuer],topic:issuer+" attributed company event",
+    inputFormat:"text" as const,sourceKind:"user_commentary" as const,
+    extractedText:issuer+" appeared in an unverified company news item."
+  });
+  it("holds exact-title versus another Hub alias collision instead of linking the wrong issuer",async()=>{
+    await add("01_Companies/TSM.md","# TSM company hub");
+    await add("01_Companies/OTHER.md","---\naliases: [TSM]\n---\n# OTHER company hub");
+    const {planCanonicalRoutingV2}=await import("./investment-routing-v2");
+    const {buildInvestmentContextPack}=await import("./investment-context");
+    const {planInvestmentWriteback}=await import("./investment-writeback-router");
+    const input=routeInput("TSM");
+    const routing=planCanonicalRoutingV2(input);
+    const context=buildInvestmentContextPack({question:input.topic,issuers:["TSM"]});
+    const plan=planInvestmentWriteback(input);
+    expect(context.issuerResolution[0]).toMatchObject({status:"ambiguous_hold",hubPath:null});
+    expect(routing.companyHubs).toEqual([]);
+    expect(routing.unresolvedEntities).toEqual(["TSM"]);
+    expect(plan.routingV2.companyHubs).toEqual([]);
+    expect(plan.historical.identityHoldDiscovery[0]?.mappingVerified).toBe(false);
+    expect(plan.routes.find(r=>r.kind==="raw_input")?.action).toBe("candidate_create");
+    expect(plan.routes.find(r=>r.kind==="company_timeline_candidate")?.action).toBe("link_existing_or_hold");
+    expect(plan.gates.canAutoWrite).toBe(false);
+  });
+  it("holds conflicting explicitly declared DR aliases without inferring an underlying",async()=>{
+    await add("01_Companies/ISSUER_A.md",'---\naliases: ["TH:TEST80"]\n---\n# Issuer A');
+    await add("01_Companies/ISSUER_B.md",'---\naliases: ["TH:TEST80"]\n---\n# Issuer B');
+    const {planCanonicalRoutingV2}=await import("./investment-routing-v2");
+    const {buildInvestmentContextPack}=await import("./investment-context");
+    const input=routeInput("TH:TEST80");
+    expect(planCanonicalRoutingV2(input)).toMatchObject({companyHubs:[],unresolvedEntities:["TH:TEST80"]});
+    expect(buildInvestmentContextPack({question:input.topic,issuers:["TH:TEST80"]}).issuerResolution[0].status).toBe("ambiguous_hold");
+  });
+  it("never lets a curated name override a conflicting canonical Hub alias",async()=>{
+    await add("01_Companies/MU.md","# MU company hub");
+    await add("01_Companies/OTHER.md","---\naliases: [MU]\n---\n# Separate issuer");
+    const {planCanonicalRoutingV2}=await import("./investment-routing-v2");
+    const routing=planCanonicalRoutingV2(routeInput("Micron Technology"));
+    expect(routing.companyHubs).toEqual([]);
+    expect(routing.unresolvedEntities).toEqual(["Micron Technology"]);
+  });
+  it.each(["missing","stale"])("rejects %s indexed Hub metadata without fresh readback",async fault=>{
+    const hub="01_Companies/TSMC.md";
+    await add(hub,"---\naliases: [TSM]\n---\n# TSMC");
+    if(fault==="missing")fs.unlinkSync(path.join(vault,hub));
+    else fs.writeFileSync(path.join(vault,hub),"---\naliases: [OTHER]\n---\n# TSMC altered outside index");
+    const {planCanonicalRoutingV2}=await import("./investment-routing-v2");
+    const {buildInvestmentContextPack}=await import("./investment-context");
+    const {db}=await import("../db");
+    const baseline=db().prepare("SELECT total_changes() AS n").get();
+    const result=planCanonicalRoutingV2(routeInput("TSM"));
+    const historical=buildInvestmentContextPack({question:"TSM historical update",issuers:["TSM"]});
+    expect(result.companyHubs).toEqual([]);
+    expect(result.unresolvedEntities).toEqual(["TSM"]);
+    expect(historical.issuerResolution[0].status).toBe("readback_hold");
+    expect(db().prepare("SELECT total_changes() AS n").get()).toEqual(baseline);
+  });
+  it("does not recover a stale Micron Technology alias through the curated MU fallback",async()=>{
+    const hub="01_Companies/MU.md";
+    await add(hub,"---\naliases: [Micron Technology]\n---\n# MU");
+    fs.writeFileSync(path.join(vault,hub),"---\naliases: [Different Company]\n---\n# MU changed outside index");
+    const {planCanonicalRoutingV2}=await import("./investment-routing-v2");
+    const {buildInvestmentContextPack}=await import("./investment-context");
+    const input=routeInput("Micron Technology");
+    expect(planCanonicalRoutingV2(input)).toMatchObject({companyHubs:[],unresolvedEntities:["Micron Technology"]});
+    expect(buildInvestmentContextPack({question:input.topic,issuers:["Micron Technology"]}).issuerResolution[0].status).toBe("readback_hold");
+  });
+  it("keeps genuine exact-title and unique-alias navigation working",async()=>{
+    const p="01_Companies/MU.md";
+    await add(p,"---\naliases: [MU, Micron Technology]\n---\n# MU");
+    const {planCanonicalRoutingV2}=await import("./investment-routing-v2");
+    const exact=planCanonicalRoutingV2(routeInput("MU"));
+    const alias=planCanonicalRoutingV2(routeInput("Micron Technology"));
+    expect(exact.companyHubs).toEqual([expect.objectContaining({path:p,resolution:"exact_existing_title"})]);
+    expect(alias.companyHubs).toEqual([expect.objectContaining({path:p,resolution:"indexed_alias"})]);
+    expect(exact.unresolvedEntities).toEqual([]);
+    expect(alias.unresolvedEntities).toEqual([]);
+  });
+});

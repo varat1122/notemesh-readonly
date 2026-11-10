@@ -4,6 +4,8 @@
  * Labels, entity roles and broker revisions are caller-declared hypotheses.
  */
 import { db } from "../db";
+import { readNote } from "./notes";
+import { splitFrontmatter } from "./markdown";
 
 export type ContentType =
   | "reported_fact" | "earnings" | "guidance" | "industry_data" | "macro_data"
@@ -63,6 +65,12 @@ export interface RoutingV2 {
 };
 
 const key=(v:string)=>v.trim().normalize("NFC").replace(/\s+/g," ").toLocaleLowerCase("en");
+/** Shared label boundary for routing and historical issuer resolution. */
+export function validHubIdentityLabel(label:string):boolean{
+  const value=label.trim();
+  return Boolean(value)&&value.length<=120&&!/[\\/]/.test(value)&&
+    ![...value].some(c=>c.charCodeAt(0)<32)&&value!=="..";
+}
 const curatedAliases:Record<string,string>={
   "samsung electronics":"Samsung", "micron":"MU", "micron technology":"MU",
   "sk hynix":"SK hynix", "sk hynix inc":"SK hynix"
@@ -83,22 +91,44 @@ function indexedAliases(frontmatter:string|null):string[]{
       .flatMap(x=>Array.isArray(x)?x:[x]).filter((x):x is string=>typeof x==="string"&&x.length>1);
   }catch{return [];}
 }
+/** A stale indexed alias cannot be used to link a different issuer. Verify
+ * the selected Hub's current on-disk aliases before suggesting navigation.
+ * This check never authenticates a security, listing or publisher identity. */
+function currentHubAliases(hub:ReturnType<typeof indexedTopLevelHubs>[number]):boolean{
+  try{
+    const current=JSON.stringify(splitFrontmatter(readNote(hub.path).content).data);
+    const labels=(fm:string|null)=>JSON.stringify([...new Set(indexedAliases(fm).map(key))].sort());
+    return labels(current)===labels(hub.frontmatter);
+  }catch{return false;}
+}
 // Reuse the existing explicit Hub vocabulary for read-only retrieval. This is
 // not a security master, and does not change canonical writeback resolution.
 export {key as hubIdentityKey,indexedAliases as indexedHubAliases};
-function findHub(label:string, indexed:ReturnType<typeof indexedTopLevelHubs>, allowCurated:boolean){
-  if(indexed.length>3000)return null;
+function findHub(label:string, indexed:ReturnType<typeof indexedTopLevelHubs>, scope:"company"|"industry"){
+  if((scope==="company"&&!validHubIdentityLabel(label))||indexed.length>3000)return null;
   const wanted=key(label);
-  const exact=indexed.filter(x=>key(x.title)===wanted);
-  if(exact.length===1)return {path:exact[0].path,resolution:"exact_existing_title" as const};
-  if(exact.length>1)return null;
-  const alias=indexed.filter(x=>indexedAliases(x.frontmatter).some(a=>key(a)===wanted));
-  if(alias.length===1)return {path:alias[0].path,resolution:"indexed_alias" as const};
-  if(alias.length>1)return null;
-  const canonical=allowCurated?curatedAliases[wanted]:undefined;
+  // A title is not unique issuer evidence when another Hub declares the same
+  // label as an alias. Resolve ALL candidate paths before giving title priority,
+  // matching the conservative company-context resolver.
+  const candidates=indexed.filter(x=>key(x.title)===wanted||
+    indexedAliases(x.frontmatter).some(a=>key(a)===wanted));
+  if(candidates.length>1)return null;
+  if(candidates.length===1){
+    // An indexed candidate with stale/missing on-disk metadata must HOLD.
+    // Never fall through to a curated alias after a failed readback.
+    if(!currentHubAliases(candidates[0]))return null;
+    return {path:candidates[0].path,
+      resolution:key(candidates[0].title)===wanted?"exact_existing_title" as const:"indexed_alias" as const};
+  }
+  const canonical=scope==="company"&&Object.hasOwn(curatedAliases,wanted)?curatedAliases[wanted]:undefined;
   if(!canonical)return null;
-  const curated=indexed.filter(x=>key(x.title)===key(canonical));
-  return curated.length===1?{path:curated[0].path,resolution:"curated_alias" as const}:null;
+  // Curated aliases are navigational hints, never evidence that overrides
+  // a collision on the canonical target (including an alias-only collision).
+  const canonicalKey=key(canonical);
+  const curated=indexed.filter(x=>key(x.title)===canonicalKey||
+    indexedAliases(x.frontmatter).some(a=>key(a)===canonicalKey));
+  return curated.length===1&&key(curated[0].title)===canonicalKey&&currentHubAliases(curated[0])?
+    {path:curated[0].path,resolution:"curated_alias" as const}:null;
 }
 function isDate(value:string|undefined){
   if(!value||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value))return false;
@@ -133,7 +163,7 @@ export function planCanonicalRoutingV2(input:RoutingV2Input):RoutingV2{
   const companyCandidates=input.domain==="company"?input.entities:[...new Set(tags.map(x=>x.entity))];
   for(const label of companyCandidates){
     const declared=tags.find(x=>key(x.entity)===key(label));
-    const hub=findHub(label,companyIndex,true);
+    const hub=findHub(label,companyIndex,"company");
     if(hub){
       const role=declared?.role??(input.domain==="company"&&input.entities.length===1?"primary_subject":"mentioned");
       if(!companyHubs.some(x=>x.path===hub.path))companyHubs.push({label,...hub,role});
@@ -148,7 +178,7 @@ export function planCanonicalRoutingV2(input:RoutingV2Input):RoutingV2{
     :[];
   const themes=[...new Set([...(input.themes??[]),...industryEntities])];
   for(const label of themes){
-    const hub=findHub(label,industryIndex,false);
+    const hub=findHub(label,industryIndex,"industry");
     if(hub){if(!industryHubs.some(x=>x.path===hub.path))industryHubs.push({label,...hub});}
     else unresolvedThemes.push(label);
   }
