@@ -38,17 +38,17 @@ export function recordPilotSource(id:string,actor:string){
  if(r.actor!==actor||p.change.kind!=="create"||r.before_text!==""||r.id!=="ICW-"+judgeHash(["source_intake",p.path,r.after_hash].join("\n")).slice(0,32))throw Error("c1_pilot_source_binding_hold");
  if(r.status==="preview")append(r.id,actor,"c1_pilot_source",{intakeId,operationId:r.id,actor,path:p.path,sha256:r.after_hash});
 }
-function sourceAdmitted(path:string,content:string,actor:string){
+function sourceAdmitted(id:string,path:string,content:string,actor:string){
  const intakeId=sourceIdentity(path,content),e=event<{operationId:string;actor:string;path:string;sha256:string}>("c1_pilot_source",intakeId);
- if(!e||e.actor!==actor||e.path!==path||e.sha256!==judgeHash(content))throw Error("c1_pilot_source_not_prepared");
+ if(!e||e.operationId!==id||e.actor!==actor||e.path!==path||e.sha256!==judgeHash(content))throw Error("c1_pilot_source_not_prepared");
  const r=row(e.operationId);if(r.actor!==actor||r.after_text!==content||JSON.parse(r.payload).change.kind!=="create")throw Error("c1_pilot_source_binding_hold");
 }
-export function assertPilotPreview(path:string,before:string,after:string,actor:string,canonicalSource=false){
+export function assertPilotPreview(id:string,path:string,before:string,after:string,actor:string,canonicalSource=false){
  if(!c1Pilot())return;
  if(before!=="")throw Error("c1_pilot_add_only_required");
  if(canonicalSource){sourceIdentity(path,after);return;}
- const g=currentJudgeGate(intake(after)),target=g?.targets.find(t=>t.path===path&&t.sha256===judgeHash(after));
- if(target?.kind==="source_intake"){sourceAdmitted(path,after,actor);return;}
+ const g=currentJudgeGate(intake(after)),target=g?.targets.find(t=>t.operationId===id&&t.path===path&&t.sha256===judgeHash(after));
+ if(target?.kind==="source_intake"){sourceAdmitted(id,path,after,actor);return;}
  if(!g||g.actor!==actor||!target||!target.eligible||g.decision!=="PASS")throw Error("c1_pilot_judge_enrollment_required");
  if(pilotRestriction(g.intakeId,g.packetEnvelopeDigest,g.packetIssuedAt))throw Error("c1_pilot_fresh_assessment_required");
  assertResearchJudgeWrite(path,before,after,actor,"preview");
@@ -70,6 +70,7 @@ function challenge(id:string){
  if(!c1Pilot())throw Error("c1_pilot_disabled");
  const first=row(id),intakeId=intake(first.after_text),g=currentJudgeGate(intakeId);
  if(!g||g.actor!==first.actor||g.decision!=="PASS"||!g.targets.some(t=>t.kind!=="source_intake"))throw Error("c1_pilot_judge_pass_required");
+ if(!g.targets.some(t=>t.eligible&&t.operationId===id&&t.path===JSON.parse(first.payload).path&&t.sha256===judgeHash(first.after_text)))throw Error("c1_pilot_exact_operation_required");
  const rows=g.targets.map(t=>{
   const r=row(t.operationId);
   if(!t.eligible||r.actor!==g.actor||r.after_hash!==t.sha256||judgeHash(r.after_text)!==t.sha256||JSON.parse(r.payload).path!==t.path||r.before_text!==""||!["preview","written"].includes(r.status))throw Error("c1_pilot_exact_bundle_hold");
@@ -132,8 +133,8 @@ export function recordPilotReview(raw:unknown,authenticatedUserId:string){
 export function assertPilotApply(id:string,path:string,before:string,after:string,actor:string){
  if(!c1Pilot())return null;
  if(before!=="")throw Error("c1_pilot_add_only_required");
- if(/^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/.test(path)){sourceAdmitted(path,after,actor);return null;}
- assertPilotPreview(path,before,after,actor);
+ if(/^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/.test(path)){sourceAdmitted(id,path,after,actor);return null;}
+ assertPilotPreview(id,path,before,after,actor);
  const c=challenge(id),decision=lastDecision(c.binding.intakeId);
  if(!decision||decision.policy!==C1_PILOT_POLICY||decision.actor!==actor||decision.effective!=="PASS"||decision.expiresAt<=Date.now()||decision.bindingDigest!==c.bindingDigest)
   throw Error("c1_pilot_explicit_current_review_required");

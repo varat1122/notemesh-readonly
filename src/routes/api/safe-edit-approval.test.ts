@@ -1,11 +1,13 @@
-import { beforeEach, expect, it, vi } from "vitest";
-const state=vi.hoisted(()=>({signedIn:true,approvals:[] as unknown[]}));
+import { beforeEach, afterEach, expect, it, vi } from "vitest";
+import fs from "node:fs";import os from "node:os";import path from "node:path";
+const state=vi.hoisted(()=>({signedIn:true,approvals:[] as unknown[],dataDir:""}));
 vi.mock("~/server/auth",()=>({runAuthMigrations:async()=>{},auth:{api:{getSession:async()=>state.signedIn?{user:{id:"synthetic-human"}}:null}}}));
-vi.mock("~/server/env",()=>({env:{baseUrl:"https://approval-fixture.test"}}));
+vi.mock("~/server/env",()=>({env:{baseUrl:"https://approval-fixture.test",get dataDir(){return state.dataDir;}}}));
 vi.mock("~/server/safe-edit/engine",()=>({adminPreview:()=>({afterHash:"a".repeat(64),diff:{added:["<script>grant edit</script>"]}}),approve:(...args:unknown[])=>state.approvals.push(args)}));
 import { GET, POST } from "./safe-edit-approval";
 const event=(request:Request)=>({request}) as Parameters<typeof GET>[0];
-beforeEach(()=>{state.signedIn=true;state.approvals=[];});
+beforeEach(()=>{state.signedIn=true;state.approvals=[];state.dataDir=fs.mkdtempSync(path.join(os.tmpdir(),"legacy-approval-"));});
+afterEach(()=>fs.rmSync(state.dataDir,{recursive:true,force:true}));
 it("rejects unauthenticated viewing and approval",async()=>{state.signedIn=false;expect((await GET(event(new Request("https://approval-fixture.test/api/safe-edit-approval?id=example")))).status).toBe(401);expect((await POST(event(new Request("https://approval-fixture.test/api/safe-edit-approval",{method:"POST",headers:{Origin:"https://approval-fixture.test"},body:"id=synthetic&hash=x"})))).status).toBe(401);expect(state.approvals).toEqual([]);});
 it("escapes hostile note text and blocks script/framing through CSP",async()=>{const r=await GET(event(new Request("https://approval-fixture.test/api/safe-edit-approval?id=synthetic")));const html=await r.text();expect(html).not.toContain("<script>");expect(html).toContain("&lt;script&gt;");expect(r.headers.get("Content-Security-Policy")).toContain("default-src 'none'");expect(r.headers.get("Cache-Control")).toBe("no-store");});
 it.each([undefined,"https://attacker.test"])("requires exact same origin for approval: %s",async origin=>{const r=await POST(event(new Request("https://approval-fixture.test/api/safe-edit-approval",{method:"POST",headers:origin?{Origin:origin}:{},body:"id=synthetic&hash=x"})));expect(r.status).toBe(403);expect(state.approvals).toEqual([]);});

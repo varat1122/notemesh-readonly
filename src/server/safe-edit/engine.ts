@@ -278,7 +278,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean,canonic
     if(existing.actor!==actor||existing.payload!==JSON.stringify(p)) throw Error("Operation ID reused for different input or actor");
     if(existing.status==="preview") {
       assertResearchJudgeWrite(p.path,existing.before_text,existing.after_text,actor,"preview");
-      assertPilotPreview(p.path,existing.before_text,existing.after_text,actor,canonicalSource);
+      assertPilotPreview(p.operationId,p.path,existing.before_text,existing.after_text,actor,canonicalSource);
       assertReceivedClaimWrite(p.path,existing.before_text,existing.after_text,actor,"preview");
       checkStoredReviewLineage(existing);
       assertDeclaredEvidenceAuthority(p.evidence);
@@ -303,7 +303,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean,canonic
   document(before??"");checkEvidence(p);
   const after=calculate(p,before??"",actor);
   assertResearchJudgeWrite(p.path,before??"",after,actor,"preview");
-  assertPilotPreview(p.path,before??"",after,actor,canonicalSource);
+  assertPilotPreview(p.operationId,p.path,before??"",after,actor,canonicalSource);
   assertReceivedClaimWrite(p.path,before??"",after,actor,"preview");
   const afterMetadata=document(after).data,beforeMetadata=document(before??"").data;
   if(p.change.kind==="create")assertReviewPreviewAdmission(after,canonical);

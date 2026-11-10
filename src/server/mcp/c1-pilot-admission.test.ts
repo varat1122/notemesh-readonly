@@ -145,6 +145,25 @@ beforeEach(async()=>{engine=await import("../safe-edit/engine");intakeModule=awa
 const enqueueFn=()=>intakeModule.enqueue;
 const importEnginePreview=()=>engine.preview({operationId:"PILOT-RAW-01",reason:"Synthetic bypass attempt",path:"10_Knowledge/Company Research/Raw.md",change:{kind:"create",content:"Raw"}},actor);
 
+it("F1 rejects a generic alias operation ID even for the exact reviewed path and bytes",async()=>{
+ const data=await judged(),p=await prepare(data);expect((await reviewDecision(p)).status).toBe(200);
+ const t=p.previews.find(t=>t.kind==="canonical_review")!;
+ const {db}=await import("../db");
+ const original=db().prepare("SELECT payload FROM safe_edit_operations WHERE id=?").get(t.operationId) as {payload:string};
+ const alias={...JSON.parse(original.payload),operationId:"C1-UNREVIEWED-ALIAS"};
+ expect(()=>engine.preview(alias,actor)).toThrow(/c1_pilot/);
+ expect(fs.existsSync(path.join(vault,t.path))).toBe(false);
+});
+
+it("F2 removing the pilot flag cannot reopen a raw writer on initialized pilot data",async()=>{
+ const notes=await import("../vault/notes");
+ delete process.env.C1_RESEARCH_PILOT;
+ try{
+  expect(()=>notes.createNote("10_Knowledge/Company Research/Flag removed.md","Unreviewed")).toThrow(/c1_pilot/);
+  expect(fs.existsSync(path.join(vault,"10_Knowledge/Company Research/Flag removed.md"))).toBe(false);
+ }finally{process.env.C1_RESEARCH_PILOT="disposable";}
+});
+
 it("dashboard rejects OAuth-only/absent session, cross-origin, forged digest and injected markup",async()=>{
  const data=await judged(),p=await prepare(data),id=p.previews.find(t=>t.kind==="canonical_review")!.operationId;
  const {GET,POST}=await import("../../routes/api/safe-edit-approval"),{env}=await import("../env");

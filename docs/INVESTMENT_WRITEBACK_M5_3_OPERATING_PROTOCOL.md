@@ -325,7 +325,16 @@ then verifies restrictive upgrade admission and immutable Source receipts.
 
 This opt-in successor of PR #168 is an experimental **whole-instance** restriction,
 not a change to Master 2.0.0, RISK-1.1, shared legacy permissions, or a production
-release. With `C1_RESEARCH_PILOT` absent, existing workflows retain their behavior.
+release. With `C1_RESEARCH_PILOT` absent, only normal, never-enrolled legacy
+instances retain their behavior. A reserved `ios-c1-pilot-*` DATA_DIR fails closed
+without the flag, even before its first database is created. Initialization
+appends a server-owned `c1_pilot_instance` event to the existing Safe Edit journal.
+Any `c1_pilot_*` enrollment (including pre-hardening Source/assessment/review
+events) remains restrictive after restart or relocation. A missing flag or
+unreadable identity state cannot reopen legacy writers. The shared guard runs
+before database initialization, at writer entrypoints and at container startup
+(maintenance keeps its existing earlier, DB-free precedence). No unenrollment,
+re-sealing, journal deletion or downgrade-to-unrestricted procedure is provided.
 `C1_RESEARCH_PILOT=disposable` requires an owner-created, exclusive temporary
 `DATA_DIR` named `ios-c1-pilot-*` beneath the OS temporary directory, its own
 `vault/`, no symlinks, and no Railway project/service environment. Other values
@@ -343,7 +352,11 @@ The server, rather than a local controller, enforces:
 2. Every non-Source target must belong to a current, exact, eligible Judge PASS
    bundle. Fresh unenrolled intakes cannot use an unjudged Draft fallback in this
    instance. Generic create/append/frontmatter/replace/rollback cannot introduce
-   another target or change protected records.
+   another target or change protected records. Preview and apply require the
+   exact eligible target operation ID, path and bytes: identical content under
+   an alternative operation ID is refused, including pre-hardening preview
+   tokens. Canonical Source admission likewise requires its enrolled operation
+   ID. Legitimate exact-ID writes/retries keep the existing receipt identity.
 3. Canonical preparation can produce exact **review-only previews** before the
    checkpoint. A preview token alone is not write authority. The existing
    `approvalUrl` presents ALL target diffs, exact received Source, sealed packet,

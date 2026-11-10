@@ -2,6 +2,8 @@
  * session/decision is NOT proof of a human or a ChatGPT room connection. */
 import {it,expect} from "vitest";
 import fs from "node:fs";import os from "node:os";import path from "node:path";
+import {spawn} from "node:child_process";
+import {createHash} from "node:crypto";
 import {startServer,claimAdmin,markConfigured,rpc,type Server} from "./harness";
 import {DRAFT_RISK_POLICY,riskDimensions,judgeHash} from "../../src/server/vault/research-judge-contract";
 it("C1 local network: audience/descriptor, explicit dashboard review, raw/generic refusal, Source and Draft",async()=>{
@@ -57,5 +59,25 @@ it("C1 local network: audience/descriptor, explicit dashboard review, raw/generi
   const saved=await save(data,p);expect(saved.status,JSON.stringify(saved)).toBe("saved_verified");expect(saved.receipts).toHaveLength(2);
   const bytes=fs.readFileSync(path.join(root,"vault",t.path),"utf8");expect(bytes).toContain("historical_analysis_only");expect(bytes).toContain("comparator_eligible: false");
   expect(s.log()).not.toMatch(/\[supervisor\] starting|\[git\] no remote configured/);
+  // F2: actual emitted server restart on the SAME persisted data, losing the
+  // flag. Refuse before auth migrations, indexing, sync or writer admission.
+  const restartUrl=s.url;await s.stop();s=undefined;
+  const snapshot=()=>Object.fromEntries(fs.readdirSync(root,{recursive:true,withFileTypes:true}).filter(e=>e.isFile()).map(e=>{
+   const file=path.join(e.parentPath,e.name);return [path.relative(root,file),createHash("sha256").update(fs.readFileSync(file)).digest("hex")];
+  }));
+  const before=snapshot(),child=spawn(process.execPath,[path.resolve(".output/server/index.mjs")],{env:{PATH:process.env.PATH,HOME:process.env.HOME,NODE_ENV:"production",DATA_DIR:root,BASE_URL:restartUrl,PORT:new URL(restartUrl).port,ENCRYPTION_KEY:Buffer.alloc(32,8).toString("base64")},stdio:["ignore","pipe","pipe"]});
+  let log="";child.stdout.on("data",b=>log+=b);child.stderr.on("data",b=>log+=b);
+  try{
+   const deadline=Date.now()+10000;
+   while(Date.now()<deadline&&child.exitCode===null&&!log.includes("c1_pilot_mode_required_hold")){
+    let response:Response|undefined;
+    try{response=await fetch(restartUrl+"/api/health",{signal:AbortSignal.timeout(500)});}catch{/* startup may refuse before listening */}
+    if(response)expect(response.ok).toBe(false);
+    await new Promise(r=>setTimeout(r,50));
+   }
+   expect(log).toContain("c1_pilot_mode_required_hold");
+   expect(log).not.toMatch(/\[supervisor\] starting|\[indexer\]|\[git\]|\[market-prices\]/);
+  }finally{if(child.exitCode===null){child.kill("SIGKILL");await new Promise<void>(r=>child.once("close",()=>r()));}}
+  expect(snapshot()).toEqual(before);
  }finally{await s?.stop();fs.rmSync(root,{recursive:true,force:true});}
 },60000);

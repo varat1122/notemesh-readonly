@@ -1,20 +1,30 @@
 import Database from "better-sqlite3";
 import { env, ensureDataDirs } from "./env";
 import { maintenanceActive, registerConnection } from "./maintenance";
+import {c1Pilot} from "./c1-pilot";
+import {enrollPilotIdentity} from "../../scripts/c1-pilot-identity.cjs";
 
 let _db: Database.Database | undefined;
 
 export function db(): Database.Database {
+  // Recheck even on cached connections: losing the pilot flag is restrictive.
+  // Maintenance still wins before any identity inspection/database opening.
+  if (!_db && maintenanceActive()) throw Error("Maintenance is active; the database is not opened");
+  const pilot=c1Pilot();
   if (!_db) {
     // Opening runs migrations and may create directories: never in maintenance.
     if (maintenanceActive()) throw Error("Maintenance is active; the database is not opened");
     ensureDataDirs();
-    _db = new Database(env.dbPath);
-    _db.pragma("journal_mode = WAL");
-    _db.pragma("foreign_keys = ON");
-    migrate(_db);
-    // Process-wide, so a drain in either router bundle fences both connections.
-    registerConnection(_db);
+    const opened = new Database(env.dbPath);
+    try {
+      opened.pragma("journal_mode = WAL");
+      opened.pragma("foreign_keys = ON");
+      if(pilot)enrollPilotIdentity(opened);
+      migrate(opened);
+      // Process-wide, so a drain in either router bundle fences both connections.
+      registerConnection(opened);
+      _db=opened;
+    } catch(error) { opened.close(); throw error; }
   }
   return _db;
 }

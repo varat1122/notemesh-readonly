@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { env } from "./env";
+import { c1Pilot } from "./c1-pilot";
 import { priceDbPath } from "./market-prices/store";
 import { gitBackend } from "./sync/git";
 import { supervisor } from "./ob/supervisor";
@@ -38,6 +39,9 @@ export function maintenanceGate(event: { request: Request }): Response | null {
   // only here — never as a side effect in another process.
   resolveServerBoot();
   let status = maintenanceStatus();
+  // Pilot identity must be valid before registering a serving process or
+  // admitting any startup hooks. Active maintenance remains DB-free.
+  if (!status.active) c1Pilot();
   // Admission needs a registered presence; failing that, the server holds closed.
   if (!status.active && registerServer()) {
     admitRequest(event);
