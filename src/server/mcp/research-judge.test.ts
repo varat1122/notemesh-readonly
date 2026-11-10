@@ -8,6 +8,10 @@ import {createHash,createHmac} from "node:crypto";
 import type {WritebackInput} from "../vault/investment-writeback-router";
 import type {IntakeClaim} from "../vault/canonical-claims";
 
+// Preserve the accepted mechanical authority fixtures; current RISK-1 policy
+// is exercised WITHOUT this oracle in risk-draft-admission.test.ts.
+vi.mock("../vault/research-draft-risk",async importOriginal=>({...await importOriginal<typeof import("../vault/research-draft-risk")>(),
+  judgeDraftRisk:(await import("./fixtures/legacy-risk-oracle")).legacyRiskOracle}));
 vi.mock("../safe-edit/sync",()=>({withPausedSync:async<T>(run:()=>T)=>run()}));
 const sha=(s:string|Buffer)=>createHash("sha256").update(s).digest("hex");
 const actor="oauth:ri001-claims-fixture";
@@ -638,7 +642,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     data.researchJudge.result.review.references[0].quote="[Source lines 1-2]";
     expect((await prepare(data)).researchJudge?.reasons).toContain("judge_locator_quote_unbound");assertProtected();
   });
-  it.each(["RI001-JUDGE-2","RI001-JUDGE-3","RI001-JUDGE-4"])("F1/F2 %s packets/gates cannot authorize pending writes after upgrade",async version=>{
+  it.each(["RI001-JUDGE-2","RI001-JUDGE-3","RI001-JUDGE-4","RI001-JUDGE-5"])("F1/F2 %s packets/gates cannot authorize pending writes after upgrade",async version=>{
     const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine"),gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
     // Existing internal journal API, not SQL/receipt fabrication: emulate an
     // old server's admission contract while retaining the real preview rows.

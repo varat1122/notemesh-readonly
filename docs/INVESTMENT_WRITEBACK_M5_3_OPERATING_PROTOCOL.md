@@ -235,3 +235,74 @@ separately authorized WORK runtime acceptance remain external gates. CI uses
 simulated assessments to test enforcement and does not certify LLM research
 quality. This change authorizes no deployment, live mutation, automatic protected
 record update, backup/restore or first-cutover operation.
+
+### Experimental risk-based Draft admission — RI001-DRAFT-RISK-1
+
+This CI candidate implements the ORCH clarification for IOS-ORCH-RI-001 under
+Master 2.0.0 §09. It does not amend the Master or authenticate an LLM.
+RI001-JUDGE-6 preserves Judge-5 All-or-Hold, RI001-DRAFT-2 trust projection and
+stored Draft metadata. The protocol increment prevents an older writer from
+ignoring the new risk-policy stamp and using its pending PASS gates.
+
+Every newly issued Judge packet seals a `riskPolicy` and `riskScope` inventory:
+received text SHA, complete proposed Review digest, each structured Claim and
+relationship, and every selected historical note SHA. The typed result must echo
+the exact envelope digest and supply `riskAssessment` for every inventory key.
+It contains six materiality findings: financial figures/forecasts, valuation /
+thesis / mechanism, material relationships, correction / contradiction / vintage,
+unsupported/unresolved assertions, and Protected authority. Each finding requires
+a rationale and exact UTF-16/SHA citations to both the received Source and an
+actually receipted historical Source. Standalone and Review-paired historical
+Sources are supported. History receipts are read, never issued by this check,
+and revalidated at non-Source admission alongside existing selection freshness.
+New Source receipts remain pending until the normal Source write actually finishes.
+
+Only an `added_detail` with all required semantic checks PASS, all six findings
+`absent`, complete bound materiality coverage, and no other current gate HOLD is
+eligible. `materialRisk=false`, the event label, an empty Claim list, citation
+existence or a statement saying "low risk" cannot alone grant the exception.
+Evaluation and pre-SDK restrictive withdrawal use the same risk evaluator.
+Malformed risk evidence in an otherwise matching authenticated submission cannot
+hide withdrawal behind SDK rejection. Prior HOLD/FAIL is terminal for that
+exact envelope: recovery still requires a later fresh packet and bound assessment.
+A required Claim/Review HOLD/FAIL blocks the entire assessed non-Source bundle.
+
+RISK-1 deliberately abstains on Unicode numeric characters anywhere in received
+text or proposed Review/Claim/relationship values, not only the quoted excerpt or
+selected Claim list. This is a conservative *quantitative-scope unsupported* HOLD,
+not a financial-materiality classifier or a permanent rule that all numbers are
+high risk. Benign dates, numbered labels or administrative quantities in those
+texts can therefore HOLD. Declared financial content, guidance/estimate roles,
+unresolved Review claims and supplier/customer relationships also retain HOLD.
+A material/uncertain finding HOLDs; an unsupported finding or any required semantic
+FAIL fails the bundle. No independent critic provenance is available here; a
+same-chat second PASS cannot override these outcomes. Other event classes have no
+new low-risk exemption in this first version. Source-only preservation remains
+available under existing rights/provenance/maintenance controls.
+
+A successful write remains only `draft` / `historical_analysis_only`, with
+`comparator_eligible=false`, `independent_evidence_increment=0` and
+`critic_independence=not_verified`. No primary, comparator, Reviewed or Thesis
+promotion is introduced. Ungated legacy intake is unchanged; an enrolled intake
+cannot escape its gate by deleting `researchJudge` or switching to a generic writer.
+
+Compatibility: pending pre-RISK-1 Judge PASS gates cannot authorize new non-Source
+writes after upgrade. Re-prepare/reassess under the new descriptor; do not patch
+old journals or backfill policy stamps. Old Judge-5 sealed envelopes remain authenticatable ONLY
+for restrictive legacy withdrawal, never new PASS admission. Historical note bytes and completed receipts
+are not migrated or invalidated. Clients must refresh the result descriptor before
+attempting the new eligibility path. No DB migration, key change or new writer.
+
+Trust limit: exact bindings establish the assessed scope, not that an analyst
+actually read it or reasoned correctly. A deliberately false but fully bound
+materiality assessment (including a material assertion written wholly in words)
+is not semantically disproven by backend text rules. Actual analyst/LLM fidelity
+and independent review remain required; no regex or mock is a research judge.
+
+Testing: `risk-draft-admission.test.ts` exercises the real new policy and real
+Safe Edit/MCP with simulated semantic results. The pre-existing lifecycle suites
+use the explicit test-only `legacy-risk-oracle.ts` to retain their financial
+fixtures while testing seal/freshness/withdrawal/CAS/receipt controls. Their PASS
+is NOT RISK-1 financial eligibility. A real-policy cross-version test separately
+checks withdrawal/denial of an actual 6cd9c3cd legacy PASS without rewriting history.
+Neither group establishes live semantic or deployment acceptance.

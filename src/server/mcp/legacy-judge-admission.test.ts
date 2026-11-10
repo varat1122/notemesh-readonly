@@ -11,6 +11,10 @@ import type {z} from "zod";
 import {Client} from "@modelcontextprotocol/sdk/client/index.js";
 import {InMemoryTransport} from "@modelcontextprotocol/sdk/inMemory.js";
 
+// Preserve the accepted mechanical authority fixtures; current RISK-1 policy
+// is exercised WITHOUT this oracle in risk-draft-admission.test.ts.
+vi.mock("../vault/research-draft-risk",async importOriginal=>({...await importOriginal<typeof import("../vault/research-draft-risk")>(),
+  judgeDraftRisk:(await import("./fixtures/legacy-risk-oracle")).legacyRiskOracle}));
 vi.mock("../safe-edit/sync",()=>({withPausedSync:async<T>(run:()=>T)=>run()}));
 const BASE="6cd9c3cd558dac3d67e9202d8652b406cfdc332a",KEY=Buffer.alloc(32,8).toString("base64");
 const T=Date.parse("2026-11-08T00:00:00.000Z"),actor="oauth:ri001-claims-fixture";
@@ -96,6 +100,19 @@ async function originalGateUnchanged(before:Awaited<ReturnType<typeof events>>){
   // Refusal/Source preview audit entries are allowed, never a replacement grant.
   expect(after.filter(e=>e.event==="research_judge_gate")).toEqual(before.filter(e=>e.event==="research_judge_gate"));
 }
+// Judge-5 packets now return explicit contract HOLD rather than new PASS
+// admission followed by a replay-order exception. Both public and generic
+// paths must still prove zero non-Source eligibility/writes.
+function expectLegacyPrepareHold(api:typeof import("./canonical-writeback")){
+  try{
+    const held=api.prepareCanonicalWriteback(manifest.original,actor);
+    expect(held.researchJudge?.decision).toBe("HOLD");
+    expect(held.previews.every(t=>t.kind==="source_intake")).toBe(true);
+  }catch(error){
+    // A legacy terminal gate may refuse stale withdrawal ordering outright.
+    expect(String(error)).toMatch(/research_judge_(reassessment_not_fresh|revoked_envelope|withdrawal_time)_hold/);
+  }
+}
 async function denyGeneric(applyFailure=/research_judge/){
   const engine=await import("../safe-edit/engine"),sql=(await import("../db")).db();
   for(const t of manifest.preview.previews.filter(t=>t.kind!=="source_intake")){
@@ -109,7 +126,7 @@ async function denyGeneric(applyFailure=/research_judge/){
 it.each(["HOLD","FAIL"] as const)("P1-LEGACY %s with saved Source: canonical/generic denial preserves real receipt",async verdict=>{
   const api=await openFixture(verdict+"-true"),before=await events(),engine=await import("../safe-edit/engine"),source=manifest.preview.steps[0];
   const receipt=engine.status(source.receiptKey,actor).receipt,bytes=fs.readFileSync(path.join(dataRoot,"vault",source.path));
-  expect(()=>api.prepareCanonicalWriteback(manifest.original,actor)).toThrow(/research_judge/);
+  expectLegacyPrepareHold(api);
   await expect(api.applyCanonicalWriteback({input:manifest.original,planId:manifest.preview.planId,authorizations:authorizations(manifest.preview)},actor)).rejects.toThrow(/research_judge/);
   await denyGeneric();await originalGateUnchanged(before);
   expect(engine.status(source.receiptKey,actor).receipt).toEqual(receipt);expect(fs.readFileSync(path.join(dataRoot,"vault",source.path))).toEqual(bytes);
@@ -200,7 +217,7 @@ it.each([false,true])("L2-A legacy withdrawal precedes invalid tokens/sourceWrit
   await expect(api.applyCanonicalWriteback({input,planId:manifest.preview.planId,authorizations:"invalid"},actor)).rejects.toThrow();
   expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(manifest.preview.planId)).toMatchObject({decision:"HOLD",expiresAt:0,revokedAt:T+5000});
   for(const row of before)expect(await events()).toContainEqual(row);
-  expect(()=>api.prepareCanonicalWriteback(manifest.original,actor)).toThrow(/research_judge/);await denyGeneric();
+  expectLegacyPrepareHold(api);await denyGeneric();
 });
 async function withMcp(run:(client:Client)=>Promise<void>,label=actor){
   const server=(await import("./maintenance-tools")).trackToolExecution((await import("./safe-edit-server")).createSafeEditMcpServer({read:true,write:false,label,scopes:["vault:read","vault:edit"]}));
@@ -214,15 +231,19 @@ it.each([["HOLD","appearance"],["FAIL","appearance"],["HOLD","tokens"],["FAIL","
   await withMcp(async client=>{
     expect((await client.callTool({name:"apply_canonical_writeback",arguments:args})).isError).toBe(true);
     expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(manifest.preview.planId)?.decision).toBe(verdict);
-    expect((await client.callTool({name:"prepare_canonical_writeback",arguments:manifest.original})).isError).toBe(true);
+    const refused=await client.callTool({name:"prepare_canonical_writeback",arguments:manifest.original});
+    expect(refused.isError).not.toBe(true);
+    const outer=JSON.parse((refused.content as {text:string}[])[0].text),held=JSON.parse(outer.result.split("\n").slice(1,-1).join("\n"));
+    expect(held.researchJudge.decision).toBe("HOLD");expect(held.previews.every((t:{kind:string})=>t.kind==="source_intake")).toBe(true);
     for(const t of manifest.preview.previews.filter(t=>t.kind!=="source_intake"))expect((await client.callTool({name:"apply_edit",arguments:{operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash}})).isError).toBe(true);
   });await denyGeneric();
 });
 it.each(["HOLD","FAIL"] as const)("L2-D/F new Prepare retains %s withdrawal and later fresh recovery",async verdict=>{
   const api=await openFixture("PASS-true"),engine=await import("../safe-edit/engine"),source=manifest.preview.steps[0];
   const receipt=engine.status(source.receiptKey,actor).receipt,bytes=fs.readFileSync(path.join(dataRoot,"vault",source.path)),before=await events();
-  expect(api.prepareCanonicalWriteback(withdrawal(verdict),actor).researchJudge?.decision).toBe(verdict);
-  await denyGeneric();expect(()=>api.prepareCanonicalWriteback(manifest.original,actor)).toThrow(/research_judge/);
+  expect(api.prepareCanonicalWriteback(withdrawal(verdict),actor).researchJudge?.decision).toBe("HOLD");
+  expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(manifest.preview.planId)?.decision).toBe(verdict);
+  await denyGeneric();expectLegacyPrepareHold(api);
   vi.setSystemTime(T+6000);const fresh=await freshInput(),p=api.prepareCanonicalWriteback(fresh,actor);
   expect(p.researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});
   const saved=await api.applyCanonicalWriteback({input:fresh,planId:p.planId,authorizations:authorizations(p)},actor);
@@ -304,7 +325,7 @@ it("L2-H same-clock HOLD then FAIL is restrictive, idempotent, and recoverable o
   const gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(manifest.preview.planId)!;
   expect(gate).toMatchObject({decision:"FAIL",revokedAt:T+5000,packetIssuedAt:T});
   expect(gate.packetEnvelopeDigest).toBe((await import("../vault/research-judge")).judgeEnvelopeDigest(manifest.original.researchJudge!.packet));
-  await denyGeneric();expect(()=>api.prepareCanonicalWriteback(manifest.original,actor)).toThrow(/research_judge_revoked_envelope_hold/);
+  await denyGeneric();expectLegacyPrepareHold(api);
   vi.setSystemTime(T+6000);const fresh=await freshInput();expect(api.prepareCanonicalWriteback(fresh,actor).researchJudge?.decision).toBe("PASS");
   for(const row of old)expect(await events()).toContainEqual(row);
 });
@@ -317,12 +338,46 @@ it.each(["source", "actor"])("L2-G independently sealed other %s packet cannot w
   await expect(api.applyCanonicalWriteback({input:{...clean,researchJudge:{packet:built.packet,result}},planId:manifest.preview.planId,authorizations:"invalid"},actor)).rejects.toThrow();
   expect(await events()).toEqual(before);await denyGeneric();
 });
-it("L2 normal authentic legacy PASS without withdrawal remains eligible and idempotent",async()=>{
-  const api=await openFixture("PASS-false"),before=await events(),p=api.prepareCanonicalWriteback(manifest.original,actor);
-  expect(p.researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});
-  const saved=await api.applyCanonicalWriteback({input:manifest.original,planId:p.planId,authorizations:authorizations(p)},actor);
+it("authentic legacy PASS requires a fresh supported packet after the risk protocol upgrade",async()=>{
+  const api=await openFixture("PASS-false"),before=await events(),old=api.prepareCanonicalWriteback(manifest.original,actor);
+  expect(old.researchJudge?.decision).toBe("HOLD");await denyGeneric();
+  vi.setSystemTime(T+7000);const fresh=await freshInput(),p=api.prepareCanonicalWriteback(fresh,actor);
+  // Lifecycle oracle only: real RISK-1 eligibility is asserted separately below.
+  expect(p.researchJudge?.decision).toBe("PASS");
+  const saved=await api.applyCanonicalWriteback({input:fresh,planId:p.planId,authorizations:authorizations(p)},actor);
   expect(saved.status).toBe("saved_verified");expect(saved.receipts).toHaveLength(4);
-  const retry=api.prepareCanonicalWriteback(manifest.original,actor);
-  expect((await api.applyCanonicalWriteback({input:manifest.original,planId:retry.planId,authorizations:authorizations(retry)},actor)).receipts).toEqual([]);
   for(const row of before)expect(await events()).toContainEqual(row);
+});
+
+it("RISK-1 actual policy: real legacy PASS is no longer pending write authority; historical bytes/events remain",async()=>{
+  // Unlike the lifecycle oracle above, exercise the REAL upgraded policy here.
+  const risk=await import("../vault/research-draft-risk"),real=await vi.importActual<typeof import("../vault/research-draft-risk")>("../vault/research-draft-risk");
+  vi.spyOn(risk,"judgeDraftRisk").mockImplementation(real.judgeDraftRisk);
+  const api=await openFixture("PASS-false"),before=await events(),p=api.prepareCanonicalWriteback(manifest.original,actor);
+  expect(p.researchJudge?.decision).toBe("HOLD");expect(p.previews.every(t=>t.kind==="source_intake")).toBe(true);await denyGeneric();
+  for(const row of before)expect(await events()).toContainEqual(row);
+  vi.setSystemTime(T+7000);const current=api.prepareCanonicalWriteback(await freshInput(),actor);
+  expect(current.researchJudge?.decision).toBe("HOLD");expect(current.researchJudge?.reasons).toContain("draft_risk_assessment_required");
+  expect(await writtenNonSource()).toEqual({n:0});
+});
+
+it("actual 6cd writer refuses new Judge-6 non-Source gates on rollback",async()=>{
+  const api=await openFixture("PASS-false"),fresh=await freshInput(),p=api.prepareCanonicalWriteback(fresh,actor);
+  expect(p.researchJudge?.decision).toBe("PASS"); // lifecycle oracle, not financial risk eligibility
+  const old=path.join(root,"old-code"),payload=path.join(root,"new-risk-preview.json");
+  fs.writeFileSync(payload,JSON.stringify({actor,previews:p.previews}));
+  fs.writeFileSync(path.join(old,"src/server/mcp/risk-old-reader.test.ts"),`
+import {it,expect,vi} from 'vitest';import fs from 'node:fs';
+it('old generic writer fails closed on new protocol',async()=>{
+ vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(${T+5000});
+ const {actor,previews}=JSON.parse(fs.readFileSync(process.env.RI001_RISK_PREVIEWS!,'utf8'));
+ const engine=await import('../safe-edit/engine');
+ for(const t of previews){const req={operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash};
+  if(t.kind==='source_intake')engine.apply(req,actor);
+  else expect(()=>engine.apply(req,actor)).toThrow('research_judge_contract_version_hold');}
+ (await import('../db')).db().close();
+});`);
+  const log=execFileSync(process.execPath,[path.resolve("node_modules/vitest/vitest.mjs"),"run","src/server/mcp/risk-old-reader.test.ts","--maxWorkers=1"],{
+    cwd:old,env:{...process.env,RI001_RISK_PREVIEWS:payload},timeout:30000,maxBuffer:4*1024*1024,encoding:"utf8"});
+  expect(log).toContain("1 passed");expect(await writtenNonSource()).toEqual({n:0});
 });

@@ -1,3 +1,4 @@
+import {judgeDraftRisk} from "../vault/research-draft-risk";
 /**
  * M5.4: one scoped Safe Edit handoff for a complete canonical intake.
  * Preview is read-only to the Vault. Apply uses the existing per-note Safe Edit
@@ -12,7 +13,7 @@ import { planInvestmentWriteback } from "../vault/investment-writeback-router";
 import { apply, preview, previewCanonicalReview, recordResearchJudgeGate, recordCanonicalAppearance, status } from "../safe-edit/engine";
 import {appearanceSchema,canonicalAppearance,requireAppearance,checkAppearanceRetry,appearanceReadback} from "../vault/intake-appearances";
 import { withPausedSync } from "../safe-edit/sync";
-import {JUDGE_VERSION,judgeSubmissionSchema,evaluateResearchJudge,verifyResearchJudgeEnvelope,judgeEnvelopeDigest,judgeHash,stableJudgeJson} from "../vault/research-judge";
+import {JUDGE_VERSION,DRAFT_RISK_POLICY,draftRiskAssessmentSchema,judgeSubmissionSchema,evaluateResearchJudge,verifyResearchJudgeEnvelope,judgeEnvelopeDigest,judgeHash,stableJudgeJson} from "../vault/research-judge";
 import {RESEARCH_STATE_POLICY} from "../vault/research-state";
 import {currentJudgeGate,assertJudgeAdmissionOrder} from "../safe-edit/research-judge-gate";
 
@@ -91,7 +92,16 @@ export const canonicalApplySchema = z.object({
  * gates have no fingerprint: require the original HMAC/key/time contract instead. */
 function revokeMatchingJudge(raw:unknown,actor:string,planId?:unknown,forced?:"HOLD"|"FAIL"){
   if(!raw||typeof raw!=="object")return;
-  const parsed=judgeSubmissionSchema.safeParse((raw as {researchJudge?:unknown}).researchJudge);
+  let submitted=(raw as {researchJudge?:unknown}).researchJudge;
+  // Malformed new risk evidence must not hide a matching restrictive result
+  // behind SDK validation. Strip ONLY that field for authenticated withdrawal;
+  // missing risk evidence is restrictive under the new policy, never PASS.
+  if(submitted&&typeof submitted==="object"&&"result" in submitted){
+    const result=submitted.result;
+    if(result&&typeof result==="object"&&"riskAssessment" in result&&!draftRiskAssessmentSchema.safeParse(result.riskAssessment).success)
+      submitted={...submitted,result:{...result,riskAssessment:undefined}};
+  }
+  const parsed=judgeSubmissionSchema.safeParse(submitted);
   if(!parsed.success)return;
   const {packet,result}=parsed.data;
   let body;try{body=JSON.parse(packet.body);}catch{return;}
@@ -100,13 +110,13 @@ function revokeMatchingJudge(raw:unknown,actor:string,planId?:unknown,forced?:"H
   const gate=currentJudgeGate(intakeId);
   if(!gate||gate.actor!==actor||packet.actorLabelSha256!==judgeHash(actor)||gate.packetDigest!==packet.digest||
     packet.digest!==judgeHash(packet.body)||packet.packetId!=="RJP-"+packet.digest.slice(0,32).toUpperCase()||
-    body.version!==JUDGE_VERSION||body.researchStatePolicy!==RESEARCH_STATE_POLICY||
+    ![JUDGE_VERSION,"RI001-JUDGE-5"].includes(body.version)||body.researchStatePolicy!==RESEARCH_STATE_POLICY||
     gate.version!==body.version||gate.researchStatePolicy!==body.researchStatePolicy)return;
   const envelopeDigest=judgeEnvelopeDigest(packet),legacy=!gate.packetEnvelopeDigest&&gate.packetIssuedAt==null;
   if(legacy){
     // Digest equality alone is caller-controlled. Authenticate the server seal
     // before accepting any legacy withdrawal; current policy/actor/time apply.
-    try{body=verifyResearchJudgeEnvelope(packet,actor);}catch{return;}
+    try{body=verifyResearchJudgeEnvelope(packet,actor,true);}catch{return;}
     if(!result||body.source.sha256!==judgeHash(body.source.text))return;
   }else if(gate.packetEnvelopeDigest!==envelopeDigest||gate.packetIssuedAt!==packet.issuedAt)return;
   let decision=forced;
@@ -120,8 +130,13 @@ function revokeMatchingJudge(raw:unknown,actor:string,planId?:unknown,forced?:"H
     if(!exact(result.claims,body.claims)||!exact(result.relationships,body.relationships)||result.event.key!=="event"||result.review.key!=="review")decision="HOLD";
     const statuses=[...result.claims,...result.relationships,result.event,result.review].flatMap(x=>[x.verdict,...Object.values(x.checks)]);
     if(statuses.includes("FAIL"))decision="FAIL";
-    else if(statuses.includes("HOLD")||result.materialRisk||["added_detail","correction","contradiction","unresolved"].includes(result.event.classification)||
+    else if(statuses.includes("HOLD")||result.materialRisk||["correction","contradiction","unresolved"].includes(result.event.classification)||
       (result.critic&&result.critic.verdict!=="PASS"))decision="HOLD";
+    if(body.riskPolicy===DRAFT_RISK_POLICY){
+      const risk=judgeDraftRisk(body,result,envelopeDigest);
+      if(risk.decision==="FAIL")decision="FAIL";
+      else if(risk.decision==="HOLD"&&decision!=="FAIL")decision="HOLD";
+    }else if(result.event.classification==="added_detail"&&decision!=="FAIL")decision="HOLD";
   }
   if(!decision)return;
   const source=gate.targets.find(t=>t.kind==="source_intake");
@@ -164,7 +179,7 @@ function planned(input: z.infer<typeof canonicalInputSchema>,actor:string) {
   if(researchJudge)try{judge=evaluateResearchJudge(clean,researchJudge,actor);}catch{
     judge={decision:"HOLD",reasons:["judge_packet_or_input_binding_hold"],criticRequired:false,criticStatus:"not_evaluated",
       packetId:researchJudge.packet.packetId,packetDigest:researchJudge.packet.digest,resultDigest:null,history:[],retrieval:null,scopeWitness:null,expiresAt:0,
-      packetEnvelopeDigest:null,packetIssuedAt:null,resultEnvelopeDigest:null,
+      packetEnvelopeDigest:null,packetIssuedAt:null,resultEnvelopeDigest:null,riskPolicy:DRAFT_RISK_POLICY,
       trust:{actorLabelSha256:"",actorProvenance:"not_established",session:"not_exposed",modelVersion:"not_exposed",judgeIdentity:"analyst_attested_unverified"},semanticTruthVerified:false,primaryAuthority:false};
   }
   const enrolled=currentJudgeGate(plan.planId);
@@ -202,7 +217,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
       const p=preview(source.safeEditRequest,actor);
       previews.push({kind:source.kind,expectedSha256:source.expectedSha256,...p});
     }
-    recordResearchJudgeGate(source.receiptKey,actor,{version:JUDGE_VERSION,researchStatePolicy:RESEARCH_STATE_POLICY,intakeId:plan.planId,actor,decision:judge.decision,
+    recordResearchJudgeGate(source.receiptKey,actor,{version:JUDGE_VERSION,researchStatePolicy:RESEARCH_STATE_POLICY,riskPolicy:judge.riskPolicy,intakeId:plan.planId,actor,decision:judge.decision,
       packetEnvelopeDigest:judge.packetEnvelopeDigest,packetIssuedAt:judge.packetIssuedAt,resultEnvelopeDigest:judge.resultEnvelopeDigest,
       packetDigest:judge.packetDigest,resultDigest:judge.resultDigest,expiresAt:judge.decision==="PASS"?judge.expiresAt:0,history:judge.history,retrieval:judge.retrieval,scopeWitness:judge.scopeWitness,
       targets:workflow.steps.map(s=>({path:s.path,sha256:s.expectedSha256,operationId:s.receiptKey,kind:s.kind,

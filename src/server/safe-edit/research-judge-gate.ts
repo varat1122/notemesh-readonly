@@ -3,17 +3,18 @@
 import {RESEARCH_STATE_POLICY} from "../vault/research-state";
 import {db} from "../db";
 import {splitFrontmatter} from "../vault/markdown";
-import {JUDGE_VERSION,judgeHash,judgeHistoryCurrent} from "../vault/research-judge";
+import {JUDGE_VERSION,DRAFT_RISK_POLICY,judgeHash,judgeHistoryCurrent} from "../vault/research-judge";
 import {judgeScopeCurrent,type JudgeScope} from "../vault/research-judge-scope";
 import type {RetrievalCoverage} from "../vault/investment-retrieval-coverage";
 import {m2VaultReadDeps} from "../vault/research-decision-v2";
 import {createReceipt} from "../vault/investment-research-context";
 export interface JudgeGate {
   version:string;
+  riskPolicy?:string;
   researchStatePolicy:string;
   intakeId:string;actor:string;decision:"PASS"|"HOLD"|"FAIL";packetDigest:string;resultDigest:string|null;expiresAt:number;
   packetEnvelopeDigest:string|null;packetIssuedAt:number|null;resultEnvelopeDigest?:string|null;revokedAt?:number;
-  history:{path:string;sha256:string}[];
+  history:{path:string;sha256:string;sourceReceiptKey?:string}[];
   retrieval:RetrievalCoverage|null;
   scopeWitness:JudgeScope|null;
   targets:{path:string;sha256:string;operationId:string;kind:"source_intake"|"structured_claim"|"canonical_review";eligible:boolean}[];
@@ -84,6 +85,7 @@ export function assertResearchJudgeWrite(path:string,before:string,after:string,
   // spans (v1). Preserve their journal/receipts, but never reuse that authority for
   // a pending Claim/Review write after the contract upgrade.
   if(g.version!==JUDGE_VERSION||g.researchStatePolicy!==RESEARCH_STATE_POLICY)throw Error("research_judge_contract_version_hold");
+  if(g.riskPolicy!==DRAFT_RISK_POLICY)throw Error("research_judge_risk_policy_hold");
   // Pending pre-remediation gates lack an exact envelope/admission binding.
   // Re-prepare with a valid packet; do not upgrade historical journal entries.
   if(!g.packetEnvelopeDigest||!(/^[a-f0-9]{64}$/).test(g.packetEnvelopeDigest)||!Number.isSafeInteger(g.packetIssuedAt))throw Error("research_judge_admission_binding_hold");

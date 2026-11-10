@@ -5,6 +5,10 @@ import {createHash} from "node:crypto";
 
 import type {WritebackInput} from "../vault/investment-writeback-router";
 import type {JudgeResult} from "../vault/research-judge";
+// Preserve the accepted mechanical authority fixtures; current RISK-1 policy
+// is exercised WITHOUT this oracle in risk-draft-admission.test.ts.
+vi.mock("../vault/research-draft-risk",async importOriginal=>({...await importOriginal<typeof import("../vault/research-draft-risk")>(),
+  judgeDraftRisk:(await import("./fixtures/legacy-risk-oracle")).legacyRiskOracle}));
 vi.mock("../safe-edit/sync",()=>({withPausedSync:async<T>(run:()=>T)=>run()}));
 const actor="oauth:normal-research-disposable",sha=(s:string)=>createHash("sha256").update(s).digest("hex");
 let root:string,vault:string;
