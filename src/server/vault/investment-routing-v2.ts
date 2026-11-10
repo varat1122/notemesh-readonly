@@ -65,6 +65,12 @@ export interface RoutingV2 {
 };
 
 const key=(v:string)=>v.trim().normalize("NFC").replace(/\s+/g," ").toLocaleLowerCase("en");
+/** Shared label boundary for routing and historical issuer resolution. */
+export function validHubIdentityLabel(label:string):boolean{
+  const value=label.trim();
+  return Boolean(value)&&value.length<=120&&!/[\\/]/.test(value)&&
+    ![...value].some(c=>c.charCodeAt(0)<32)&&value!=="..";
+}
 const curatedAliases:Record<string,string>={
   "samsung electronics":"Samsung", "micron":"MU", "micron technology":"MU",
   "sk hynix":"SK hynix", "sk hynix inc":"SK hynix"
@@ -98,8 +104,8 @@ function currentHubAliases(hub:ReturnType<typeof indexedTopLevelHubs>[number]):b
 // Reuse the existing explicit Hub vocabulary for read-only retrieval. This is
 // not a security master, and does not change canonical writeback resolution.
 export {key as hubIdentityKey,indexedAliases as indexedHubAliases};
-function findHub(label:string, indexed:ReturnType<typeof indexedTopLevelHubs>, allowCurated:boolean){
-  if(indexed.length>3000)return null;
+function findHub(label:string, indexed:ReturnType<typeof indexedTopLevelHubs>, scope:"company"|"industry"){
+  if((scope==="company"&&!validHubIdentityLabel(label))||indexed.length>3000)return null;
   const wanted=key(label);
   // A title is not unique issuer evidence when another Hub declares the same
   // label as an alias. Resolve ALL candidate paths before giving title priority,
@@ -114,7 +120,7 @@ function findHub(label:string, indexed:ReturnType<typeof indexedTopLevelHubs>, a
     return {path:candidates[0].path,
       resolution:key(candidates[0].title)===wanted?"exact_existing_title" as const:"indexed_alias" as const};
   }
-  const canonical=allowCurated?curatedAliases[wanted]:undefined;
+  const canonical=scope==="company"&&Object.hasOwn(curatedAliases,wanted)?curatedAliases[wanted]:undefined;
   if(!canonical)return null;
   // Curated aliases are navigational hints, never evidence that overrides
   // a collision on the canonical target (including an alias-only collision).
@@ -157,7 +163,7 @@ export function planCanonicalRoutingV2(input:RoutingV2Input):RoutingV2{
   const companyCandidates=input.domain==="company"?input.entities:[...new Set(tags.map(x=>x.entity))];
   for(const label of companyCandidates){
     const declared=tags.find(x=>key(x.entity)===key(label));
-    const hub=findHub(label,companyIndex,true);
+    const hub=findHub(label,companyIndex,"company");
     if(hub){
       const role=declared?.role??(input.domain==="company"&&input.entities.length===1?"primary_subject":"mentioned");
       if(!companyHubs.some(x=>x.path===hub.path))companyHubs.push({label,...hub,role});
@@ -172,7 +178,7 @@ export function planCanonicalRoutingV2(input:RoutingV2Input):RoutingV2{
     :[];
   const themes=[...new Set([...(input.themes??[]),...industryEntities])];
   for(const label of themes){
-    const hub=findHub(label,industryIndex,false);
+    const hub=findHub(label,industryIndex,"industry");
     if(hub){if(!industryHubs.some(x=>x.path===hub.path))industryHubs.push({label,...hub});}
     else unresolvedThemes.push(label);
   }

@@ -59,9 +59,15 @@ export function proposeCompanyOnboarding(
   const indexComplete=indexed.length<=3000;
   const entries=requested.map(raw=>{
     const label=raw.trim().normalize("NFC"),wanted=hubIdentityKey(label);
-    const hub=routing.companyHubs.find(h=>hubIdentityKey(h.label)===wanted);
-    const history=historical.find(h=>hubIdentityKey(h.requested)===wanted) ??
-      historical.find(h=>Boolean(hub&&h.hubPath===hub.path));
+    // The raw request must resolve in history itself. Do not borrow another
+    // label's successful resolution: qualified/invalid aliases can share a
+    // navigation target without sharing a valid identity interpretation.
+    const history=historical.find(h=>h.requested.trim().normalize("NFC").toUpperCase()===label.toUpperCase());
+    const historyResolved=history&&["exact_existing_title","indexed_alias"].includes(history.status);
+    // Routing deduplicates by Hub path. A title and its explicit alias may
+    // therefore have one routing entry while both raw histories resolve.
+    const hub=routing.companyHubs.find(h=>hubIdentityKey(h.label)===wanted) ??
+      (historyResolved?routing.companyHubs.find(h=>h.path===history.hubPath):undefined);
     const bad=history&&["ambiguous_hold","readback_hold","index_limit_hold","invalid_hold"].includes(history.status);
     const candidates=indexComplete?indexed.filter(h=>hubIdentityKey(h.title)===wanted||
       indexedHubAliases(h.frontmatter).some(alias=>hubIdentityKey(alias)===wanted)):[];
@@ -71,7 +77,7 @@ export function proposeCompanyOnboarding(
     if(!indexComplete)status="index_limit_hold";
     else if(bad)status=unresolvedStatus(history!.status);
     else if(candidates.length>1)status="ambiguous_hold";
-    else if(hub&&hub.resolution!=="curated_alias"&&
+    else if(hub&&
       history?.hubPath===hub.path&&
       ["exact_existing_title","indexed_alias"].includes(history.status))
       status="existing_hub_context_candidate";
@@ -80,7 +86,11 @@ export function proposeCompanyOnboarding(
     return {
       requested:label,status,
       currentHubCandidate:status==="existing_hub_context_candidate"?hub!.path:null,
-      routingBasis:hub?.resolution??null,
+      // The path-deduplicated navigation row can belong to a curated label
+      // encountered earlier. Only this label's own successful readback may
+      // supply its resolution basis; the curated label itself stays held.
+      routingBasis:status==="existing_hub_context_candidate"?
+        history!.status as "exact_existing_title"|"indexed_alias":hub?.resolution??null,
       historicalStatus:history?.status??null,
       indexedConflictCandidatePaths:paths,
       candidateScanComplete:scanComplete,

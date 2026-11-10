@@ -236,22 +236,27 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   // A deterministic intake marker is added only after a reviewed Timeline
   // append. Repeated submission of identical source text must not propose
   // a second Timeline event even when a new research note already exists.
-  const timelineRecorded=Boolean(timelinePath && timelineExists &&
-    readNote(timelinePath).content.includes("<!-- investment-intake:"+planId+" -->"));
+  let timelineRecorded=false,timelineReadbackHold=false;
+  if(timelinePath&&timelineExists)try{
+    timelineRecorded=readNote(timelinePath).content.includes("<!-- investment-intake:"+planId+" -->");
+  }catch{timelineReadbackHold=true;}
   const focus=input.focus??(input.sourceKind==="broker_research"?"broker":input.domain==="macro"?"macro":"general");
   const pack=buildInvestmentContextPack({
     question:(T(input.topic)+" "+entities.join(" ")+" "+text.slice(0,450)).slice(0,1150),
-    issuers:[...new Set([
-      ...routingV2.companyHubs.map(x=>x.path.slice("01_Companies/".length,-3)),
-      ...(input.domain==="company"?entities.map(x=>safeTicker(x)).filter((x):x is string=>!!x):[])
-    ])].filter(x=>/^[A-Z][A-Z0-9.-]{0,11}$/.test(x)).slice(0,6),
+    // Company labels are already bounded to six inputs. Preserve the raw
+    // labels so the shared resolver can report named, qualified and invalid
+    // identities; reducing them to ticker-shaped Hub titles erases HOLDs.
+    issuers:input.domain==="company"?input.entities:[...new Set(
+      routingV2.companyHubs.map(x=>x.path.slice("01_Companies/".length,-3))
+    )].filter(x=>/^[A-Z][A-Z0-9.-]{0,11}$/.test(x)).slice(0,6),
     industry:routingV2.industryHubs.length?
       routingV2.industryHubs.map(x=>x.label).join(" / ").slice(0,140):
       input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
     focus,maxNotes:10,maxChars:8500
   });
   const companyOnboarding=input.domain==="company"?
-    proposeCompanyOnboarding(entities,routingV2,pack.issuerResolution):null;
+    proposeCompanyOnboarding(input.entities,routingV2,pack.issuerResolution):null;
+  const claimIdentityHold=Boolean(companyOnboarding?.missingOrHeld);
   // A ticker-shaped label is not authority to append to a Company Timeline.
   // Require the same current existing Hub to resolve in routing AND history.
   // Curated aliases are navigational hints, never issuer identity evidence.
@@ -304,6 +309,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     "Historical pointers are bounded lexical discovery; missed prior broker PTs, same-event reposts and counter-evidence remain possible."
   ];
   if(integrityHold)warnings.unshift(claimIntegrityWarning(integrity));
+  if(timelineReadbackHold)warnings.push("Indexed Company Timeline readback failed: hold Timeline suggestions; raw Source capture remains independent.");
   if(input.sourceKind==="broker_research")
     warnings.push("Broker model/version dedup requires exact bank, report date, prior same-bank PT, EPS vintage and actual report; 'reiterates' is not a new PT raise.");
   if(companyOnboarding?.missingOrHeld)
@@ -333,9 +339,10 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   ];
   if(timelinePath)
     routes.push({kind:"company_timeline_candidate",
-      action:timelineExists&&timelineIdentityReady&&!integrityHold&&!duplicates&&!timelineRecorded&&!sameSourceEvent?"candidate_append_after_review":"link_existing_or_hold",
+      action:timelineExists&&!timelineReadbackHold&&timelineIdentityReady&&!integrityHold&&!duplicates&&!timelineRecorded&&!sameSourceEvent?"candidate_append_after_review":"link_existing_or_hold",
       path:timelinePath,requiresReview:true,
-      reason:!timelineIdentityReady?"Company identity unresolved or inconsistent across current Hub routing and historical readback: preserve Source, resolve issuer onboarding before proposing a Timeline append.":
+      reason:timelineReadbackHold?"Indexed Company Timeline readback failed; preserve Source and resolve the missing or unreadable Timeline before proposing an append.":
+        !timelineIdentityReady?"Company identity unresolved or inconsistent across current Hub routing and historical readback: preserve Source, resolve issuer onboarding before proposing a Timeline append.":
         integrityHold?claimIntegrityWarning(integrity):timelineRecorded?"Intake ID already recorded in this Timeline; do not append the same text a second time.":
         sameSourceEvent?"Same declared issuer, event date, and original source URL already referenced by existing notes: inspect candidatePaths and do NOT add a new Timeline event until source-level adjudication.":
         duplicates?"Exact numeric claim duplicate candidate: link existing event, no repeated timeline proof.":
@@ -345,8 +352,10 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     path:routingV2.industryHubs.length===1?routingV2.industryHubs[0].path:null,requiresReview:true,
     reason:"Multi-issuer, non-ticker or macro item: use existing indexed Industry/Macro hubs only after dated source/event review; this is a link candidate, not an auto-append."});
   if(claimReady&&!duplicates&&!input.claims)
-    routes.push({kind:"claim_registry_candidate",action:integrityHold?"link_existing_or_hold":"candidate_create",path:null,requiresReview:true,
-      reason:integrityHold?claimIntegrityWarning(integrity):"Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
+    routes.push({kind:"claim_registry_candidate",action:integrityHold||claimIdentityHold?"link_existing_or_hold":"candidate_create",path:null,requiresReview:true,
+      reason:integrityHold?claimIntegrityWarning(integrity):claimIdentityHold?
+        "Company identity requires onboarding or current Hub reconciliation before proposing a new issuer-specific claim; preserve the Source independently.":
+        "Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
   const needed=[
     "Preserve user text verbatim in a non-protected raw intake note using separately authorized Safe Edit and verify its receipt.",
     verifiedAttachment?"Link the hash-verified original user attachment in the raw intake note; preserve original language and distinguish source attribution.":"For screenshot/PDF, archive its actual bytes with Safe Edit store_user_attachment and inspect it before claiming raw attachment preservation.",

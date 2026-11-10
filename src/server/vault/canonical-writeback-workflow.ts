@@ -14,6 +14,7 @@ import {planClaimNotes,lineageMetadata,readPersistedClaim,claimInterpretationBou
 import {splitFrontmatter} from "./markdown";
 import {draftMetadata,researchTrust,type ResearchTrust} from "./research-state";
 import {revalidateHistoricalArchive} from "./canonical-archive-revalidation";
+import {hubIdentityKey,validHubIdentityLabel} from "./investment-routing-v2";
 
 const sha=(s:string)=>createHash("sha256").update(s,"utf8").digest("hex");
 const yaml=(s:string|null|undefined)=>s==null?"null":JSON.stringify(s);
@@ -283,6 +284,17 @@ export function buildCanonicalSafeEditWorkflow(
   }
   const claimSteps=claimNotes.map(c=>{
     const step=toStep("structured_claim",c.path,c.content,tag,false);
+    // Identity HOLD concerns a pending issuer-specific claim, not an old
+    // receipt or an unrelated, already-resolved company mentioned alongside
+    // it. Inspect the generated claim's own entity using the shared label key.
+    const entity=splitFrontmatter(c.content).data.entity;
+    const identityEntries=typeof entity==="string"&&validHubIdentityLabel(entity)?plan.companyOnboarding?.entries.filter(e=>
+      hubIdentityKey(e.requested)===hubIdentityKey(entity))??[]:[];
+    const identityReady=identityEntries.length>0&&identityEntries.every(e=>e.status==="existing_hub_context_candidate");
+    if(plan.domain==="company"&&!identityReady&&step.state==="needs_create"){
+      step.state="hold_claim_gate";step.safeEditRequest=null;
+      claimIssues.push("claim_company_identity_onboarding_required");
+    }
     if(hasSourceMatch&&step.state==="needs_create"){
       step.state="hold_event_review";step.safeEditRequest=null;
       claimIssues.push("claim_source_event_reconciliation_required");
