@@ -205,6 +205,22 @@ describe("N5 safe issuer onboarding — routing and historical identity must agr
     expect(routing.companyHubs).toEqual([]);
     expect(routing.unresolvedEntities).toEqual(["Micron Technology"]);
   });
+  it.each(["missing","stale"])("rejects %s indexed Hub metadata without fresh readback",async fault=>{
+    const hub="01_Companies/TSMC.md";
+    await add(hub,"---\naliases: [TSM]\n---\n# TSMC");
+    if(fault==="missing")fs.unlinkSync(path.join(vault,hub));
+    else fs.writeFileSync(path.join(vault,hub),"---\naliases: [OTHER]\n---\n# TSMC altered outside index");
+    const {planCanonicalRoutingV2}=await import("./investment-routing-v2");
+    const {buildInvestmentContextPack}=await import("./investment-context");
+    const {db}=await import("../db");
+    const baseline=db().prepare("SELECT total_changes() AS n").get();
+    const result=planCanonicalRoutingV2(routeInput("TSM"));
+    const historical=buildInvestmentContextPack({question:"TSM historical update",issuers:["TSM"]});
+    expect(result.companyHubs).toEqual([]);
+    expect(result.unresolvedEntities).toEqual(["TSM"]);
+    expect(historical.issuerResolution[0].status).toBe("readback_hold");
+    expect(db().prepare("SELECT total_changes() AS n").get()).toEqual(baseline);
+  });
   it("keeps genuine exact-title and unique-alias navigation working",async()=>{
     const p="01_Companies/MU.md";
     await add(p,"---\naliases: [MU, Micron Technology]\n---\n# MU");
