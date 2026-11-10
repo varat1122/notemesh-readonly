@@ -6,7 +6,8 @@
  * No receipts, journal state, freshness checks or write guards are mocked here.
  */
 import type {judgeDraftRisk} from "../../vault/research-draft-risk";
+import {DRAFT_RISK_POLICY} from "../../vault/research-judge-contract";
 export const legacyRiskOracle:typeof judgeDraftRisk=(_body,result)=>{
  const criticRequired=result.materialRisk||["added_detail","correction","contradiction","unresolved"].includes(result.event.classification);
- return {policy:"RI001-DRAFT-RISK-1",decision:criticRequired?"HOLD":"PASS",reasons:criticRequired?["independent_critic_provenance_unavailable"]:[],criticRequired,authority:"analyst_attested_only"};
+ return {policy:DRAFT_RISK_POLICY,decision:criticRequired?"HOLD":"PASS",reasons:criticRequired?["independent_critic_provenance_unavailable"]:[],criticRequired,authority:"analyst_attested_only"};
 };

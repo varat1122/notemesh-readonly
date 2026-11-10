@@ -10,6 +10,9 @@ import type {PacketBody} from "./research-judge";
 export function draftRiskScope(body:PacketBody){
   const items=[{key:"received_source",sha256:body.source.sha256},
     {key:"proposed_review",sha256:body.reviewDigest},
+    // Broker metadata is rendered separately from typed Review prose. Bind its
+    // presence/absence and source kind, not just the prose selected by a caller.
+    {key:"broker_provenance",sha256:judgeHash(stableJudgeJson({sourceKind:body.provenance.sourceKind,brokerVintage:body.provenance.brokerVintage}))},
     ...body.claims.map(c=>({key:c.key,sha256:judgeHash(stableJudgeJson(c.candidate))})),
     ...body.relationships.map(c=>({key:c.key,sha256:judgeHash(stableJudgeJson(c.candidate))})),
     ...body.history.map(h=>({key:h.key,sha256:h.sha256}))];
@@ -41,12 +44,17 @@ export function judgeDraftRisk(body:PacketBody,result:JudgeResult,envelopeDigest
       }
     }
   }
-  // Scan the full received text and every proposed Review/Claim/relationship
-  // value, not merely the caller-selected claim list or citations. This initial
+  // Scan the full received text, rendered broker metadata and every proposed
+  // Review/Claim/relationship value, not merely selected claims or citations. This
   // policy abstains on quantitative content; it does NOT infer financial risk.
   const strings=(x:unknown):string[]=>typeof x==="string"?[x]:Array.isArray(x)?x.flatMap(strings):x&&typeof x==="object"?Object.values(x).flatMap(strings):[];
-  if([body.source.text,...strings(body.proposedThaiReview),...body.claims.flatMap(c=>strings(c.candidate)),...body.relationships.flatMap(c=>strings(c.candidate))].some(s=>/\p{N}/u.test(s))){
+  if([body.source.text,...strings(body.proposedThaiReview),...strings(body.provenance.brokerVintage),...body.claims.flatMap(c=>strings(c.candidate)),...body.relationships.flatMap(c=>strings(c.candidate))].some(s=>/\p{N}/u.test(s))){
     criticRequired=true;hold("draft_risk_quantitative_scope_not_supported");
+  }
+  // Every brokerUpdate is sealed as brokerVintage. Qualitative rating changes
+  // and omitted contentTypes must never bypass the broker/critic boundary.
+  if(body.provenance.brokerVintage!=null||body.provenance.sourceKind==="broker_research"){
+    criticRequired=true;hold("draft_risk_broker_scope");
   }
   if(result.materialRisk||result.event.classification!=="added_detail"){
     criticRequired=true;hold("draft_risk_not_routine_added_detail");

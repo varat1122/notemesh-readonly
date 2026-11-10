@@ -22,14 +22,16 @@ const reference=z.object({key:z.string().min(1).max(80),quote:z.string().max(160
   locator:z.string().max(300).describe("Exactly utf16:START:END; zero-based, end-exclusive code-unit offsets into received Source text or the full historical note. Not a PDF page or section assertion."),
   sourceSha256:digest.optional().describe("Required for eligibility: exact source.sha256 or history.sha256 from the sealed packet."),
   callerDeclaredLocator:z.string().max(300).optional().describe("Optional unverified page/section label. Caller-declared only; never server-verified by text-span binding.")}).strict();
-export const DRAFT_RISK_POLICY="RI001-DRAFT-RISK-1";
+// Broker-rendering scope revision. The existing exact policy check invalidates
+// pending RISK-1 gates; older writers likewise reject gates carrying this stamp.
+export const DRAFT_RISK_POLICY="RI001-DRAFT-RISK-1.1";
 export const riskDimensions=["financial_figures_forecasts","valuation_thesis_mechanism","material_relationships",
   "correction_contradiction_vintage","unsupported_or_unresolved_assertions","protected_authority"] as const;
 export const draftRiskAssessmentSchema=z.object({policy:z.literal(DRAFT_RISK_POLICY),scopeDigest:digest,
   coveredKeys:z.array(z.string().min(1).max(80)).max(40),
   findings:z.array(z.object({dimension:z.enum(riskDimensions),disposition:z.enum(["absent","material","uncertain","unsupported"]),
     rationale:z.string().trim().min(20).max(1000),references:z.array(reference).min(1).max(4)}).strict()).length(riskDimensions.length)
-}).strict().describe("Analyst-attested materiality review of ALL sealed source/review/history/claim/relationship inputs, not independent critic or verified truth. Explain every risk dimension with exact source/history citations. Missing/uncertain coverage HOLDs. RISK-1 routine exemption is intentionally limited to non-quantitative added detail; numbers in received/proposed text require further review, not a claim that every number is financially material.");
+}).strict().describe("Analyst-attested materiality review of ALL sealed source/review/history/claim/relationship/broker-provenance inputs, not independent critic or verified truth. Explain every risk dimension with exact source/history citations. Missing/uncertain coverage HOLDs. RISK-1 routine exemption is intentionally limited to non-quantitative added detail; numbers in received/proposed text require further review, not a claim that every number is financially material. Broker updates and broker_research sources always retain the critic/HOLD gate, including qualitative rating changes.");
 const assessment=z.object({key:z.string().min(1).max(80),verdict,rationale:z.string().min(1).max(1000),
   references:z.array(reference).min(1).max(4),checks:z.object({entailment:verdict,numbersUnits:verdict,
     periodRoleAttributionVintage:verdict,identityRelationships:verdict,pointInTime:verdict,

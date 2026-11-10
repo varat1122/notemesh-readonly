@@ -180,3 +180,40 @@ it("a receipt-bound Source already paired with a Review also supplies the histor
  expect(historical.sourceReceiptKey).toBeTruthy();expect(historical.sourceBinding).toBeUndefined();
  const p=await prepare(data);expect(p.researchJudge?.decision).toBe("PASS");expect((await save(data,p)).status).toBe("saved_verified");
 });
+
+it.each([
+ {name:"PT and EPS hidden outside typed Review",brokerUpdate:{bank:"Fixture Broker",priorTargetPrice:"100",targetPrice:"150",estimateChanges:[{metric:"EPS",period:"FY forward",oldValue:"1.0",newValue:"2.0",unit:"USD"}]}},
+ {name:"qualitative Sell to Buy",brokerUpdate:{bank:"Fixture Broker",priorRating:"Sell",rating:"Buy"}},
+ {name:"broker metadata without rating or estimates",brokerUpdate:{bank:"Fixture Broker"}},
+ {name:"broker source kind alone",sourceKind:"broker_research" as const},
+])("D1 $name cannot use routine exemption",async ({name,...input})=>{
+ const data=await judged({...base,...input,contentTypes:["other"]}),p=await prepare(data);
+ expect(p.researchJudge).toMatchObject({decision:"HOLD",criticRequired:true});
+ expect(p.researchJudge?.reasons).toContain("draft_risk_broker_scope");
+ if(name.startsWith("PT"))expect(p.researchJudge?.reasons).toContain("draft_risk_quantitative_scope_not_supported");
+ expect(p.previews.map(t=>t.kind)).toEqual(["source_intake"]);
+ const body=JSON.parse(data.researchJudge.packet.body);
+ const j=await import("../vault/research-judge");
+ expect(body.riskScope.items.find((x:{key:string})=>x.key==="broker_provenance")).toEqual({key:"broker_provenance",sha256:j.judgeHash(j.stableJudgeJson({sourceKind:body.provenance.sourceKind,brokerVintage:body.provenance.brokerVintage}))});
+ const saved=await save(data,p);expect(saved.receipts).toHaveLength(1);
+ for(const s of saved.steps.filter(s=>s.kind!=="source_intake"))expect(fs.existsSync(path.join(vault,s.path))).toBe(false);
+ const reviewStep=p.steps.find(s=>s.kind==="canonical_review")!;
+ const workflow=(await import("../vault/investment-writeback-router")).planInvestmentWriteback(data).safeEditWorkflow;
+ const request=workflow!.steps.find(s=>s.kind==="canonical_review")!.safeEditRequest!;
+ expect(()=>importEngine.preview(request,actor)).toThrow(/research_judge/);
+ expect(fs.existsSync(path.join(vault,reviewStep.path))).toBe(false);
+});
+
+it("D1 broker provenance is required in assessed inventory; null remains eligible, omission cannot pass",async()=>{
+ const data=await judged(),body=JSON.parse(data.researchJudge.packet.body);
+ expect(body.provenance.brokerVintage).toBeNull();expect((await prepare(data)).researchJudge?.decision).toBe("PASS");
+ data.researchJudge.result.riskAssessment!.coveredKeys=data.researchJudge.result.riskAssessment!.coveredKeys.filter(k=>k!=="broker_provenance");
+ expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");
+});
+
+it("F2 new_event remains HOLD in the JUDGE-6 risk tier",async()=>{
+ const data=await judged();data.researchJudge.result.event.classification="new_event";
+ const p=await prepare(data);expect(p.researchJudge?.decision).toBe("HOLD");
+ expect(p.researchJudge?.reasons).toContain("draft_risk_not_routine_added_detail");
+ expect(p.previews.every(t=>t.kind==="source_intake")).toBe(true);
+});

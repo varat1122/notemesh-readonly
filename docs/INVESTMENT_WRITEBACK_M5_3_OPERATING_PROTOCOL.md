@@ -236,7 +236,7 @@ simulated assessments to test enforcement and does not certify LLM research
 quality. This change authorizes no deployment, live mutation, automatic protected
 record update, backup/restore or first-cutover operation.
 
-### Experimental risk-based Draft admission — RI001-DRAFT-RISK-1
+### Experimental risk-based Draft admission — RI001-DRAFT-RISK-1 (revision 1.1)
 
 This CI candidate implements the ORCH clarification for IOS-ORCH-RI-001 under
 Master 2.0.0 §09. It does not amend the Master or authenticate an LLM.
@@ -246,7 +246,10 @@ ignoring the new risk-policy stamp and using its pending PASS gates.
 
 Every newly issued Judge packet seals a `riskPolicy` and `riskScope` inventory:
 received text SHA, complete proposed Review digest, each structured Claim and
-relationship, and every selected historical note SHA. The typed result must echo
+relationship, every selected historical note SHA, and `broker_provenance` (source
+kind plus the exact broker update, including its absence). Broker updates are
+sealed as `provenance.brokerVintage` and rendered separately from typed Review
+prose; their entire payload participates in the quantitative scan. The typed result must echo
 the exact envelope digest and supply `riskAssessment` for every inventory key.
 It contains six materiality findings: financial figures/forecasts, valuation /
 thesis / mechanism, material relationships, correction / contradiction / vintage,
@@ -274,10 +277,15 @@ not a financial-materiality classifier or a permanent rule that all numbers are
 high risk. Benign dates, numbered labels or administrative quantities in those
 texts can therefore HOLD. Declared financial content, guidance/estimate roles,
 unresolved Review claims and supplier/customer relationships also retain HOLD.
+Any non-null `brokerUpdate` / sealed `brokerVintage`, or `sourceKind=broker_research`,
+is ineligible for the routine exemption even with no numbers, `contentTypes:["other"]`,
+`materialRisk=false`, or all-absent risk findings. This includes qualitative ratings.
 A material/uncertain finding HOLDs; an unsupported finding or any required semantic
 FAIL fails the bundle. No independent critic provenance is available here; a
 same-chat second PASS cannot override these outcomes. Other event classes have no
-new low-risk exemption in this first version. Source-only preservation remains
+new low-risk exemption in this first version: **new_event is HOLD** in this opt-in
+JUDGE-6 RISK-1 tier. This is deliberately not equivalent to earlier JUDGE-5
+new_event PASS behavior. Source-only preservation remains
 available under existing rights/provenance/maintenance controls.
 
 A successful write remains only `draft` / `historical_analysis_only`, with
@@ -286,8 +294,11 @@ A successful write remains only `draft` / `historical_analysis_only`, with
 promotion is introduced. Ungated legacy intake is unchanged; an enrolled intake
 cannot escape its gate by deleting `researchJudge` or switching to a generic writer.
 
-Compatibility: pending pre-RISK-1 Judge PASS gates cannot authorize new non-Source
-writes after upgrade. Re-prepare/reassess under the new descriptor; do not patch
+Compatibility: revision `RI001-DRAFT-RISK-1.1` binds the previously omitted broker
+rendering inputs without changing JUDGE-6 or note/receipt formats. Pending RISK-1
+(and pre-RISK-1) Judge PASS gates cannot authorize new non-Source writes after
+upgrade; the existing exact risk-policy admission check also rejects 1.1 gates
+on the pre-fix RISK-1 reader. Re-prepare/reassess under the new descriptor; do not patch
 old journals or backfill policy stamps. Old Judge-5 sealed envelopes remain authenticatable ONLY
 for restrictive legacy withdrawal, never new PASS admission. Historical note bytes and completed receipts
 are not migrated or invalidated. Clients must refresh the result descriptor before
@@ -305,4 +316,7 @@ use the explicit test-only `legacy-risk-oracle.ts` to retain their financial
 fixtures while testing seal/freshness/withdrawal/CAS/receipt controls. Their PASS
 is NOT RISK-1 financial eligibility. A real-policy cross-version test separately
 checks withdrawal/denial of an actual 6cd9c3cd legacy PASS without rewriting history.
-Neither group establishes live semantic or deployment acceptance.
+Neither group establishes live semantic or deployment acceptance. No general
+Research Product Acceptance is claimed. The D1 upgrade regression additionally
+executes actual 44efef94 modules to produce pre-fix broker/routine PASS gates,
+then verifies restrictive upgrade admission and immutable Source receipts.
