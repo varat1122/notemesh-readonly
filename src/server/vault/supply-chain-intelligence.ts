@@ -44,9 +44,11 @@ export const supplyChainCandidateSchema=z.object({
 }).strict();
 /** Keep an object schema: the existing MCP registry consumes .shape. */
 export const supplyChainInputSchema=z.object({
-  question:z.string().trim().min(3).max(1200),issuers:z.array(label).min(1).max(6),
-  industry:z.string().trim().min(1).max(140).optional(),asOf:z.string().datetime({offset:true}).optional(),
-  candidates:z.array(supplyChainCandidateSchema).max(8).optional()
+  question:z.string().trim().min(3).max(1200).describe("Research question for bounded Source discovery; no automatic relationship inference"),
+  issuers:z.array(label).min(1).max(6).describe("One to six explicit company labels; existing Hub navigation is not legal issuer or DR verification"),
+  industry:z.string().trim().min(1).max(140).optional().describe("Optional industry context for bounded evidence discovery"),
+  asOf:z.string().datetime({offset:true}).optional().describe("Optional evidence-availability cutoff with timezone; current-index filtering, not historical reconstruction"),
+  candidates:z.array(supplyChainCandidateSchema).max(8).optional().describe("Up to eight caller-proposed typed relationships and at most 32 total quote references; omit to discover Source text only. Meaning and economic magnitude remain unverified")
 }).strict();
 export type SupplyChainInput=z.infer<typeof supplyChainInputSchema>;
 export type SupplyChainCandidate=z.infer<typeof supplyChainCandidateSchema>;
