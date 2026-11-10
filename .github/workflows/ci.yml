@@ -51,7 +51,7 @@ jobs:
         run: pnpm build
 
       - name: Fetch exact legacy code for disposable cross-version Judge tests
-        run: git fetch --no-tags --depth=1 origin 6cd9c3cd558dac3d67e9202d8652b406cfdc332a
+        run: git fetch --no-tags --depth=1 origin 6cd9c3cd558dac3d67e9202d8652b406cfdc332a 44efef941f0b586ccd1f1cf84dc608c4f77eb6b2
 
       - name: Test
         run: pnpm test

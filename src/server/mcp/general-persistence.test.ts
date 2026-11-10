@@ -9,6 +9,10 @@ import crypto from "node:crypto";
 import type {WritebackInput} from "../vault/investment-writeback-router";
 import type {IntakeClaim} from "../vault/canonical-claims";
 
+// Preserve the accepted mechanical authority fixtures; current RISK-1 policy
+// is exercised WITHOUT this oracle in risk-draft-admission.test.ts.
+vi.mock("../vault/research-draft-risk",async importOriginal=>({...await importOriginal<typeof import("../vault/research-draft-risk")>(),
+  judgeDraftRisk:(await import("./fixtures/legacy-risk-oracle")).legacyRiskOracle}));
 vi.mock("../safe-edit/sync",()=>({withPausedSync:async<T>(run:()=>T)=>run()}));
 const sha=(s:string|Buffer)=>createHash("sha256").update(s).digest("hex");
 const actor="oauth:ri001-claims-fixture";
