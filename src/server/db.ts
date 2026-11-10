@@ -10,8 +10,8 @@ export function db(): Database.Database {
   // Recheck even on cached connections: losing the pilot flag is restrictive.
   // Maintenance still wins before any identity inspection/database opening.
   if (!_db && maintenanceActive()) throw Error("Maintenance is active; the database is not opened");
-  // Reuse this exact connection for the fresh SELECT, rather than opening a
-  // second native connection on every db() call. No identity-result caching.
+  // Bootstrap identity + monotonic instance latch; hot calls never scan the
+  // journal. Every new writable connection is verified below before mutation.
   const pilot=c1Pilot(_db);
   if (!_db) {
     // Opening runs migrations and may create directories: never in maintenance.
@@ -19,6 +19,7 @@ export function db(): Database.Database {
     ensureDataDirs();
     const opened = new Database(env.dbPath);
     try {
+      c1Pilot(opened);
       opened.pragma("journal_mode = WAL");
       opened.pragma("foreign_keys = ON");
       if(pilot)enrollPilotIdentity(opened);

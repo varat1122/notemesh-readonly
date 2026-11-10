@@ -335,6 +335,23 @@ unreadable identity state cannot reopen legacy writers. The shared guard runs
 before database initialization, at writer entrypoints and at container startup
 (maintenance keeps its existing earlier, DB-free precedence). No unenrollment,
 re-sealing, journal deletion or downgrade-to-unrestricted procedure is provided.
+
+R1 identity enforcement inspects the persisted journal once at process bootstrap
+and once per newly opened writable app connection, before pragmas/migrations or
+worker admission. SQLite reads the WAL as well as the main database; a missing
+database is checked when it first appears. Hot `db()`/writer/sync/HTTP checks use
+a shared process-lifetime latch plus constant-time configuration and filesystem
+identity checks, not repeated journal scans or extra SQLite connections. The
+latch is shared across emitted router bundles. Changing DATA_DIR, enabling pilot
+mode on a live legacy process, disabling it on a pilot process, or replacing an
+inspected database fails closed. A failure is sticky until process restart;
+restoring the flag cannot clear it. Legitimate restarts revalidate durable
+identity. There is no live legacy-to-pilot or unenrollment transition. This adds
+no schema migration or index: the unindexed compatibility scan is a startup
+cost, not a per-request cost. External direct journal mutation while a legacy
+process is running is unsupported under the exclusive-writer prerequisite;
+this latch is not a polling monitor for an uncooperative second writer.
+
 `C1_RESEARCH_PILOT=disposable` requires an owner-created, exclusive temporary
 `DATA_DIR` named `ios-c1-pilot-*` beneath the OS temporary directory, its own
 `vault/`, no symlinks, and no Railway project/service environment. Other values

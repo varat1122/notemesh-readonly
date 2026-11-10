@@ -23,7 +23,7 @@ const review={headlineTh:"TESTA เพิ่มช่องทางติดต
 const base:WritebackInput={domain:"company",entities:["TESTA"],topic:"TESTA กำหนดการเยี่ยมชมโรงงาน",sourceKind:"news_media",sourceLanguage:"th",
  sourceUrl:"https://example.org/routine/new",sourceChat:"disposable risk fixture",sourceChannel:"chat",inputFormat:"text",originalDocumentAccess:"not_obtained",
  extractedText:text,contentTypes:["other"],researchReview:review};
-let root:string,vault:string,historyPath:string;
+let root:string,vault:string,historyPath:string,fixtureConnection:{close:()=>void};
 const protectedPaths=["05_Thesis/TESTA - Current Thesis.md","06_Portfolio/Positions.md","08_Daily_Weekly/Research Indexes/Company Evolution - TESTA.md"];
 beforeEach(async()=>{vi.resetModules();delete (globalThis as Record<symbol,unknown>)[Symbol.for("notemesh.maintenance.registry.v1")];
  root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),"ios-c1-pilot-")));vault=path.join(root,"vault");
@@ -32,9 +32,10 @@ beforeEach(async()=>{vi.resetModules();delete (globalThis as Record<symbol,unkno
  for(const p of ["01_Companies/TESTA.md",...protectedPaths]){fs.mkdirSync(path.dirname(path.join(vault,p)),{recursive:true});fs.writeFileSync(path.join(vault,p),"# TESTA disposable fixture\n");(await import("../vault/indexer")).reindexPath(p);}
  const data={...base,sourceUrl:"https://example.org/routine/prior",extractedText:prior,researchReview:undefined,captureOnly:true};
  const saved=await save(data,await prepare(data));historyPath=saved.steps[0].path;
+ fixtureConnection=(await import("../db")).db();
 });
 afterEach(async()=>{for(const p of protectedPaths)expect(fs.readFileSync(path.join(vault,p),"utf8")).toBe("# TESTA disposable fixture\n");
- (await import("../db")).db().close();vi.useRealTimers();vi.restoreAllMocks();fs.rmSync(root,{recursive:true,force:true});
+ fixtureConnection.close();vi.useRealTimers();vi.restoreAllMocks();fs.rmSync(root,{recursive:true,force:true});
  for(const k of ["DATA_DIR","SAFE_EDIT_ENABLED","SAFE_EDIT_SINGLE_WRITER","C1_RESEARCH_PILOT"])delete process.env[k];});
 async function prepare(data:WritebackInput){return (await import("./canonical-writeback")).prepareCanonicalWriteback(data,actor);}
 async function save(data:WritebackInput,p:Awaited<ReturnType<typeof prepare>>){return (await import("./canonical-writeback")).applyCanonicalWriteback({input:data,planId:p.planId,authorizations:p.previews.map(t=>({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash}))},actor);}
@@ -285,5 +286,7 @@ it("invalid pilot configuration and symlinked root fail closed; existing single 
  fs.mkdirSync(path.join(root,"safe-edit.lock"));
  try{expect(()=>recordPilotReview({id,bindingDigest:c.bindingDigest,decision:"approve",semanticVerdict:"PASS",materiality:"low",rationale:"Simulated concurrent admission refusal"},"SIMULATED")).toThrow();}finally{fs.rmdirSync(path.join(root,"safe-edit.lock"));}
  process.env.C1_RESEARCH_PILOT="true";expect(c1Pilot).toThrow(/invalid_mode/);process.env.C1_RESEARCH_PILOT="disposable";
- const link=root+"-link";fs.symlinkSync(root,link);process.env.DATA_DIR=link;try{expect(c1Pilot).toThrow(/isolation/);}finally{process.env.DATA_DIR=root;fs.unlinkSync(link);}
+ // A process that observed invalid mode stays held even after restoring it.
+ const link=root+"-link";fs.symlinkSync(root,link);process.env.DATA_DIR=link;try{expect(c1Pilot).toThrow(/invalid_mode/);}finally{process.env.DATA_DIR=root;fs.unlinkSync(link);}
+ expect(c1Pilot).toThrow(/invalid_mode/);
 });
