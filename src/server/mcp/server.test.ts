@@ -65,6 +65,7 @@ const READ_TOOLS = [
   "plan_review_revision",
   "preview_edit",
   "preview_hybrid_claim_reconciliation",
+  "preview_supply_chain_relationships",
   "random_note",
   "read_attachment",
   "read_note",
