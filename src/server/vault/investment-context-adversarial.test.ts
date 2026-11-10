@@ -221,6 +221,16 @@ describe("N5 safe issuer onboarding — routing and historical identity must agr
     expect(historical.issuerResolution[0].status).toBe("readback_hold");
     expect(db().prepare("SELECT total_changes() AS n").get()).toEqual(baseline);
   });
+  it("does not recover a stale Micron Technology alias through the curated MU fallback",async()=>{
+    const hub="01_Companies/MU.md";
+    await add(hub,"---\naliases: [Micron Technology]\n---\n# MU");
+    fs.writeFileSync(path.join(vault,hub),"---\naliases: [Different Company]\n---\n# MU changed outside index");
+    const {planCanonicalRoutingV2}=await import("./investment-routing-v2");
+    const {buildInvestmentContextPack}=await import("./investment-context");
+    const input=routeInput("Micron Technology");
+    expect(planCanonicalRoutingV2(input)).toMatchObject({companyHubs:[],unresolvedEntities:["Micron Technology"]});
+    expect(buildInvestmentContextPack({question:input.topic,issuers:["Micron Technology"]}).issuerResolution[0].status).toBe("readback_hold");
+  });
   it("keeps genuine exact-title and unique-alias navigation working",async()=>{
     const p="01_Companies/MU.md";
     await add(p,"---\naliases: [MU, Micron Technology]\n---\n# MU");
