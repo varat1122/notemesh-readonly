@@ -19,6 +19,7 @@ import type { ThaiResearchReview } from "./research-quality-m55";
 import {resolveSourceIdentityM56, type SourceIdentityResolution} from "./source-identity-m56";
 import {inspectSourceArchiveProvenance,type SourceArchiveProvenance} from "./source-archive-provenance-p0";
 import type {AppearanceInput} from "./intake-appearances";
+import {proposeCompanyOnboarding,type CompanyOnboardingPlan} from "./company-onboarding-plan";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
@@ -108,6 +109,7 @@ export interface WritebackPlan {
   exactClaimReview:ClaimIntegrityCoverage & {status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
     classification:ReviewClass|null;matchingClaimPaths:string[];scanTruncated:boolean|null};
   routingV2:RoutingV2;
+  companyOnboarding:CompanyOnboardingPlan|null;
   safeEditWorkflow?:CanonicalSafeEditWorkflow;
   routes:Route[];
   gates:{
@@ -248,6 +250,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
     focus,maxNotes:10,maxChars:8500
   });
+  const companyOnboarding=input.domain==="company"?
+    proposeCompanyOnboarding(entities,routingV2,pack.issuerResolution):null;
   // A ticker-shaped label is not authority to append to a Company Timeline.
   // Require the same current existing Hub to resolve in routing AND history.
   // Curated aliases are navigational hints, never issuer identity evidence.
@@ -302,6 +306,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(integrityHold)warnings.unshift(claimIntegrityWarning(integrity));
   if(input.sourceKind==="broker_research")
     warnings.push("Broker model/version dedup requires exact bank, report date, prior same-bank PT, EPS vintage and actual report; 'reiterates' is not a new PT raise.");
+  if(companyOnboarding?.missingOrHeld)
+    warnings.push("Issuer onboarding/identity review required before creating Company Hub, treating a listing/DR as an issuer, or proposing an issuer-specific claim; raw Source capture stays separate.");
   if(routingV2.unresolvedEntities.length||routingV2.unresolvedThemes.length)
     warnings.push("M5.2 hub links use only existing indexed titles or explicit aliases; unresolved names must be adjudicated, never created or mapped by guesswork.");
   if(input.brokerUpdate)
@@ -380,7 +386,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     },
     exactClaimReview:{...integrity,status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
-    routingV2,
+    routingV2,companyOnboarding,
     routes,gates:{
       fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,
