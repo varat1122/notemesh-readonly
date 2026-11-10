@@ -9,7 +9,7 @@ function sqlite(){
     return require('node:module').createRequire(path.resolve(__dirname,'../.output/server/index.mjs'))('better-sqlite3');
   }
 }
-function assertPilotIdentity(dataDir,mode=process.env.C1_RESEARCH_PILOT,driver){
+function assertPilotIdentity(dataDir,mode=process.env.C1_RESEARCH_PILOT,driver,existing){
   const root=path.resolve(dataDir);
   if(mode!==undefined){
     if(mode!=='disposable')throw Error('c1_pilot_invalid_mode_hold');
@@ -21,20 +21,21 @@ function assertPilotIdentity(dataDir,mode=process.env.C1_RESEARCH_PILOT,driver){
     throw Error('c1_pilot_mode_required_hold');
   const file=path.join(root,'app.sqlite');
   try{fs.lstatSync(file);}catch(e){if(e.code==='ENOENT')return;throw Error('c1_pilot_identity_unreadable_hold');}
-  let d;
+  let d,owned=false;
   try{
     // No migrations, new database, key access or journal rewrites. The query
     // also recognizes pre-hardening c1_pilot_source/assessment/review events.
     // Bundled ESM server supplies its already imported native driver. Only
     // standalone CommonJS entrypoints use the packaged dependency resolver.
-    const Database=driver||sqlite();d=new Database(file,{readonly:true,fileMustExist:true});
+    if(existing?.open&&existing.name===file)d=existing;
+    else{const Database=driver||sqlite();d=new Database(file,{readonly:true,fileMustExist:true});owned=true;}
     if(d.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_events'").get()&&
       d.prepare("SELECT 1 FROM safe_edit_events WHERE event GLOB 'c1_pilot_*' LIMIT 1").get())
       throw Error('c1_pilot_enrolled_instance_requires_mode_hold');
   }catch(e){
     if(e.message==='c1_pilot_enrolled_instance_requires_mode_hold')throw e;
     throw Error('c1_pilot_identity_unreadable_hold');
-  }finally{d?.close();}
+  }finally{if(owned)d?.close();}
 }
 function enrollPilotIdentity(d){
   // Same existing Safe Edit event schema, initialized before auth/workers.

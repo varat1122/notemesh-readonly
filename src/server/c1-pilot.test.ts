@@ -1,7 +1,8 @@
 import {afterEach,beforeEach,it,expect,vi} from "vitest";
 import fs from "node:fs";import os from "node:os";import path from "node:path";
 import {spawnSync} from "node:child_process";
-import {assertPilotIdentity} from "../../scripts/c1-pilot-identity.cjs";
+import {assertPilotIdentity,enrollPilotIdentity} from "../../scripts/c1-pilot-identity.cjs";
+import Database from "better-sqlite3";
 let root:string,connection:{close:()=>void}|undefined;
 beforeEach(()=>{vi.resetModules();delete (globalThis as Record<symbol,unknown>)[Symbol.for("notemesh.maintenance.registry.v1")];delete process.env.C1_RESEARCH_PILOT;
  root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),"c1-hardening-legacy-")));process.env.DATA_DIR=root;fs.mkdirSync(path.join(root,"vault"));});
@@ -18,6 +19,17 @@ it("reserved empty DATA_DIR without mode fails before any DB or directory creati
  expect(()=>assertPilotIdentity(reserved)).toThrow(/c1_pilot_mode_required/);
  const {db}=await import("./db");expect(()=>db()).toThrow(/c1_pilot_mode_required/);
  expect(fs.existsSync(reserved)).toBe(false);
+});
+it("connection reuse reads fresh enrollment, retains caller connection and rejects an unrelated DB handle",async()=>{
+ const d=(await import("./db")).db();connection=d;
+ expect(()=>assertPilotIdentity(root,undefined,undefined,d)).not.toThrow();
+ // Actual server enrollment helper, not a fabricated receipt or raw SQL row.
+ enrollPilotIdentity(d);
+ expect(()=>assertPilotIdentity(root,undefined,undefined,d)).toThrow(/enrolled_instance_requires_mode/);
+ expect(d.open).toBe(true);
+ const unrelated=new Database(":memory:");
+ try{expect(()=>assertPilotIdentity(root,undefined,undefined,unrelated)).toThrow(/enrolled_instance_requires_mode/);}
+ finally{unrelated.close();}
 });
 it("enrollment precedes app initialization; removing mode blocks cached DB and worker entrypoints",async()=>{
  const pilot=path.join(root,"ios-c1-pilot-enrolled");fs.mkdirSync(path.join(pilot,"vault"),{recursive:true});process.env.DATA_DIR=pilot;process.env.C1_RESEARCH_PILOT="disposable";

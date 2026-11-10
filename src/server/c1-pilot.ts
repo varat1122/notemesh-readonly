@@ -8,9 +8,9 @@ import Database from "better-sqlite3";
 import {env} from "./env";
 import {assertPilotIdentity} from "../../scripts/c1-pilot-identity.cjs";
 export const C1_PILOT_POLICY="C1-ANALYST-REVIEW-1";
-export function c1Pilot(){
+export function c1Pilot(existing?:Database.Database){
  const mode=process.env.C1_RESEARCH_PILOT;
- assertPilotIdentity(env.dataDir,mode,Database);
+ assertPilotIdentity(env.dataDir,mode,Database,existing);
  if(mode===undefined)return false;
  if(mode!=="disposable")throw Error("c1_pilot_invalid_mode_hold");
  const root=fs.realpathSync(env.dataDir),tmp=fs.realpathSync(os.tmpdir());

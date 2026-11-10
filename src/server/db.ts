@@ -10,7 +10,9 @@ export function db(): Database.Database {
   // Recheck even on cached connections: losing the pilot flag is restrictive.
   // Maintenance still wins before any identity inspection/database opening.
   if (!_db && maintenanceActive()) throw Error("Maintenance is active; the database is not opened");
-  const pilot=c1Pilot();
+  // Reuse this exact connection for the fresh SELECT, rather than opening a
+  // second native connection on every db() call. No identity-result caching.
+  const pilot=c1Pilot(_db);
   if (!_db) {
     // Opening runs migrations and may create directories: never in maintenance.
     if (maintenanceActive()) throw Error("Maintenance is active; the database is not opened");
