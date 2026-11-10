@@ -234,8 +234,10 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   // A deterministic intake marker is added only after a reviewed Timeline
   // append. Repeated submission of identical source text must not propose
   // a second Timeline event even when a new research note already exists.
-  const timelineRecorded=Boolean(timelinePath && timelineExists &&
-    readNote(timelinePath).content.includes("<!-- investment-intake:"+planId+" -->"));
+  let timelineRecorded=false,timelineReadbackHold=false;
+  if(timelinePath&&timelineExists)try{
+    timelineRecorded=readNote(timelinePath).content.includes("<!-- investment-intake:"+planId+" -->");
+  }catch{timelineReadbackHold=true;}
   const focus=input.focus??(input.sourceKind==="broker_research"?"broker":input.domain==="macro"?"macro":"general");
   const pack=buildInvestmentContextPack({
     question:(T(input.topic)+" "+entities.join(" ")+" "+text.slice(0,450)).slice(0,1150),
@@ -300,6 +302,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     "Historical pointers are bounded lexical discovery; missed prior broker PTs, same-event reposts and counter-evidence remain possible."
   ];
   if(integrityHold)warnings.unshift(claimIntegrityWarning(integrity));
+  if(timelineReadbackHold)warnings.push("Indexed Company Timeline readback failed: hold Timeline suggestions; raw Source capture remains independent.");
   if(input.sourceKind==="broker_research")
     warnings.push("Broker model/version dedup requires exact bank, report date, prior same-bank PT, EPS vintage and actual report; 'reiterates' is not a new PT raise.");
   if(routingV2.unresolvedEntities.length||routingV2.unresolvedThemes.length)
@@ -327,9 +330,10 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   ];
   if(timelinePath)
     routes.push({kind:"company_timeline_candidate",
-      action:timelineExists&&timelineIdentityReady&&!integrityHold&&!duplicates&&!timelineRecorded&&!sameSourceEvent?"candidate_append_after_review":"link_existing_or_hold",
+      action:timelineExists&&!timelineReadbackHold&&timelineIdentityReady&&!integrityHold&&!duplicates&&!timelineRecorded&&!sameSourceEvent?"candidate_append_after_review":"link_existing_or_hold",
       path:timelinePath,requiresReview:true,
-      reason:!timelineIdentityReady?"Company identity unresolved or inconsistent across current Hub routing and historical readback: preserve Source, resolve issuer onboarding before proposing a Timeline append.":
+      reason:timelineReadbackHold?"Indexed Company Timeline readback failed; preserve Source and resolve the missing or unreadable Timeline before proposing an append.":
+        !timelineIdentityReady?"Company identity unresolved or inconsistent across current Hub routing and historical readback: preserve Source, resolve issuer onboarding before proposing a Timeline append.":
         integrityHold?claimIntegrityWarning(integrity):timelineRecorded?"Intake ID already recorded in this Timeline; do not append the same text a second time.":
         sameSourceEvent?"Same declared issuer, event date, and original source URL already referenced by existing notes: inspect candidatePaths and do NOT add a new Timeline event until source-level adjudication.":
         duplicates?"Exact numeric claim duplicate candidate: link existing event, no repeated timeline proof.":

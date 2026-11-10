@@ -9,7 +9,7 @@ import { readNote } from "./notes";
 import { resolveNotePath, resolveFolderPath } from "./paths";
 import { splitFrontmatter } from "./markdown";
 import { inspectCanonicalKnowledgeMetadata, type SchemaInspection } from "./investment-knowledge-schema";
-import { hubIdentityKey, indexedHubAliases, indexedTopLevelHubs } from "./investment-routing-v2";
+import { hubIdentityKey, indexedHubAliases, indexedTopLevelHubs, validHubIdentityLabel } from "./investment-routing-v2";
 import { discoverCanonicalResearch, isCanonicalResearchPath, publicationWindow, type ContextBundle, type CanonicalResearchScan } from "./investment-research-context";
 
 export type Focus = "earnings" | "broker" | "tam" | "macro" | "thesis" | "general";
@@ -45,7 +45,7 @@ function resolveIssuers(requested:string[],observer:RetrievalObserver):IssuerRes
   return requested.map(label=>{
     const result=(status:IssuerResolution["status"],contextKey:string|null=null,hubPath:string|null=null):IssuerResolution=>
       ({requested:label,status,contextKey,hubPath});
-    if(!label||label.length>120||/[\\/]/.test(label)||[...label].some(c=>c.charCodeAt(0)<32)||label==="..")return result("invalid_hold");
+    if(!validHubIdentityLabel(label))return result("invalid_hold");
     if(hubs.length>3000)return result("index_limit_hold");
     const wanted=hubIdentityKey(label);
     // Count title AND alias collisions. An exact title cannot excuse a second
