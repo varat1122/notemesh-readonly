@@ -306,6 +306,8 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     expect(p.researchJudge?.decision).toBe("PASS");
     const source=p.previews.find(x=>x.kind==="source_intake")!;
     engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    const cachedRecipe=(await plan(data)).safeEditWorkflow!.steps.find(x=>x.kind==="structured_claim")!.safeEditRequest;
+    expect(cachedRecipe).not.toBeNull();
     if(change==="hub context"||change==="hub mapping"||change==="hub readback"){
       const hub="01_Companies/NVDA.md";
       if(change==="hub mapping"){
@@ -336,7 +338,12 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const before=await journal(),claim=p.previews.find(x=>x.kind==="structured_claim")!;
     expect(()=>engine.apply({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge/);
     const recipe=(await plan(data)).safeEditWorkflow!.steps.find(x=>x.kind==="structured_claim")!;
-    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/research_judge/);
+    if(change==="hub readback"){
+      // N6 now withholds a new Claim recipe at planning time. An already
+      // issued recipe must still be rejected by the existing Judge admission.
+      expect(recipe).toMatchObject({state:"hold_claim_gate",safeEditRequest:null});
+      expect(()=>engine.preview(cachedRecipe,actor)).toThrow(/research_judge/);
+    }else expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/research_judge/);
     await expect(apply(data,{...p,previews:p.previews.filter(x=>x.kind!=="source_intake")})).rejects.toThrow();
     expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");
     for(const row of before)expect(await journal()).toContainEqual(row);
