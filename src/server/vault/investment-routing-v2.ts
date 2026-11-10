@@ -4,6 +4,8 @@
  * Labels, entity roles and broker revisions are caller-declared hypotheses.
  */
 import { db } from "../db";
+import { readNote } from "./notes";
+import { splitFrontmatter } from "./markdown";
 
 export type ContentType =
   | "reported_fact" | "earnings" | "guidance" | "industry_data" | "macro_data"
@@ -83,6 +85,16 @@ function indexedAliases(frontmatter:string|null):string[]{
       .flatMap(x=>Array.isArray(x)?x:[x]).filter((x):x is string=>typeof x==="string"&&x.length>1);
   }catch{return [];}
 }
+/** A stale indexed alias cannot be used to link a different issuer. Verify
+ * the selected Hub's current on-disk aliases before suggesting navigation.
+ * This check never authenticates a security, listing or publisher identity. */
+function currentHubAliases(hub:ReturnType<typeof indexedTopLevelHubs>[number]):boolean{
+  try{
+    const current=JSON.stringify(splitFrontmatter(readNote(hub.path).content).data);
+    const labels=(fm:string|null)=>JSON.stringify([...new Set(indexedAliases(fm).map(key))].sort());
+    return labels(current)===labels(hub.frontmatter);
+  }catch{return false;}
+}
 // Reuse the existing explicit Hub vocabulary for read-only retrieval. This is
 // not a security master, and does not change canonical writeback resolution.
 export {key as hubIdentityKey,indexedAliases as indexedHubAliases};
@@ -95,7 +107,7 @@ function findHub(label:string, indexed:ReturnType<typeof indexedTopLevelHubs>, a
   const candidates=indexed.filter(x=>key(x.title)===wanted||
     indexedAliases(x.frontmatter).some(a=>key(a)===wanted));
   if(candidates.length>1)return null;
-  if(candidates.length===1)return {path:candidates[0].path,
+  if(candidates.length===1&&currentHubAliases(candidates[0]))return {path:candidates[0].path,
     resolution:key(candidates[0].title)===wanted?"exact_existing_title" as const:"indexed_alias" as const};
   const canonical=allowCurated?curatedAliases[wanted]:undefined;
   if(!canonical)return null;
@@ -104,7 +116,7 @@ function findHub(label:string, indexed:ReturnType<typeof indexedTopLevelHubs>, a
   const canonicalKey=key(canonical);
   const curated=indexed.filter(x=>key(x.title)===canonicalKey||
     indexedAliases(x.frontmatter).some(a=>key(a)===canonicalKey));
-  return curated.length===1&&key(curated[0].title)===canonicalKey?
+  return curated.length===1&&key(curated[0].title)===canonicalKey&&currentHubAliases(curated[0])?
     {path:curated[0].path,resolution:"curated_alias" as const}:null;
 }
 function isDate(value:string|undefined){
