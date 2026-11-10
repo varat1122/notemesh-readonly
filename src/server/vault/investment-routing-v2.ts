@@ -89,16 +89,23 @@ export {key as hubIdentityKey,indexedAliases as indexedHubAliases};
 function findHub(label:string, indexed:ReturnType<typeof indexedTopLevelHubs>, allowCurated:boolean){
   if(indexed.length>3000)return null;
   const wanted=key(label);
-  const exact=indexed.filter(x=>key(x.title)===wanted);
-  if(exact.length===1)return {path:exact[0].path,resolution:"exact_existing_title" as const};
-  if(exact.length>1)return null;
-  const alias=indexed.filter(x=>indexedAliases(x.frontmatter).some(a=>key(a)===wanted));
-  if(alias.length===1)return {path:alias[0].path,resolution:"indexed_alias" as const};
-  if(alias.length>1)return null;
+  // A title is not unique issuer evidence when another Hub declares the same
+  // label as an alias. Resolve ALL candidate paths before giving title priority,
+  // matching the conservative company-context resolver.
+  const candidates=indexed.filter(x=>key(x.title)===wanted||
+    indexedAliases(x.frontmatter).some(a=>key(a)===wanted));
+  if(candidates.length>1)return null;
+  if(candidates.length===1)return {path:candidates[0].path,
+    resolution:key(candidates[0].title)===wanted?"exact_existing_title" as const:"indexed_alias" as const};
   const canonical=allowCurated?curatedAliases[wanted]:undefined;
   if(!canonical)return null;
-  const curated=indexed.filter(x=>key(x.title)===key(canonical));
-  return curated.length===1?{path:curated[0].path,resolution:"curated_alias" as const}:null;
+  // Curated aliases are navigational hints, never evidence that overrides
+  // a collision on the canonical target (including an alias-only collision).
+  const canonicalKey=key(canonical);
+  const curated=indexed.filter(x=>key(x.title)===canonicalKey||
+    indexedAliases(x.frontmatter).some(a=>key(a)===canonicalKey));
+  return curated.length===1&&key(curated[0].title)===canonicalKey?
+    {path:curated[0].path,resolution:"curated_alias" as const}:null;
 }
 function isDate(value:string|undefined){
   if(!value||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value))return false;
