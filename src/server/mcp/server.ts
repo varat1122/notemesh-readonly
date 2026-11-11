@@ -424,8 +424,14 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     inputSchema:estimateRevisionInputSchema.shape
   },safe((args)=>{
     const preview=previewEstimateRevision(args);
-    const fenceRecord=(record:NonNullable<typeof preview.earlier>)=>
-      fenceEach([record],"entity","metric","period","unit","value","sourceExcerpt","sourceLocator","originalSourceUrl")[0];
+    const fenceRecord=(record:NonNullable<typeof preview.earlier>)=>({
+      ...fenceEach([record],"entity","metric","period","unit","value","sourceExcerpt","sourceLocator","originalSourceUrl")[0],
+      // Both nested metadata objects are attributed Source/Claim text. Keep
+      // machine paths, IDs, hashes and ISO dates untouched for follow-up tools.
+      estimate:record.estimate?fenceEach([record.estimate],"provider")[0]:null,
+      accountingBasis:record.accountingBasis?
+        fenceEach([record.accountingBasis],"standard","shareBasis","scope","definition")[0]:null
+    });
     return json(withBoundary({...preview,
       earlier:preview.earlier?fenceRecord(preview.earlier):null,
       later:preview.later?fenceRecord(preview.later):null,

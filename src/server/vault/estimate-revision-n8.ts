@@ -174,6 +174,16 @@ export function previewEstimateRevision(raw:unknown):EstimateRevisionPreview{
     if(!earlier.sourcePublicationDate||!later.sourcePublicationDate)issues.push("n8_publication_date_unknown");
     else if(publicationWindow(earlier.sourcePublicationDate)![0]>publicationWindow(later.sourcePublicationDate)![1])
       issues.push("n8_publication_order_conflict");
+    // A forecast *vintage* is the as-of date of an issued estimate, not the
+    // fiscal period being forecast. A future-dated estimate cannot have been
+    // published in an earlier report, even if both caller labels match.
+    // Date-only claims use their stated civil calendar day; never fill the gap
+    // from the Source receipt or file creation time.
+    for(const record of [earlier,later]){
+      if(record.estimate?.forecastVintage&&isoDate(record.estimate.forecastVintage)&&
+        record.sourcePublicationDate&&record.estimate.forecastVintage>record.sourcePublicationDate.slice(0,10))
+        issues.push("n8_estimate_vintage_postdates_publication");
+    }
     if(input.asOf){
       const cutoff=Date.parse(input.asOf);
       for(const record of [earlier,later]){
