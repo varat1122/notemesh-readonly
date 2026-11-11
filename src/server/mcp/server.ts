@@ -11,6 +11,7 @@ import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventor
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { hybridClaimPreview, type HybridInput } from "../vault/investment-hybrid-readonly";
 import { previewSupplyChainRelationships, supplyChainInputSchema } from "../vault/supply-chain-intelligence";
+import { previewEstimateRevision, estimateRevisionInputSchema } from "../vault/estimate-revision-n8";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import {planDuplicateSourceLinkM56} from "../vault/event-review-relation-m56";
 import {discoverNearDuplicateSourcesM56,planReviewRevisionM56} from "../vault/review-discovery-m56";
@@ -417,6 +418,20 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       }));
     }),
   );
+  server.registerTool("preview_estimate_revision",{
+    title:"N8 broker estimate old-to-new candidate preview (read-only)",annotations:READ,
+    description:"Compare two explicitly selected, separately receipted broker estimate claims and their received Source text. Requires matching issuer Hub navigation, provider, metric, period, unit, accounting basis and increasing forecast vintages; computes decimal delta without FX/unit conversion. Source/broker authenticity, original PDF pages, semantic estimate truth, consensus, valuation and price-in are not verified. asOf is a current-index availability filter only. No Vault, research, Thesis, Portfolio or order writes.",
+    inputSchema:estimateRevisionInputSchema.shape
+  },safe((args)=>{
+    const preview=previewEstimateRevision(args);
+    const fenceRecord=(record:NonNullable<typeof preview.earlier>)=>
+      fenceEach([record],"entity","metric","period","unit","value","sourceExcerpt","sourceLocator","originalSourceUrl")[0];
+    return json(withBoundary({...preview,
+      earlier:preview.earlier?fenceRecord(preview.earlier):null,
+      later:preview.later?fenceRecord(preview.later):null,
+      comparison:preview.comparison?fenceEach([preview.comparison],"metric","period","unit","provider")[0]:null
+    }));
+  }));
   // RI-011 is intentionally read-only. Candidate results cannot authorize source
   // creation, semantic duplicate adjudication, protected edits, or graph edges.
   server.registerTool(

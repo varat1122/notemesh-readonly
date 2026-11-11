@@ -150,6 +150,35 @@ Exact-scale unit comparison is only for declared USD/EUR million/billion, VND tr
 
 Outputs: source-scoped `indexed` candidate counts and paths, bounded multi-query interleaved `historical` FTS hits and readback excerpts, source-note line offsets when present, and **indexed, untrusted provenance hints** (declared source kind, event/publication/receipt dates, evidence-access labels and existing Source→Review links). Read-only lineage checks flag missing linked Source notes and differing intake IDs; source-labelled HTTPS URLs in the beginning of legacy note bodies are exposed as **unverified follow-up locators**, not authenticated issuer documents. A stored text SHA field is **not** proof of original bytes or issuer authentication. These are retrieval aids for the LLM analyst, not deterministic semantic conclusions. The explainable `classification` (duplicate/unit-equivalent/conflict/added detail/historical/HOLD) and explicit `gates` (`canAutoWrite=false`, `canEditThesis=false`, `canEditPortfolio=false`) never authorize writes. Historical text/titles are fenced as untrusted. Zero DB or Vault writes. Independent blind accuracy, original-source verification, and staging approval remain separate gates.
 
+### preview_estimate_revision — read
+
+N8/IOS-ORCH-RI-001 bounded read-only candidate comparison of exactly two already
+persisted generated Structured Claims. Inputs `earlier` and `later` each
+contain the exact Claim note path and SHA-256, plus optional offset-aware
+`asOf`. No text or values are accepted as substitute evidence.
+
+The backend performs fresh per-Claim and per-Source index, original received
+text anchor, content hash, receipt, link and current navigational Company Hub
+checks. A comparable broker revision requires distinct Source receipts,
+the same explicit company label, metric, fiscal period, unit/currency,
+broker-estimate role, named broker provider, and all four declared
+accounting-basis dimensions, with strictly increasing ISO-date forecast
+vintage and chronologically consistent publication dates. Numeric value
+strings must be plain unambiguous decimal expressions; differences use
+integer-scaled arithmetic with percentage change against the absolute
+old value (two decimal places, null for zero old value). No FX, unit scale,
+accounting adjustment, fiscal calendar or implied share conversion occurs.
+
+Output remains `revision_candidate_pending_semantic_review`,
+`no_change_candidate_pending_semantic_review` or `hold`. Source labels,
+claims, dates, broker and PDF locators remain **attributed/unverified** even
+when their local bytes and receipts match. `asOf` checks current bytes'
+server-recorded times and declared publication/vintage availability, **not**
+a historical snapshot. No consensus estimate is derived from a broker,
+no original PDF page is visually verified, and no Thesis/Review/Portfolio,
+receipt or forecast dataset is written. See
+`docs/investment-os/N8-broker-estimate-revision-preview.md`.
+
 ### preview_supply_chain_relationships — read
 
 Discovers bounded, receipted Source text for one to six explicit company labels,

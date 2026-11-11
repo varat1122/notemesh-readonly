@@ -1,8 +1,20 @@
 # Changelog
 
-Candidate research surface (not merged or deployed): 33 tools covering read-only investment retrieval, canonical received-appearance inspection, M5.6 source/event relation and revision proposals, M5.7 PDF extraction coverage preflight, N7 supply chain evidence previews, claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
+Candidate research surface (not merged or deployed): 34 tools covering read-only investment retrieval, canonical received-appearance inspection, M5.6 source/event relation and revision proposals, M5.7 PDF extraction coverage preflight, N7 supply chain evidence previews, claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
 Safe Edit offers ten tools on a separate resource (including original-source archive and two user attachment byte-store/inspect actions); see docs/SAFE_EDIT.md.
 Historical upstream release descriptions below are preserved.
+
+## Unreleased — IOS-ORCH-RI-001 / N8 (Draft PR, not deployed)
+
+Adds read-only `preview_estimate_revision`: an exact two-claim comparison
+of separately persisted, receipt-verified broker-estimate observations. Same
+broker/role/issuer/metric/period/unit/declared accounting basis and strictly
+ordered forecast vintages are prerequisites to computing an exact decimal
+old-to-new delta. Publication date and server-recorded availability are
+checked; missing, conflicting, tampered or incomparable inputs HOLD. This
+does not verify broker identity, original PDF pages, semantic truth,
+consensus, valuation, or price-in; no notes, receipts or protected records
+are changed. See `docs/investment-os/N8-broker-estimate-revision-preview.md`.
 
 ## Unreleased — IOS-ORCH-RI-001 / N7 (Draft PR, not deployed)
 

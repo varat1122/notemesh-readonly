@@ -20,6 +20,7 @@ beforeEach(async()=>{
   vi.stubEnv("DATA_DIR",root);vi.stubEnv("ENCRYPTION_KEY",Buffer.alloc(32,18).toString("base64"));
   vi.stubEnv("SAFE_EDIT_ENABLED","1");vi.stubEnv("SAFE_EDIT_SINGLE_WRITER","1");
   for(const [rel,text] of [["01_Companies/SYNZ.md","# SYNZ isolated company Hub\n"],
+    ["01_Companies/OTHER.md","# OTHER isolated company Hub\\n"],
     ["05_Thesis/SYNZ - Current Thesis.md","# Protected original\n"],
     ["06_Portfolio/Positions.md","# Protected positions\n"]]){
     fs.writeFileSync(path.join(vault,rel),text);(await import("./indexer")).reindexPath(rel);
@@ -103,10 +104,10 @@ describe("N8 receipt-bound broker estimate revision (read-only)",()=>{
     ["period",{period:"FY2028"},"n8_reporting_period_mismatch"],
     ["basis",{accountingBasis:{...basis,standard:"Non-GAAP"}},"n8_accounting_basis_mismatch"],
     ["unknown basis",{accountingBasis:undefined},"n8_accounting_basis_incomplete"],
-    ["wrong issuer",{entity:"OTHER"},"n8_later_claim_receipt_or_readback_hold"],
+    ["wrong issuer",{entity:"OTHER"},"n8_company_entity_mismatch"],
     ["same vintage",{estimate:{role:"broker_estimate",provider:"Broker X",forecastVintage:"2026-09-01"}},"n8_forecast_vintage_order_invalid"]
   ] as Array<[string,Changed,string]>)("holds incompatible %s instead of computing a misleading revision",async(_case,change,issue)=>{
-    const a=await save("100","2026-09-01"),b=await save("112","2026-10-01",change);
+    const a=await save("100","2026-09-01"),b=await save("112","2026-10-01",change,_case==="wrong issuer"?{entities:["OTHER"]}:{});
     const r=await preview(request(a,b));
     expect(r.status).toBe("hold");expect(r.issues).toContain(issue);
     expect(r.comparison).toBeNull();expect(r.earlier).toBeNull();expect(r.later).toBeNull();
