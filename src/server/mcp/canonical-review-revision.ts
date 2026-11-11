@@ -8,7 +8,7 @@ import {db} from "../db";
 import {previewCanonicalRevision,apply,status} from "../safe-edit/engine";
 import {withPausedSync} from "../safe-edit/sync";
 import {canonicalRevisionInputSchema,verifyRevisionCandidate,makeRevisionGate,recordRevisionAdmission,revisionGate} from "../safe-edit/canonical-review-revision-pilot";
-import {indexedRead} from "../vault/investment-research-context";
+import {indexedRead,createReceipt} from "../vault/investment-research-context";
 import {applySchema} from "../safe-edit/schema";
 const sha=(x:string)=>createHash("sha256").update(x).digest("hex");
 export const canonicalRevisionApplySchema=z.object({
@@ -35,22 +35,38 @@ export function prepareCanonicalReviewRevision(raw:unknown,actor:string){
    preview:p,writesPerformed:false,protectedNotesTouched:false};
 }
 export async function applyCanonicalReviewRevision(raw:unknown,actor:string){
- const args=canonicalRevisionApplySchema.parse(raw),candidate=verifyRevisionCandidate(args.input);
+ const args=canonicalRevisionApplySchema.parse(raw);
  if(args.operationId!==args.authorization.operationId)throw Error("revision_operation_identity_hold");
  const g=revisionGate(args.operationId);
- if(g.actor!==actor||g.inputDigest!==candidate.inputDigest||
+ if(g.actor!==actor||g.inputDigest!==sha(JSON.stringify(args.input))||
     g.path!==args.input.existingReview.path||g.beforeHash!==args.input.existingReview.expectedSha256)
    throw Error("revision_input_or_review_binding_hold");
- const outcome=await withPausedSync(()=>apply(args.authorization,actor));
+ // A completed operation is read-only on retry; do not require the old Review
+ // hash to remain on disk after a successful append. Unwritten paths still
+ // revalidate the full original Review and all Source receipts.
+ const previous=status(args.operationId,actor);
+ const outcome=previous.status==="written"?previous:await (async()=>{
+   const candidate=verifyRevisionCandidate(args.input);
+   if(g.inputDigest!==candidate.inputDigest)throw Error("revision_semantic_input_drift_hold");
+   return withPausedSync(()=>apply(args.authorization,actor));
+ })();
  const receipt=outcome.receipt;
  if(outcome.status!=="written"||receipt?.write!=="written"||receipt?.readback!=="verified"||receipt?.reindex!=="verified")
    return {phase:"revision_apply",status:"hold_receipt_or_index",operationId:g.operationId,receipt,protectedNotesTouched:false};
  const note=indexedRead(g.path);
+ let chainVerified=false,sourcesVerified=false;
+ try{
+   chainVerified=createReceipt("canonical_review",g.path,note.raw)===g.reviewReceiptId;
+   sourcesVerified=g.sources.every(s=>{
+     const source=indexedRead(s.path);
+     return sha(source.raw)===s.sha256&&createReceipt("source_intake",s.path,source.raw)===s.receiptId;
+   });
+ }catch{ /* Hold, never backfill or rewrite a receipt. */ }
  const linkStatus=g.sources.map(s=>({path:s.path,resolved:Boolean(db().prepare("SELECT 1 FROM links WHERE source_path=? AND resolved_path=?").get(g.path,s.path))}));
- const full=sha(note.raw)===g.afterHash&&linkStatus.every(x=>x.resolved);
+ const full=chainVerified&&sourcesVerified&&sha(note.raw)===g.afterHash&&linkStatus.every(x=>x.resolved);
  return {phase:"revision_apply",status:full?"revision_saved_verified":"hold_revision_link_or_hash",
    operationId:g.operationId,reviewPath:g.path,afterHash:g.afterHash,receipt,
-   sourceLinks:linkStatus,researchStatus:"draft",independentEvidenceIncrement:0,
+   sourceLinks:linkStatus,reviewAppendChainVerified:chainVerified,sourceReceiptsVerified:sourcesVerified,researchStatus:"draft",independentEvidenceIncrement:0,
    originalSourcePreserved:true,protectedNotesTouched:false,
    perDeviceSync:"not_verified",humanPresence:"not_verified",criticIndependence:"not_verified"};
 }
