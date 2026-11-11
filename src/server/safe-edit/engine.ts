@@ -22,7 +22,7 @@ import {appearancePayloadSchema,appearanceRows,requireAppearance,sealAppearance,
 import {assertNoMaintenance} from "../maintenance";
 import {c1Pilot,withPilotAdmissionLock} from "../c1-pilot";
 import {assertPilotPreview,assertPilotApply,recordPilotSource} from "./c1-pilot-review";
-import {isCanonicalCompanyReview,assertRevisionGate,revisionGate} from "./canonical-review-revision-pilot";
+import {isCanonicalCompanyReview,assertRevisionGate} from "./canonical-review-revision-pilot";
 
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
 const MAX_BYTES = 100_000;
