@@ -13,7 +13,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),"safe-edit-mcp-"));
 process.env.DATA_DIR=root;process.env.BASE_URL="https://safe-fixture.test";
 process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
 const access:McpAccess={read:true,write:false,label:"oauth:edit-fixture",scopes:["vault:read","vault:edit"]};
-const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","prepare_canonical_writeback","apply_canonical_writeback","prepare_research_judge_packet","research_judge_result_contract","preflight_research_decision_v2","get_edit_status","rollback_edit","archive_original_source","inspect_original_source_archive","get_sync_delivery_evidence","store_user_attachment","inspect_user_attachment"];
+const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","prepare_canonical_writeback","apply_canonical_writeback","prepare_research_judge_packet","research_judge_result_contract","preflight_research_decision_v2","get_edit_status","rollback_edit","archive_original_source","inspect_original_source_archive","get_sync_delivery_evidence","store_user_attachment","inspect_user_attachment","prepare_canonical_review_revision","apply_canonical_review_revision","inspect_canonical_review_revision"];
 const args={operationId:"mcp-synthetic-01",path:"Synthetic.md",reason:"Synthetic MCP test",change:{kind:"replace",oldText:"Old data",newText:"New data"}};
 
 const digest=(value:string)=>createHash("sha256").update(value,"utf8").digest("hex");
@@ -68,8 +68,8 @@ it("generic MCP routes reject fully populated caller primary declarations before
   expect(fs.existsSync(path.join(root,"vault","Forged.md"))).toBe(false);
  }finally{await c.close();}
 });
-it("discovers seventeen scoped tools with accurate write annotations",async()=>{
- const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="apply_canonical_writeback"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment");}}finally{await c.close();}
+it("discovers twenty scoped tools with accurate write annotations",async()=>{
+ const c=await connected(access);try{const {tools}=await c.client.listTools();expect(tools.map(t=>t.name).sort()).toEqual(toolsList.sort());for(const t of tools){expect(t._meta?.securitySchemes).toEqual([{type:"oauth2",scopes:["vault:read","vault:edit"]}]);expect(t.annotations?.readOnlyHint).toBe(t.name!=="apply_edit"&&t.name!=="apply_canonical_writeback"&&t.name!=="archive_original_source"&&t.name!=="store_user_attachment"&&t.name!=="apply_canonical_review_revision");}}finally{await c.close();}
 });
 it("M3d MCP preflight binds existing indexed original quotes but neither verifies issuer truth nor writes notes",async()=>{
  const rel=m2Path,original=m2Original;
