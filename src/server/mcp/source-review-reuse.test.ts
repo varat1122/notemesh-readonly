@@ -111,6 +111,12 @@ it("missing publication date alone is not a new event, including broker-versus-i
  expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
  expect(p.reviewReuse.duplicateAdjudicated).toBe(false);
 });
+it.each([" ","message:forwarded-post"])("non-HTTP origin %j cannot supply missing event identity",async sourceUrl=>{
+ await save(base);
+ const p=await prepare({...repost,sourceUrl,eventDate:"2026-10-02",publicationDate:"2026-10-02"});
+ expect(p.reviewReuse.status).toBe("hold_event_adjudication");
+ expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+});
 it("the exact existing-Review selection is included in the sealed Judge input binding",async()=>{
  const existingReview=await selected();await save({...repost,captureOnly:true,researchReview:undefined});
  const input={...repost,existingReview};

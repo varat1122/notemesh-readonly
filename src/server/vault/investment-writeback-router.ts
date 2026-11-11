@@ -260,7 +260,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     x.path.startsWith("10_Knowledge/Company Research/") && x.score>=110
   ).map(x=>x.path)])].slice(0,4);
   const reviewReuse=planReviewReuse({selection:input.existingReview,domain:input.domain,planId,sourcePath:rawPath,
-    existingSourcePath:sourceIdentity.existingSourcePath,sourceUrl:input.sourceUrl,eventDate,publicationDate,pack,historicalCandidatePaths:candidateEventPaths});
+    existingSourcePath:sourceIdentity.existingSourcePath,sourceUrl:canonicalSourceUrl(input.sourceUrl),eventDate,publicationDate,pack,historicalCandidatePaths:candidateEventPaths});
   // The same broker/industry source can mention several declared companies.
   // Reconcile all already-resolved issuer identities by exact URL/event date,
   // never counting co-mentions or raw message repetitions as independent proof.
