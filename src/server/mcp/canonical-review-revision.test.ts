@@ -72,8 +72,13 @@ it("isolated routine addendum requires exact reviewer dashboard approval and per
  expect(engine.approve(prepared.operationId,"synthetic-dashboard-reviewer",prepared.preview.afterHash)).toEqual({approved:true});
  const result=await bridge.applyCanonicalReviewRevision(args,actor);
  expect(result.status).toBe("revision_saved_verified");
+ expect(result.reviewAppendChainVerified).toBe(true);
+ expect(result.sourceReceiptsVerified).toBe(true);
  expect(result.sourceLinks?.every(x=>x.resolved)).toBe(true);
  expect(result.independentEvidenceIncrement).toBe(0);
+ const repeated=await bridge.applyCanonicalReviewRevision(args,actor);
+ expect(repeated.status).toBe("revision_saved_verified");
+ expect(repeated.afterHash).toBe(result.afterHash);
  expect(fs.readdirSync(path.join(vault,"10_Knowledge/Company Research"))).toHaveLength(1);
 });
 it("generic Safe Edit append cannot bypass the dedicated revision tool even if caller supplies approval URL",async()=>{
