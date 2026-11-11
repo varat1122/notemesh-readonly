@@ -8,6 +8,7 @@ import {execFileSync} from "node:child_process";
 import {z} from "zod";
 import {inspectUserAttachment,MAX_USER_ATTACHMENT_BYTES} from "../user-attachment-vault";
 import {readPersistedClaim} from "./canonical-claims";
+import {estimateSchema} from "./claim-dimensions";
 import {indexedRead} from "./investment-research-context";
 import {claimSourceAnchorIssues} from "./claim-value-anchor";
 import {resolveNotePath,openNoFollow} from "./paths";
@@ -90,7 +91,7 @@ function readOriginal(digestValue:string){
 export function previewBrokerPdfPageEvidence(raw:unknown):PdfPageEvidencePreview{
   const input=pdfPageEvidenceInputSchema.parse(raw);
   const base={
-    methodVersion:N9_PDF_METHOD,originalPdfByteReadbackVerified:false,
+    methodVersion:N9_PDF_METHOD as typeof N9_PDF_METHOD,originalPdfByteReadbackVerified:false,
     originalPdfIsUserAttachment:true as const,sourceToAttachmentReceiptBound:false,
     publisherAuthenticated:false as const,pdfPageNativeTextMatch:false,
     pdfTextExtractionMethod:"poppler_pdftotext" as const,pdfTextExtractionVisuallyVerified:false as const,
@@ -104,8 +105,10 @@ export function previewBrokerPdfPageEvidence(raw:unknown):PdfPageEvidencePreview
     return {...base,status:"hold",issues:["n9_native_pdf_preview_not_enabled"],claim:null,page:null};
   try{
     const c=readPersistedClaim(input.claimPath);
+    const estimate=estimateSchema.safeParse(c.claim.estimate);
     if(digest(c.readbackText)!==input.claimNoteSha256||c.scope.domain!=="company"||
-      c.claim.evidence_class!=="analyst_estimate"||c.claim.estimate?.role!=="broker_estimate")
+      c.claim.evidence_class!=="analyst_estimate"||
+      !estimate.success||estimate.data.role!=="broker_estimate")
       throw Error("n9_broker_claim_binding_hold");
     const src=indexedRead(c.sourcePath);
     const expectedAttachment="07_Sources/ChatGPT/Attachments/"+input.attachmentSha256+".pdf";
