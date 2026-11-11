@@ -11,6 +11,7 @@ import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventor
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { hybridClaimPreview, type HybridInput } from "../vault/investment-hybrid-readonly";
 import { previewSupplyChainRelationships, supplyChainInputSchema } from "../vault/supply-chain-intelligence";
+import {previewEstimateRevision,estimateRevisionInputSchema} from "../vault/estimate-revision-n8";
 import { previewEstimateRevision, estimateRevisionInputSchema } from "../vault/estimate-revision-n8";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import {planDuplicateSourceLinkM56} from "../vault/event-review-relation-m56";
@@ -432,6 +433,16 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       comparison:preview.comparison?fenceEach([preview.comparison],"metric","period","unit","provider")[0]:null
     }));
   }));
+  server.registerTool("preview_estimate_revision",{
+    title:"Compare two attributed broker estimate claim vintages (read-only)",
+    annotations:READ,
+    description:"N8 receipt-bound read-only comparison of two persisted broker Structured Claims. Requires same company, metric, period, unit, provider and accounting basis; refuses ambiguous or unavailable evidence. Never authenticates broker PDFs, declares consensus, changes forecasts, writes Vault notes or edits protected Thesis/Portfolio.",
+    inputSchema:estimateRevisionInputSchema.shape
+  },safe((args)=>json(withBoundary((()=>{
+    const preview=previewEstimateRevision(args);
+    return {...preview,earlier:preview.earlier?fenceEach([preview.earlier],"sourceExcerpt","sourceLocator")[0]:null,
+      later:preview.later?fenceEach([preview.later],"sourceExcerpt","sourceLocator")[0]:null};
+  })()))));
   // RI-011 is intentionally read-only. Candidate results cannot authorize source
   // creation, semantic duplicate adjudication, protected edits, or graph edges.
   server.registerTool(
