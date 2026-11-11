@@ -12,6 +12,7 @@ import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-re
 import { hybridClaimPreview, type HybridInput } from "../vault/investment-hybrid-readonly";
 import { previewSupplyChainRelationships, supplyChainInputSchema } from "../vault/supply-chain-intelligence";
 import { previewEstimateRevision, estimateRevisionInputSchema } from "../vault/estimate-revision-n8";
+import {previewBrokerPdfPageEvidence,pdfPageEvidenceInputSchema} from "../vault/pdf-page-evidence-n9";
 import { planInvestmentWriteback, type WritebackInput } from "../vault/investment-writeback-router";
 import {planDuplicateSourceLinkM56} from "../vault/event-review-relation-m56";
 import {discoverNearDuplicateSourcesM56,planReviewRevisionM56} from "../vault/review-discovery-m56";
@@ -436,6 +437,18 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       earlier:preview.earlier?fenceRecord(preview.earlier):null,
       later:preview.later?fenceRecord(preview.later):null,
       comparison:preview.comparison?fenceEach([preview.comparison],"metric","period","unit","provider")[0]:null
+    }));
+  }));
+  server.registerTool("preview_broker_pdf_page_evidence",{
+    title:"N9 native PDF page-to-Claim evidence preview (read-only)",
+    annotations:READ,
+    description:"Read-only, operator-opt-in native PDF page-text check against exact already-stored hash-verified user attachment and persisted broker Claim/Source receipts. Returns a one-page excerpt-matching candidate only. No OCR, charts, tables, footnotes, publisher authentication or economic-claim verification; never writes Vault, Thesis, Portfolio or receipts.",
+    inputSchema:pdfPageEvidenceInputSchema.shape
+  },safe((args)=>{
+    const preview=previewBrokerPdfPageEvidence(args);
+    return json(withBoundary({...preview,
+      claim:preview.claim?fenceEach([preview.claim],"metric","period","value","unit",
+        "sourceExcerpt","sourceLocator","originalSourceUrl")[0]:null
     }));
   }));
   // RI-011 is intentionally read-only. Candidate results cannot authorize source

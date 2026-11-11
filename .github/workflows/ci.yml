@@ -53,6 +53,9 @@ jobs:
       - name: Fetch exact legacy code for disposable cross-version Judge tests
         run: git fetch --no-tags --depth=1 origin 6cd9c3cd558dac3d67e9202d8652b406cfdc332a 44efef941f0b586ccd1f1cf84dc608c4f77eb6b2 1294bc8ae7e379ff1188e705ee74ad1c7fde2053
 
+      - name: Install native PDF text tools for isolated N9 tests
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+
       - name: Test
         run: pnpm test
 
@@ -123,6 +126,9 @@ jobs:
             -e ENCRYPTION_KEY="$(openssl rand -hex 32)" \
             -v nmdata:/data \
             notemesh:ci
+
+      - name: Native PDF text tools exist in the runtime image
+        run: docker exec nm sh -c 'command -v pdfinfo >/dev/null && command -v pdftotext >/dev/null'
 
       - name: It boots and answers /api/health
         run: |

@@ -64,6 +64,7 @@ const READ_TOOLS = [
   "plan_pdf_extraction_coverage",
   "plan_review_revision",
   "preview_edit",
+  "preview_broker_pdf_page_evidence",
   "preview_estimate_revision",
   "preview_hybrid_claim_reconciliation",
   "preview_supply_chain_relationships",

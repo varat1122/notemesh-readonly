@@ -6,6 +6,12 @@ Historical upstream release descriptions below are preserved.
 
 ## Unreleased — IOS-ORCH-RI-001 / N8 (Draft PR, not deployed)
 
+N9 (IOS-ORCH-RI-001) adds operator-opt-in read-only `preview_broker_pdf_page_evidence`
+to compare one persisted Broker Structured Claim excerpt with native text extracted
+from the actual content-addressed, hash-readback-verified user attachment PDF
+using Poppler. A page match is NOT visual verification, broker authenticity,
+consensus, economic truth, original archive creation or writer authority.
+
 Adds read-only `preview_estimate_revision`: an exact two-claim comparison
 of separately persisted, receipt-verified broker-estimate observations. Same
 broker/role/issuer/metric/period/unit/declared accounting basis and strictly

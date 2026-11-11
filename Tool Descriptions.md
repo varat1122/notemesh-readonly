@@ -150,6 +150,10 @@ Exact-scale unit comparison is only for declared USD/EUR million/billion, VND tr
 
 Outputs: source-scoped `indexed` candidate counts and paths, bounded multi-query interleaved `historical` FTS hits and readback excerpts, source-note line offsets when present, and **indexed, untrusted provenance hints** (declared source kind, event/publication/receipt dates, evidence-access labels and existing Source→Review links). Read-only lineage checks flag missing linked Source notes and differing intake IDs; source-labelled HTTPS URLs in the beginning of legacy note bodies are exposed as **unverified follow-up locators**, not authenticated issuer documents. A stored text SHA field is **not** proof of original bytes or issuer authentication. These are retrieval aids for the LLM analyst, not deterministic semantic conclusions. The explainable `classification` (duplicate/unit-equivalent/conflict/added detail/historical/HOLD) and explicit `gates` (`canAutoWrite=false`, `canEditThesis=false`, `canEditPortfolio=false`) never authorize writes. Historical text/titles are fenced as untrusted. Zero DB or Vault writes. Independent blind accuracy, original-source verification, and staging approval remain separate gates.
 
+### preview_broker_pdf_page_evidence — read
+
+**N9 / IOS-ORCH-RI-001.** Operator-opt-in (`N9_PDF_PAGE_TEXT_PREVIEW_ENABLED=1`) read-only native PDF text check of one page of an existing, byte/hash-readback-verified user-supplied PDF attachment. Requires exact canonical Broker Structured Claim path/SHA and its Source/Claim Safe Edit receipts. The Source must explicitly bind the same already-preserved PDF. Uses `pdfinfo` for actual PDF page count and `pdftotext` for original-byte native text; exact normalized Source excerpt/numeric anchor must be present on the selected page. No OCR, image/table/footnote visual verification, publisher authentication, semantic truth, original archive operation or write. Fails closed on missing binary, mismatch, oversized/unreadable page and disabled parser. No server service or external API.
+
 ### preview_estimate_revision — read
 
 N8/IOS-ORCH-RI-001 bounded read-only candidate comparison of exactly two already

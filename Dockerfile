@@ -23,7 +23,7 @@ WORKDIR /app
 # pointer files in place of every attachment, which contain no NUL bytes and so
 # read as text — the server would hand those to a model as if they were images.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git git-lfs ca-certificates tini \
+    && apt-get install -y --no-install-recommends git git-lfs ca-certificates tini poppler-utils \
     && rm -rf /var/lib/apt/lists/* \
     && git lfs install --system
 RUN npm install -g obsidian-headless@0.0.14
