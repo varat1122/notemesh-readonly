@@ -466,3 +466,33 @@ separate reported evidence. Quay/Vela preflight HOLD judgments are supplied and
 bound; CI proves their enforcement, not autonomous economic reasoning. Arbor
 persists an attributed Draft after explicit simulated review; Birch's benign
 planned date still encounters the accepted RISK-1.1 backend HOLD. No Gold changes.
+
+### N5 company onboarding — read-only identity proposal
+
+The `plan_investment_writeback` read-only response for company-domain intakes includes
+`companyOnboarding` (`RI001-N5-ONBOARDING-PREVIEW-1`). This is a **proposal to
+review identity**, not permission to create a Company Hub, verify an issuer/security
+or convert a DR/ADR to its underlying.
+
+- `existing_hub_navigation_only`: reuse an exact or uniquely indexed Hub alias
+  as navigational context only; issuer/security/listing evidence remains separate.
+- `no_indexed_hub_candidate`: propose owner onboarding evidence when the current
+  bounded index does not resolve a Hub; it is **not proof** that the issuer is new.
+- `ambiguous_identity_hold`, `stale_hub_readback_hold`,
+  `index_incomplete_hold` or `invalid_identity_hold`: do not invent a
+  mapping or issuer-specific Claim; preserve attributed Source if separately
+  authorized.
+- `curated_alias_hint_hold`: an existing curated name is only a navigation hint.
+- `qualified_listing_mapping_hold`: an exchange-qualified symbol or DR label
+  requires dated, evidence-backed issuer/security/listing/underlying mapping,
+  even when an alias points at a Company Hub.
+
+Every candidate includes an explicit evidence checklist and leaves
+`issuerSecurityListingVerified=false`, `mayCreateHub=false`,
+`mayConvertDrOrAdr=false`, `mayWriteIssuerSpecificClaims=false` and
+`mayMutateProtectedNotes=false`. Existing Source-preservation rights and Safe
+Edit receipts remain separate. No schema migration, automatic Hub creation,
+external symbol provider or protected-note changes are introduced.
+
+This N5 preview is tested only on synthetic fixtures; it does not verify a real
+legal entity or create an owner-reviewed registry.

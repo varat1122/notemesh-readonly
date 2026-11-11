@@ -13,6 +13,7 @@ import { reviewInvestmentClaim, claimIntegrityCoverage, claimIntegrityWarning, t
 import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
 import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTag,
   type BrokerUpdate } from "./investment-routing-v2";
+import {proposeCompanyOnboarding,type CompanyOnboardingPreview} from "./company-onboarding";
 import { buildCanonicalSafeEditWorkflow, type CanonicalSafeEditWorkflow } from "./canonical-writeback-workflow";
 import type {IntakeClaim,ResearchLineage} from "./canonical-claims";
 import type { ThaiResearchReview } from "./research-quality-m55";
@@ -108,6 +109,7 @@ export interface WritebackPlan {
   exactClaimReview:ClaimIntegrityCoverage & {status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
     classification:ReviewClass|null;matchingClaimPaths:string[];scanTruncated:boolean|null};
   routingV2:RoutingV2;
+  companyOnboarding?:CompanyOnboardingPreview;
   safeEditWorkflow?:CanonicalSafeEditWorkflow;
   routes:Route[];
   gates:{
@@ -385,6 +387,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     exactClaimReview:{...integrity,status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
     routingV2,
+    ...(input.domain==="company"?{companyOnboarding:proposeCompanyOnboarding({
+      entities,routing:routingV2,issuerResolution:pack.issuerResolution})}:{}),
     routes,gates:{
       fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,
