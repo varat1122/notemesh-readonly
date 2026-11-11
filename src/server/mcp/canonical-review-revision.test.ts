@@ -72,7 +72,7 @@ it("isolated routine addendum requires exact reviewer dashboard approval and per
  expect(engine.approve(prepared.operationId,"synthetic-dashboard-reviewer",prepared.preview.afterHash)).toEqual({approved:true});
  const result=await bridge.applyCanonicalReviewRevision(args,actor);
  expect(result.status).toBe("revision_saved_verified");
- expect(result.sourceLinks.every(x=>x.resolved)).toBe(true);
+ expect(result.sourceLinks?.every(x=>x.resolved)).toBe(true);
  expect(result.independentEvidenceIncrement).toBe(0);
  expect(fs.readdirSync(path.join(vault,"10_Knowledge/Company Research"))).toHaveLength(1);
 });
