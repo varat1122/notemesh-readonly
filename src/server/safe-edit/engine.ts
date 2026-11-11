@@ -25,6 +25,7 @@ import {assertPilotPreview,assertPilotApply,recordPilotSource} from "./c1-pilot-
 import {isCanonicalCompanyReview,assertRevisionGate} from "./canonical-review-revision-pilot";
 
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
+const revisionPilotActive=()=>process.env.IOS_C1_REVISION_PILOT==="synthetic";
 const MAX_BYTES = 100_000;
 const TTL = 30 * 60_000;
 export function assertEnabled() {
@@ -204,7 +205,7 @@ function requiresApproval(r:RecordRow) {
   const p=JSON.parse(r.payload) as PreviewInput;
   // Protect all thesis changes, including first creation and rollback; never
   // infer investment approval from an OAuth grant or model-supplied boolean.
-  return p.path.startsWith("05_Thesis/") || (r.before_text!==""&&isCanonicalCompanyReview(p.path)) || [r.before_text,r.after_text].some(text=>{
+  return p.path.startsWith("05_Thesis/") || (revisionPilotActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path)) || [r.before_text,r.after_text].some(text=>{
     const data=document(text).data;
     return data.user_endorsed===true || data.user_endorsed==="true" || data.status==="user_endorsed";
   });
@@ -275,7 +276,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean,canonic
   assertEnabled();const p=previewSchema.parse(input);const t=target(p.path);p.path=t.rel;
   if(store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND status='writing' LIMIT 1").get(p.path)) throw Error("This path has an interrupted operation; administrator recovery required");
   const before=read(t.abs);
-  const managedRevision=isCanonicalCompanyReview(p.path)&&before!==null;
+  const managedRevision=revisionPilotActive()&&isCanonicalCompanyReview(p.path)&&before!==null;
   if(managedRevision&&!revision)throw Error("canonical_review_revision_dedicated_route_required");
   if(revision&&(!managedRevision||p.change.kind!=="append"||c1Pilot()))throw Error("canonical_review_revision_scope_hold");
   if(p.change.kind==="create"?before!==null:before===null) throw Error("Create never overwrites; other edits require an existing note");
@@ -337,7 +338,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean,canonic
 export function adminPreview(id:string) {
   assertEnabled();
   const r=row(id),p=JSON.parse(r.payload) as PreviewInput;
-  if(r.before_text!==""&&isCanonicalCompanyReview(p.path)){
+  if(revisionPilotActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path)){
     const g=assertRevisionGate(id,p.path,r.before_text,r.after_text,r.actor);
     return {...publicPreview(r),reviewerScope:"authenticated_dashboard_session_attestation_not_human_presence",
       revisionEvidence:g,fullBefore:r.before_text,fullAfter:r.after_text};
@@ -350,7 +351,7 @@ export function approve(id:string,adminId:string,afterHash:string) {
   assertProtectedRecord((JSON.parse(r.payload) as PreviewInput).path,document(r.before_text).data,document(r.after_text).data);
   if(r.status!=="preview"||Date.now()>r.expires||afterHash!==r.after_hash) throw Error("Approval expired or does not match the reviewed diff");
   const p=JSON.parse(r.payload) as PreviewInput;
-  if(r.before_text!==""&&isCanonicalCompanyReview(p.path))
+  if(revisionPilotActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path))
     assertRevisionGate(id,p.path,r.before_text,r.after_text,r.actor);
   store().prepare("UPDATE safe_edit_operations SET approval=? WHERE id=? AND status='preview'").run(`admin:${adminId}`,id);
   log(id,`admin:${adminId}`,"approved",{afterHash});return {approved:true};
@@ -409,7 +410,7 @@ export function apply(input:unknown,actor:string) {
   if(Date.now()>r.expires) throw Error("Preview expired; review a fresh diff");
   if(requiresApproval(r)&&!r.approval) throw Error("Explicit authenticated dashboard approval of this exact protected/revision diff is required; open approvalUrl");
   const p=JSON.parse(r.payload) as PreviewInput;
-  if(r.before_text!==""&&isCanonicalCompanyReview(p.path))
+  if(revisionPilotActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path))
     assertRevisionGate(r.id,p.path,r.before_text,r.after_text,actor);
   if(r.status==="writing") throw Error("Interrupted write: inspect receipt and backup; do not replay without recovery review");
   // Cross-process lock deliberately has no stale timeout. A crash requires
@@ -420,7 +421,7 @@ export function apply(input:unknown,actor:string) {
     const {abs}=target(p.path),current=read(abs);
     if((p.change.kind==="create"?current!==null:current===null)||sha256(current??"")!==r.before_hash) throw Error("Version conflict: re-preview; another writer changed this note");
     checkEvidence(p);
-    if(current!==null&&isCanonicalCompanyReview(p.path))
+    if(revisionPilotActive()&&current!==null&&isCanonicalCompanyReview(p.path))
       assertRevisionGate(r.id,p.path,current,r.after_text,actor);
     assertResearchJudgeWrite(p.path,current??"",r.after_text,actor,"apply");
     assertPilotApply(r.id,p.path,current??"",r.after_text,actor);
