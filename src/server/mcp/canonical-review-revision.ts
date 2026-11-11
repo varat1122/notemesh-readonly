@@ -20,7 +20,7 @@ export function prepareCanonicalReviewRevision(raw:unknown,actor:string){
  const candidate=verifyRevisionCandidate(raw),input=candidate.input;
  const operationId="ICR-"+sha(JSON.stringify([actor,candidate.inputDigest,input.existingReview.path])).slice(0,32);
  const request={operationId,path:input.existingReview.path,reason:"IOS-ORCH-RI-001 disposable Source-bound low-risk existing Review revision",
-   change:{kind:"append" as const,heading:"Research analysis (AI interpretation; not approved Thesis)",
+   change:{kind:"append" as const,heading:candidate.review.raw.includes("## บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)")?"บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)":"Research analysis (AI interpretation; not approved Thesis)",
      content:candidate.body,date:input.reviewDate}};
  const p=previewCanonicalRevision(request,actor);
  if(!p.previewToken)throw Error("revision_preview_token_required");
