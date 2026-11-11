@@ -7,3 +7,5 @@ data
 .git
 Dockerfile
 README.md
+
+.n9-pdf-runtime/

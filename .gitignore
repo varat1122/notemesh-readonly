@@ -20,3 +20,5 @@ dist/
 /blob-report/
 /.playwright/
 /.uat-data
+
+.n9-pdf-runtime/

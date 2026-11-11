@@ -1,10 +1,20 @@
 # Changelog
 
-Candidate research surface (not merged or deployed): 34 tools covering read-only investment retrieval, canonical received-appearance inspection, M5.6 source/event relation and revision proposals, M5.7 PDF extraction coverage preflight, N7 supply chain evidence previews, claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
+Candidate research surface (not merged or deployed): 35 tools covering read-only investment retrieval, canonical received-appearance inspection, M5.6 source/event relation and revision proposals, M5.7 PDF extraction coverage preflight, N7 supply chain evidence previews, claim/evidence review, analyst thesis proposal quality checks and scoped add-only intake.
 Safe Edit offers ten tools on a separate resource (including original-source archive and two user attachment byte-store/inspect actions); see docs/SAFE_EDIT.md.
 Historical upstream release descriptions below are preserved.
 
 ## Unreleased — IOS-ORCH-RI-001 / N8 (Draft PR, not deployed)
+
+N9 (IOS-ORCH-RI-001) adds operator-opt-in read-only `preview_broker_pdf_page_evidence`
+to compare one persisted Broker Structured Claim excerpt with native text extracted
+from the actual content-addressed, hash-readback-verified user attachment PDF
+using Poppler. A page match is NOT visual verification, broker authenticity,
+consensus, economic truth, original archive creation or writer authority.
+N9 TEXT-2 hardening replaces blocking native calls with asynchronous, single-slot
+parsing inside a required minimal filesystem/network namespace sandbox; missing
+isolation HOLDs without fallback. Explicit conflicting or ambiguous page locators
+HOLD, and receipt/byte bindings are rechecked after parsing. Default remains OFF.
 
 Adds read-only `preview_estimate_revision`: an exact two-claim comparison
 of separately persisted, receipt-verified broker-estimate observations. Same

@@ -63,6 +63,7 @@ const READ_TOOLS = [
   "plan_investment_writeback",
   "plan_pdf_extraction_coverage",
   "plan_review_revision",
+  "preview_broker_pdf_page_evidence",
   "preview_edit",
   "preview_estimate_revision",
   "preview_hybrid_claim_reconciliation",

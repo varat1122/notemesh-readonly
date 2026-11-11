@@ -40,7 +40,7 @@ describe("the tool catalogue", () => {
   it("lists exactly what a write-scoped client is registered", async () => {
     const names = (await catalog()).map((t) => t.name).sort();
     expect(names).toEqual(await registered(true, true));
-    expect(names.length).toBe(34);
+    expect(names.length).toBe(35);
   });
 
   it("marks as write exactly the tools a read-only client does not get", async () => {
