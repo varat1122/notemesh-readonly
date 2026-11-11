@@ -1,4 +1,5 @@
 import {judgeDraftRisk} from "../vault/research-draft-risk";
+import {existingReviewSelectionSchema} from "../vault/canonical-review-reuse";
 /**
  * M5.4: one scoped Safe Edit handoff for a complete canonical intake.
  * Preview is read-only to the Vault. Apply uses the existing per-note Safe Edit
@@ -31,6 +32,7 @@ const canonicalBaseSchema = z.object({
   sourceChat: nonempty.max(120),
   appearance:appearanceSchema.optional(),
   existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional(),
+  existingReview:existingReviewSelectionSchema.optional(),
   completedAnalysis: nonempty.max(30000).optional(),
   researchReview: researchReviewSchema,
   sourceChannel:z.string().max(80).optional(),
@@ -236,7 +238,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
     previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p});
   }
   const appearance=appearancePayload?recordCanonicalAppearance(appearancePayload,actor):null;
-  return {phase:"preview_only",appearance,planId:plan.planId,workflowStatus:workflow.status,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
+  return {phase:"preview_only",appearance,planId:plan.planId,reviewReuse:plan.reviewReuse,workflowStatus:workflow.status,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     ...(c1Pilot()?{pilotAdmission:pilotAdmissionSummary(plan.planId,judge?.packetEnvelopeDigest,judge?.packetIssuedAt)}:{}),
     qualityIssues:workflow.qualityIssues,claimIssues:workflow.claimIssues,lineageIssues:workflow.lineageIssues,claimInterpretationBoundary:workflow.claimInterpretationBoundary,readyForNextNews:workflow.readyForNextNews,
     archiveProvenanceStatus:workflow.archiveProvenanceStatus,archiveProvenanceReason:workflow.archiveProvenanceReason,
@@ -295,11 +297,11 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   }
   // Re-plan from the unchanged source input; trust disk hash/FTS readback, not
   // mere Safe Edit success or a stale pre-write plan.
-  let after=workflow,workflowVerificationHold=false;
-  try{after=planned(args.input,actor).workflow;}catch{workflowVerificationHold=true;}
+  let after=workflow,afterReuse=plan.reviewReuse,workflowVerificationHold=false;
+  try{const verified=planned(args.input,actor);after=verified.workflow;afterReuse=verified.plan.reviewReuse;}catch{workflowVerificationHold=true;}
   const appearance=appearancePayload?appearanceReadback(appearancePayload):null;
   const verificationHold=workflowVerificationHold||appearance?.disposition==="binding_hold";
-  return {phase:"apply_verified_or_pending",appearance,planId:plan.planId,
+  return {phase:"apply_verified_or_pending",appearance,planId:plan.planId,reviewReuse:afterReuse,
     ...(c1Pilot()?{pilotAdmission:pilotAdmissionSummary(plan.planId,judge?.packetEnvelopeDigest,judge?.packetIssuedAt)}:{}),
     status:verificationHold?"hold_post_write_verification":after.status,readyForNextNews:!verificationHold&&after.readyForNextNews,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     qualityIssues:after.qualityIssues,claimIssues:after.claimIssues,lineageIssues:after.lineageIssues,claimInterpretationBoundary:after.claimInterpretationBoundary,

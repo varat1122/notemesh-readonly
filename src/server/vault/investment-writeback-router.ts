@@ -8,7 +8,7 @@
 import { readNote } from "./notes";
 import {canonicalHttpSourceUrl as canonicalSourceUrl} from "../source-url";
 import { db } from "../db";
-import { buildInvestmentContextPack, type Focus, type IdentityHoldDiscovery } from "./investment-context";
+import { buildInvestmentContextPack, type Focus, type IdentityHoldDiscovery,type ResearchFallback } from "./investment-context";
 import { reviewInvestmentClaim, claimIntegrityCoverage, claimIntegrityWarning, type ClaimIntegrityCoverage, type Domain, type ReviewClass } from "./investment-claim-review";
 import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
 import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTag,
@@ -19,6 +19,7 @@ import type { ThaiResearchReview } from "./research-quality-m55";
 import {resolveSourceIdentityM56, type SourceIdentityResolution} from "./source-identity-m56";
 import {inspectSourceArchiveProvenance,type SourceArchiveProvenance} from "./source-archive-provenance-p0";
 import type {AppearanceInput} from "./intake-appearances";
+import {planReviewReuse,type ReviewReuse,type ExistingReviewSelection} from "./canonical-review-reuse";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
@@ -58,11 +59,13 @@ export interface WritebackInput {
   originalDocumentAccess?:"full_original"|"excerpt_only"|"not_obtained";
   /** M5.6: an existing Source receipt must be proven against original bytes and chronology. */
   existingIntakeId?:string;
+  existingReview?:ExistingReviewSelection;
 }
 type Route={kind:"raw_input"|"research_review"|"company_timeline_candidate"|"industry_context_candidate"|"claim_registry_candidate";
   action:"candidate_create"|"candidate_append_after_review"|"link_existing_or_hold";
   path:string|null;reason:string;requiresReview:boolean};
 export interface WritebackPlan {
+  reviewReuse:ReviewReuse;
   status:"read_only_plan_not_written";
   planId:string;
   entityScope:string[];
@@ -87,6 +90,7 @@ export interface WritebackPlan {
     importedAt:"not_yet_written";
   };
   historical:{
+    fallback:ResearchFallback;
     source:"bounded_lexical_context_not_exhaustive";
     selected:number;
     paths:string[];
@@ -251,10 +255,12 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   // Preserve literal historical hints when identity resolution HOLDs, without
   // treating them as mapped issuers. Otherwise retain the existing high-score
   // Company Research candidates. Neither path adjudicates event equivalence.
-  const candidateEventPaths=[...new Set([...pack.identityHoldDiscovery.flatMap(x=>x.candidatePaths),...pack.items.filter(x=>
+  const candidateEventPaths=[...new Set([...pack.contextBundles.map(b=>b.reviewPath),...pack.identityHoldDiscovery.flatMap(x=>x.candidatePaths),...pack.items.filter(x=>
     input.domain==="company" && x.role==="research" &&
     x.path.startsWith("10_Knowledge/Company Research/") && x.score>=110
   ).map(x=>x.path)])].slice(0,4);
+  const reviewReuse=planReviewReuse({selection:input.existingReview,domain:input.domain,planId,sourcePath:rawPath,
+    existingSourcePath:sourceIdentity.existingSourcePath,sourceUrl:input.sourceUrl,eventDate,publicationDate,pack,historicalCandidatePaths:candidateEventPaths});
   // The same broker/industry source can mention several declared companies.
   // Reconcile all already-resolved issuer identities by exact URL/event date,
   // never counting co-mentions or raw message repetitions as independent proof.
@@ -311,8 +317,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const routes:Route[]=[
     {kind:"raw_input",action:rawExists?"link_existing_or_hold":"candidate_create",path:rawPath,
       reason:rawExists?"A note with the deterministic intake ID already exists; inspect identity/hash before linking.":"Preserve exact supplied text and attribution with a traceable link to actual image/PDF if available.",requiresReview:true},
-    {kind:"research_review",action:reviewExists||integrityHold?"link_existing_or_hold":"candidate_create",path:reviewPath,
-      reason:integrityHold?claimIntegrityWarning(integrity):candidateEventPaths.length?
+    {kind:"research_review",action:reviewExists||integrityHold||reviewReuse.status!=="no_reuse_selected"?"link_existing_or_hold":"candidate_create",path:reviewReuse.selectedReview?.reviewPath??reviewPath,
+      reason:reviewReuse.status!=="no_reuse_selected"?"Possible prior event: "+reviewReuse.reasons.join("; "):integrityHold?claimIntegrityWarning(integrity):candidateEventPaths.length?
         "Possible prior event research exists: inspect original source, event date, metric and period before creating a distinct analysis; never count reposts twice.":
         "Separate sourced statements, user input, broker/management commentary, AI interpretation, contrary evidence, event chronology and thesis delta.",requiresReview:true}
   ];
@@ -354,7 +360,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
       preservation:verifiedAttachment?"stored_original_user_bytes":"needs_safe_edit_raw_capture"
     },
     chronology:{eventDate,publicationDate,importedAt:"not_yet_written"},
-    historical:{source:"bounded_lexical_context_not_exhaustive",
+    historical:{source:"bounded_lexical_context_not_exhaustive",fallback:pack.researchFallback,
       selected:pack.selected,paths:pack.items.map(x=>x.path),missing:pack.incomplete,identityHoldDiscovery:pack.identityHoldDiscovery},
     historicalEventReview:{
       status:candidateEventPaths.length?"possible_same_event_candidates":"none_selected_not_proof_new",
@@ -370,7 +376,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     },
     exactClaimReview:{...integrity,status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
-    routingV2,
+    routingV2,reviewReuse,
     routes,gates:{
       fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,

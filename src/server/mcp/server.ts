@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {intakeClaimsSchema,researchLineageSchema,evidenceClassSchema} from "../vault/canonical-claims";
 import {researchReviewSchema} from "./research-review-schema";
+import {existingReviewSelectionSchema} from "../vault/canonical-review-reuse";
 import {estimateSchema,accountingBasisSchema} from "../vault/claim-dimensions";
 import {appearanceSchema,inspectIntakeAppearances} from "../vault/intake-appearances";
 import { registerIntakeTools } from "./intake-tools";
@@ -486,6 +487,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional().describe("M5.6 optional existing Source receipt ID; accepted only when exact original text, channel, format, URL and chronology match the indexed and readback-verified Source"),
         completedAnalysis:z.string().min(1).max(30000).optional().describe("Legacy freeform input retained for diagnostics/Source capture. A fresh canonical Review requires typed researchReview; completedAnalysis alone cannot issue a Review recipe"),
         researchReview:researchReviewSchema,
+        existingReview:existingReviewSelectionSchema.optional(),
         appearance:appearanceSchema.optional(),
         claims:intakeClaimsSchema,
         researchLineage:researchLineageSchema,
