@@ -33,16 +33,22 @@ async function apply(input:WritebackInput,p:Awaited<ReturnType<typeof prepare>>)
 async function save(input:WritebackInput){return apply(input,await prepare(input));}
 const repost:WritebackInput={...base,sourceKind:"social_repost",sourceUrl:null,eventDate:null,publicationDate:null,
  extractedText:"SYNTHETIC REPOST: TESTA manual instructions are located in the appendix, according to a forwarded message."};
-it("missing origin must not turn a separately receipted Source into a second event Review",async()=>{
+it("Source-only replay exposes unresolved event identity; explicit bound reuse issues no duplicate Review",async()=>{
  const initial=await prepare(base);expect(initial.qualityIssues).toEqual([]);
  const original=await apply(base,initial);expect(original.status).toBe("saved_verified");
  const feed={...repost,captureOnly:true,researchReview:undefined};const source=await save(feed);expect(source.receipts).toHaveLength(1);
  expect(source.status).toBe("source_saved_analysis_pending");
- const p=await prepare({...repost,existingIntakeId:source.planId});
+ const discovered=await prepare({...repost,existingIntakeId:source.planId});
+ expect(discovered.reviewReuse.reasons).toContain("missing_origin_with_historical_review_candidates_not_proof_new_event");
+ expect(discovered.reviewReuse.duplicateAdjudicated).toBe(false);
+ const candidate=discovered.reviewReuse.candidates[0];
+ const input={...repost,existingIntakeId:source.planId,existingReview:{path:candidate.reviewPath,expectedSha256:candidate.reviewSha256,
+  receiptId:candidate.reviewReceiptId!,relationship:"duplicate" as const,comparisonBasis:"Synthetic analyst comparison proposes this forwarded statement is coverage of the existing manual; not independently verified."}};
+ const p=await prepare(input);
  expect(p.steps[0].state).toBe("verified_existing");
  expect(p.steps.find(s=>s.kind==="canonical_review")?.state).toBe("hold_event_review");
  expect(p.previews).toHaveLength(0);
- const result=await apply({...repost,existingIntakeId:source.planId},p);
+ const result=await apply(input,p);
  expect(result.receipts).toHaveLength(0);expect(result.status).toBe("hold_source_event_review");
  expect(fs.readdirSync(path.join(vault,"10_Knowledge/Company Research"))).toHaveLength(1);
 });
@@ -82,18 +88,22 @@ it("selection without a written Source receipt is a proposal HOLD, never an inve
  expect(p.reviewReuse.source).toMatchObject({status:"pending",receiptId:null});
  expect(p.reviewReuse.proposal).toBeNull();expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
 });
-it("lexical historical Review hints also prevent unknown-origin novelty, without claiming receipt binding",async()=>{
+it("lexical historical hints report unresolved event identity without claiming receipt binding or blocking unrelated legacy Drafts",async()=>{
  await seed("10_Knowledge/Company Research/TESTA manual research.md","# TESTA manual research\n\nPrior synthetic manual statement; legacy analysis, not verified fact.\n");
- const p=await prepare(repost);expect(p.reviewReuse.status).toBe("hold_event_adjudication");
- expect(p.reviewReuse.candidates).toEqual([]);expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+ const source=await save({...repost,captureOnly:true,researchReview:undefined});
+ const p=await prepare({...repost,existingIntakeId:source.planId});expect(p.reviewReuse.status).toBe("no_reuse_selected");
+ expect(p.reviewReuse.reasons).toContain("missing_origin_with_historical_review_candidates_not_proof_new_event");
+ expect(p.reviewReuse.candidates).toEqual([]);expect(p.previews.map(x=>x.kind)).toEqual(["canonical_review"]);
 });
-it("a prior preview cannot create its per-intake Review after a relevant Review appears",async()=>{
- const pending=await prepare(repost);expect(pending.previews.map(x=>x.kind)).toEqual(["source_intake","canonical_review"]);
- await save(base);
- await expect(apply(repost,pending)).rejects.toThrow(/Authorization must exactly match/);
+it("old canonical preview tokens cannot be used after selecting the existing Review instead",async()=>{
+ const source=await save({...repost,captureOnly:true,researchReview:undefined});
+ const input={...repost,existingIntakeId:source.planId};
+ const pending=await prepare(input);expect(pending.previews.map(x=>x.kind)).toEqual(["canonical_review"]);
+ const existingReview=await selected(),reuse={...input,existingReview};
+ await expect(apply(reuse,pending)).rejects.toThrow(/Authorization must exactly match/);
  expect(fs.existsSync(path.join(vault,pending.steps[1].path))).toBe(false);
- const result=await save(repost);expect(result.status).toBe("hold_source_event_review");
- expect(result.receipts).toEqual([expect.objectContaining({path:pending.steps[0].path})]);
+ const result=await save(reuse);expect(result.status).toBe("hold_source_event_review");
+ expect(result.receipts).toHaveLength(0);
  expect(fs.readdirSync(path.join(vault,"10_Knowledge/Company Research"))).toHaveLength(1);
 });
 it("first no-URL Draft and exact retry still work; genuinely distinct dated source retains existing admission",async()=>{
@@ -107,15 +117,17 @@ it("first no-URL Draft and exact retry still work; genuinely distinct dated sour
 it("missing publication date alone is not a new event, including broker-versus-issuer coverage",async()=>{
  await save(base);
  const input={...repost,sourceKind:"broker_research" as const,sourceUrl:"https://example.org/broker-note",eventDate:"2026-10-01"};
- const p=await prepare(input);expect(p.reviewReuse.status).toBe("hold_event_adjudication");
- expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+ const source=await save({...input,captureOnly:true,researchReview:undefined});
+ const p=await prepare({...input,existingIntakeId:source.planId});
+ expect(p.reviewReuse.reasons).toContain("missing_origin_with_historical_review_candidates_not_proof_new_event");
  expect(p.reviewReuse.duplicateAdjudicated).toBe(false);
 });
 it.each([" ","message:forwarded-post"])("non-HTTP origin %j cannot supply missing event identity",async sourceUrl=>{
  await save(base);
- const p=await prepare({...repost,sourceUrl,eventDate:"2026-10-02",publicationDate:"2026-10-02"});
- expect(p.reviewReuse.status).toBe("hold_event_adjudication");
- expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+ const input={...repost,sourceUrl,eventDate:"2026-10-02",publicationDate:"2026-10-02"};
+ const source=await save({...input,captureOnly:true,researchReview:undefined});
+ const p=await prepare({...input,existingIntakeId:source.planId});
+ expect(p.reviewReuse.reasons).toContain("missing_origin_with_historical_review_candidates_not_proof_new_event");
 });
 it("the exact existing-Review selection is included in the sealed Judge input binding",async()=>{
  const existingReview=await selected();await save({...repost,captureOnly:true,researchReview:undefined});

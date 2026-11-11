@@ -725,7 +725,14 @@ live data migration is performed by this change.
 decision. A new Intake ID, missing origin URL/date, or an empty bounded duplicate
 search is not proof of a new economic event. When the existing bounded company
 history contains another Review candidate and URL/event/publication identity is
-incomplete, canonical planning holds new Claim/Review recipes for reconciliation.
+incomplete, planning reports an explicit unresolved-event warning and bounded
+Review candidates. This does not establish novelty, duplication or equivalence.
+Only an explicit `existingReview` selection invokes the restrictive revision
+contract; an `existingIntakeId` alone identifies received bytes, not an event.
+Legacy/unselected Draft admission is preserved under existing gates. Clients must
+carry the Source identity and proposed Review relation; relatedness cannot be
+inferred just from company identity. Mandatory event-selection admission remains
+a contract gap, not something this patch silently imposes on every legacy writer.
 Source-only remains independently eligible. An existing exact same-intake Review
 can still be read/retried; ordinary dated new-source admission retains its existing
 quality, Judge, reviewer, and CAS gates. This does not certify any event as new.

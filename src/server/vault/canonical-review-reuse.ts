@@ -16,7 +16,8 @@ export const existingReviewSelectionSchema=z.object({
 export type ExistingReviewSelection=z.infer<typeof existingReviewSelectionSchema>;
 export interface ReviewReuse {
  version:"C1-REVIEW-REUSE-1";
- status:"no_reuse_selected"|"hold_event_adjudication"|"hold_review_binding"|"revision_proposal_only";
+  admissionScope:"explicit_existing_review_selection";
+  status:"no_reuse_selected"|"hold_review_binding"|"revision_proposal_only";
  reasons:string[];candidates:ContextBundle[];candidateScope:"bounded_company_reviews_not_semantic_event_matches";
  selection:ExistingReviewSelection|null;selectedReview:ContextBundle|null;
  source:{path:string;sha256:string|null;receiptId:string|null;status:"pending"|"verified_existing"|"HOLD"};
@@ -28,7 +29,7 @@ export interface ReviewReuse {
 export function planReviewReuse(input:{selection?:ExistingReviewSelection;domain:string;planId:string;sourcePath:string;
  existingSourcePath:string|null;sourceUrl?:string|null;eventDate:string|null;publicationDate:string|null;pack:Pack;historicalCandidatePaths:string[]}):ReviewReuse{
  const candidates=input.pack.contextBundles.filter(b=>b.intakeId!==input.planId);
- const result:ReviewReuse={version:"C1-REVIEW-REUSE-1",status:"no_reuse_selected",reasons:[],candidates,
+ const result:ReviewReuse={version:"C1-REVIEW-REUSE-1",admissionScope:"explicit_existing_review_selection",status:"no_reuse_selected",reasons:[],candidates,
   candidateScope:"bounded_company_reviews_not_semantic_event_matches",selection:input.selection??null,selectedReview:null,
   source:{path:input.sourcePath,sha256:null,receiptId:null,status:"pending"},proposal:null,
   duplicateAdjudicated:false,independentEvidenceIncrement:0,writeAuthority:false};
@@ -62,13 +63,14 @@ export function planReviewReuse(input:{selection?:ExistingReviewSelection;domain
     "separately_authorized_reviewer_exact_diff","new_revision_preview","compare_and_swap_before_hash","receipt_readback_index_links"],safeEditRequest:null};
   return result;
  }
- // Unknown origin is not proof of novelty. Only a relevant bounded historical
- // Review scope triggers this uncertainty HOLD; a first eligible Draft remains
- // possible, and known-date/URL new-event admission retains its existing gates.
+ // A same-issuer candidate is NOT proof of the same event. Preserve accepted
+ // fresh/legacy Draft admission: incomplete origin is a reconciliation warning,
+ // never proof of novelty OR an automatic issuer-wide veto. Only an explicit
+ // existing Review selection invokes the restrictive revision contract above.
  const ownReview=input.pack.contextBundles.some(b=>b.intakeId===input.planId&&b.status==="BOUND_SOURCE_REVIEW");
  if(!ownReview&&input.domain==="company"&&(!input.sourceUrl||!input.eventDate||!input.publicationDate)&&
    (candidates.length||input.historicalCandidatePaths.some(p=>!p.endsWith(` - ${input.planId}.md`)))){
-  result.status="hold_event_adjudication";result.reasons.push("missing_origin_with_historical_review_candidates_not_proof_new_event");
+  result.reasons.push("missing_origin_with_historical_review_candidates_not_proof_new_event");
  }
  return result;
 }
