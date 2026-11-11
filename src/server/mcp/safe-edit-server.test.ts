@@ -137,7 +137,16 @@ it.each([
      checks:{entailment:"PASS",numbersUnits:"PASS",periodRoleAttributionVintage:"PASS",identityRelationships:"PASS",pointInTime:"PASS",independenceCounterEvidence:"PASS",injectionCoverage:"PASS"}});
    params={packetId:"RJP-"+"A".repeat(32),packetDigest:"0".repeat(64),reviewDigest:"0".repeat(64),claims:[],relationships:[],event:{...decision("event"),classification:"new_event"},review:decision("review"),materialRisk:false};
  }
- if(name==="preview_edit")params.change=args.change;
+ if(["prepare_canonical_review_revision","apply_canonical_review_revision","inspect_canonical_review_revision"].includes(name)){
+   const operationId="ICR-"+"a".repeat(32);
+   const fakeRevision={existingReview:{path:"10_Knowledge/Company Research/Investment Review - NVDA - IN-AABBCCDDEEFF0011.md",expectedSha256:"a".repeat(64),receiptId:"ICW-"+"a".repeat(32),relationship:"added_detail",comparisonBasis:"Synthetic comparison for scoped OAuth-negative testing, without fact claims."},
+    entity:"NVDA",additionalSources:[{path:"00_Inbox/ChatGPT/Investment Intake - IN-AABBCCDDEEFF0011.md",sha256:"a".repeat(64),receiptId:"ICW-"+"a".repeat(32)}],
+    reviewDate:"2026-11-12",methodVersion:"synthetic-auth-test",
+    analystAssessment:{disposition:"PASS",eventRelation:"added_detail",materiality:"low",assessment:"Synthetic only",counterEvidence:"Not original proof",requiredEvidence:"Check source",criticIndependence:"not_verified",independentEvidenceIncrement:0},
+    revisionText:"Synthetic low-risk addendum"};
+   params=name==="prepare_canonical_review_revision"?fakeRevision:name==="inspect_canonical_review_revision"?{operationId}:{input:fakeRevision,operationId,authorization:{operationId,previewToken:"a".repeat(64),expectedHash:"a".repeat(64)}};
+  }
+  if(name==="preview_edit")params.change=args.change;
  const result=await c.client.callTool({name,arguments:params});expect(result.isError,name).toBe(true);expect(JSON.stringify(result._meta),name).toContain("insufficient_scope");
  }expect(fs.readFileSync(path.join(root,"vault","Synthetic.md"),"utf8")).toContain("Old data");}finally{await c.close();}
 });
