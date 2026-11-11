@@ -45,7 +45,7 @@ export async function applyCanonicalReviewRevision(raw:unknown,actor:string){
  // hash to remain on disk after a successful append. Unwritten paths still
  // revalidate the full original Review and all Source receipts.
  const previous=status(args.operationId,actor);
- const outcome=previous.status==="written"?previous:await (async()=>{
+ const outcome=previous.status==="written"?await withPausedSync(()=>apply(args.authorization,actor)):await (async()=>{
    const candidate=verifyRevisionCandidate(args.input);
    if(g.inputDigest!==candidate.inputDigest)throw Error("revision_semantic_input_drift_hold");
    return withPausedSync(()=>apply(args.authorization,actor));
