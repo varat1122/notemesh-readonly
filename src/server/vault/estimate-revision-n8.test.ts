@@ -51,7 +51,7 @@ async function save(value:string,day:string,changes:Changed={},options:Partial<W
   const prepared=prepareCanonicalWriteback(data,actor);
   expect(prepared.claimIssues).toEqual([]);
   expect(prepared.previews.map(x=>x.kind)).toContain("structured_claim");
-  const saved=applyCanonicalWriteback({input:data,planId:prepared.planId,
+  const saved=await applyCanonicalWriteback({input:data,planId:prepared.planId,
     authorizations:prepared.previews.map(x=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}))},actor);
   expect(saved.steps.every(s=>s.state==="verified_existing")).toBe(true);
   const claimPath=saved.steps.find(s=>s.kind==="structured_claim")!.path;

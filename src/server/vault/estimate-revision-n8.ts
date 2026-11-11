@@ -137,7 +137,7 @@ export function previewEstimateRevision(raw:unknown):EstimateRevisionPreview{
   try{earlier=load(input.earlier);}catch{issues.push("n8_earlier_claim_receipt_or_readback_hold");}
   try{later=load(input.later);}catch{issues.push("n8_later_claim_receipt_or_readback_hold");}
   const identityNavigation={status:"not_checked",hubPath:null as string|null};
-  const base={methodVersion:ESTIMATE_REVISION_METHOD,asOf:input.asOf??null,
+  const base={methodVersion:ESTIMATE_REVISION_METHOD as typeof ESTIMATE_REVISION_METHOD,asOf:input.asOf??null,
     historicalView:input.asOf?"availability_bounded_current_index" as const:"current_index" as const,
     sourceAuthenticityVerified:false as const,semanticFidelity:"not_assessed" as const,publisherIdentityVerified:false as const,
     independentEvidenceIncrement:0 as const,economicForecastVerified:false as const,priceInAssessed:false as const,
