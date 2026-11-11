@@ -237,7 +237,8 @@ export function buildCanonicalSafeEditWorkflow(
     .get(plan.planId,rawPath,reviewPath,...claimNotes.map(c=>c.path)) as {path:string}|undefined;
   const legacyConflict=Boolean(legacy&&legacy!==reviewPath&&
     db().prepare("SELECT 1 FROM notes WHERE path=? LIMIT 1").get(legacy))||Boolean(otherCanonical);
-  const reviewStep=captureOnly?null:toStep("canonical_review",reviewPath,reviewContent,tag,hasSourceMatch||legacyConflict);
+  const reuseHold=plan.reviewReuse.status!=="no_reuse_selected";
+  const reviewStep=captureOnly?null:toStep("canonical_review",reviewPath,reviewContent,tag,hasSourceMatch||legacyConflict||reuseHold);
   const archiveHold=plan.sourceCapture.archiveProvenanceStatus==="HOLD";
   if(reviewStep&&(reviewStep.state==="hold_conflict"||archiveHold&&reviewStep.state==="verified_existing")){
     const historical=revalidateHistoricalArchive(reviewPath,reviewContent,plan.sourceCapture.originalSourceArchive,archiveHold)??
@@ -283,7 +284,7 @@ export function buildCanonicalSafeEditWorkflow(
   }
   const claimSteps=claimNotes.map(c=>{
     const step=toStep("structured_claim",c.path,c.content,tag,false);
-    if(hasSourceMatch&&step.state==="needs_create"){
+    if((hasSourceMatch||reuseHold)&&step.state==="needs_create"){
       step.state="hold_event_review";step.safeEditRequest=null;
       claimIssues.push("claim_source_event_reconciliation_required");
     }
@@ -312,16 +313,15 @@ export function buildCanonicalSafeEditWorkflow(
   const steps=reviewStep?[sourceStep,...claimSteps,reviewStep]:[sourceStep,...claimSteps];
   const saved=steps.every(x=>x.state==="verified_existing");
   const blocked=steps.some(x=>x.state==="hold_conflict"||x.state==="hold_index_repair");
-  const reviewHeld=reviewStep?.state==="hold_event_review";
+  const reviewHeld=reviewStep?.state==="hold_event_review"||Boolean(input.existingReview&&!captureOnly);
   const qualityHeld=reviewStep?.state==="hold_quality_gate";
   const archiveState=reviewStep?.state==="hold_archive_drift"||reviewStep?.state==="hold_archive_provenance"?reviewStep.state:null;
   return {
     version:"M5.3-recipe",status:lineageIssues.length?"hold_review_lineage":blocked?"hold_conflict_or_index":
       (reviewHeld||claimSteps.some(s=>s.state==="hold_event_review"))&&claimHeld?"hold_source_event_review":claimHeld||historyBlocked?"hold_claim_persistence":captureOnly?(saved?"source_saved_analysis_pending":"pending_source_capture"):
       archiveState??(qualityHeld?"hold_research_quality":
-      saved?"saved_verified":
-      reviewHeld?"hold_source_event_review":"pending_safe_edit"),
-    sourceChat,steps,readyForNextNews:saved&&!(captureOnly&&claimNotes.length)&&!qualityHeld&&!archiveHold&&!archiveState,analysisComplete:!captureOnly&&saved&&!qualityHeld&&!archiveHold&&!archiveState,writesPerformedByPlanner:false,
+      reviewHeld?"hold_source_event_review":saved?"saved_verified":"pending_safe_edit"),
+    sourceChat,steps,readyForNextNews:saved&&!reviewHeld&&!(captureOnly&&claimNotes.length)&&!qualityHeld&&!archiveHold&&!archiveState,analysisComplete:!captureOnly&&saved&&!reviewHeld&&!qualityHeld&&!archiveHold&&!archiveState,writesPerformedByPlanner:false,
     lineageIssues,claimInterpretationBoundary,qualityIssues,claimIssues:[...new Set(claimIssues)],archiveProvenanceStatus:plan.sourceCapture.archiveProvenanceStatus,
     archiveProvenanceReason:plan.sourceCapture.archiveProvenanceReason,
     protectedNotesTouched:false,
@@ -333,6 +333,7 @@ export function buildCanonicalSafeEditWorkflow(
       "For captureOnly, save and verify the attributed raw Source and any explicitly requested unverified Claims. Return source_saved_analysis_pending, not a completed Research Review. Later retry the SAME source with typed researchReview to create the linked review without duplicating the Source.",
       "After each apply, require receipt.write/readback/reindex all verified, plus the indexed canonical Review→Source Obsidian link. Retry by re-running this planner and checking hashes; never overwrite a changed note.",
       "If hold_event_review, reconcile original economic event/source and old broker vintage before new Claims or a canonical Review. A new appearance is not independent evidence; semantic materiality/correction requires reviewer adjudication. Preserve the raw source independently.",
+      "existingReview selects a receipt/hash-bound reconciliation proposal only. It cannot append, overwrite, or claim the existing Review now covers this Source. C1 remains add-only; a separately authorized revision contract and fresh exact-diff/CAS review are required.",
       "If hold_review_lineage, preserve all receipts and Source/Claims; inspect lineageIssues and use a separately authorized reconciliation for ambiguous/invalid historical chronology. Never edit the journal to clear HOLD.",
       "Run this planner again after writes: only saved_verified and readyForNextNews=true prove server file/readback/search index for all requested notes. For screenshot/PDF without a hash-verified attachment this is TEXT-ONLY preservation; per-device Obsidian Sync still unverified.",
       "Existing Company/Industry Hub links are bidirectional Obsidian backlinks; this workflow does not imply a material Company Timeline update or revise protected files."

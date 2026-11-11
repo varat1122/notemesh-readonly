@@ -35,7 +35,14 @@ export interface MacroCoverage {scope:string;subjectEvidence:Coverage;counterEvi
 type DeclaredDate={status:"DECLARED"|"UNKNOWN";value:string|null};
 export interface ResearchChronology {eventDate:DeclaredDate;publicationDate:DeclaredDate;analysisDate:DeclaredDate;importDate:DeclaredDate}
 export interface Item { sourceBinding?:StandaloneSourceBinding; researchTrust:SchemaInspection["researchTrust"]; contentSha256:string; path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
-export interface Pack { standaloneSources:StandaloneSourceScan[]; retrieval:RetrievalCoverage; status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
+export interface ResearchFallback {
+ status:"bounded_discovery_not_selected_evidence";truncated:boolean;
+ candidates:{path:string;intakeId:string;kind:"source_intake"|"canonical_review";sha256:string|null;
+  receiptId:string|null;bindingStatus:"receipt_bound"|"HOLD";researchTrust:Item["researchTrust"];
+  eventDate:string|null;publicationDate:string|null;reason:"outside_selected_context"}[];
+ instructions:string;
+}
+export interface Pack { researchFallback:ResearchFallback;standaloneSources:StandaloneSourceScan[]; retrieval:RetrievalCoverage; status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
 function resolveIssuers(requested:string[],observer:RetrievalObserver):IssuerResolution[]{
   if(!requested.length)return [];
@@ -637,7 +644,29 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
     incomplete.push("Server-verified primary macro/statistical evidence not established by retrieval; verify the official data release and exact-scope PEV before analysis.");
   }
   if(failed.length)incomplete.push("Search failed on terms: "+failed.join(", "));
+  // Expose already discovered receipt-bound research omitted by note/excerpt
+  // budgets. No extra scan, changed ranking, borrowed event dates, or implicit
+  // insertion into the Judge's selected-history witness. Missing ≠ nonexistent.
+  const fallback=new Map<string,ResearchFallback["candidates"][number]>();
+  const remember=(candidate:ResearchFallback["candidates"][number])=>{
+    if(!items.some(i=>i.path===candidate.path))fallback.set(candidate.path,candidate);
+  };
+  for(const scan of researchScans)for(const {bundle:b} of scan.reviews){
+    remember({path:b.reviewPath,intakeId:b.intakeId,kind:"canonical_review",sha256:b.reviewSha256,receiptId:b.reviewReceiptId,
+      bindingStatus:b.status==="BOUND_SOURCE_REVIEW"?"receipt_bound":"HOLD",researchTrust:b.researchTrust,
+      eventDate:b.eventDate,publicationDate:b.publishedAt,reason:"outside_selected_context"});
+    if(b.status==="BOUND_SOURCE_REVIEW"&&b.sourcePath)remember({path:b.sourcePath,intakeId:b.intakeId,kind:"source_intake",
+      sha256:b.sourceSha256,receiptId:b.sourceReceiptId,bindingStatus:"receipt_bound",
+      researchTrust:inspectCanonicalKnowledgeMetadata(b.sourcePath,indexedMetadata(b.sourcePath)).researchTrust,
+      eventDate:b.eventDate,publicationDate:b.publishedAt,reason:"outside_selected_context"});
+  }
+  for(const [path,b] of standalone.bindings)remember({path,intakeId:b.intakeId,kind:"source_intake",sha256:b.sourceSha256,
+    receiptId:b.sourceReceiptId,bindingStatus:"receipt_bound",researchTrust:inspectCanonicalKnowledgeMetadata(path,indexedMetadata(path)).researchTrust,
+    eventDate:b.eventDate,publicationDate:b.publicationDate,reason:"outside_selected_context"});
+  const researchFallback:ResearchFallback={status:"bounded_discovery_not_selected_evidence",truncated:fallback.size>12,
+    candidates:[...fallback.values()].slice(0,12),instructions:"Read exact paths/intakeId before reasoning; these candidates were NOT selected or semantically assessed. Publication order may be unknown. Receipts prove persistence, not event equivalence, primary truth, independence or comparator eligibility. Any changed assessment requires a fresh packet."};
   return {
+    researchFallback,
     standaloneSources:standalone.scans,retrieval,status:"retrieval_only_not_verified",question,issuers:requestedIssuers,issuerResolution,issuerCoverage,identityHoldDiscovery,macroCoverage,researchCoverage,
     contextBundles:researchScans.flatMap(scan=>scan.reviews.map(review=>review.bundle)),focus,industry:req.industry?.slice(0,140)||null,
     items,considered:rank.length,selected:items.length,excerptChars:budget-remaining,

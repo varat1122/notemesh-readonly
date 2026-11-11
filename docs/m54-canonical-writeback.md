@@ -719,3 +719,58 @@ The existing offline anchor-compatibility script remains explicitly scoped to
 RI001-1/RI001-2 and reports RI001-3 as unsupported/HOLD; it is not a replacement
 for RI001-3 receipt/index/link validation by this reader. No historical scan or
 live data migration is performed by this change.
+# C1 Source-only to existing Review reconciliation (candidate, not runtime acceptance)
+
+`C1-REVIEW-REUSE-1` separates appearance/Source identity from an economic-event
+decision. A new Intake ID, missing origin URL/date, or an empty bounded duplicate
+search is not proof of a new economic event. When the existing bounded company
+history contains another Review candidate and URL/event/publication identity is
+incomplete, planning reports an explicit unresolved-event warning and bounded
+Review candidates. This does not establish novelty, duplication or equivalence.
+Only an explicit `existingReview` selection invokes the restrictive revision
+contract; an `existingIntakeId` alone identifies received bytes, not an event.
+Legacy/unselected Draft admission is preserved under existing gates. Clients must
+carry the Source identity and proposed Review relation; relatedness cannot be
+inferred just from company identity. Mandatory event-selection admission remains
+a contract gap, not something this patch silently imposes on every legacy writer.
+Source-only remains independently eligible. An existing exact same-intake Review
+can still be read/retried; ordinary dated new-source admission retains its existing
+quality, Judge, reviewer, and CAS gates. This does not certify any event as new.
+
+The optional typed `existingReview` input (path, expected SHA-256, original
+canonical receipt ID, proposed relationship, comparison rationale) is shared by
+the read-only planner, canonical prepare/apply and Judge-packet input. It checks
+the current resolved issuer, exact Review/Source receipt chain, index, readback,
+chronology and links. Selection is bounded to canonical Company Reviews; missing,
+legacy-unbound, stale or wrong-scope records HOLD. A caller relationship is an
+analyst proposal, never an authenticated same-event or independent-source verdict.
+
+`reviewReuse` reports the existing and additional Source receipts separately.
+The additional receipt is null until the Source is actually persisted. A valid
+selection returns `revision_proposal_only`, no append/write token, no second
+Review, and no claim that the existing Review now incorporates the new Source.
+Missing/invalid selection returns explicit reasons while retaining Source capture.
+Every proposed relation keeps independent evidence increment zero.
+
+The existing C1 checkpoint is **add-only**. Authorizing an existing Review
+revision needs a separately accepted revision admission contract: fresh semantic
+assessment of the exact multi-Source content and selected history, authenticated
+reviewer-session decision over the full diff, current before-hash CAS, write lock,
+and receipt/readback/index/link verification. This candidate does not authorize
+that extension or use generic append to circumvent it. M5.6's owner-gated revision
+proposal remains a proposal. Material corrections and contradictions retain their
+existing HOLD/critic requirements. No economic-event ID is invented from dates,
+publisher names, titles or financial keywords.
+
+Context `researchFallback` exposes up to twelve already-discovered Review/Source
+records outside the selected note/excerpt budget, with exact receipt/hash status,
+dates and conservative trust labels. It adds no scan or selection/ranking change.
+`truncated` and existing scan/coverage reasons remain explicit. These hints are
+**not** part of the Judge's selected evidence; read the exact path/intake and build
+a fresh packet before reassessment. Unknown publication dates remain unknown;
+no import/mtime substitution or claim of exhaustive/recent-event recall is made.
+
+Local MCP `tools/list` parity is not installed ChatGPT descriptor availability.
+Client refresh, exact endpoint/OAuth actor/audience binding, independent delta
+review and isolated runtime acceptance remain separate gates. No deployment,
+connector refresh, historical rewrite or protected-record write is authorized.
