@@ -4,7 +4,7 @@
  * semantic verification. All APIs are read-only and disabled without opt-in. */
 import {createHash} from "node:crypto";
 import fs from "node:fs";
-import {execFileSync} from "node:child_process";
+import {pdfNativeInfo} from "./pdf-parser-n9";
 import {z} from "zod";
 import {inspectUserAttachment,MAX_USER_ATTACHMENT_BYTES} from "../user-attachment-vault";
 import {readPersistedClaim} from "./canonical-claims";
@@ -13,7 +13,7 @@ import {indexedRead} from "./investment-research-context";
 import {claimSourceAnchorIssues} from "./claim-value-anchor";
 import {resolveNotePath,openNoFollow} from "./paths";
 
-export const N9_PDF_METHOD="IOS-RI001-N9-POPPLER-TEXT-1";
+export const N9_PDF_METHOD="IOS-RI001-N9-POPPLER-TEXT-2";
 const digest=(bytes:Buffer|string)=>createHash("sha256").update(bytes).digest("hex");
 export const pdfPageEvidenceInputSchema=z.object({
   claimPath:z.string().min(1).max(300).describe("Exact existing, receipt-bound generated Broker Structured Claim path"),
@@ -33,6 +33,8 @@ export interface PdfPageEvidencePreview{
     nativeTextCharacterCount:number;normalizedExcerptSha256:string;
     matchScope:"single_requested_native_text_page";originalPdfSha256:string;
     originalPdfByteLength:number}|null;
+  locatorAgreement:{status:"not_checked"|"agrees"|"conflicts"|"ambiguous"|"not_verifiable";
+    requestedPage:number;declaredPage:number|null;authority:"caller_declared_locator_only"};
   originalPdfByteReadbackVerified:boolean;
   originalPdfIsUserAttachment:true;
   sourceToAttachmentReceiptBound:boolean;
@@ -58,20 +60,15 @@ const caveats=[
   "No original PDF is archived by this tool. The required user attachment must already have been preserved under an authorized earlier operation.",
 ];
 const normalize=(s:string)=>s.normalize("NFC").replace(/[\s\u00a0]+/gu," ").trim();
-function pdfNativeInfo(bytes:Buffer,page:number){
-  const options={input:bytes,encoding:"utf8" as const,timeout:8000,maxBuffer:128*1024,windowsHide:true};
-  // Fixed executable and flags. No shell, URLs, arbitrary files or caller
-  // expressions are ever passed to the native parser.
-  const info=execFileSync("pdfinfo",["-"],options);
-  const matched=/^Pages:\s+(\d+)\s*$/m.exec(info);
-  const count=matched?Number(matched[1]):NaN;
-  if(!Number.isSafeInteger(count)||count<1||count>2000)throw Error("n9_pdf_page_count_invalid");
-  if(page>count)throw Error("n9_pdf_page_out_of_range");
-  const extracted=execFileSync("pdftotext",["-f",String(page),"-l",String(page),
-    "-layout","-enc","UTF-8","-","-"],options);
-  if(Buffer.byteLength(extracted,"utf8")>12000)throw Error("n9_page_text_over_limit");
-  if(!extracted.trim())throw Error("n9_no_native_text_on_page");
-  return {count,text:extracted};
+function locatorAgreement(locator:string,page:number):PdfPageEvidencePreview["locatorAgreement"]{
+  const matches=[...locator.matchAll(/(?:\b(?:pdf\s+)?page|\bp\.|หน้า(?:ที่)?)\s*[:#]?\s*([1-9]\d{0,3})(?![\p{L}\p{N}])/giu)];
+  const result={requestedPage:page,declaredPage:null,authority:"caller_declared_locator_only" as const};
+  if(matches.length!==1)return {...result,status:matches.length?"ambiguous":"not_verifiable"};
+  const m=matches[0],tail=locator.slice(m.index!+m[0].length);
+  // Ranges, decimal labels and lists cannot be reduced to one physical page.
+  if(/^\s*(?:[-–—/]|[.,]\s*\d|(?:to|and|ถึง)\b)/iu.test(tail))return {...result,status:"ambiguous"};
+  const declaredPage=Number(m[1]);
+  return {...result,declaredPage,status:declaredPage===page?"agrees":"conflicts"};
 }
 function readOriginal(digestValue:string){
   const attached=inspectUserAttachment({sha256:digestValue,contentType:"application/pdf"});
@@ -88,9 +85,11 @@ function readOriginal(digestValue:string){
     return {bytes,byteLength:bytes.length,path:attached.path};
   }finally{fs.closeSync(fd);}
 }
-export function previewBrokerPdfPageEvidence(raw:unknown):PdfPageEvidencePreview{
+export async function previewBrokerPdfPageEvidence(raw:unknown):Promise<PdfPageEvidencePreview>{
   const input=pdfPageEvidenceInputSchema.parse(raw);
+  let agreement:PdfPageEvidencePreview["locatorAgreement"]={status:"not_checked",requestedPage:input.page,declaredPage:null,authority:"caller_declared_locator_only"};
   const base={
+    locatorAgreement:agreement,
     methodVersion:N9_PDF_METHOD as typeof N9_PDF_METHOD,originalPdfByteReadbackVerified:false,
     originalPdfIsUserAttachment:true as const,sourceToAttachmentReceiptBound:false,
     publisherAuthenticated:false as const,pdfPageNativeTextMatch:false,
@@ -116,19 +115,29 @@ export function previewBrokerPdfPageEvidence(raw:unknown):PdfPageEvidencePreview
       src.fm.attachment_path!==expectedAttachment||
       src.fm.attachment_status!=="hash_readback_verified_user_bytes")
       throw Error("n9_source_attachment_link_hold");
+    agreement=locatorAgreement(String(c.claim.source_locator),input.page);
+    if(agreement.status!=="agrees")throw Error("n9_claim_page_locator_"+agreement.status);
     const file=readOriginal(input.attachmentSha256);
     if(file.path!==expectedAttachment)throw Error("n9_source_attachment_link_hold");
     // The Claim's received-text excerpt has already been validated by
     // readPersistedClaim against its separately receipted original Source.
     // Now cross-check the very same excerpt against native PDF page text.
-    const pdf=pdfNativeInfo(file.bytes,input.page);
+    const pdf=await pdfNativeInfo(file.bytes,input.page);
+    // Async parsing yields to other operations. Recheck the same receipt-bound
+    // Claim/Source, current index and attachment bytes before returning a match.
+    if(process.env.N9_PDF_PAGE_TEXT_PREVIEW_ENABLED!=="1")throw Error("n9_native_pdf_preview_not_enabled");
+    const current=readPersistedClaim(input.claimPath);
+    if(digest(current.readbackText)!==input.claimNoteSha256||current.receiptKey!==c.receiptKey||
+      current.sourceReceiptKey!==c.sourceReceiptKey||current.sourcePath!==c.sourcePath||
+      indexedRead(current.sourcePath).raw!==src.raw)throw Error("n9_binding_changed_during_parse");
+    readOriginal(input.attachmentSha256);
     const text=normalize(pdf.text),excerpt=normalize(String(c.claim.source_excerpt));
     const value=String(c.claim.value),qualification=typeof c.claim.qualification==="string"?
       c.claim.qualification:undefined;
     if(excerpt.length<12||text.length>12000||!text.includes(excerpt)||
       claimSourceAnchorIssues(text,excerpt,value,qualification).length)
       throw Error("n9_pdf_page_quote_or_value_unmatched");
-    return {...base,status:"pdf_native_page_text_candidate_pending_semantic_review",
+    return {...base,locatorAgreement:agreement,status:"pdf_native_page_text_candidate_pending_semantic_review",
       issues,originalPdfByteReadbackVerified:true,sourceToAttachmentReceiptBound:true,
       pdfPageNativeTextMatch:true,
       claim:{path:input.claimPath,claimId:String(c.claim.claim_id),intakeId:c.intakeId,
@@ -147,8 +156,12 @@ export function previewBrokerPdfPageEvidence(raw:unknown):PdfPageEvidencePreview
     const recognized=new Set(["n9_broker_claim_binding_hold","n9_source_attachment_link_hold",
       "n9_attachment_readback_hold","n9_attachment_size_hold","n9_attachment_hash_or_type_hold",
       "n9_pdf_page_count_invalid","n9_pdf_page_out_of_range","n9_page_text_over_limit",
-      "n9_no_native_text_on_page","n9_pdf_page_quote_or_value_unmatched"]);
+      "n9_no_native_text_on_page","n9_pdf_page_quote_or_value_unmatched",
+      "n9_native_pdf_preview_not_enabled","n9_binding_changed_during_parse",
+      "n9_claim_page_locator_conflicts","n9_claim_page_locator_ambiguous","n9_claim_page_locator_not_verifiable",
+      "n9_pdf_sandbox_unavailable","n9_pdf_sandbox_or_parser_unavailable","n9_pdf_parser_timeout",
+      "n9_pdf_parser_output_limit","n9_pdf_parser_busy","n9_pdf_parser_input_hold","n9_pdf_parser_cleanup_hold"]);
     const reason=error instanceof Error&&recognized.has(error.message)?error.message:"n9_pdf_or_claim_binding_unavailable";
-    return {...base,status:"hold",issues:[reason],claim:null,page:null};
+    return {...base,locatorAgreement:agreement,status:"hold",issues:[reason],claim:null,page:null};
   }
 }

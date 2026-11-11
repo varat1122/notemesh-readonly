@@ -154,6 +154,8 @@ Outputs: source-scoped `indexed` candidate counts and paths, bounded multi-query
 
 **N9 / IOS-ORCH-RI-001.** Operator-opt-in (`N9_PDF_PAGE_TEXT_PREVIEW_ENABLED=1`) read-only native PDF text check of one page of an existing, byte/hash-readback-verified user-supplied PDF attachment. Requires exact canonical Broker Structured Claim path/SHA and its Source/Claim Safe Edit receipts. The Source must explicitly bind the same already-preserved PDF. Uses `pdfinfo` for actual PDF page count and `pdftotext` for original-byte native text; exact normalized Source excerpt/numeric anchor must be present on the selected page. No OCR, image/table/footnote visual verification, publisher authentication, semantic truth, original archive operation or write. Fails closed on missing binary, mismatch, oversized/unreadable page and disabled parser. No server service or external API.
 
+TEXT-2 uses a required Linux namespace sandbox with a minimal packaged runtime and no host DATA_DIR/network access, asynchronous subprocesses, one active request and zero queue. Deadline, output and resource limits are enforced; unavailable isolation or uncertain cleanup returns HOLD with no unsandboxed fallback. `locatorAgreement` distinguishes a matching caller-declared page from conflict/ambiguity/unverifiability (all HOLD); it never authenticates a publisher locator. Claim/Source/attachment bindings are rechecked after parsing. Default OFF; image health is not evidence of runtime sandbox availability or enablement approval.
+
 ### preview_estimate_revision — read
 
 N8/IOS-ORCH-RI-001 bounded read-only candidate comparison of exactly two already

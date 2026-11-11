@@ -11,6 +11,10 @@ to compare one persisted Broker Structured Claim excerpt with native text extrac
 from the actual content-addressed, hash-readback-verified user attachment PDF
 using Poppler. A page match is NOT visual verification, broker authenticity,
 consensus, economic truth, original archive creation or writer authority.
+N9 TEXT-2 hardening replaces blocking native calls with asynchronous, single-slot
+parsing inside a required minimal filesystem/network namespace sandbox; missing
+isolation HOLDs without fallback. Explicit conflicting or ambiguous page locators
+HOLD, and receipt/byte bindings are rechecked after parsing. Default remains OFF.
 
 Adds read-only `preview_estimate_revision`: an exact two-claim comparison
 of separately persisted, receipt-verified broker-estimate observations. Same

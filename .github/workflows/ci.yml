@@ -54,7 +54,9 @@ jobs:
         run: git fetch --no-tags --depth=1 origin 6cd9c3cd558dac3d67e9202d8652b406cfdc332a 44efef941f0b586ccd1f1cf84dc608c4f77eb6b2 1294bc8ae7e379ff1188e705ee74ad1c7fde2053
 
       - name: Install native PDF text tools for isolated N9 tests
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils bubblewrap util-linux
+          node scripts/build-n9-pdf-runtime.mjs
 
       - name: Test
         run: pnpm test
@@ -127,8 +129,10 @@ jobs:
             -v nmdata:/data \
             notemesh:ci
 
-      - name: Native PDF text tools exist in the runtime image
-        run: docker exec nm sh -c 'command -v pdfinfo >/dev/null && command -v pdftotext >/dev/null'
+      - name: N9 isolated runtime is packaged and remains default off
+        run: |
+          docker exec nm sh -c 'test -x /usr/bin/bwrap && test -x /app/.n9-pdf-runtime/bin/pdfinfo && test -x /app/.n9-pdf-runtime/bin/pdftotext && test -x /app/.n9-pdf-runtime/bin/prlimit && test "$(cat /app/.n9-pdf-runtime/runtime-version)" = N9-SANDBOX-1 && test "${N9_PDF_PAGE_TEXT_PREVIEW_ENABLED:-0}" != 1'
+          docker exec -u node nm sh -c 'test ! -w /app/.n9-pdf-runtime && test ! -w /app/.n9-pdf-runtime/bin/pdfinfo'
 
       - name: It boots and answers /api/health
         run: |

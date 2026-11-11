@@ -23,9 +23,11 @@ WORKDIR /app
 # pointer files in place of every attachment, which contain no NUL bytes and so
 # read as text — the server would hand those to a model as if they were images.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git git-lfs ca-certificates tini poppler-utils \
+    && apt-get install -y --no-install-recommends git git-lfs ca-certificates tini poppler-utils bubblewrap util-linux \
     && rm -rf /var/lib/apt/lists/* \
     && git lfs install --system
+COPY scripts/build-n9-pdf-runtime.mjs /app/scripts/build-n9-pdf-runtime.mjs
+RUN node scripts/build-n9-pdf-runtime.mjs
 RUN npm install -g obsidian-headless@0.0.14
 COPY --from=build /app/.output ./.output
 COPY scripts/check-runtime-exclusions.mjs /app/check-runtime-exclusions.mjs
