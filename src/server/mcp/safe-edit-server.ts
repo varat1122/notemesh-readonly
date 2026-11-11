@@ -13,6 +13,8 @@ import { storeUserAttachment, inspectUserAttachment, MAX_USER_ATTACHMENT_BYTES }
 import { canonicalInputShape, canonicalInputSchema, canonicalApplySchema, prepareCanonicalWriteback, applyCanonicalWriteback, withdrawCanonicalJudge } from "./canonical-writeback";
 import {assertMutationAllowed,beginWork,endWork} from "../maintenance";
 import {buildResearchJudgePacket,judgeResultSchema} from "../vault/research-judge";
+import {canonicalRevisionInputSchema} from "../safe-edit/canonical-review-revision-pilot";
+import {canonicalRevisionApplySchema,prepareCanonicalReviewRevision,applyCanonicalReviewRevision,inspectCanonicalReviewRevision} from "./canonical-review-revision";
 import { researchDecisionV2Schema, preflightResearchDecisionV2 } from "../vault/research-decision-v2";
 const securitySchemes=[{type:"oauth2",scopes:["vault:read","vault:edit"]}];
 const base=previewSchema.omit({change:true}).shape;
@@ -72,6 +74,23 @@ export function createSafeEditMcpServer(access:McpAccess) {
     inputSchema:canonicalApplySchema.shape,
     annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},...meta
   },async input=>invoke(()=>applyCanonicalWriteback(input,access.label)));
+  // Synthetic-only isolated successor. These tools refuse shared or Railway
+  // runtimes and never infer semantic equivalence from issuer/date similarity.
+  server.registerTool("prepare_canonical_review_revision",{
+    description:"IOS-ORCH-RI-001 isolated pilot ONLY. Exact existing Company Review receipt/hash plus all added Source receipts, low-risk attributed added-detail and complete reviewer diff. Returns a preview, never an independent-evidence increment. Disabled without explicit disposable pilot flag and strict temporary root; corrections/contradictions/material risks HOLD.",
+    inputSchema:canonicalRevisionInputSchema.shape,
+    annotations:{readOnlyHint:true,openWorldHint:false},...meta
+  },async input=>invoke(()=>prepareCanonicalReviewRevision(input,access.label)));
+  server.registerTool("apply_canonical_review_revision",{
+    description:"IOS-ORCH-RI-001 isolated pilot ONLY. Requires authenticated dashboard-session approval of the exact prior diff and the unchanged actor/source/review/hash binding, then Safe Edit CAS, readback, reindex and source links. No live Vault authorization.",
+    inputSchema:canonicalRevisionApplySchema.shape,
+    annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},...meta
+  },async input=>invoke(()=>applyCanonicalReviewRevision(input,access.label)));
+  server.registerTool("inspect_canonical_review_revision",{
+    description:"Read-only receipt/authority inspection for isolated canonical revision. A receipt is not publisher verification or human/critic independence.",
+    inputSchema:{operationId:z.string().regex(/^ICR-[a-f0-9]{32}$/)},
+    annotations:{readOnlyHint:true,openWorldHint:false},...meta
+  },async ({operationId})=>invoke(()=>inspectCanonicalReviewRevision(operationId,access.label)));
   server.registerTool("archive_original_source",{
     description:"Download one explicitly allowlisted HTTPS primary document to the content-addressed archive OUTSIDE Obsidian Vault under authorized vault:edit OAuth. Returns SHA-256 of complete fetched bytes and source version. Does not alter Notes, Current Thesis or Portfolio. Redirects, unknown hosts and files above 8 MiB are denied. Requires server SOURCE_ARCHIVE_USER_AGENT identifying a real operator. This is NOT proof of publisher signature, source completeness or claim truth.",
     inputSchema:{url:z.string().url().max(2000).describe("Official original-source HTTPS URL on the administrator-approved allowlist. Exact source byte hash is computed from fetched response.")},
