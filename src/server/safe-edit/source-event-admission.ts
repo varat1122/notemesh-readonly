@@ -15,6 +15,7 @@ import {retrievalOperationallyComplete,type RetrievalCoverage} from "../vault/in
 import {indexedRead,createReceipt} from "../vault/investment-research-context";
 import {preservedSubmittedText,m2VaultReadDeps} from "../vault/research-decision-v2";
 import {planInvestmentWriteback,type WritebackInput} from "../vault/investment-writeback-router";
+import {isGeneratedClaimPath,readPersistedClaim} from "../vault/canonical-claims";
 import {splitFrontmatter} from "../vault/markdown";
 import {isResearchReviewType,researchTrust} from "../vault/research-state";
 import type {PreviewInput} from "./schema";
@@ -75,6 +76,9 @@ function sourceRead(path:string){
  if(!text||n.fm.type!=="investment_source_intake"||n.fm.intake_id!==id||fts?.body!==n.body)throw Error("source_event_source_readback_hold");
  return {path,intakeId:id,sha256:sha(n.raw),text,textSha256:sha(text),receiptId,
    familyRef:receiptId,originalLocator:n.fm.source_url??null,publisher:n.fm.attributed_publisher??null,
+   declaredMetadata:{sourceKind:n.fm.source_kind??null,inputFormat:n.fm.input_format??null,sourceLanguage:n.fm.source_language??null,
+     sourceChat:n.fm.source_chat??null,sourceChannel:n.fm.source_channel??null,attributedOrigin:n.fm.attributed_origin??null,
+     originalDocumentAccess:n.fm.original_document_access??null,attachmentStatus:n.fm.attachment_status??null,receivedAt:n.fm.received_at??null},
    eventDate:n.fm.event_date??null,publicationDate:n.fm.published_at??null,provenance:"received_source_not_publisher_authentication"};
 }
 function historicalRead(path:string){
@@ -87,6 +91,11 @@ function historicalRead(path:string){
  const n={raw:read.content,fm:parsed.data},isSource=/^00_Inbox\/ChatGPT\/Investment Intake - IN-/.test(path),isReview=/^10_Knowledge\/Company Research\/Investment Review - .+ - IN-/.test(path);
  let receiptId:string|null=null,source:null|ReturnType<typeof sourceRead>=null,receiptBinding="historical_unverified";
  if(isSource){receiptId=sourceRead(path).receiptId;receiptBinding="received_source_receipt";}
+ if(isGeneratedClaimPath(path)){
+   const bound=readPersistedClaim(path);
+   if(!bound.reviewScanComplete)throw Error("source_event_claim_review_binding_hold");
+   receiptId=bound.receiptKey;source=sourceRead(bound.sourcePath);receiptBinding="source_claim_receipts";
+ }
  if(isReview){
    const journal=db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='safe_edit_operations'").get();
    const recorded=journal&&db().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? LIMIT 1").get(path);

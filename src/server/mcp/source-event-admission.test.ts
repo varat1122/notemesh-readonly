@@ -59,7 +59,7 @@ it.each(["mentioned_only","unknown","related_issuer"] as const)("unqualified %s 
 it("SE03/11: duplicate/missing existingReview cannot silently create; same-source capture reuses receipt",async()=>{
  const first=await bound();expect((await apply(first,await ready(first))).status).toBe("saved_verified");
  const incoming=await bound({...base,sourceUrl:null,publicationDate:null,eventDate:null,extractedText:"SYNTHETIC forwarded: same TESTA manual described again."});
- const body=JSON.parse(incoming.sourceEvent.packet.body);expect(body.context.history.some((h:{path:string})=>h.path.includes("Investment Review"))).toBe(true);
+ const body=JSON.parse(incoming.sourceEvent.packet.body);expect(body.sources[0].declaredMetadata.sourceKind).toBe("news_media");expect(body.sources[0].declaredMetadata.receivedAt).toBeNull();expect(body.context.history.some((h:{path:string})=>h.path.includes("Investment Review"))).toBe(true);
  incoming.sourceEvent.result.event.relation="duplicate";incoming.sourceEvent.result.event.action="duplicate_link_only";
  const c=await import("./canonical-writeback"),p=c.prepareCanonicalWriteback(incoming,actor);
  expect(p.previews).toHaveLength(0);expect(p.sourceEvent?.reasons).toContain("source_event_create_requires_new_event");
@@ -239,4 +239,13 @@ it("legacy unreceipted Review remains unverified historical context, not a canon
  const input=await bound(),body=JSON.parse(input.sourceEvent.packet.body),h=body.context.history.find((x:{path:string})=>x.path===p);
  expect(h).toMatchObject({receiptId:null,source:null,receiptBinding:"legacy_historical_unverified"});
  expect((await apply(input,await ready(input))).status).toBe("saved_verified");
+});
+
+it("selected generated Claim cannot fall back to unverified legacy history when its binding is invalid",async()=>{
+ const p="10_Knowledge/Company Research/Investment Claim - ICL-"+"A".repeat(32)+".md";
+ await note(p,"---\ntype: investment_structured_claim_register\ncompany: TESTA\nentity: TESTA\ndomain: company\n---\n# TESTA adverse unbound generated claim\n");
+ const input=await bound(),body=JSON.parse(input.sourceEvent.packet.body);
+ expect(body.context.constraints).toContain("source_event_selected_history_readback_hold");
+ expect((await import("./canonical-writeback")).prepareCanonicalWriteback(input,actor).sourceEvent?.decision).toBe("HOLD");
+ expect(reviews()).toHaveLength(0);await capture(input);
 });
