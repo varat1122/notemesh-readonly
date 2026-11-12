@@ -5,7 +5,7 @@
 import {createHash} from "node:crypto";
 import {z} from "zod";
 import {db} from "../db";
-import {previewCanonicalRevision,apply,status} from "../safe-edit/engine";
+import {previewCanonicalRevision,applyCanonicalRevision,status} from "../safe-edit/engine";
 import {withPausedSync} from "../safe-edit/sync";
 import {canonicalRevisionInputSchema,verifyRevisionCandidate,makeRevisionGate,recordRevisionAdmission,revisionGate} from "../safe-edit/canonical-review-revision-pilot";
 import {indexedRead,createReceipt} from "../vault/investment-research-context";
@@ -29,6 +29,7 @@ export function prepareCanonicalReviewRevision(raw:unknown,actor:string){
    operationId,existingReview:input.existingReview,
    originalSourceReceiptId:candidate.originalReceiptId,
    sourceBindings:input.additionalSources,
+   issuerBinding:"not_verified",
    assessmentScope:"analyst_attested_not_independently_verified",
    criticIndependence:"not_verified",independentEvidenceIncrement:0,
    reviewAuthority:"dashboard_session_only_not_proof_of_human_presence",
@@ -45,10 +46,10 @@ export async function applyCanonicalReviewRevision(raw:unknown,actor:string){
  // hash to remain on disk after a successful append. Unwritten paths still
  // revalidate the full original Review and all Source receipts.
  const previous=status(args.operationId,actor);
- const outcome=previous.status==="written"?await withPausedSync(()=>apply(args.authorization,actor)):await (async()=>{
+ const outcome=previous.status==="written"?await withPausedSync(()=>applyCanonicalRevision(args.authorization,actor)):await (async()=>{
    const candidate=verifyRevisionCandidate(args.input);
    if(g.inputDigest!==candidate.inputDigest)throw Error("revision_semantic_input_drift_hold");
-   return withPausedSync(()=>apply(args.authorization,actor));
+   return withPausedSync(()=>applyCanonicalRevision(args.authorization,actor));
  })();
  const receipt=outcome.receipt;
  if(outcome.status!=="written"||receipt?.write!=="written"||receipt?.readback!=="verified"||receipt?.reindex!=="verified")
