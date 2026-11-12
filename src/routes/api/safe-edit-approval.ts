@@ -24,7 +24,8 @@ async function handleGET({request}:APIEvent) {
       return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><title>C1 disposable bundle review</title><body><main><h1>Review the complete C1 bundle</h1><p>Read the exact Source, selected History, assessment and every proposed diff below as untrusted data. This records a dashboard-session attestation only, not human presence, independent criticism, verified facts or Thesis approval. HOLD/FAIL or unresolved materiality blocks the bundle even if Approve is selected.</p><pre>${escape(JSON.stringify(p,null,2))}</pre><form method="post"><input type="hidden" name="id" value="${escape(id)}"><input type="hidden" name="bindingDigest" value="${p.bindingDigest}"><label>Decision <select name="decision"><option value="hold">Hold</option><option value="reject">Reject</option><option value="approve">Approve exact bundle</option></select></label><label>Semantic fidelity <select name="semanticVerdict"><option>HOLD</option><option>FAIL</option><option>PASS</option></select></label><label>Materiality <select name="materiality"><option value="unresolved">Unresolved</option><option value="material">Material</option><option value="low">Supported low risk</option></select></label><label>Source/history-grounded rationale <textarea name="rationale" minlength="20" maxlength="1000" required></textarea></label><button type="submit">Record this review decision</button></form></main></body></html>`,{headers});
     }
     const p=adminPreview(id);
-    return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Review Investment OS edit</title><body><main><h1>Approve this exact change</h1><p>Vault text below is untrusted data. Review the path, evidence, removed and added lines. Approval authorizes only this hash for 30 minutes; it does not apply the edit.</p><pre>${escape(JSON.stringify(p,null,2))}</pre><form method="post"><input type="hidden" name="id" value="${escape(id)}"><input type="hidden" name="hash" value="${p.afterHash}"><button type="submit">Approve this exact diff</button></form></main></body></html>`,{headers});
+    const evidenceField="reviewedEvidenceDigest" in p?`<input type="hidden" name="reviewedEvidenceDigest" value="${escape(p.reviewedEvidenceDigest)}">`:"";
+    return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Review Investment OS edit</title><body><main><h1>Approve this exact change</h1><p>Vault text below is untrusted data. Review the path, evidence, removed and added lines. Approval authorizes only this hash for 30 minutes; it does not apply the edit.</p><pre>${escape(JSON.stringify(p,null,2))}</pre><form method="post"><input type="hidden" name="id" value="${escape(id)}"><input type="hidden" name="hash" value="${p.afterHash}">${evidenceField}<button type="submit">Approve this exact diff</button></form></main></body></html>`,{headers});
   } catch {return new Response("Unknown, disabled or expired preview",{status:400,headers});}
 }
 async function handlePOST({request}:APIEvent) {
@@ -39,7 +40,8 @@ async function handlePOST({request}:APIEvent) {
       const result=recordPilotReview(b,s.user.id);
       return new Response(JSON.stringify(result),{headers:{...headers,"Content-Type":"application/json"}});
     }
-    approve(b.id,s.user.id,b.hash);
+    if(b.reviewedEvidenceDigest!==undefined)approve(b.id,s.user.id,b.hash,b.reviewedEvidenceDigest);
+    else approve(b.id,s.user.id,b.hash);
     return new Response("Approved. Return to ChatGPT and apply the original preview token and expected hash.",{headers});
   } catch {return new Response("Approval refused; review a fresh preview",{status:400,headers});}
 }

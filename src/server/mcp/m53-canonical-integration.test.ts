@@ -73,7 +73,7 @@ it("M5.3 Web tool contract: research MCP recipe → scoped Safe Edit preview/app
   const safe=await connect(createSafeEditMcpServer(editAccess));
   try{
     const tools=await safe.client.listTools();
-    expect(tools.tools).toHaveLength(17);
+    expect(tools.tools).toHaveLength(20);
     expect(tools.tools.find(x=>x.name==="preflight_research_decision_v2")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.some(x=>x.name==="preview_edit")).toBe(true);
     const first=parseResearch(await research.client.callTool({name:"plan_investment_writeback",arguments:news}));
