@@ -32,7 +32,7 @@ export interface PacketBody {
   citationContract:{format:string;offsets:string;authority:string;declaredLocators:string};
   constraints:string[];trust:{actorLabelSha256:string;actorProvenance:string;session:string;modelVersion:string;judgeIdentity:string};
 }
-function unjudged(input:WritebackInput){const copy={...input} as WritebackInput&{researchJudge?:unknown};delete copy.researchJudge;return copy;}
+function unjudged(input:WritebackInput){const copy={...input} as WritebackInput&{researchJudge?:unknown;sourceEvent?:unknown};delete copy.researchJudge;delete copy.sourceEvent;return copy;}
 const inputDigest=(input:WritebackInput)=>judgeHash(stableJudgeJson(unjudged(input)));
 function seal(envelope:Omit<z.infer<typeof judgeEnvelopeSchema>,"seal">){
   return createHmac("sha256",env.encryptionKey).update("research-judge-packet-v1\0"+stableJudgeJson(envelope)).digest("hex");

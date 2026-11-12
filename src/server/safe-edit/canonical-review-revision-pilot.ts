@@ -12,6 +12,7 @@ import {env} from "../env";
 import {c1Pilot} from "../c1-pilot";
 import {indexedRead,createReceipt} from "../vault/investment-research-context";
 import {existingReviewSelectionSchema} from "../vault/canonical-review-reuse";
+import {sourceEventSubmissionSchema} from "../vault/source-event-contract";
 
 const hash=(text:string)=>createHash("sha256").update(text).digest("hex");
 const digest=z.string().regex(/^[a-f0-9]{64}$/);
@@ -32,7 +33,8 @@ export const canonicalRevisionInputSchema=z.object({
    criticIndependence:z.literal("not_verified"),
    independentEvidenceIncrement:z.literal(0)
  }).strict(),
- revisionText:trim(12000)
+ revisionText:trim(12000),
+ sourceEvent:sourceEventSubmissionSchema.optional()
 }).strict();
 export type CanonicalRevisionInput=z.infer<typeof canonicalRevisionInputSchema>;
 type BoundSource={path:string;sha256:string;receiptId:string};
@@ -45,13 +47,15 @@ type Gate={
 const gateEvent="canonical_review_revision_pilot";
 export const isCanonicalCompanyReview=(p:string)=>/^10_Knowledge\/Company Research\/Investment Review - [^/]+ - IN-[A-F0-9]{16}\.md$/.test(p);
 
-function enablePilot(){
+export function assertRevisionPilot(){
  if(process.env.IOS_C1_REVISION_PILOT!=="synthetic"||c1Pilot())throw Error("revision_pilot_isolated_scope_required");
  if(process.env.RAILWAY_PROJECT_ID||process.env.RAILWAY_SERVICE_ID)throw Error("revision_pilot_railway_identity_refused");
  const root=fs.realpathSync(env.dataDir),tmp=fs.realpathSync(os.tmpdir());
  if(!root.startsWith(tmp+path.sep)||!path.basename(root).startsWith("ios-revision-pilot-")||
     fs.lstatSync(env.dataDir).isSymbolicLink())throw Error("revision_pilot_disposable_path_required");
 }
+const enablePilot=assertRevisionPilot;
+export function revisionInputDigest(input:CanonicalRevisionInput){const clean={...input};delete clean.sourceEvent;return hash(JSON.stringify(clean));}
 function checkSource(s:BoundSource){
  const note=indexedRead(s.path);
  const fm=note.fm;
@@ -136,7 +140,7 @@ export function verifyRevisionCandidate(raw:unknown){
    "No Thesis, Evidence Register, Company Timeline or Portfolio authorization."
  ].join("\n");
  return {input,review,originalReceiptId:receipt,sourcePaths:[...paths],body,
-   inputDigest:hash(JSON.stringify(input))};
+   inputDigest:revisionInputDigest(input)};
 }
 const seal=(g:Gate)=>createHmac("sha256",env.encryptionKey).update("ios-review-revision-pilot-v2\0"+JSON.stringify(g)).digest("hex");
 export function recordRevisionAdmission(g:Gate){
@@ -153,7 +157,7 @@ export function recordRevisionAdmission(g:Gate){
 export function makeRevisionGate(input:CanonicalRevisionInput,actor:string,operationId:string,beforeHash:string,afterHash:string,expiresAt:number):Gate{
  return {version:"IOS-REVIEW-REVISION-PILOT-2",operationId,actor,path:input.existingReview.path,
    beforeHash,afterHash,reviewReceiptId:input.existingReview.receiptId,
-   sources:input.additionalSources, inputDigest:hash(JSON.stringify(input)),
+   sources:input.additionalSources, inputDigest:revisionInputDigest(input),
    expiresAt,researchStatus:"draft",independentEvidenceIncrement:0,reviewerAuthority:"dashboard_session_required"};
 }
 export function revisionGate(operationId:string):Gate{

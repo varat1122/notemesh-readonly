@@ -13,7 +13,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),"safe-edit-mcp-"));
 process.env.DATA_DIR=root;process.env.BASE_URL="https://safe-fixture.test";
 process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
 const access:McpAccess={read:true,write:false,label:"oauth:edit-fixture",scopes:["vault:read","vault:edit"]};
-const toolsList=["preview_edit","apply_edit","append_section","update_frontmatter","create_note","prepare_canonical_writeback","apply_canonical_writeback","prepare_research_judge_packet","research_judge_result_contract","preflight_research_decision_v2","get_edit_status","rollback_edit","archive_original_source","inspect_original_source_archive","get_sync_delivery_evidence","store_user_attachment","inspect_user_attachment","prepare_canonical_review_revision","apply_canonical_review_revision","inspect_canonical_review_revision"];
+const toolsList=["prepare_source_event_packet","source_event_result_contract","preview_edit","apply_edit","append_section","update_frontmatter","create_note","prepare_canonical_writeback","apply_canonical_writeback","prepare_research_judge_packet","research_judge_result_contract","preflight_research_decision_v2","get_edit_status","rollback_edit","archive_original_source","inspect_original_source_archive","get_sync_delivery_evidence","store_user_attachment","inspect_user_attachment","prepare_canonical_review_revision","apply_canonical_review_revision","inspect_canonical_review_revision"];
 const args={operationId:"mcp-synthetic-01",path:"Synthetic.md",reason:"Synthetic MCP test",change:{kind:"replace",oldText:"Old data",newText:"New data"}};
 
 const digest=(value:string)=>createHash("sha256").update(value,"utf8").digest("hex");
@@ -131,6 +131,8 @@ it.each([
  const c=await connected(a);try{for(const name of toolsList){
  const canonical={domain:"company",entities:["NVDA"],topic:"Synthetic",inputFormat:"text",sourceKind:"archived_chat",extractedText:"Synthetic",sourceChat:"test",completedAnalysis:"Synthetic analysis"};
  let params:Record<string,unknown>=name==="preview_edit"?{...args}:name==="apply_edit"?{operationId:args.operationId,previewToken:"0".repeat(64),expectedHash:"0".repeat(64)}:name==="prepare_canonical_writeback"?canonical:name==="preflight_research_decision_v2"?m2Fixture():name==="apply_canonical_writeback"?{input:canonical,planId:"IN-0000000000000000",authorizations:[]}:name==="get_edit_status"?{operationId:args.operationId}:name==="archive_original_source"?{url:"https://www.sec.gov/Archives/sample"}:name==="inspect_original_source_archive"?{url:"https://www.sec.gov/Archives/sample"}:name==="get_sync_delivery_evidence"?{}:name==="store_user_attachment"?{base64:"AAAA".repeat(8),contentType:"image/png"}:name==="inspect_user_attachment"?{sha256:"a".repeat(64),contentType:"image/png"}:name==="append_section"?{...args,change:undefined,heading:"Synthetic",content:"x",date:"2026-10-16"}:name==="create_note"?{...args,change:undefined,content:"new"}:name==="update_frontmatter"?{...args,change:undefined,properties:{updated:null}}:{...args,change:undefined,rollbackOperationId:args.operationId};delete params.change;
+ if(name==="prepare_source_event_packet")params={kind:"create",input:canonical};
+ if(name==="source_event_result_contract")params={};
  if(name==="prepare_research_judge_packet")params={input:canonical};
  if(name==="research_judge_result_contract"){
    const decision=(key:string)=>({key,verdict:"PASS",rationale:"Simulated result for authorization test",references:[{key:"received_source",quote:"Synthetic",locator:"line 1"}],

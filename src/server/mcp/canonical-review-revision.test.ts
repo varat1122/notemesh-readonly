@@ -10,6 +10,7 @@ import type {CanonicalRevisionInput} from "../safe-edit/canonical-review-revisio
 const paused=vi.hoisted(()=>({beforeRun:null as null|(()=>Promise<void>)}));
 vi.mock("../safe-edit/sync",()=>({withPausedSync:async<T>(run:()=>T)=>{await paused.beforeRun?.();return run();}}));
 vi.mock("~/server/auth",()=>({runAuthMigrations:async()=>{},auth:{api:{getSession:async()=>({user:{id:"synthetic-dashboard-reviewer"}})}}}));
+import {assessed,approveFixture} from "../../../tests/source-event-fixture";
 const actor="oauth:revision-disposable-fixture";
 const sha=(s:string)=>createHash("sha256").update(s).digest("hex");
 let root:string,vault:string,dbClosed:boolean;
@@ -34,6 +35,7 @@ beforeEach(async()=>{vi.resetModules();dbClosed=false;paused.beforeRun=null;root
  fs.writeFileSync(path.join(vault,"01_Companies/TESTA.md"),"# TESTA\n");
  fs.writeFileSync(path.join(vault,"05_Thesis/TESTA - Current Thesis.md"),"# protected fixture\n");
  (await import("../vault/indexer")).reindexPath("01_Companies/TESTA.md");
+ (await import("../vault/indexer")).reindexPath("05_Thesis/TESTA - Current Thesis.md");
 });
 afterEach(async()=>{expect(fs.readFileSync(path.join(vault,"05_Thesis/TESTA - Current Thesis.md"),"utf8")).toBe("# protected fixture\n");
  if(!dbClosed)(await import("../db")).db().close();fs.rmSync(root,{recursive:true,force:true});vi.useRealTimers();
@@ -44,12 +46,20 @@ async function save(input:WritebackInput){
  return c.applyCanonicalWriteback({input,planId:p.planId,authorizations:p.previews.map(t=>({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash}))},actor);
 }
 async function candidate():Promise<CanonicalRevisionInput>{
- const first=await save(original),source=await save({...repost,captureOnly:true,researchReview:undefined});
+ await save({...original,captureOnly:true,researchReview:undefined});
+ const admission=await import("../safe-edit/source-event-admission"),c=await import("./canonical-writeback");
+ const full={...original,sourceEvent:await assessed(admission.canonicalEventProposal(original),actor)};
+ expect(JSON.parse(full.sourceEvent.packet.body).context.constraints).toEqual([]);
+ const prep=c.prepareCanonicalWriteback(full,actor);
+ expect(prep.sourceEvent).toMatchObject({decision:"PASS",reasons:[]});
+ for(const p of prep.previews)await approveFixture(p.operationId);
+ const first=await c.applyCanonicalWriteback({input:full,planId:prep.planId,authorizations:prep.previews.map(p=>({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash}))},actor);
+ const source=await save({...repost,captureOnly:true,researchReview:undefined});
  expect(first.status).toBe("saved_verified");expect(source.status).toBe("source_saved_analysis_pending");
  const reviewStep=first.steps.find(s=>s.kind==="canonical_review")!,sourceStep=source.steps[0];
  const reviewBytes=fs.readFileSync(path.join(vault,reviewStep.path),"utf8");
  const sourceBytes=fs.readFileSync(path.join(vault,sourceStep.path),"utf8");
- return {
+ const input:CanonicalRevisionInput={
  existingReview:{path:reviewStep.path,expectedSha256:sha(reviewBytes),receiptId:reviewStep.receiptKey,
    relationship:"added_detail",comparisonBasis:"Synthetic analyst comparison: this is a low-risk detail to the same manual, without independent issuer verification."},
  entity:"TESTA",reviewDate:"2026-11-12",methodVersion:"TEST-SYNTHETIC-1",
@@ -61,6 +71,8 @@ async function candidate():Promise<CanonicalRevisionInput>{
    criticIndependence:"not_verified",independentEvidenceIncrement:0},
  revisionText:"Preserve the original Research Review and attach this unverified appearance as additional context only."
  };
+ input.sourceEvent=await assessed(admission.revisionEventProposal(input),actor);
+ return input;
 }
 it("isolated routine addendum requires exact reviewer dashboard approval and persists source links",async()=>{
  const input=await candidate(),bridge=await import("./canonical-review-revision"),engine=await import("../safe-edit/engine");
@@ -114,7 +126,7 @@ it("review CAS drift between preview and apply cannot be approved or written",as
  const reviewAbs=path.join(vault,input.existingReview.path);
  fs.appendFileSync(reviewAbs,"\nExternal edit before review.\n");
  expect(()=>engine.approve(prepared.operationId,"synthetic-dashboard-reviewer",prepared.preview.afterHash))
- .toThrow(/review_receipt_hold|diff_actor|review/);
+ .toThrow(/review_receipt_hold|diff_actor|review|source_event_scope_changed_or_unavailable_hold/);
 });
 async function approveReviewed(id:string){
  const engine=await import("../safe-edit/engine"),view=engine.adminPreview(id);
@@ -122,12 +134,13 @@ async function approveReviewed(id:string){
  return engine.approve(id,"synthetic-dashboard-reviewer",view.afterHash,
    "reviewedEvidenceDigest" in view?view.reviewedEvidenceDigest as string:undefined);
 }
-it("F1: OTHERCO Source is fully visible with explicit unverified issuer binding, not hidden behind a receipt",async()=>{
+it("F1: exact Source and semantic scope remain fully visible; receipt never means verified issuer",async()=>{
  const input=await candidate(),bridge=await import("./canonical-review-revision"),engine=await import("../safe-edit/engine");
- const text="SYNTHETIC OTHERCO only: an unrelated issuer changed its manual. TESTA association is not established.";
- const saved=await save({...repost,entities:["OTHERCO"],extractedText:text,captureOnly:true,researchReview:undefined});
+ const text="SYNTHETIC TESTA: another ordinary manual annotation; publisher identity is not independently verified.";
+ const saved=await save({...repost,entities:["TESTA"],extractedText:text,captureOnly:true,researchReview:undefined});
  const s=saved.steps[0],raw=fs.readFileSync(path.join(vault,s.path),"utf8");
  input.additionalSources.push({path:s.path,sha256:sha(raw),receiptId:s.receiptKey});
+ input.sourceEvent=await assessed((await import("../safe-edit/source-event-admission")).revisionEventProposal(input),actor);
  const p=bridge.prepareCanonicalReviewRevision(input,actor),view=engine.adminPreview(p.operationId);
  expect(view).toMatchObject({issuerBinding:"not_verified",additionalSourceEvidence:input.additionalSources.map(x=>({
    ...x,intakeId:x.path.match(/IN-[A-F0-9]{16}/)![0],fullReceiptedText:fs.readFileSync(path.join(vault,x.path),"utf8"),
@@ -205,6 +218,7 @@ it("two dedicated appends retain one Review, real Source receipts, links and col
  const originalBytes=fs.readFileSync(path.join(vault,input.existingReview.path),"utf8");
  const sourceBefore=fs.readFileSync(path.join(vault,input.additionalSources[0].path),"utf8");
  for(let i=0;i<2;i++){
+   input.sourceEvent=await assessed((await import("../safe-edit/source-event-admission")).revisionEventProposal(input),actor);
    const p=bridge.prepareCanonicalReviewRevision(input,actor);await approveReviewed(p.operationId);
    expect(p.preview.diff.removed).toEqual([]);
    const authorization={operationId:p.operationId,previewToken:p.preview.previewToken!,expectedHash:p.preview.beforeHash};
@@ -236,7 +250,7 @@ it("F2: original Source is rechecked at the Safe Edit write boundary after sync 
    (await import("../vault/indexer")).reindexPath(originalPath);
  };
  await expect(bridge.applyCanonicalReviewRevision({input,operationId:p.operationId,authorization:{
-   operationId:p.operationId,previewToken:p.preview.previewToken!,expectedHash:p.preview.beforeHash}},actor)).rejects.toThrow(/create_receipt_unverified/);
+   operationId:p.operationId,previewToken:p.preview.previewToken!,expectedHash:p.preview.beforeHash}},actor)).rejects.toThrow(/create_receipt_unverified|source_event_scope_changed_or_unavailable_hold/);
  expect(indexedRead(input.existingReview.path).raw).toBe(before.raw);
  expect(engine.status(p.operationId,actor).status).toBe("preview");
 });
