@@ -23,6 +23,7 @@ import {assertNoMaintenance} from "../maintenance";
 import {c1Pilot,withPilotAdmissionLock} from "../c1-pilot";
 import {assertPilotPreview,assertPilotApply,recordPilotSource} from "./c1-pilot-review";
 import {isCanonicalCompanyReview,assertRevisionGate,hasRevisionAdmission,revisionReviewEvidence} from "./canonical-review-revision-pilot";
+import {assertSourceEventWrite,sourceEventReviewEvidence,hasSourceEventGate,sourceEventTargets} from "./source-event-admission";
 
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
 const revisionPilotActive=()=>process.env.IOS_C1_REVISION_PILOT==="synthetic";
@@ -205,7 +206,7 @@ function requiresApproval(r:RecordRow) {
   const p=JSON.parse(r.payload) as PreviewInput;
   // Protect all thesis changes, including first creation and rollback; never
   // infer investment approval from an OAuth grant or model-supplied boolean.
-  return p.path.startsWith("05_Thesis/") || (revisionPilotActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path)) || [r.before_text,r.after_text].some(text=>{
+  return hasSourceEventGate(p.path)||p.path.startsWith("05_Thesis/") || (revisionPilotActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path)) || [r.before_text,r.after_text].some(text=>{
     const data=document(text).data;
     return data.user_endorsed===true || data.user_endorsed==="true" || data.status==="user_endorsed";
   });
@@ -218,6 +219,7 @@ export function previewCanonicalSource(input:unknown,actor:string) {return withP
 /** Server-internal entrypoint: only canonical prepare supplies the freshly
  * planned Review. It is not an MCP argument, environment switch or wire flag. */
 export function previewCanonicalReview(input:unknown,actor:string) {return withPilotAdmissionLock(()=>previewWithLineage(input,actor,true));}
+export function previewCanonicalAssessedClaim(input:unknown,actor:string) {return withPilotAdmissionLock(()=>previewWithLineage(input,actor,true));}
 /** Only the receipt-validated, isolated pilot revision handler may call this. */
 export function previewCanonicalRevision(input:unknown,actor:string){return withPilotAdmissionLock(()=>previewWithLineage(input,actor,false,false,true));}
 /** Internal canonical admission only; no caller-facing event/approval API. */
@@ -287,6 +289,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean,canonic
     // identical reprepare BEFORE token rotation or any journal mutation.
     if(revision||hasRevisionAdmission(existing.id))throw Error("revision_admission_replay_hold");
     if(existing.status==="preview") {
+      assertSourceEventWrite(p.operationId,p.path,existing.before_text,existing.after_text,actor,p.change,"preview",canonical||revision);
       assertResearchJudgeWrite(p.path,existing.before_text,existing.after_text,actor,"preview");
       assertPilotPreview(p.operationId,p.path,existing.before_text,existing.after_text,actor,canonicalSource);
       assertReceivedClaimWrite(p.path,existing.before_text,existing.after_text,actor,"preview");
@@ -312,6 +315,7 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean,canonic
   if(size.n>=1000||size.bytes+200_000>20_000_000) throw Error("Safe Edit journal quota reached; administrator archival required");
   document(before??"");checkEvidence(p);
   const after=calculate(p,before??"",actor);
+  assertSourceEventWrite(p.operationId,p.path,before??"",after,actor,p.change,"preview",canonical||revision);
   assertResearchJudgeWrite(p.path,before??"",after,actor,"preview");
   assertPilotPreview(p.operationId,p.path,before??"",after,actor,canonicalSource);
   assertReceivedClaimWrite(p.path,before??"",after,actor,"preview");
@@ -338,15 +342,20 @@ function previewWithLineage(input:unknown,actor:string,canonical:boolean,canonic
   log(p.operationId,actor,"preview",{path:p.path,beforeHash:sha256(before??""),afterHash:sha256(after),reason:p.reason});
   return {...publicPreview(row(p.operationId)),previewToken:token};
 }
-export function adminPreview(id:string) {
-  assertEnabled();
-  const r=row(id),p=JSON.parse(r.payload) as PreviewInput;
+function reviewedEvidence(r:RecordRow,p:PreviewInput){
+  const id=r.id,semantic=sourceEventReviewEvidence(p.path);
+  let revision:ReturnType<typeof revisionReviewEvidence>|null=null;
   if(hasRevisionAdmission(id)||(revisionPilotActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path))){
     const g=assertRevisionGate(id,p.path,r.before_text,r.after_text,r.actor);
-    return {...publicPreview(r),reviewerScope:"authenticated_dashboard_session_attestation_not_human_presence",
-      ...revisionReviewEvidence(g),fullBefore:r.before_text,fullAfter:r.after_text};
+    revision=revisionReviewEvidence(g);
   }
-  return publicPreview(r);
+  if(!revision&&!semantic)return null;
+  const evidence={...(revision??{}),...(semantic?{sourceEventEvidence:semantic}:{}),operationId:id,actor:r.actor,beforeHash:r.before_hash,afterHash:r.after_hash};
+  return {...evidence,reviewedEvidenceDigest:sha256(JSON.stringify(evidence)),fullBefore:r.before_text,fullAfter:r.after_text};
+}
+export function adminPreview(id:string) {
+  assertEnabled();const r=row(id),p=JSON.parse(r.payload) as PreviewInput,evidence=reviewedEvidence(r,p);
+  return {...publicPreview(r),...(evidence?{...evidence,reviewerScope:"authenticated_dashboard_session_attestation_not_human_presence"}:{})};
 }
 export function approve(id:string,adminId:string,afterHash:string,reviewedEvidenceDigest?:string) {
   if(c1Pilot())throw Error("c1_pilot_explicit_bundle_review_required");
@@ -354,13 +363,14 @@ export function approve(id:string,adminId:string,afterHash:string,reviewedEviden
   assertProtectedRecord((JSON.parse(r.payload) as PreviewInput).path,document(r.before_text).data,document(r.after_text).data);
   if(r.status!=="preview"||Date.now()>r.expires||afterHash!==r.after_hash) throw Error("Approval expired or does not match the reviewed diff");
   const p=JSON.parse(r.payload) as PreviewInput;
-  const revision=hasRevisionAdmission(id)||(revisionPilotActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path));
-  if(revision){
-    const g=assertRevisionGate(id,p.path,r.before_text,r.after_text,r.actor);
-    if(reviewedEvidenceDigest!==revisionReviewEvidence(g).reviewedEvidenceDigest)throw Error("revision_reviewed_source_evidence_hold");
+  const evidence=reviewedEvidence(r,p);
+  if(evidence&&reviewedEvidenceDigest!==evidence.reviewedEvidenceDigest)throw Error("revision_reviewed_source_evidence_hold");
+  if(r.approval===`admin:${adminId}`){
+    const previous=store().prepare("SELECT detail FROM safe_edit_events WHERE operation_id=? AND event='approved' AND actor=? ORDER BY rowid DESC LIMIT 1").get(id,r.approval) as {detail:string}|undefined;
+    if(previous&&JSON.parse(previous.detail).afterHash===afterHash&&JSON.parse(previous.detail).reviewedEvidenceDigest===reviewedEvidenceDigest)return {approved:true};
   }
   store().prepare("UPDATE safe_edit_operations SET approval=? WHERE id=? AND status='preview'").run(`admin:${adminId}`,id);
-  log(id,`admin:${adminId}`,"approved",{afterHash,...(revision?{reviewedEvidenceDigest}:{})});return {approved:true};
+  log(id,`admin:${adminId}`,"approved",{afterHash,...(evidence?{reviewedEvidenceDigest}:{})});return {approved:true};
 }
 function backupDir() {
   const dir=path.join(env.dataDir,"safe-edit-backups");
@@ -411,26 +421,38 @@ export function status(id:string,actor:string) {
 export function apply(input:unknown,actor:string) {return applyWithAdmission(input,actor,false);}
 /** Internal dedicated revision route only; no public schema flag enables it. */
 export function applyCanonicalRevision(input:unknown,actor:string) {return applyWithAdmission(input,actor,true);}
-function assertRevisionApproval(r:RecordRow,p:PreviewInput,actor:string){
-  const g=assertRevisionGate(r.id,p.path,r.before_text,r.after_text,actor);
+export function applyCanonicalAssessed(input:unknown,actor:string){return applyWithAdmission(input,actor,false,true);}
+function assertReviewedApproval(r:RecordRow,p:PreviewInput){
+  const evidence=reviewedEvidence(r,p);
   const approved=store().prepare("SELECT detail FROM safe_edit_events WHERE operation_id=? AND event='approved' AND actor=? ORDER BY rowid DESC LIMIT 1")
     .get(r.id,r.approval) as {detail:string}|undefined;
   const detail=approved?JSON.parse(approved.detail):null;
-  if(detail?.afterHash!==r.after_hash||detail?.reviewedEvidenceDigest!==revisionReviewEvidence(g).reviewedEvidenceDigest)
+  if(!r.approval||!evidence||detail?.afterHash!==r.after_hash||detail?.reviewedEvidenceDigest!==evidence.reviewedEvidenceDigest)
     throw Error("revision_reviewed_source_evidence_hold");
 }
-function applyWithAdmission(input:unknown,actor:string,revision:boolean) {
+function assertAssessedBundleApproval(p:PreviewInput){
+  for(const t of sourceEventTargets(p.path)){
+    const r=row(t.operationId!);
+    if(!["preview","written"].includes(r.status))throw Error("source_event_bundle_not_ready");
+    // Written members retain their actual receipt; pending members all require
+    // exact approval before the first non-Source write. No subset fallback.
+    if(r.status!=="written")assertReviewedApproval(r,JSON.parse(r.payload));
+  }
+}
+function applyWithAdmission(input:unknown,actor:string,revision:boolean,canonicalAssessed=false) {
   assertEnabled();const args=applySchema.parse(input),r=owned(args.operationId,actor);
   const p=JSON.parse(r.payload) as PreviewInput;
   const managedRevision=hasRevisionAdmission(r.id)||(revisionPilotActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path));
   if(managedRevision&&!revision)throw Error("canonical_review_revision_dedicated_route_required");
   if(revision&&!managedRevision)throw Error("canonical_review_revision_scope_hold");
+  if(hasSourceEventGate(p.path)&&!revision&&!canonicalAssessed)throw Error("source_event_dedicated_apply_required");
   if(!crypto.timingSafeEqual(Buffer.from(sha256(args.previewToken),"hex"),Buffer.from(r.token_hash,"hex"))||args.expectedHash!==r.before_hash) throw Error("Invalid preview token or expected hash");
   if(r.status==="written") return status(r.id,actor);
   checkStoredReviewLineage(r);
   if(Date.now()>r.expires) throw Error("Preview expired; review a fresh diff");
   if(requiresApproval(r)&&!r.approval) throw Error("Explicit authenticated dashboard approval of this exact protected/revision diff is required; open approvalUrl");
-  if(managedRevision)assertRevisionApproval(r,p,actor);
+  if(managedRevision||hasSourceEventGate(p.path))assertReviewedApproval(r,p);
+  assertAssessedBundleApproval(p);
   if(r.status==="writing") throw Error("Interrupted write: inspect receipt and backup; do not replay without recovery review");
   // Cross-process lock deliberately has no stale timeout. A crash requires
   // administrator recovery, rather than silently racing an unknown writer.
@@ -440,7 +462,9 @@ function applyWithAdmission(input:unknown,actor:string,revision:boolean) {
     const {abs}=target(p.path),current=read(abs);
     if((p.change.kind==="create"?current!==null:current===null)||sha256(current??"")!==r.before_hash) throw Error("Version conflict: re-preview; another writer changed this note");
     checkEvidence(p);
-    if(managedRevision)assertRevisionApproval(r,p,actor);
+    if(managedRevision||hasSourceEventGate(p.path))assertReviewedApproval(r,p);
+    assertSourceEventWrite(r.id,p.path,current??"",r.after_text,actor,p.change,"apply");
+    assertAssessedBundleApproval(p);
     assertResearchJudgeWrite(p.path,current??"",r.after_text,actor,"apply");
     assertPilotApply(r.id,p.path,current??"",r.after_text,actor);
     assertReceivedClaimWrite(p.path,current??"",r.after_text,actor,"apply");

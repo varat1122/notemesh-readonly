@@ -7,7 +7,8 @@ import {z} from "zod";
 import {db} from "../db";
 import {previewCanonicalRevision,applyCanonicalRevision,status} from "../safe-edit/engine";
 import {withPausedSync} from "../safe-edit/sync";
-import {canonicalRevisionInputSchema,verifyRevisionCandidate,makeRevisionGate,recordRevisionAdmission,revisionGate} from "../safe-edit/canonical-review-revision-pilot";
+import {canonicalRevisionInputSchema,verifyRevisionCandidate,makeRevisionGate,recordRevisionAdmission,revisionGate,revisionInputDigest} from "../safe-edit/canonical-review-revision-pilot";
+import {revisionEventProposal,evaluateSourceEvent,enrollSourceEvent,sourceEventOperationId,withdrawSourceEvent} from "../safe-edit/source-event-admission";
 import {indexedRead,createReceipt} from "../vault/investment-research-context";
 import {applySchema} from "../safe-edit/schema";
 const sha=(x:string)=>createHash("sha256").update(x).digest("hex");
@@ -17,8 +18,12 @@ export const canonicalRevisionApplySchema=z.object({
  authorization:applySchema
 }).strict();
 export function prepareCanonicalReviewRevision(raw:unknown,actor:string){
+ withdrawSourceEvent((raw as {sourceEvent?:unknown}|null)?.sourceEvent,actor);
  const candidate=verifyRevisionCandidate(raw),input=candidate.input;
- const operationId="ICR-"+sha(JSON.stringify([actor,candidate.inputDigest,input.existingReview.path])).slice(0,32);
+ const admission=evaluateSourceEvent(revisionEventProposal(input),input.sourceEvent,actor);
+ enrollSourceEvent(admission,actor);
+ if(admission.decision!=="PASS")throw Error("source_event_revision_hold: "+admission.reasons.join(","));
+ const operationId=sourceEventOperationId(admission);
  const request={operationId,path:input.existingReview.path,reason:"IOS-ORCH-RI-001 disposable Source-bound low-risk existing Review revision",
    change:{kind:"append" as const,heading:candidate.review.raw.includes("## บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)")?"บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)":"Research analysis (AI interpretation; not approved Thesis)",
      content:candidate.body,date:input.reviewDate}};
@@ -36,10 +41,11 @@ export function prepareCanonicalReviewRevision(raw:unknown,actor:string){
    preview:p,writesPerformed:false,protectedNotesTouched:false};
 }
 export async function applyCanonicalReviewRevision(raw:unknown,actor:string){
+ withdrawSourceEvent((raw as {input?:{sourceEvent?:unknown}}|null)?.input?.sourceEvent,actor);
  const args=canonicalRevisionApplySchema.parse(raw);
  if(args.operationId!==args.authorization.operationId)throw Error("revision_operation_identity_hold");
  const g=revisionGate(args.operationId);
- if(g.actor!==actor||g.inputDigest!==sha(JSON.stringify(args.input))||
+ if(g.actor!==actor||g.inputDigest!==revisionInputDigest(args.input)||
     g.path!==args.input.existingReview.path||g.beforeHash!==args.input.existingReview.expectedSha256)
    throw Error("revision_input_or_review_binding_hold");
  // A completed operation is read-only on retry; do not require the old Review
@@ -49,6 +55,8 @@ export async function applyCanonicalReviewRevision(raw:unknown,actor:string){
  const outcome=previous.status==="written"?await withPausedSync(()=>applyCanonicalRevision(args.authorization,actor)):await (async()=>{
    const candidate=verifyRevisionCandidate(args.input);
    if(g.inputDigest!==candidate.inputDigest)throw Error("revision_semantic_input_drift_hold");
+   const admission=evaluateSourceEvent(revisionEventProposal(args.input),args.input.sourceEvent,actor);
+   if(admission.decision!=="PASS"||sourceEventOperationId(admission)!==args.operationId)throw Error("source_event_revision_hold");
    return withPausedSync(()=>applyCanonicalRevision(args.authorization,actor));
  })();
  const receipt=outcome.receipt;
@@ -69,7 +77,7 @@ export async function applyCanonicalReviewRevision(raw:unknown,actor:string){
    operationId:g.operationId,reviewPath:g.path,afterHash:g.afterHash,receipt,
    sourceLinks:linkStatus,reviewAppendChainVerified:chainVerified,sourceReceiptsVerified:sourcesVerified,researchStatus:"draft",independentEvidenceIncrement:0,
    originalSourcePreserved:true,protectedNotesTouched:false,
-   perDeviceSync:"not_verified",humanPresence:"not_verified",criticIndependence:"not_verified"};
+   perDeviceSync:"not_verified",humanPresence:"not_verified",criticIndependence:"not_verified",issuerBinding:"analyst_attested_not_independently_verified"};
 }
 export function inspectCanonicalReviewRevision(operationId:string,actor:string){
  const g=revisionGate(operationId);

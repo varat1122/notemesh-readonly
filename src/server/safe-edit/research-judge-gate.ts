@@ -19,7 +19,7 @@ export interface JudgeGate {
   scopeWitness:JudgeScope|null;
   targets:{path:string;sha256:string;operationId:string;kind:"source_intake"|"structured_claim"|"canonical_review";eligible:boolean}[];
 }
-export function assertJudgeAdmissionOrder(current:JudgeGate|null,next:Pick<JudgeGate,"packetEnvelopeDigest"|"packetIssuedAt"|"resultEnvelopeDigest"|"decision">){
+export function assertJudgeAdmissionOrder(current:Pick<JudgeGate,"decision"|"packetEnvelopeDigest"|"packetIssuedAt"|"revokedAt">|null,next:Pick<JudgeGate,"packetEnvelopeDigest"|"packetIssuedAt"|"resultEnvelopeDigest"|"decision">){
   if(!current)return;
   // Legacy gates lack envelope identity, not terminal-state authority. Never
   // let missing identity (or an invalid withdrawal clock) erase HOLD/FAIL.

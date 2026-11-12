@@ -11,13 +11,15 @@ import { z } from "zod";
 import {intakeClaimsSchema,researchLineageSchema} from "../vault/canonical-claims";
 import {researchReviewSchema} from "./research-review-schema";
 import { planInvestmentWriteback } from "../vault/investment-writeback-router";
-import { apply, preview, previewCanonicalSource, previewCanonicalReview, recordResearchJudgeGate, recordCanonicalAppearance, status } from "../safe-edit/engine";
+import { apply, applyCanonicalAssessed, preview, previewCanonicalAssessedClaim, previewCanonicalSource, previewCanonicalReview, recordResearchJudgeGate, recordCanonicalAppearance, status } from "../safe-edit/engine";
 import {appearanceSchema,canonicalAppearance,requireAppearance,checkAppearanceRetry,appearanceReadback} from "../vault/intake-appearances";
 import { withPausedSync } from "../safe-edit/sync";
 import {JUDGE_VERSION,DRAFT_RISK_POLICY,draftRiskAssessmentSchema,judgeSubmissionSchema,evaluateResearchJudge,verifyResearchJudgeEnvelope,judgeEnvelopeDigest,judgeHash,stableJudgeJson} from "../vault/research-judge";
 import {RESEARCH_STATE_POLICY} from "../vault/research-state";
 import {currentJudgeGate,assertJudgeAdmissionOrder} from "../safe-edit/research-judge-gate";
 import {c1Pilot} from "../c1-pilot";
+import {sourceEventSubmissionSchema} from "../vault/source-event-contract";
+import {sourceEventRequired,canonicalEventProposal,evaluateSourceEvent,enrollSourceEvent,assertEnrolledSourceEvent,withdrawSourceEvent,type EventAdmission} from "../safe-edit/source-event-admission";
 import {recordPilotAssessment,pilotRestriction,pilotAdmissionSummary} from "../safe-edit/c1-pilot-review";
 
 const nonempty = z.string().min(1);
@@ -51,6 +53,7 @@ const canonicalBaseSchema = z.object({
   claims:intakeClaimsSchema,
   researchLineage:researchLineageSchema,
   researchJudge:judgeSubmissionSchema.optional().describe("Opt-in Chat-first semantic gate. Supply the exact server-sealed packet and typed analyst-attested result. HOLD/FAIL preserves Source only. Once admitted, this intake cannot silently return to a legacy ungated writer. PASS never grants primary authority."),
+  sourceEvent:sourceEventSubmissionSchema.optional().describe("Required for company Review admission in the isolated revision/Event pilot. Exact server packet plus evidence-grounded issuer/event assessment; omission never means new_event. Source-only remains eligible."),
   claim: z.object({metric: nonempty.max(140), period: nonempty.max(120), statement: z.string().min(8).max(2500),
     value: z.string().max(150).optional(), unit: z.string().max(80).optional()}).optional(),
   contentTypes: z.array(z.enum(["reported_fact", "earnings", "guidance", "industry_data", "macro_data",
@@ -154,6 +157,8 @@ function revokeMatchingJudge(raw:unknown,actor:string,planId?:unknown,forced?:"H
 /** Restrictive admission hook also used before the MCP SDK validates the rest
  * of a canonical request. This never prepares targets or issues authority. */
 export function withdrawCanonicalJudge(tool:string,raw:unknown,actor:string){
+  const eventInput=tool==="apply_canonical_writeback"?(raw as {input?:{sourceEvent?:unknown}}|null)?.input:raw as {sourceEvent?:unknown}|null;
+  if(eventInput&&typeof eventInput==="object")withdrawSourceEvent(eventInput.sourceEvent,actor);
   if(tool==="prepare_canonical_writeback")revokeMatchingJudge(raw,actor);
   else if(tool==="apply_canonical_writeback"&&raw&&typeof raw==="object"){
     const request=raw as {input?:unknown;planId?:unknown};
@@ -165,7 +170,7 @@ export function withdrawCanonicalJudge(tool:string,raw:unknown,actor:string){
 }
 
 function planned(input: z.infer<typeof canonicalInputSchema>,actor:string) {
-  const {researchJudge,...clean}=input;
+  const {researchJudge,sourceEvent,...clean}=input;
   const plan = planInvestmentWriteback(clean);
   const workflow = plan.safeEditWorkflow;
   if(!workflow) throw Error("No canonical Safe Edit recipe; sourceChat and analysis/capture mode are required");
@@ -187,20 +192,27 @@ function planned(input: z.infer<typeof canonicalInputSchema>,actor:string) {
       trust:{actorLabelSha256:"",actorProvenance:"not_established",session:"not_exposed",modelVersion:"not_exposed",judgeIdentity:"analyst_attested_unverified"},semanticTruthVerified:false,primaryAuthority:false};
   }
   const enrolled=currentJudgeGate(plan.planId);
+  let eventAdmission:EventAdmission|null=null;
+  const eventReasons:string[]=[];
+  const eventRequired=sourceEventRequired()&&clean.domain==="company"&&!clean.captureOnly;
+  if(eventRequired){
+    try{eventAdmission=evaluateSourceEvent(canonicalEventProposal(clean,plan),sourceEvent,actor);eventReasons.push(...eventAdmission.reasons);}
+    catch(e){eventReasons.push(e instanceof Error&&e.message.startsWith("source_event_")?e.message:"source_event_packet_or_assessment_required");}
+  }
   if((judge&&judge.decision!=="PASS")||(!researchJudge&&(enrolled||c1Pilot()))||
-    pilotRestriction(plan.planId,judge?.packetEnvelopeDigest,judge?.packetIssuedAt)){
+    pilotRestriction(plan.planId,judge?.packetEnvelopeDigest,judge?.packetIssuedAt)||eventRequired&&eventAdmission?.decision!=="PASS"){
     for(const step of workflow.steps)if(step.kind!=="source_intake"&&step.state==="needs_create"){
       step.state="hold_research_judge";step.safeEditRequest=null;
     }
     workflow.status="hold_research_judge";workflow.readyForNextNews=false;
   }
-  return {plan,workflow,judge,enrolled};
+  return {plan,workflow,judge,enrolled,eventAdmission,eventReasons,eventRequired};
 }
 
 export function prepareCanonicalWriteback(raw:unknown,actor:string) {
   withdrawCanonicalJudge("prepare_canonical_writeback",raw,actor);
   const input=canonicalInputSchema.parse(raw);
-  const {plan,workflow,judge,enrolled}=planned(input,actor);
+  const {plan,workflow,judge,enrolled,eventAdmission,eventReasons,eventRequired}=planned(input,actor);
   if(judge&&judge.decision!=="PASS")revokeMatchingJudge(input,actor,plan.planId,judge.decision);
   const previews=[];
   // Admit the exact Source first, then record semantic eligibility in the
@@ -229,28 +241,29 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
         eligible:s.state==="needs_create"||s.state==="verified_existing"}))});
   }
   if(c1Pilot()&&input.researchJudge){const current=currentJudgeGate(plan.planId);if(current?.decision==="PASS"&&current.packetEnvelopeDigest===judge?.packetEnvelopeDigest&&current.resultDigest===judge?.resultDigest)recordPilotAssessment(current,input.researchJudge);}
+  if(eventAdmission)enrollSourceEvent(eventAdmission,actor);
   for(const step of workflow.steps) {
     if(step.state!=="needs_create")continue;
     if(previews.some(p=>p.kind===step.kind&&p.path===step.path))continue;
     if(!step.safeEditRequest) throw Error("Missing add-only recipe");
-    const p=(step.kind==="source_intake"?previewCanonicalSource:step.kind==="canonical_review"?previewCanonicalReview:preview)(step.safeEditRequest,actor);
+    const p=(step.kind==="source_intake"?previewCanonicalSource:step.kind==="canonical_review"?previewCanonicalReview:eventRequired?previewCanonicalAssessedClaim:preview)(step.safeEditRequest,actor);
     if(!p.previewToken) throw Error("Safe Edit did not issue a fresh preview token");
     previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p});
   }
   const appearance=appearancePayload?recordCanonicalAppearance(appearancePayload,actor):null;
-  return {phase:"preview_only",appearance,planId:plan.planId,reviewReuse:plan.reviewReuse,workflowStatus:workflow.status,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
+  return {phase:"preview_only",appearance,planId:plan.planId,reviewReuse:plan.reviewReuse,workflowStatus:workflow.status,sourceEvent:eventRequired?{decision:eventAdmission?.decision??"HOLD",reasons:eventReasons}:null,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     ...(c1Pilot()?{pilotAdmission:pilotAdmissionSummary(plan.planId,judge?.packetEnvelopeDigest,judge?.packetIssuedAt)}:{}),
     qualityIssues:workflow.qualityIssues,claimIssues:workflow.claimIssues,lineageIssues:workflow.lineageIssues,claimInterpretationBoundary:workflow.claimInterpretationBoundary,readyForNextNews:workflow.readyForNextNews,
     archiveProvenanceStatus:workflow.archiveProvenanceStatus,archiveProvenanceReason:workflow.archiveProvenanceReason,
     steps:workflow.steps.map(({kind,path,state,expectedSha256,receiptKey,researchTrust})=>({kind,path,state,expectedSha256,receiptKey,researchTrust})),
     previews,protectedNotesTouched:false,perDeviceSync:"unverified",writesPerformed:false,
-    next:c1Pilot()?"Restricted disposable C1: Source may persist. Non-Source requires the authenticated dashboard's explicit bundle/semantic review at approvalUrl, backend Judge PASS and fresh exact tokens. No human presence or independent critic is established.":"Review exact diffs and authorize apply_canonical_writeback with these tokens; no Vault notes have been written."};
+    next:eventRequired?"Preserve Source first; read prepare_source_event_packet and supply exact sourceEvent assessment. PASS still requires authenticated dashboard approval of every non-Source diff before canonical apply. No semantic truth, human presence or independent critic is established.":c1Pilot()?"Restricted disposable C1: Source may persist. Non-Source requires the authenticated dashboard's explicit bundle/semantic review at approvalUrl, backend Judge PASS and fresh exact tokens. No human presence or independent critic is established.":"Review exact diffs and authorize apply_canonical_writeback with these tokens; no Vault notes have been written."};
 }
 
 export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   withdrawCanonicalJudge("apply_canonical_writeback",raw,actor);
   const args=canonicalApplySchema.parse(raw);
-  const {plan,workflow,judge,enrolled}=planned(args.input,actor);
+  const {plan,workflow,judge,enrolled,eventAdmission,eventReasons,eventRequired}=planned(args.input,actor);
   if(plan.planId!==args.planId) throw Error("Plan identity mismatch; original source or chronology changed");
   if(enrolled&&judge&&enrolled.actor!==actor)throw Error("Operation belongs to another OAuth client");
   if(judge&&judge.decision!=="PASS")revokeMatchingJudge(args.input,actor,plan.planId,judge.decision);
@@ -288,7 +301,8 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
             if(current?.state!=="needs_create"||current.receiptKey!==step.receiptKey||
               current.expectedSha256!==step.expectedSha256)
               throw Error("Canonical state or archive provenance changed; prepare again");
-            writeAttempts++;receipts.push(apply(a,actor));
+            if(step.kind!=="source_intake"&&eventRequired){if(!eventAdmission)throw Error("source_event_exact_enrollment_required");assertEnrolledSourceEvent(eventAdmission,actor);}
+            writeAttempts++;receipts.push((step.kind!=="source_intake"&&eventRequired?applyCanonicalAssessed:apply)(a,actor));
           }
           catch(e) {interrupted=e instanceof Error?e.message:"Safe Edit operation failed";break;}
         }
@@ -303,7 +317,7 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   const verificationHold=workflowVerificationHold||appearance?.disposition==="binding_hold";
   return {phase:"apply_verified_or_pending",appearance,planId:plan.planId,reviewReuse:afterReuse,
     ...(c1Pilot()?{pilotAdmission:pilotAdmissionSummary(plan.planId,judge?.packetEnvelopeDigest,judge?.packetIssuedAt)}:{}),
-    status:verificationHold?"hold_post_write_verification":after.status,readyForNextNews:!verificationHold&&after.readyForNextNews,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
+    status:verificationHold?"hold_post_write_verification":after.status,readyForNextNews:!verificationHold&&after.readyForNextNews,sourceEvent:eventRequired?{decision:eventAdmission?.decision??"HOLD",reasons:eventReasons}:null,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     qualityIssues:after.qualityIssues,claimIssues:after.claimIssues,lineageIssues:after.lineageIssues,claimInterpretationBoundary:after.claimInterpretationBoundary,
     archiveProvenanceStatus:after.archiveProvenanceStatus,archiveProvenanceReason:after.archiveProvenanceReason,
     steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable,researchTrust})=>

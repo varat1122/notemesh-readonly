@@ -93,11 +93,19 @@ function verifyReceiptMetadata(row:ChainRow,path:string,payload:Metadata,receipt
     detail.afterHash!==row.after_hash)
     throw Error("create_receipt_unverified");
   if(row.approval!==null){
-    const approvals=db().prepare("SELECT at,detail FROM safe_edit_events WHERE operation_id=? AND event='approved' AND actor=? LIMIT 2")
-      .all(row.id,row.approval) as Array<{at:string;detail:string}>;
-    const approvedAt=approvals.length===1?isoMillis(approvals[0].at):null;
-    const approved=approvals.length===1?metadata(approvals[0].detail):null;
-    if(approvedAt===null||approvedAt>writtenAt||approved?.afterHash!==row.after_hash)
+    // A fresh reviewed assessment may rotate a pending token for the same
+    // canonical bytes/operation. Bind the actual final approval to that Preview
+    // and the sole write, not to the count of abandoned earlier approvals.
+    // Read only: no journal/receipt rewrite or caller-created authorization.
+    const approval=db().prepare("SELECT rowid,at,detail FROM safe_edit_events WHERE operation_id=? AND event='approved' AND actor=? ORDER BY rowid DESC LIMIT 1")
+      .get(row.id,row.approval) as {rowid:number;at:string;detail:string}|undefined;
+    const preview=db().prepare("SELECT rowid,at FROM safe_edit_events WHERE operation_id=? AND actor=? AND event IN ('preview','preview_token_rotated') ORDER BY rowid DESC LIMIT 1")
+      .get(row.id,row.actor) as {rowid:number;at:string}|undefined;
+    const write=db().prepare("SELECT rowid FROM safe_edit_events WHERE operation_id=? AND event='written'").get(row.id) as {rowid:number}|undefined;
+    const approvedAt=approval?isoMillis(approval.at):null,previewAt=preview?isoMillis(preview.at):null;
+    const approved=approval?metadata(approval.detail):null;
+    if(approvedAt===null||previewAt===null||!approval||!preview||!write||preview.rowid>=approval.rowid||approval.rowid>=write.rowid||
+      previewAt>approvedAt||approvedAt>writtenAt||approved?.afterHash!==row.after_hash)
       throw Error("create_receipt_unverified");
   }
 }
