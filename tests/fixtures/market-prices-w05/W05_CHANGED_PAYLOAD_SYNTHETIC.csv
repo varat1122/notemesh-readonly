@@ -1,0 +1,7 @@
+market,symbol,venue,currency,time_zone,session_date,open,high,low,close,volume,adjusted_close,price_basis,source_type,source_ref,source_captured_at
+US,AAPL,XNAS,USD,America/New_York,2026-10-05,100.00,103.00,99.00,101.00,1000,,synthetic_raw_ohlcv,synthetic_fixture,IOS-W05-LOCAL-MOCK-ONLY,2026-11-13T00:00:00Z
+US,AAPL,XNAS,USD,America/New_York,2026-10-06,101.00,104.00,100.00,102.00,1200,,synthetic_raw_ohlcv,synthetic_fixture,IOS-W05-LOCAL-MOCK-ONLY,2026-11-13T00:00:00Z
+US,AAPL,XNAS,USD,America/New_York,2026-10-07,102.00,104.00,98.00,99.00,1100,,synthetic_raw_ohlcv,synthetic_fixture,IOS-W05-LOCAL-MOCK-ONLY,2026-11-13T00:00:00Z
+US,AAPL,XNAS,USD,America/New_York,2026-10-08,99.00,101.00,97.00,100.00,900,,synthetic_raw_ohlcv,synthetic_fixture,IOS-W05-LOCAL-MOCK-ONLY,2026-11-13T00:00:00Z
+US,AAPL,XNAS,USD,America/New_York,2026-10-09,100.00,105.00,99.00,103.00,1300,,synthetic_raw_ohlcv,synthetic_fixture,IOS-W05-LOCAL-MOCK-ONLY,2026-11-13T00:00:00Z
+US,AAPL,XNAS,USD,America/New_York,2026-10-12,104.00,106.00,103.00,105.00,1600,,synthetic_raw_ohlcv,synthetic_fixture,IOS-W05-LOCAL-MOCK-ONLY,2026-11-13T00:00:00Z

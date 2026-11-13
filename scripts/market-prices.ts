@@ -48,6 +48,13 @@ try {
     const asOf = new Date(process.argv[8]);
     if (!Number.isFinite(asOf.getTime())) throw new PriceError("invalid_snapshot_as_of");
     console.log(JSON.stringify(exportLocalPriceSnapshot(process.argv[4], process.argv[6], asOf, 62, process.argv[10]), null, 2));
+  } else if (command === "price-file-preview") {
+    // W05 Phase A: one explicit local synthetic CSV. No-write preview only; never stores, fetches or archives.
+    if (process.argv.length !== 5 || process.argv[3] !== "--input") throw new PriceError("price_file_preview_requires_input");
+    const { previewPriceFile } = await import("../src/server/market-prices/csv-preview.ts");
+    const result = previewPriceFile(process.argv[4]);
+    console.log(JSON.stringify(result, null, 2));
+    if (result.status !== "PREVIEW_VALID_SYNTHETIC") process.exitCode = 1;
   } else if (command === "daily") {
     if (process.argv.length > 3) throw new PriceError("unexpected_price_job_argument");
     const result = await runDailyPriceJob();
