@@ -105,6 +105,6 @@ it("shows the update button only after activation and reports an incomplete run 
   vi.stubEnv("MARKET_PRICES_REFRESH_ENABLED", "1");
   expect(await (await GET(event(new Request(origin+"/api/market-prices-drive")))).text()).toContain('value="refresh"');
   vi.mocked(runPriceRefresh).mockResolvedValueOnce({ status: "pending_time_limit", trigger: "admin", startedAt: "2026-10-27T06:00:00Z",
-    finishedAt: "2026-10-27T06:05:00Z", universeSize: 8, batches: 1, remainingDue: 3, results: [] });
+    finishedAt: "2026-10-27T06:05:00Z", universeSize: 8, batches: 1, remainingDue: 3, results: [], listingReceipts: [], providerRequests: 0 });
   expect((await POST(refreshRequest())).status).toBe(409);
 });

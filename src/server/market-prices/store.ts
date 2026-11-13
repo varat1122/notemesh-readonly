@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import Database from "better-sqlite3";
 import { inProcessDrWriterFence } from "../backup/writer-fence.ts";
 import { instrument, isoDate, PRICE_POLICY, PriceError, type InstrumentInput, type PriceBar, type PriceSnapshot } from "./model.ts";
+import { priceRights } from "./rights.ts";
 
 export function priceDatabaseLimit(): number {
   const mb = Number(process.env.MARKET_PRICES_MAX_DB_MB ?? "4");
@@ -91,6 +92,16 @@ export class PriceStore {
           observed_at TEXT NOT NULL, before_json TEXT NOT NULL, after_json TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS collector_lease (id INTEGER PRIMARY KEY CHECK(id=1), token TEXT NOT NULL, expires_at INTEGER NOT NULL);
+        -- Additive extension: retain legacy full bars without rewriting their schema/history.
+        CREATE TABLE IF NOT EXISTS partial_bars (
+          instrument_id TEXT NOT NULL REFERENCES instruments(id), date TEXT NOT NULL,
+          open REAL, high REAL, low REAL, close REAL NOT NULL CHECK(close>0),
+          volume INTEGER CHECK(volume IS NULL OR volume>=0), adjusted_close REAL, fetched_at TEXT NOT NULL,
+          PRIMARY KEY(instrument_id,date),
+          CHECK((open IS NULL AND high IS NULL AND low IS NULL) OR
+            (open IS NOT NULL AND high IS NOT NULL AND low IS NOT NULL AND open>0 AND low>0 AND high>=open AND high>=close AND high>=low AND low<=open AND low<=close))
+        );
+        CREATE TABLE IF NOT EXISTS series_metadata (instrument_id TEXT PRIMARY KEY REFERENCES instruments(id), metadata_json TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS quality_issues (
           instrument_id TEXT NOT NULL REFERENCES instruments(id), date TEXT NOT NULL, reason TEXT NOT NULL,
           values_json TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, resolved_at TEXT,
@@ -149,6 +160,9 @@ export class PriceStore {
     this.db.prepare(`INSERT OR IGNORE INTO instruments VALUES (?,?,?,?,?,?)`).run(i.id, i.market, i.symbol, i.yahooSymbol, i.currency, i.timeZone);
   }
 
+  private hasPartialBars() { return !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='partial_bars'").get(); }
+  private barSource() { return this.hasPartialBars() ? "(SELECT * FROM bars UNION ALL SELECT * FROM partial_bars)" : "bars"; }
+
   lastAttempt(input: InstrumentInput): { attempted_at: string; success: number; error_code: string | null } | undefined {
     return this.db.prepare("SELECT attempted_at,success,error_code FROM refreshes WHERE instrument_id=? ORDER BY id DESC LIMIT 1")
       .get(instrument(input).id) as { attempted_at: string; success: number; error_code: string | null } | undefined;
@@ -174,22 +188,32 @@ export class PriceStore {
     if (!this.writable) throw new PriceError("read_only_price_store");
     this.assertSpace();
     const id = snapshot.instrument.id;
+    const expected = instrument(snapshot.instrument);
     // The provider parser is the only producer; also validate at this persistence boundary.
-    if (id !== instrument(snapshot.instrument).id || !snapshot.bars.length || snapshot.bars.length > 10000 ||
+    if (id !== expected.id || snapshot.instrument.currency !== expected.currency || snapshot.instrument.timeZone !== expected.timeZone ||
+      snapshot.instrument.yahooSymbol !== expected.yahooSymbol || snapshot.source !== "yahoo-chart" || !snapshot.bars.length || snapshot.bars.length > 10000 ||
       !Number.isFinite(Date.parse(snapshot.fetchedAt))) throw new PriceError("invalid_snapshot");
     for (const bar of snapshot.bars) {
       isoDate.parse(bar.date);
-      if (![bar.open, bar.high, bar.low, bar.close, bar.volume].every(Number.isFinite) ||
-        !Number.isSafeInteger(bar.volume) || bar.volume < 0 || (bar.adjustedClose !== null && (!Number.isFinite(bar.adjustedClose) || bar.adjustedClose <= 0))) {
+      const full = bar.open !== null && bar.high !== null && bar.low !== null;
+      const closeOnly = bar.open === null && bar.high === null && bar.low === null;
+      if (!Number.isFinite(bar.close) || bar.close <= 0 || (!full && !closeOnly) ||
+        (full && (![bar.open, bar.high, bar.low].every(Number.isFinite) || bar.open! <= 0 || bar.low! <= 0 ||
+          bar.high! < Math.max(bar.open!, bar.close, bar.low!) || bar.low! > Math.min(bar.open!, bar.close, bar.high!))) ||
+        (bar.volume !== null && (!Number.isSafeInteger(bar.volume) || bar.volume < 0)) ||
+        (bar.adjustedClose !== null && (!Number.isFinite(bar.adjustedClose) || bar.adjustedClose <= 0))) {
         throw new PriceError("invalid_snapshot");
       }
     }
     if (new Set(snapshot.bars.map(b => b.date)).size !== snapshot.bars.length) throw new PriceError("duplicate_snapshot_date");
     return this.db.transaction(() => {
       this.ensureInstrument(snapshot.instrument);
-      const before = new Map((this.db.prepare(`SELECT date,open,high,low,close,volume,adjusted_close AS adjustedClose FROM bars WHERE instrument_id=?`).all(id) as PriceBar[])
+      const before = new Map((this.db.prepare(`SELECT date,open,high,low,close,volume,adjusted_close AS adjustedClose FROM ${this.barSource()} WHERE instrument_id=?`).all(id) as PriceBar[])
         .map(bar => [bar.date, bar]));
       const upsert = this.db.prepare(`INSERT INTO bars VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(instrument_id,date) DO UPDATE SET
+        open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,volume=excluded.volume,
+        adjusted_close=excluded.adjusted_close,fetched_at=excluded.fetched_at`);
+      const upsertPartial = this.db.prepare(`INSERT INTO partial_bars VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(instrument_id,date) DO UPDATE SET
         open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,volume=excluded.volume,
         adjusted_close=excluded.adjusted_close,fetched_at=excluded.fetched_at`);
       let inserted = 0, revised = 0, unchanged = 0;
@@ -203,7 +227,9 @@ export class PriceStore {
           this.db.prepare("INSERT INTO revisions(instrument_id,date,observed_at,before_json,after_json) VALUES (?,?,?,?,?)")
             .run(id, bar.date, snapshot.fetchedAt, JSON.stringify(old), JSON.stringify(bar));
         } else unchanged++;
-        upsert.run(id, bar.date, bar.open, bar.high, bar.low, bar.close, bar.volume, bar.adjustedClose, snapshot.fetchedAt);
+        const partial = bar.open === null || bar.volume === null;
+        this.db.prepare(`DELETE FROM ${partial ? "bars" : "partial_bars"} WHERE instrument_id=? AND date=?`).run(id, bar.date);
+        (partial ? upsertPartial : upsert).run(id, bar.date, bar.open, bar.high, bar.low, bar.close, bar.volume, bar.adjustedClose, snapshot.fetchedAt);
         this.db.prepare("UPDATE quality_issues SET resolved_at=? WHERE instrument_id=? AND date=? AND resolved_at IS NULL")
           .run(snapshot.fetchedAt, id, bar.date);
       }
@@ -217,6 +243,7 @@ export class PriceStore {
             .run(id, issue.date, snapshot.fetchedAt, JSON.stringify(old), JSON.stringify({ quarantined: true, ...issue }));
         }
         this.db.prepare("DELETE FROM bars WHERE instrument_id=? AND date=?").run(id, issue.date);
+        this.db.prepare("DELETE FROM partial_bars WHERE instrument_id=? AND date=?").run(id, issue.date);
         this.db.prepare(`INSERT INTO quality_issues VALUES (?,?,?,?,?,?,NULL) ON CONFLICT(instrument_id,date,reason) DO UPDATE SET
           values_json=excluded.values_json,last_seen_at=excluded.last_seen_at,resolved_at=NULL`)
           .run(id, issue.date, issue.reason, JSON.stringify(issue.values), snapshot.fetchedAt, snapshot.fetchedAt);
@@ -232,6 +259,12 @@ export class PriceStore {
       this.db.prepare(`INSERT INTO refreshes(instrument_id,attempted_at,success,row_count,inserted,revised,missing_bars,excluded_current,payload_hash)
         VALUES (?,?,1,?,?,?,?,?,?)`).run(id, snapshot.fetchedAt, snapshot.bars.length, inserted, revised, snapshot.missingBars, snapshot.excludedCurrentSession, payloadHash);
       this.pruneAudit();
+      this.db.prepare("INSERT INTO series_metadata VALUES (?,?) ON CONFLICT(instrument_id) DO UPDATE SET metadata_json=excluded.metadata_json")
+        .run(id, JSON.stringify({ seriesSchemaVersion: 2, instrument: expected, source: snapshot.source,
+          dataOrigin: snapshot.dataOrigin ?? "provider_response_not_independently_verified",
+          sourceUrl: `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(expected.yahooSymbol)}`,
+          priceBasis: PRICE_POLICY.priceBasis, rights: priceRights(snapshot.instrument, new Date(snapshot.fetchedAt)),
+          fetchedAt: snapshot.fetchedAt, mappingVerification: "configured_mapping_not_independent_market_certification" }));
       return { inserted, revised, unchanged, rowCount: snapshot.bars.length };
     })();
   }
@@ -242,11 +275,14 @@ export class PriceStore {
   }
 
   instruments() {
-    return this.db.prepare(`SELECT i.id,i.market,i.symbol,i.yahoo_symbol AS yahooSymbol,i.currency,i.time_zone AS timeZone,
+    const rows = this.db.prepare(`SELECT i.id,i.market,i.symbol,i.yahoo_symbol AS yahooSymbol,i.currency,i.time_zone AS timeZone,
       COUNT(b.date) AS barCount,MIN(b.date) AS firstDate,MAX(b.date) AS lastDate,MAX(b.fetched_at) AS lastFetchedAt,
       (SELECT attempted_at FROM refreshes r WHERE r.instrument_id=i.id AND success=1 ORDER BY id DESC LIMIT 1) AS lastSuccessfulRefresh,
       (SELECT error_code FROM refreshes r WHERE r.instrument_id=i.id ORDER BY id DESC LIMIT 1) AS lastError
-      FROM instruments i LEFT JOIN bars b ON b.instrument_id=i.id GROUP BY i.id ORDER BY i.id`).all();
+      FROM instruments i LEFT JOIN ${this.barSource()} b ON b.instrument_id=i.id GROUP BY i.id ORDER BY i.id`).all() as
+      (InstrumentInput & { id: string; barCount: number; firstDate: string | null; lastDate: string | null;
+        lastFetchedAt: string | null; lastSuccessfulRefresh: string | null; lastError: string | null })[];
+    return rows.map(row => ({ ...row, ...instrument(row) }));
   }
 
   read(input: InstrumentInput, start?: string, end?: string, limit = 100) {
@@ -256,9 +292,11 @@ export class PriceStore {
     if (end) isoDate.parse(end);
     if (start && end && start > end) throw new PriceError("invalid_price_date_range");
     const dates = [target.id, start ?? "0001-01-01", end ?? "9999-12-31"];
-    const count = (this.db.prepare("SELECT COUNT(*) AS n FROM bars WHERE instrument_id=? AND date BETWEEN ? AND ?").get(...dates) as { n: number }).n;
+    const count = (this.db.prepare(`SELECT COUNT(*) AS n FROM ${this.barSource()} WHERE instrument_id=? AND date BETWEEN ? AND ?`).get(...dates) as { n: number }).n;
     const bars = this.db.prepare(`SELECT date,open,high,low,close,volume,adjusted_close AS adjustedClose,fetched_at AS fetchedAt
-      FROM bars WHERE instrument_id=? AND date BETWEEN ? AND ? ORDER BY date DESC LIMIT ?`).all(...dates, limit).reverse();
+      FROM ${this.barSource()} WHERE instrument_id=? AND date BETWEEN ? AND ? ORDER BY date DESC LIMIT ?`).all(...dates, limit).reverse() as (PriceBar & { fetchedAt: string })[];
+    const hasMetadata = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='series_metadata'").get();
+    const metadata = hasMetadata ? this.db.prepare("SELECT metadata_json FROM series_metadata WHERE instrument_id=?").get(target.id) as { metadata_json: string } | undefined : undefined;
     const actions = this.db.prepare(`SELECT date,kind,value,denominator,fetched_at AS fetchedAt FROM actions
       WHERE instrument_id=? AND date BETWEEN ? AND ? ORDER BY date,event_key LIMIT 200`).all(...dates);
     const qualityIssues = this.db.prepare(`SELECT date,reason,last_seen_at AS lastSeenAt FROM quality_issues
@@ -266,7 +304,13 @@ export class PriceStore {
     const issueCount = (this.db.prepare(`SELECT COUNT(*) AS n FROM quality_issues WHERE instrument_id=? AND date BETWEEN ? AND ? AND resolved_at IS NULL`).get(...dates) as { n: number }).n;
     return { instrument: target, policy: PRICE_POLICY, total: count, count: bars.length, truncated: count > bars.length, qualityIssues,
       qualityIssueCount: issueCount, qualityIssuesTruncated: issueCount > qualityIssues.length,
-      selection: "Latest bars in the inclusive requested range, returned oldest first. Narrow start/end to retrieve earlier history.", bars, actions,
+      seriesSchemaVersion: 2, series: metadata ? JSON.parse(metadata.metadata_json) as Record<string, unknown> : { rights: { status: "RIGHTS_HOLD" }, provenance: "legacy_metadata_unavailable" },
+      selection: "Latest bars in the inclusive requested range, returned oldest first. Narrow start/end to retrieve earlier history.",
+      bars: bars.map(b => ({ ...b, completeness: b.open === null ? "close_only" : b.volume === null ? "ohlc_without_volume" : "ohlcv",
+        valueHash: crypto.createHash("sha256").update(JSON.stringify([target.id, "yahoo-chart", "provider_quote_v1", b.date,
+          b.open, b.high, b.low, b.close, b.volume, b.adjustedClose])).digest("hex") })), actions,
+      revisionAudit: { detailedHistoryBounded: true, maxDetailedCorrectionsPerPartition: 5000,
+        valueHash: "SHA-256 JSON array [instrumentId, yahoo-chart, provider_quote_v1, date, open, high, low, close, volume, adjustedClose]; excludes download timestamp" },
       latestRefresh: this.lastAttempt(input) ?? null,
       warnings: ["No live prices. Do not substitute another listing, ADR or DR.",
         "Missing trading dates are not filled. Retained rows can have older fetchedAt values; inspect freshness before analysis."] };

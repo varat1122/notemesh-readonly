@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import crypto from "node:crypto";
 import { inProcessDrWriterFence } from "../backup/writer-fence.ts";
 import { PriceStore } from "./store.ts";
 import { PRICE_POLICY, PriceError, instrument, type InstrumentInput } from "./model.ts";
@@ -6,6 +7,9 @@ import { collectIntoPriceStore, priceWatchlistFrom, scheduledCutoff, pendingPric
 import { GoogleDriveArchives, packDriveArchive, unpackDriveArchive, DRIVE_DB_LIMIT, type ArchiveRepository } from "./drive-archive.ts";
 import { emptyCatalogue, packPriceCatalogue, unpackPriceCatalogue, type CatalogueEntry, type PriceCatalogue } from "./drive-catalogue.ts";
 import { fetchIncremental } from "./incremental.ts";
+import { allRightsHeld, priceRunReceipts } from "./receipts.ts";
+import { priceRights } from "./rights.ts";
+import { priceProviderBudget } from "./request-budget.ts";
 
 export interface PriceReader {
   read: PriceStore["read"];
@@ -71,6 +75,9 @@ export class DrivePriceCache {
     } catch (error) { throw this.failed(error); }
   }
   private openPartition(bytes: Buffer, entry: CatalogueEntry, writable = false): PriceStore {
+    if (entry.archiveSha256 && crypto.createHash("sha256").update(bytes).digest("hex") !== entry.archiveSha256) {
+      throw new PriceError("drive_partition_checksum_mismatch");
+    }
     const decoded = unpackDriveArchive(bytes);
     if (decoded.database.length !== entry.databaseBytes) throw new PriceError("drive_partition_integrity_failed");
     const store = new PriceStore(decoded.database, writable);
@@ -104,7 +111,9 @@ export class DrivePriceCache {
       read: (input, start, end, limit) => {
         const entry = this.cache.get(instrument(input).id);
         if (!entry) throw new PriceError("drive_partition_not_loaded");
-        return entry.store.read(input, start, end, limit);
+        const manifest = this.catalogue.entries.find(e => instrument(e.instrument).id === instrument(input).id)!;
+        return { ...entry.store.read(input, start, end, limit), canonicalListingId: null, dataScope: "listing-local",
+          snapshotBinding: manifest.archiveSha256 ? "catalogue_sha256_and_archive_authenticator" : "legacy_archive_authenticator_without_catalogue_checksum" };
       },
       instruments: () => this.catalogue.entries.map(e => ({ ...instrument(e.instrument), barCount: e.barCount, firstDate: e.firstDate,
         lastDate: e.lastDate, lastFetchedAt: e.lastFetchedAt, lastSuccessfulRefresh: e.lastSuccessfulRefresh, lastError: e.lastError })),
@@ -146,20 +155,33 @@ export class DrivePriceCache {
     // collector work; callers already inside refreshPrices() reuse the scope.
     return inProcessDrWriterFence.withWrite(async () => {
     const watchlist = priceWatchlistFrom(options), count = batchSize(), now = options.now ?? new Date();
+    if (!options.fetcher) {
+      const hold = allRightsHeld(watchlist, now);
+      if (hold) return hold;
+    }
     if (process.env.MARKET_PRICES_DRIVE_SINGLE_WRITER !== "1") throw new PriceError("drive_single_writer_required");
-    if (this.busy) return { status: "collector_busy", results: [] };
-    if (Date.now() < this.retryAfter) return { status: "drive_retry_backoff", results: [] };
+    if (this.busy) return { status: "collector_busy", results: [], listingReceipts: priceRunReceipts(watchlist, []) };
+    if (Date.now() < this.retryAfter) return { status: "drive_retry_backoff", results: [], listingReceipts: priceRunReceipts(watchlist, []) };
     this.busy = true;
     const results: Awaited<ReturnType<typeof collectIntoPriceStore>>["results"] = [];
     try {
       await this.loadVerified(true);
-      if (Math.max(this.providerRetryUntil, this.catalogue.providerRetryAfter ? Date.parse(this.catalogue.providerRetryAfter) : 0) > now.getTime()) return { status: "provider_cooldown", results };
-      const allowed = new Set(watchlist.map(i => instrument(i).id));
+      if (Math.max(this.providerRetryUntil, this.catalogue.providerRetryAfter ? Date.parse(this.catalogue.providerRetryAfter) : 0) > now.getTime()) return { status: "provider_cooldown", results, listingReceipts: priceRunReceipts(watchlist, []) };
       const next: PriceCatalogue = { ...this.catalogue, updatedAt: now.toISOString(), providerRetryAfter: null,
-        entries: this.catalogue.entries.filter(e => allowed.has(instrument(e.instrument).id)) };
+        entries: [...this.catalogue.entries] };
       const entries = new Map(next.entries.map(e => [instrument(e.instrument).id, e]));
-      const selected = watchlist.filter(i => options.force || due(entries.get(instrument(i).id), now)).slice(0, count);
+      const blocked = new Set<string>();
+      if (!options.fetcher) for (const input of watchlist) {
+        const rights = priceRights(input, now), id = instrument(input).id;
+        if (rights.status !== "OPERATOR_ATTESTED") {
+          blocked.add(id);
+          results.push({ instrumentId: id, status: "failed", errorCode: rights.status === "UNSUPPORTED" ? "unsupported_price_instrument" : "price_rights_hold" });
+        }
+      }
+      const selected = watchlist.filter(i => !blocked.has(instrument(i).id) && (options.force || due(entries.get(instrument(i).id), now))).slice(0, count);
       for (const [index, input] of selected.entries()) {
+        const budget = priceProviderBudget.getStore();
+        if (budget && budget.requests >= budget.limit) break;
         if (index > 0) await (options.pause ?? delay)(3000);
         const id = instrument(input).id, old = entries.get(id);
         const working = old ? this.openPartition(await this.archives.get(old.archiveId), old, true) : new PriceStore(":memory:", true);
@@ -171,6 +193,7 @@ export class DrivePriceCache {
             full = next.full; return next.snapshot;
           } });
           results.push(...collected.results);
+          if (collected.status === "pending_request_limit") break;
           const throttled = collected.results.some(row => ["provider_rate_limited", "provider_http_401", "provider_http_403"].includes(row.errorCode ?? ""));
           if (throttled) {
             this.providerRetryUntil = now.getTime() + 60 * 60 * 1000;
@@ -185,7 +208,7 @@ export class DrivePriceCache {
             lastFetchedAt: string | null; lastSuccessfulRefresh: string | null; lastError: string | null };
           const last = working.lastAttempt(input)!;
           const issues = working.db.prepare("SELECT COUNT(*) AS n FROM quality_issues WHERE resolved_at IS NULL").get() as { n: number };
-          entries.set(id, { instrument: input, archiveId: published.id, databaseBytes: database.length,
+          entries.set(id, { instrument: input, archiveId: published.id, archiveSha256: crypto.createHash("sha256").update(packed).digest("hex"), databaseBytes: database.length,
             barCount: coverage.barCount, firstDate: coverage.firstDate, lastDate: coverage.lastDate, lastFetchedAt: coverage.lastFetchedAt,
             lastSuccessfulRefresh: coverage.lastSuccessfulRefresh, lastError: coverage.lastError, lastAttemptAt: last.attempted_at,
             lastAttemptSuccess: !!last.success, qualityIssueCount: issues.n,
@@ -194,7 +217,14 @@ export class DrivePriceCache {
         } finally { working.close(); }
       }
       next.entries = [...entries.values()];
-      if (results.length || next.entries.length !== this.catalogue.entries.length) {
+      const receiptResults = [...results];
+      for (const input of watchlist) {
+        if (!results.some(r => r.instrumentId === instrument(input).id)) {
+          const e = entries.get(instrument(input).id);
+          if (e && !due(e, now)) receiptResults.push({ instrumentId: instrument(input).id, status: "not_due", rowCount: e.barCount, latestSessionDate: e.lastDate });
+        }
+      }
+      if (results.some(r => r.status !== "not_due" && !["price_rights_hold", "unsupported_price_instrument"].includes(r.errorCode ?? ""))) {
         const packed = packPriceCatalogue(next), published = await this.catalogues.publish(packed);
         if (!published.bytes.equals(packed)) throw new PriceError("drive_readback_mismatch");
         this.acceptCatalogue(published.bytes, published.id);
@@ -204,7 +234,7 @@ export class DrivePriceCache {
       const remainingDue = pendingPriceListings(next.entries.map(e => ({ id: instrument(e.instrument).id, barCount: e.barCount,
         lastSuccessfulRefresh: e.lastSuccessfulRefresh, lastError: e.lastError })), watchlist, now);
       return { status: results.some(r => r.status === "failed") ? "partial_failure" : dueNow ? "batch_complete" : remainingDue ? "pending_retry_or_coverage" : "complete",
-        scope: "bounded_batch", universeSize: watchlist.length, remainingDue, results,
+        scope: "bounded_batch", universeSize: watchlist.length, remainingDue, results, listingReceipts: priceRunReceipts(watchlist, receiptResults),
         storage: { backend: "google-drive", catalogueId: this.catalogueId, verifiedAt: this.verifiedAt, readBackVerified: !!this.catalogueId } };
     } catch (error) { throw this.failed(error); } finally { this.busy = false; }
     }, "market_price_drive");

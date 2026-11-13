@@ -5,6 +5,7 @@ import { driveKey, driveAccessToken } from "./drive-auth.ts";
 import { googleBytes, googleJson } from "./drive-http.ts";
 import { PriceError } from "./model.ts";
 import { CATALOGUE_LIMIT, unpackPriceCatalogue } from "./drive-catalogue.ts";
+import type { DrivePilotSession } from "./drive-pilot.ts";
 
 export const DRIVE_DB_LIMIT = 4 * 1024 * 1024;
 const ARCHIVE_LIMIT = DRIVE_DB_LIMIT + 65536;
@@ -54,10 +55,11 @@ export interface ArchiveRepository {
 /** Creates private, immutable generations. Never patches/deletes/shares files or mounts Drive. */
 export class GoogleDriveArchives implements ArchiveRepository {
   private readonly role: "priceArchive" | "priceCatalogue";
-  constructor(role: "priceArchive" | "priceCatalogue" = "priceArchive") { this.role = role; }
+  private readonly pilot?: DrivePilotSession;
+  constructor(role: "priceArchive" | "priceCatalogue" = "priceArchive", pilot?: DrivePilotSession) { this.role = role; this.pilot = pilot; }
   private folderId: string | null = null;
   private namespace = crypto.createHmac("sha256", driveKey("dataset-namespace-v1")).update("prices").digest("hex").slice(0, 32);
-  private async headers() { return { Authorization: `Bearer ${await driveAccessToken()}` }; }
+  private async headers() { return this.pilot ? this.pilot.headers() : { Authorization: `Bearer ${await driveAccessToken()}` }; }
   private async list(query: string, latest = false) {
     const url = new URL("https://www.googleapis.com/drive/v3/files");
     url.search = new URLSearchParams({ q: query, fields: "files(id),nextPageToken", pageSize: latest ? "1" : "2",
@@ -67,6 +69,7 @@ export class GoogleDriveArchives implements ArchiveRepository {
     return result.data;
   }
   private async folder(create: boolean): Promise<string | null> {
+    if (this.pilot) return this.pilot.folder(); // Never discover/create a folder from an unapproved ID.
     this.folderId ??= datasetFolders.get(this.namespace) ?? null;
     if (this.folderId) return this.folderId;
     const query = `trashed=false and mimeType='application/vnd.google-apps.folder' and appProperties has { key='investmentOsPrices' and value='${this.namespace}' }`;
@@ -87,28 +90,43 @@ export class GoogleDriveArchives implements ArchiveRepository {
   }
   async get(id: string): Promise<Buffer> {
     fileSchema.parse({ id });
-    return googleBytes(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,
-      { headers: await this.headers() }, this.role === "priceArchive" ? ARCHIVE_LIMIT : CATALOGUE_LIMIT);
+    if (this.pilot) await this.pilot.inspect(this.role, id);
+    const bytes = await (this.pilot ? this.pilot.bytes.bind(this.pilot) : googleBytes)(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,
+      { headers: await this.headers() }, this.pilot ? this.pilot.payloadLimit(this.role) : this.role === "priceArchive" ? ARCHIVE_LIMIT : CATALOGUE_LIMIT);
+    if (this.pilot) this.pilot.verify(this.role, id, bytes);
+    return bytes;
   }
   async latest() {
     const folder = await this.folder(false); if (!folder) return null;
+    if (this.pilot) {
+      const files = await this.pilot.list(this.pilot.query(this.role));
+      if (files.length !== 1) throw new PriceError("pilot_missing_or_duplicate_generation");
+      return { id: files[0].id, bytes: await this.get(files[0].id) };
+    }
     const result = await this.list(`trashed=false and '${folder}' in parents and appProperties has { key='${this.role}' and value='${this.role === "priceArchive" ? "v1" : "v2"}' }`, true);
     if (!result.files[0]) return null;
     const id = result.files[0].id; return { id, bytes: await this.get(id) };
   }
   async publish(bytes: Buffer) {
+    if (this.pilot) {
+      const prior = this.pilot.prepare(this.role, bytes);
+      if (prior) return { id: prior, bytes: await this.get(prior) };
+    }
     if (this.role === "priceArchive") unpackDriveArchive(bytes);
     else unpackPriceCatalogue(bytes);
     const folder = await this.folder(true);
     const boundary = "investment-os-" + crypto.randomBytes(16).toString("hex");
-    const metadata = { name: `${this.role}-${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID()}.${this.role === "priceArchive" ? "iop" : "ioc"}`,
-      mimeType: "application/octet-stream", parents: [folder], appProperties: { [this.role]: this.role === "priceArchive" ? "v1" : "v2" } };
+    const metadata = { ...(this.pilot?.plannedId(this.role) ? { id: this.pilot.plannedId(this.role) } : {}), name: `${this.role}-${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID()}.${this.role === "priceArchive" ? "iop" : "ioc"}`,
+      mimeType: "application/octet-stream", parents: [folder], appProperties: { [this.role]: this.role === "priceArchive" ? "v1" : "v2",
+        ...(this.pilot ? this.pilot.properties(this.role) : {}) } };
     const body = Buffer.concat([Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`),
       bytes, Buffer.from(`\r\n--${boundary}--\r\n`)]);
-    const result = fileSchema.safeParse(await googleJson("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
+    this.pilot?.attempt(this.role);
+    const result = fileSchema.safeParse(await (this.pilot ? this.pilot.json.bind(this.pilot) : googleJson)("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
       method: "POST", headers: { ...await this.headers(), "Content-Type": `multipart/related; boundary=${boundary}` }, body,
     }));
     if (!result.success) throw new PriceError("drive_invalid_upload_response");
+    this.pilot?.acceptResultId(this.role, result.data.id);
     // Accept only a byte-for-byte read-back of the new generation, not just an upload receipt.
     const readBack = await this.get(result.data.id);
     if (!readBack.equals(bytes)) throw new PriceError("drive_readback_mismatch");

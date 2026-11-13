@@ -1,0 +1,7 @@
+[
+  { "market": "US", "symbol": "AAPL" },
+  { "market": "US", "symbol": "MSFT" },
+  { "market": "US", "symbol": "SPY" },
+  { "market": "US", "symbol": "GLD" },
+  { "market": "US", "symbol": "^GSPC" }
+]

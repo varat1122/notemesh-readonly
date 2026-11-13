@@ -1,0 +1,22 @@
+[
+  { "market": "US", "symbol": "NVDA" },
+  { "market": "US", "symbol": "SPY" },
+  { "market": "JP", "symbol": "1306" },
+  { "market": "JP", "symbol": "7203" },
+  { "market": "HK", "symbol": "2800" },
+  { "market": "HK", "symbol": "9988" },
+  { "market": "TH", "symbol": "PTT" },
+  { "market": "TH", "symbol": "TDEX" },
+  { "market": "US", "symbol": "AAPL" },
+  { "market": "US", "symbol": "MSFT" },
+  { "market": "US", "symbol": "QQQ" },
+  { "market": "US", "symbol": "GLD" },
+  { "market": "JP", "symbol": "6758" },
+  { "market": "JP", "symbol": "8306" },
+  { "market": "JP", "symbol": "9984" },
+  { "market": "HK", "symbol": "0700" },
+  { "market": "HK", "symbol": "0005" },
+  { "market": "HK", "symbol": "0388" },
+  { "market": "TH", "symbol": "AOT" },
+  { "market": "TH", "symbol": "ADVANC" }
+]
