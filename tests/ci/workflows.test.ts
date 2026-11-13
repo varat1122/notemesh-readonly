@@ -28,9 +28,15 @@ describe("the workflows", () => {
     expect(ci).not.toMatch(/pnpm audit[^\n]*\|\| true/);
     // pnpm 11's bulk endpoint reports GHSA IDs; ignoreCves is no longer read.
     const workspace = parse(readFileSync("pnpm-workspace.yaml", "utf8"));
+    // A patched node-forge is required: do not preserve its historical waiver.
     expect(workspace.audit.ignore).toEqual([
-      "GHSA-86w9-cpqp-85rv", "GHSA-vfj7-8cjw-p6xm",
+      "GHSA-vfj7-8cjw-p6xm",
     ]);
+    expect(workspace.audit.ignore).not.toContain("GHSA-86w9-cpqp-85rv");
+    expect(workspace.overrides["node-forge"]).toBe("1.4.3");
+    const lockfile = readFileSync("pnpm-lock.yaml", "utf8");
+    expect(lockfile).toContain("node-forge@1.4.3:");
+    expect(lockfile).not.toContain("node-forge@1.4.0");
     expect(ci).not.toMatch(/--ignore-unfixable|--ignore-registry-errors/);
     const pkg = JSON.parse(readFileSync("package.json", "utf8"));
     expect(pkg.scripts.build).toContain("node scripts/check-runtime-exclusions.mjs");
