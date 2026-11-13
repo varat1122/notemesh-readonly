@@ -35,8 +35,8 @@ describe("the workflows", () => {
     expect(workspace.audit.ignore).not.toContain("GHSA-86w9-cpqp-85rv");
     expect(workspace.overrides["node-forge"]).toBe("1.4.3");
     const lockfile = readFileSync("pnpm-lock.yaml", "utf8");
-    expect(lockfile).toMatch(/^  node-forge@1\\.4\\.3:/m);
-    expect(lockfile).not.toMatch(/node-forge@1\\.4\\.0/);
+    expect(lockfile).toContain("node-forge@1.4.3:");
+    expect(lockfile).not.toContain("node-forge@1.4.0");
     expect(ci).not.toMatch(/--ignore-unfixable|--ignore-registry-errors/);
     const pkg = JSON.parse(readFileSync("package.json", "utf8"));
     expect(pkg.scripts.build).toContain("node scripts/check-runtime-exclusions.mjs");
