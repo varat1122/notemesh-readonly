@@ -23,6 +23,7 @@ overrides:
   body-parser: ^2.4.0 # GHSA-27r3-jxmh-p828; compressed body trailing bytes
   vite: ^6.4.4 # GHSA-587h-7wmj-h5pm; keep Vite 6, verify Vinxi compatibility
   zod: ^4.6.6 # GHSA-mrhx-c7xc-m3w5; experimental major migration only
+  node-forge: 1.4.3 # 2026-11 security: supersedes 1.4.0; 1.4.3 also closes residual Ed25519 advisory in 1.4.1/1.4.2
 
 # CI fails on a high or critical advisory in a production dependency. An
 # advisory that has been reviewed and found not to apply goes here, with
