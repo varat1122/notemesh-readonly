@@ -11,6 +11,8 @@ export const catalogueEntrySchema = z.object({
   lastFetchedAt: stamp.nullable(), lastSuccessfulRefresh: stamp.nullable(), lastAttemptAt: stamp,
   lastAttemptSuccess: z.boolean(), lastError: z.string().max(100).nullable(), qualityIssueCount: z.number().int().min(0),
   lastFullRefreshAt: stamp.nullable(),
+  // Optional only for reading existing v2 catalogues. Every new publication binds exact bytes.
+  archiveSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 }).strict();
 export const catalogueSchema = z.object({ version: z.literal(2), updatedAt: stamp,
   providerRetryAfter: stamp.nullable(), entries: z.array(catalogueEntrySchema).max(MAX_PRICE_INSTRUMENTS),

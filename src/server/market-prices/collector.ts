@@ -6,7 +6,11 @@ import { instrumentSchema, instrument, PILOT_INSTRUMENTS, BENCHMARKS, MAX_PRICE_
 import { PriceStore, priceDbPath } from "./store.ts";
 import { fetchYahooDaily } from "./yahoo.ts";
 import { inProcessDrWriterFence } from "../backup/writer-fence.ts";
-import { assertPriceTime, priceDeadline } from "./request-budget.ts";
+import { assertPriceTime, priceDeadline, priceProviderBudget } from "./request-budget.ts";
+import { REVIEWED_PILOT, MVP_PILOT, mvpPriceProfile, priceInstrumentLimit, reviewedPriceProfile, listingLocalPriceProfile } from "./universe.ts";
+import { allRightsHeld, priceRunReceipts, stalePriceSession, type PriceListingResult } from "./receipts.ts";
+import { priceRights } from "./rights.ts";
+import { assertListingContinuity, listingSessionQuality } from "./listing-quality.ts";
 
 export function priceScheduleMode() {
   const mode = process.env.MARKET_PRICES_SCHEDULE ?? "in-process";
@@ -17,18 +21,19 @@ export function priceScheduleMode() {
 export function priceWatchlist(): InstrumentInput[] {
   try {
     const value = process.env.MARKET_PRICES_WATCHLIST ? JSON.parse(process.env.MARKET_PRICES_WATCHLIST) :
-      [...PILOT_INSTRUMENTS, ...Object.values(BENCHMARKS).map(({ market, symbol }) => ({ market, symbol }))];
-    const list = z.array(instrumentSchema).min(1).max(MAX_PRICE_INSTRUMENTS).parse(value);
+      mvpPriceProfile() ? MVP_PILOT : reviewedPriceProfile() ? REVIEWED_PILOT : [...PILOT_INSTRUMENTS, ...Object.values(BENCHMARKS).map(({ market, symbol }) => ({ market, symbol }))];
+    const list = z.array(instrumentSchema).min(1).max(priceInstrumentLimit()).parse(value);
     if (new Set(list.map(i => instrument(i).id)).size !== list.length) throw new Error("duplicate");
     return list;
   } catch { throw new PriceError("invalid_price_watchlist"); }
 }
 
-// Run after 06:00 UTC (13:00 Bangkok): the previous session date has ended in all four markets.
+// Legacy cutoff 06:00 UTC; reviewed profile proposes 03:23 UTC (10:23 Bangkok).
 // A boot-time preview before that time does not consume the next scheduled refresh.
 export function scheduledCutoff(now: Date): number {
   const scheduled = new Date(now);
-  scheduled.setUTCHours(6, 0, 0, 0);
+  const afterCloseProfile = reviewedPriceProfile() || listingLocalPriceProfile();
+  scheduled.setUTCHours(afterCloseProfile ? 3 : 6, afterCloseProfile ? 23 : 0, 0, 0);
   if (scheduled.getTime() > now.getTime()) scheduled.setUTCDate(scheduled.getUTCDate() - 1);
   return scheduled.getTime();
 }
@@ -50,6 +55,10 @@ export async function refreshPrices(options: RefreshOptions = {}) {
   // cleanup, so a coordinated freeze cannot enter mid-refresh.
   return inProcessDrWriterFence.withWrite(async () => {
   priceWatchlistFrom(options);
+  if (!options.fetcher) {
+    const hold = allRightsHeld(priceWatchlistFrom(options), options.now ?? new Date());
+    if (hold) return hold;
+  }
   const backend = process.env.MARKET_PRICES_STORAGE ?? "disk";
   if (!["disk", "google-drive"].includes(backend)) throw new PriceError("invalid_price_storage_backend");
   // Explicit filenames are a local CLI/test path; the production Drive collector never creates one.
@@ -64,7 +73,7 @@ export async function refreshPrices(options: RefreshOptions = {}) {
   }, "background_price_collector");
 }
 export function priceWatchlistFrom(options: RefreshOptions) {
-  const list = z.array(instrumentSchema).min(1).max(MAX_PRICE_INSTRUMENTS).parse(options.watchlist ?? priceWatchlist());
+  const list = z.array(instrumentSchema).min(1).max(priceInstrumentLimit()).parse(options.watchlist ?? priceWatchlist());
   if (new Set(list.map(i => instrument(i).id)).size !== list.length) throw new PriceError("duplicate_price_instrument");
   return list;
 }
@@ -72,25 +81,51 @@ export async function collectIntoPriceStore(store: PriceStore, options: RefreshO
   const now = options.now ?? new Date();
   const list = priceWatchlistFrom(options);
   let lease: string | null = null;
-  const results: { instrumentId: string; status: string; inserted?: number; revised?: number; unchanged?: number; rowCount?: number; errorCode?: string }[] = [];
+  const results: PriceListingResult[] = [];
   try {
     lease = store.acquireLease(now);
     if (!lease) return { status: "collector_busy", results };
     if (store.providerCoolingDown(now)) return { status: "provider_cooldown", results };
     for (const [index, input] of list.entries()) {
       assertPriceTime();
+      if (!options.fetcher && priceRights(input, now).status !== "OPERATOR_ATTESTED") {
+        results.push({ instrumentId: instrument(input).id, status: "failed", errorCode:
+          priceRights(input, now).status === "UNSUPPORTED" ? "unsupported_price_instrument" : "price_rights_hold" });
+        continue;
+      }
       const last = store.lastAttempt(input);
       const lastAt = last ? Date.parse(last.attempted_at) : 0;
       const due = !last || (last.success ? lastAt < scheduledCutoff(now) : now.getTime() - lastAt >= 60 * 60 * 1000);
-      if (!options.force && !due) { results.push({ instrumentId: instrument(input).id, status: "not_due" }); continue; }
+      if (!options.force && !due) {
+        const data = store.read(input);
+        results.push({ instrumentId: instrument(input).id, status: "not_due", rowCount: data.total, latestSessionDate: data.bars.at(-1)?.date ?? null }); continue;
+      }
       if (index > 0) await (options.pause ?? delay)(3000);
       assertPriceTime();
       try {
         const snapshot = await (options.fetcher ?? fetchYahooDaily)(input, { now });
+        assertListingContinuity(store, input, snapshot);
         const counts = store.save(snapshot);
-        results.push({ instrumentId: instrument(input).id, status: "updated", ...counts });
+        const saved = store.read(input), latest = saved.bars.at(-1)?.date ?? null;
+        const quality = listingSessionQuality(input, snapshot.bars.map(b => b.date), now);
+        const errorCode = snapshot.quarantinedBars.length || snapshot.missingBars ? "incomplete_or_invalid_provider_bars" :
+          stalePriceSession(input, latest, now) ? "stale_source_session" : null;
+        if (errorCode) {
+          store.failure(input, errorCode, now);
+          results.push({ instrumentId: instrument(input).id, status: "failed", errorCode, ...counts, rowCount: saved.total, latestSessionDate: latest, quality, providerIdentity: snapshot.providerIdentity });
+        } else results.push({ instrumentId: instrument(input).id, status: "updated", ...counts, rowCount: saved.total, latestSessionDate: latest, quality, providerIdentity: snapshot.providerIdentity });
       } catch (error) {
-        const code = error instanceof PriceError ? error.code : "price_refresh_failed";
+        const code = error instanceof PriceError ? error.code : (error as { code?: string })?.code === "SQLITE_FULL" ?
+          "price_database_budget_exhausted" : "price_refresh_failed";
+        // SQLite rolled back the rejected transaction. A full DB cannot reliably persist another receipt.
+        if (code === "price_database_budget_exhausted") {
+          results.push({ instrumentId: instrument(input).id, status: "failed", errorCode: code });
+          return { status: "storage_budget_hold", results, remainingDue: pendingPriceListings(store.instruments(), list, now),
+            receiptPersistence: "run_result_only_database_full" };
+        }
+        // An unissued request is pending work, not a provider failure or a one-hour listing cooldown.
+        if (code === "provider_request_budget_exhausted") return { status: "pending_request_limit", results,
+          remainingDue: pendingPriceListings(store.instruments(), list, now) };
         // Error text from providers/native filesystems is never copied to tools or receipts.
         store.failure(input, code, now);
         results.push({ instrumentId: instrument(input).id, status: "failed", errorCode: code });
@@ -119,6 +154,10 @@ export async function runPriceRefresh(options: PriceRunOptions) {
   if (options.trigger === "job" && mode !== "external") throw new PriceError("price_job_requires_external_schedule");
   if (options.trigger === "background" && mode !== "in-process") throw new PriceError("price_background_schedule_disabled");
   if (options.force) throw new PriceError("bounded_refresh_does_not_force");
+  if (!options.fetcher && !options.batch) {
+    const hold = allRightsHeld(priceWatchlistFrom(options), options.now ?? new Date());
+    if (hold) return { ...hold, trigger: options.trigger, batches: 0, remainingDue: hold.results.length };
+  }
   const maxBatches = options.maxBatches ?? MAX_PRICE_INSTRUMENTS;
   const maxDurationMs = options.maxDurationMs ?? (options.trigger === "admin" ? 300000 : 600000);
   if (!Number.isInteger(maxBatches) || maxBatches < 1 || maxBatches > MAX_PRICE_INSTRUMENTS ||
@@ -134,17 +173,24 @@ export async function runPriceRefresh(options: PriceRunOptions) {
     fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
     if (fs.lstatSync(folder).isSymbolicLink()) throw new PriceError("linked_price_directory_refused");
     try { fs.mkdirSync(lock, { mode: 0o700 }); }
-    catch (e) { if ((e as NodeJS.ErrnoException).code === "EEXIST") return { status: "collector_busy", batches: 0, results: [], remainingDue: null }; throw e; }
+    catch (e) { if ((e as NodeJS.ErrnoException).code === "EEXIST") return { status: "collector_busy", batches: 0, results: [], remainingDue: null,
+      listingReceipts: priceRunReceipts(watchlist, []), providerRequests: 0 }; throw e; }
     const parent = fs.openSync(folder, "r"); try { fs.fsyncSync(parent); } finally { fs.closeSync(parent); }
-    const results: Awaited<ReturnType<typeof collectIntoPriceStore>>["results"] = [];
+    const results: PriceListingResult[] = [];
+    const budget = { requests: 0, limit: mvpPriceProfile() ? 10 : 24 };
+    const receiptFallback = new Map<string, ReturnType<typeof priceRunReceipts>[number]>();
     let batches = 0, remainingDue: number | null = null;
     const summary = (status: string, errorCode?: string) => ({ status, trigger: options.trigger, startedAt: new Date(started).toISOString(),
-      finishedAt: new Date().toISOString(), universeSize: watchlist.length, batches, remainingDue, results, ...(errorCode ? { errorCode } : {}) });
+      finishedAt: new Date().toISOString(), universeSize: watchlist.length, batches, remainingDue, results,
+      listingReceipts: priceRunReceipts(watchlist, results).map(r => r.reason === "not_attempted_or_interrupted" ? receiptFallback.get(r.instrumentId) ?? r : r), providerRequests: budget.requests,
+      ...(errorCode ? { errorCode } : {}) });
     try {
-      return await priceDeadline.run(started + maxDurationMs, async () => {
+      return await priceProviderBudget.run(budget, () => priceDeadline.run(started + maxDurationMs, async () => {
         while (batches < maxBatches) {
           assertPriceTime();
+          if (budget.requests >= budget.limit) return summary("pending_request_limit");
           const result = await (options.batch ?? refreshPrices)({ ...options, watchlist, now: options.now ?? new Date() });
+          if ("listingReceipts" in result) for (const receipt of result.listingReceipts) receiptFallback.set(receipt.instrumentId, receipt);
           batches++; results.push(...result.results);
           remainingDue = "remainingDue" in result && typeof result.remainingDue === "number" ? result.remainingDue : result.status === "complete" ? 0 : null;
           assertPriceTime();
@@ -153,7 +199,7 @@ export async function runPriceRefresh(options: PriceRunOptions) {
           if (!result.results.some(r => r.status === "updated")) return summary("pending_no_progress");
         }
         return summary("pending_batch_limit");
-      });
+      }));
     } catch (e) {
       const code = e instanceof PriceError ? e.code : "price_run_failed";
       return summary(code === "price_refresh_deadline_exceeded" ? "pending_time_limit" : "failed", code);

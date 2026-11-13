@@ -1,0 +1,68 @@
+{
+  "schema": "ios-prices-w05-preview-v0-design-only",
+  "asOf": "2026-11-13",
+  "status": "GOLDEN_EXPECTATIONS_NOT_ENGINE_OUTPUT",
+  "allOutputsMustHave": {
+    "networkRequests": 0,
+    "driveWrites": 0,
+    "databaseWrites": 0,
+    "vaultWrites": 0,
+    "wouldWrite": false,
+    "sourceOrigin": "synthetic_fixture"
+  },
+  "cases": {
+    "W05_GOOD_SYNTHETIC.csv": {
+      "status": "PREVIEW_VALID_SYNTHETIC",
+      "rawRows": 6,
+      "candidateRows": 6,
+      "quarantinedRows": 0,
+      "firstSession": "2026-10-05",
+      "lastSession": "2026-10-12",
+      "identity": "US:AAPL",
+      "eligibleForPersistence": false,
+      "fileSha256": "7fad0fc6302d0d362d25327eba3ee83baf063ddda572933c4ea45a7ee7401043",
+      "bytes": 1120
+    },
+    "W05_INVALID_BAR_SYNTHETIC.csv": {
+      "status": "PREVIEW_QC_HOLD",
+      "rawRows": 2,
+      "candidateRows": 1,
+      "quarantinedRows": 1,
+      "reason": "invalid_ohlc_range",
+      "eligibleForPersistence": false,
+      "fileSha256": "7fa3e5939a6c776206405a7516c57621c8226adf46802427b61a6374dafda27d",
+      "bytes": 473
+    },
+    "W05_DUPLICATE_DATE_SYNTHETIC.csv": {
+      "status": "PREVIEW_HOLD",
+      "rawRows": 2,
+      "candidateRows": 0,
+      "reason": "duplicate_session_date",
+      "eligibleForPersistence": false,
+      "fileSha256": "f9e2c1ac1da552464b85c641b3a110a271e30a8d7f2b26bf5e45d7eaa24c6d2d",
+      "bytes": 473
+    },
+    "W05_MIXED_LISTING_SYNTHETIC.csv": {
+      "status": "PREVIEW_HOLD",
+      "rawRows": 2,
+      "candidateRows": 0,
+      "reason": "mixed_listing_not_supported_v1",
+      "eligibleForPersistence": false,
+      "fileSha256": "48b5a7c680733447de2abc97ae7d9bac1c80973db90723537a1f988a8bc60238",
+      "bytes": 474
+    },
+    "W05_CHANGED_PAYLOAD_SYNTHETIC.csv": {
+      "status": "PREVIEW_VALID_SYNTHETIC",
+      "rawRows": 6,
+      "candidateRows": 6,
+      "quarantinedRows": 0,
+      "firstSession": "2026-10-05",
+      "lastSession": "2026-10-12",
+      "identity": "US:AAPL",
+      "eligibleForPersistence": false,
+      "note": "different raw file hash from GOOD; do not interpret as an authenticated provider correction",
+      "fileSha256": "0f04f39a24aa205ce1f280dc33e63d058bd822ba8640ba3947239dfad6cec188",
+      "bytes": 1120
+    }
+  }
+}
