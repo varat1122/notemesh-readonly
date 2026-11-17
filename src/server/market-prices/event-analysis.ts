@@ -25,6 +25,9 @@ export function analyzePriceEvent(store: Pick<PriceStore, "read">, input: EventA
   if (benchmark.id === target.id) throw new PriceError("benchmark_must_differ_from_stock");
   const stockData = store.read(target, undefined, undefined, 1500);
   const benchmarkData = store.read(benchmark, undefined, undefined, 1500);
+  // The legacy event contract assumes Yahoo adjustment semantics. Import/read
+  // permission is not permission to mix owner history into this calculation.
+  if ([stockData, benchmarkData].some(data => data.series.source === "owner_csv")) throw new PriceError("history_event_analysis_requires_basis_review");
   const methodology = {
     version: "event-window-v1",
     alignment: "Caller supplies the first affected exchange session after checking source publication time. This tool does not infer it from note/import dates.",

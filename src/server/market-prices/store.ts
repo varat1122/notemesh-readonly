@@ -1,10 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import os from "node:os";
 import Database from "better-sqlite3";
 import { inProcessDrWriterFence } from "../backup/writer-fence.ts";
 import { instrument, isoDate, PRICE_POLICY, PriceError, type InstrumentInput, type PriceBar, type PriceSnapshot } from "./model.ts";
 import { priceRights } from "./rights.ts";
+import { prepareHistoryBatch, historyHash, HISTORY_IMPORT_SCHEMA, HISTORY_SOURCE_SCHEMA, SYNTHETIC_HISTORY_REF,
+  type HistoryImportOptions, type HistoryImportResult, type HistoryReceipt } from "./history-import.ts";
 
 export function priceDatabaseLimit(): number {
   const mb = Number(process.env.MARKET_PRICES_MAX_DB_MB ?? "4");
@@ -35,6 +38,20 @@ export class PriceStore {
   readonly writable: boolean;
   readonly memory: boolean;
   private releaseWriter: (()=>void)|null = null;
+  #disposableHistoryFixture = false;
+
+  /** The only admitted import target in v0: a newly allocated disposable test DB.
+   * No path/flag from a caller can turn an existing runtime DB into this target.
+   */
+  static createDisposableHistoryFixture(): { store: PriceStore; root: string } {
+    if (process.env.NODE_ENV !== "test") throw new PriceError("D1_HOLD");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ios-history-fixture-"));
+    try {
+      const store = new PriceStore(path.join(root, "market-prices", "prices.sqlite"), true);
+      store.#disposableHistoryFixture = true;
+      return { store, root };
+    } catch (error) { fs.rmSync(root, { recursive: true, force: true }); throw error; }
+  }
   constructor(filename: string | Buffer, writable = false) {
     this.memory = Buffer.isBuffer(filename) || filename === ":memory:";
     this.filename = typeof filename === "string" ? filename : ":memory:";
@@ -162,6 +179,112 @@ export class PriceStore {
 
   private hasPartialBars() { return !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='partial_bars'").get(); }
   private barSource() { return this.hasPartialBars() ? "(SELECT * FROM bars UNION ALL SELECT * FROM partial_bars)" : "bars"; }
+  private hasTable(name: string) { return !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name); }
+  private seriesMetadata(id: string): Record<string, unknown> | null {
+    if (!this.hasTable("series_metadata")) return null;
+    const row = this.db.prepare("SELECT metadata_json FROM series_metadata WHERE instrument_id=?").get(id) as { metadata_json: string } | undefined;
+    return row ? JSON.parse(row.metadata_json) as Record<string, unknown> : null;
+  }
+  private assertUniqueBarKeys(id: string): void {
+    if (this.hasPartialBars() && this.db.prepare(`SELECT 1 FROM bars b JOIN partial_bars p
+      ON b.instrument_id=p.instrument_id AND b.date=p.date WHERE b.instrument_id=? LIMIT 1`).get(id)) throw new PriceError("ambiguous_price_bar_key");
+  }
+
+  /** One-source/one-listing import through this native Store, lease and SQLite transaction.
+   * Real-file admission is deliberately unavailable until ORCH proves native D1/recovery.
+   * Default does not parse, write, or replace either existing preview/audit command.
+   */
+  importHistory(bytes: Uint8Array, options: HistoryImportOptions = {}): HistoryImportResult {
+    const fileSha256 = historyHash(bytes);
+    const hold = (status: HistoryImportResult["status"], reason: string): HistoryImportResult => ({ status, applied: false, fileSha256, reason });
+    if (options.mode !== "APPLY") return hold("NO_APPLY", "explicit_disposable_fixture_apply_required");
+    if (!this.#disposableHistoryFixture || !this.writable || process.env.NODE_ENV !== "test") return hold("D1_HOLD", "native_runtime_admission_recovery_not_proven");
+    if (options.rights?.scope !== "synthetic_fixture_only" || options.rights.evidenceRef !== SYNTHETIC_HISTORY_REF) return hold("RIGHTS_HOLD", "synthetic_storage_scope_required");
+    if (options.mapping?.instrumentId !== "US:AAPL" || options.mapping.currency !== "USD" || options.mapping.evidenceRef !== SYNTHETIC_HISTORY_REF) return hold("MAPPING_HOLD", "exact_synthetic_mapping_required");
+    const now = new Date();
+    let batch: ReturnType<typeof prepareHistoryBatch>;
+    try { batch = prepareHistoryBatch(bytes, now); }
+    catch (error) {
+      return hold(error instanceof PriceError && error.code === "real_file_apply_requires_D1" ? "D1_HOLD" : "INPUT_HOLD",
+        error instanceof PriceError ? error.code : "invalid_history_csv");
+    }
+    this.assertSpace();
+    return this.db.transaction((): HistoryImportResult => {
+      const id = batch.target.id;
+      const metadata = this.seriesMetadata(id);
+      const old = this.db.prepare(`SELECT date,open,high,low,close,volume,adjusted_close AS adjustedClose FROM ${this.barSource()} WHERE instrument_id=? ORDER BY date`).all(id) as PriceBar[];
+      const conflict = (reason: string, existing: unknown, incoming: unknown): HistoryImportResult => ({ ...hold("HOLD_CONFLICT", reason), conflict: { existing, incoming } });
+      if (new Set(old.map(b => b.date)).size !== old.length) return conflict("ambiguous_price_bar_key", metadata, batch.rows);
+      if ((metadata && (metadata.source !== batch.source || metadata.priceBasis !== batch.priceBasis || metadata.sourceRef !== batch.sourceRef)) || (old.length && !metadata)) {
+        return conflict("source_or_basis_conflict", { series: metadata, dates: old.map(b => b.date) }, { source: batch.source, sourceRef: batch.sourceRef, priceBasis: batch.priceBasis, fileSha256 });
+      }
+      const hasProvenance = this.hasTable("history_bar_provenance");
+      const previous = new Map(old.map(b => [b.date, b]));
+      const additions = [] as typeof batch.rows;
+      for (const row of batch.rows) {
+        const prior = previous.get(row.date);
+        const provenance = hasProvenance ? this.db.prepare("SELECT value_hash,provenance_json FROM history_bar_provenance WHERE instrument_id=? AND date=?").get(id, row.date) as { value_hash: string; provenance_json: string } | undefined : undefined;
+        if (prior && (!provenance || provenance.value_hash !== row.inputValueHash ||
+          ["open", "high", "low", "close", "volume", "adjustedClose"].some(k => prior[k as keyof PriceBar] !== row[k as keyof PriceBar]))) {
+          return conflict("overlapping_history_conflict", { bar: prior, provenance: provenance ? JSON.parse(provenance.provenance_json) : metadata }, { bar: row, source: batch.source, priceBasis: batch.priceBasis, fileSha256 });
+        }
+        if (!prior && provenance) return conflict("orphan_history_provenance", provenance, row);
+        if (this.db.prepare("SELECT 1 FROM quality_issues WHERE instrument_id=? AND date=? AND resolved_at IS NULL").get(id, row.date)) return conflict("unresolved_quality_issue", { date: row.date }, row);
+        if (!prior) additions.push(row);
+      }
+      const receiptId = historyHash(JSON.stringify([HISTORY_IMPORT_SCHEMA, id, fileSha256]));
+      const replay = this.hasTable("history_import_receipts") ? this.db.prepare("SELECT receipt_json FROM history_import_receipts WHERE receipt_id=?").get(receiptId) as { receipt_json: string } | undefined : undefined;
+      if (replay) {
+        if (additions.length) return conflict("receipt_readback_drift", JSON.parse(replay.receipt_json), batch.rows);
+        return { status: "IDEMPOTENT", applied: false, fileSha256, receipt: JSON.parse(replay.receipt_json) as HistoryReceipt };
+      }
+      const token = this.acquireLease(now);
+      if (!token) return hold("WRITER_BUSY", "collector_lease_active");
+      try {
+        this.ensureInstrument(batch.target);
+        // Metadata belongs to this same SQLite database and commits with its bars.
+        this.db.exec(`CREATE TABLE IF NOT EXISTS history_import_receipts (
+          receipt_id TEXT PRIMARY KEY, instrument_id TEXT NOT NULL REFERENCES instruments(id),
+          file_sha256 TEXT NOT NULL, revision INTEGER NOT NULL, receipt_json TEXT NOT NULL,
+          UNIQUE(instrument_id,revision));
+          CREATE TABLE IF NOT EXISTS history_source_versions (
+          instrument_id TEXT NOT NULL REFERENCES instruments(id), revision INTEGER NOT NULL, record_json TEXT NOT NULL,
+          PRIMARY KEY(instrument_id,revision));
+          CREATE TABLE IF NOT EXISTS history_bar_provenance (
+          instrument_id TEXT NOT NULL REFERENCES instruments(id), date TEXT NOT NULL, value_hash TEXT NOT NULL,
+          provenance_json TEXT NOT NULL, PRIMARY KEY(instrument_id,date));`);
+        const revision = (this.db.prepare("SELECT COALESCE(MAX(revision),0)+1 AS n FROM history_import_receipts WHERE instrument_id=?").get(id) as { n: number }).n;
+        const importedAt = now.toISOString();
+        for (const row of additions) {
+          const table = row.open === null || row.volume === null ? "partial_bars" : "bars";
+          // No UPSERT and no deletion of a competing source/representation.
+          this.db.prepare(`INSERT INTO ${table} VALUES (?,?,?,?,?,?,?,?,?)`).run(id, row.date, row.open, row.high, row.low, row.close, row.volume, row.adjustedClose, importedAt);
+          this.db.prepare("INSERT INTO history_bar_provenance VALUES (?,?,?,?)").run(id, row.date, row.inputValueHash, JSON.stringify({
+            source: batch.source, sourceRef: batch.sourceRef, dataOrigin: "synthetic_fixture", priceBasis: batch.priceBasis,
+            fileSha256, receiptId, revision, sourceLine: row.sourceLine, decimalValues: row.decimalValues,
+            observedAt: row.observedAt, retrievedAt: row.retrievedAt, importedAt, independentVerification: false,
+          }));
+        }
+        const total = this.db.prepare(`SELECT COUNT(*) AS rows,MIN(date) AS firstSession,MAX(date) AS lastSession FROM ${this.barSource()} WHERE instrument_id=?`).get(id) as { rows: number; firstSession: string; lastSession: string };
+        const receipt: HistoryReceipt = { schema: HISTORY_IMPORT_SCHEMA, receiptId, fileSha256, source: batch.source,
+          dataOrigin: "synthetic_fixture", instrumentId: id, sourceRef: batch.sourceRef, priceBasis: batch.priceBasis,
+          importedAt, revision, sourceRecordVersion: HISTORY_SOURCE_SCHEMA, inserted: additions.length,
+          unchanged: batch.rows.length - additions.length, inputRows: batch.rows.length, totalRows: total.rows,
+          coverage: { ...total, officialCalendarVerified: false }, rights: { status: "SYNTHETIC_ONLY_NOT_ENTITLED", evidenceRef: options.rights!.evidenceRef },
+          mappingEvidenceRef: options.mapping!.evidenceRef, independentVerification: false };
+        this.db.prepare("INSERT INTO history_import_receipts VALUES (?,?,?,?,?)").run(receiptId, id, fileSha256, revision, JSON.stringify(receipt));
+        const sourceRecord = { schema: HISTORY_SOURCE_SCHEMA, revision, receiptId, source: batch.source, sourceRef: batch.sourceRef,
+          fileSha256, priceBasis: batch.priceBasis, dataOrigin: "synthetic_fixture", rights: receipt.rights,
+          mappingVerification: "synthetic_fixture_only_not_independently_verified", coverage: receipt.coverage, importedAt };
+        this.db.prepare("INSERT INTO history_source_versions VALUES (?,?,?)").run(id, revision, JSON.stringify(sourceRecord));
+        this.db.prepare("INSERT INTO series_metadata VALUES (?,?) ON CONFLICT(instrument_id) DO UPDATE SET metadata_json=excluded.metadata_json")
+          .run(id, JSON.stringify({ ...sourceRecord, seriesSchemaVersion: 2, instrument: batch.target }));
+        this.db.prepare(`INSERT INTO refreshes(instrument_id,attempted_at,success,row_count,inserted,revised,payload_hash)
+          VALUES (?,?,1,?,?,0,?)`).run(id, importedAt, batch.rows.length, additions.length, fileSha256);
+        return { status: "APPLIED_SYNTHETIC", applied: true, fileSha256, receipt };
+      } finally { this.releaseLease(token); }
+    }).immediate();
+  }
 
   lastAttempt(input: InstrumentInput): { attempted_at: string; success: number; error_code: string | null } | undefined {
     return this.db.prepare("SELECT attempted_at,success,error_code FROM refreshes WHERE instrument_id=? ORDER BY id DESC LIMIT 1")
@@ -207,6 +330,9 @@ export class PriceStore {
     }
     if (new Set(snapshot.bars.map(b => b.date)).size !== snapshot.bars.length) throw new PriceError("duplicate_snapshot_date");
     return this.db.transaction(() => {
+      this.assertUniqueBarKeys(id);
+      const storedSource = this.seriesMetadata(id)?.source;
+      if (storedSource && storedSource !== snapshot.source) throw new PriceError("price_source_conflict");
       this.ensureInstrument(snapshot.instrument);
       const before = new Map((this.db.prepare(`SELECT date,open,high,low,close,volume,adjusted_close AS adjustedClose FROM ${this.barSource()} WHERE instrument_id=?`).all(id) as PriceBar[])
         .map(bar => [bar.date, bar]));
@@ -282,11 +408,18 @@ export class PriceStore {
       FROM instruments i LEFT JOIN ${this.barSource()} b ON b.instrument_id=i.id GROUP BY i.id ORDER BY i.id`).all() as
       (InstrumentInput & { id: string; barCount: number; firstDate: string | null; lastDate: string | null;
         lastFetchedAt: string | null; lastSuccessfulRefresh: string | null; lastError: string | null })[];
-    return rows.map(row => ({ ...row, ...instrument(row) }));
+    return rows.map(row => {
+      const series = this.seriesMetadata(row.id);
+      return { ...row, ...instrument(row), ...(series?.source === "owner_csv" ? {
+        source: "owner_csv", priceBasis: String(series.priceBasis), dataOrigin: series.dataOrigin,
+        sourceRecordRevision: series.revision,
+      } : {}) };
+    });
   }
 
   read(input: InstrumentInput, start?: string, end?: string, limit = 100) {
     const target = instrument(input);
+    this.assertUniqueBarKeys(target.id);
     if (!Number.isInteger(limit) || limit < 1 || limit > 1500) throw new PriceError("invalid_price_limit");
     if (start) isoDate.parse(start);
     if (end) isoDate.parse(end);
@@ -295,29 +428,48 @@ export class PriceStore {
     const count = (this.db.prepare(`SELECT COUNT(*) AS n FROM ${this.barSource()} WHERE instrument_id=? AND date BETWEEN ? AND ?`).get(...dates) as { n: number }).n;
     const bars = this.db.prepare(`SELECT date,open,high,low,close,volume,adjusted_close AS adjustedClose,fetched_at AS fetchedAt
       FROM ${this.barSource()} WHERE instrument_id=? AND date BETWEEN ? AND ? ORDER BY date DESC LIMIT ?`).all(...dates, limit).reverse() as (PriceBar & { fetchedAt: string })[];
-    const hasMetadata = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='series_metadata'").get();
-    const metadata = hasMetadata ? this.db.prepare("SELECT metadata_json FROM series_metadata WHERE instrument_id=?").get(target.id) as { metadata_json: string } | undefined : undefined;
+    const series = this.seriesMetadata(target.id) ?? { rights: { status: "RIGHTS_HOLD" }, provenance: "legacy_metadata_unavailable" };
+    const imported = series.source === "owner_csv";
+    const source = imported ? "owner_csv" : "yahoo-chart";
+    const basis = imported ? String(series.priceBasis) : "provider_quote_v1";
+    if (imported && !this.hasTable("history_bar_provenance")) throw new PriceError("history_provenance_missing");
+    const policy = imported ? { ...PRICE_POLICY, source, priceBasis: basis,
+      completion: "Owner-supplied session dates; no official calendar or market verification.",
+      adjustment: "Preserve supplied values and separate adjustedClose; no conversion, forward-fill or basis splicing.",
+      revisionNoise: "Conflicting import values HOLD; immutable import receipts and source revisions are retained." } : PRICE_POLICY;
     const actions = this.db.prepare(`SELECT date,kind,value,denominator,fetched_at AS fetchedAt FROM actions
       WHERE instrument_id=? AND date BETWEEN ? AND ? ORDER BY date,event_key LIMIT 200`).all(...dates);
     const qualityIssues = this.db.prepare(`SELECT date,reason,last_seen_at AS lastSeenAt FROM quality_issues
       WHERE instrument_id=? AND date BETWEEN ? AND ? AND resolved_at IS NULL ORDER BY date LIMIT 100`).all(...dates);
     const issueCount = (this.db.prepare(`SELECT COUNT(*) AS n FROM quality_issues WHERE instrument_id=? AND date BETWEEN ? AND ? AND resolved_at IS NULL`).get(...dates) as { n: number }).n;
-    return { instrument: target, policy: PRICE_POLICY, total: count, count: bars.length, truncated: count > bars.length, qualityIssues,
+    return { instrument: target, policy, total: count, count: bars.length, truncated: count > bars.length, qualityIssues,
       qualityIssueCount: issueCount, qualityIssuesTruncated: issueCount > qualityIssues.length,
-      seriesSchemaVersion: 2, series: metadata ? JSON.parse(metadata.metadata_json) as Record<string, unknown> : { rights: { status: "RIGHTS_HOLD" }, provenance: "legacy_metadata_unavailable" },
+      seriesSchemaVersion: 2, series,
       selection: "Latest bars in the inclusive requested range, returned oldest first. Narrow start/end to retrieve earlier history.",
-      bars: bars.map(b => ({ ...b, completeness: b.open === null ? "close_only" : b.volume === null ? "ohlc_without_volume" : "ohlcv",
-        valueHash: crypto.createHash("sha256").update(JSON.stringify([target.id, "yahoo-chart", "provider_quote_v1", b.date,
-          b.open, b.high, b.low, b.close, b.volume, b.adjustedClose])).digest("hex") })), actions,
+      bars: bars.map(b => {
+        let provenance: Record<string, unknown> | undefined;
+        if (imported) {
+          const row = this.db.prepare("SELECT provenance_json FROM history_bar_provenance WHERE instrument_id=? AND date=?").get(target.id, b.date) as { provenance_json: string } | undefined;
+          if (!row) throw new PriceError("history_provenance_missing");
+          provenance = JSON.parse(row.provenance_json) as Record<string, unknown>;
+        }
+        return { ...b, ...(provenance ? { source, priceBasis: basis, provenance } : {}), completeness: b.open === null ? "close_only" : b.volume === null ? "ohlc_without_volume" : "ohlcv",
+          valueHash: crypto.createHash("sha256").update(JSON.stringify([target.id, source, basis, b.date,
+            b.open, b.high, b.low, b.close, b.volume, b.adjustedClose])).digest("hex") };
+      }), actions,
       revisionAudit: { detailedHistoryBounded: true, maxDetailedCorrectionsPerPartition: 5000,
-        valueHash: "SHA-256 JSON array [instrumentId, yahoo-chart, provider_quote_v1, date, open, high, low, close, volume, adjustedClose]; excludes download timestamp" },
+        ...(imported ? { importReceipts: this.db.prepare("SELECT receipt_json FROM history_import_receipts WHERE instrument_id=? ORDER BY revision DESC LIMIT 20").all(target.id).map(row => JSON.parse((row as { receipt_json: string }).receipt_json) as HistoryReceipt), importReceiptLimit: 20, importReceiptsPruned: false } : {}),
+        valueHash: `SHA-256 JSON array [instrumentId, ${source}, ${basis}, date, open, high, low, close, volume, adjustedClose]; excludes download timestamp` },
       latestRefresh: this.lastAttempt(input) ?? null,
       warnings: ["No live prices. Do not substitute another listing, ADR or DR.",
         "Missing trading dates are not filled. Retained rows can have older fetchedAt values; inspect freshness before analysis."] };
   }
 
   status() {
-    return { enabled: process.env.MARKET_PRICES_ENABLED === "1", policy: PRICE_POLICY, instruments: this.instruments(),
+    const instruments = this.instruments();
+    const policy = instruments.some(i => i.source === "owner_csv") ? { ...PRICE_POLICY, source: "per_series",
+      priceBasis: "Source/basis differ by series; inspect read_price_bars provenance. Owner CSV is not Yahoo or independently verified." } : PRICE_POLICY;
+    return { enabled: process.env.MARKET_PRICES_ENABLED === "1", policy, instruments,
       receipts: this.db.prepare(`SELECT instrument_id AS instrumentId,attempted_at AS attemptedAt,success,error_code AS errorCode,
         row_count AS rowCount,inserted,revised,missing_bars AS missingBars,excluded_current AS excludedCurrent,payload_hash AS payloadHash
         FROM refreshes ORDER BY id DESC LIMIT 20`).all(),
