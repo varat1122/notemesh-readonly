@@ -22,7 +22,8 @@
     "snapshot:sources:offline": "node --experimental-strip-types scripts/audit-vault-snapshot.mjs --sources",
     "snapshot:review:offline": "node --experimental-strip-types scripts/audit-vault-snapshot.mjs --review",
     "prices:status": "node scripts/market-prices.ts status",
-    "prices:refresh": "node scripts/market-prices.ts refresh"
+    "prices:refresh": "node scripts/market-prices.ts refresh",
+    "prices:import-audit": "node scripts/prices-import-audit.ts"
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.7",
