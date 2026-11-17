@@ -62,7 +62,7 @@ export type ImportPreviewResult = {
 };
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const INSTRUMENT = /^[A-Z0-9_]{2,15}:[A-Z0-9.\-]{1,30}$/;
+const INSTRUMENT = /^[A-Z0-9_]{2,15}:[A-Z0-9.-]{1,30}$/;
 const CURRENCY = /^[A-Z]{3}$/;
 const BASIS = new Set(["RAW", "SPLIT_ADJUSTED", "DIVIDEND_ADJUSTED", "TOTAL_RETURN"]);
 const LEGACY_MARKETS = new Set(["US", "TH", "HK", "JP"]);
