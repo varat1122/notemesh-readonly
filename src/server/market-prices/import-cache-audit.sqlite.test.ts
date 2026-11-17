@@ -95,6 +95,27 @@ describe("Historical CSV vs real SQLite PriceStore Reader (disposable, NO APPLY)
     expect(hash(fs.readFileSync(filename))).toBe(before);
   });
 
+  it("honors a real SQLite quarantine record rather than treating a missing bar as clean", async () => {
+    const filename = priceDbPath();
+    const writer = new PriceStore(filename, true);
+    try {
+      writer.save(parseYahooChart(chartFixture(listing), listing, TEST_NOW));
+      const bad = parseYahooChart(chartFixture(listing), listing, TEST_NOW);
+      const removed = bad.bars.shift()!;
+      bad.quarantinedBars.push({ date: removed.date, reason: "invalid_provider_bar", values: {
+        open: 10, high: 9, low: 8, close: 11, volume: 100,
+      } });
+      writer.save(bad);
+    } finally { writer.close(); }
+    const before = hash(fs.readFileSync(filename));
+    const rows = parsePriceImportCsv(csv(row("2026-10-14")));
+    const report = await readCachedPrices(reader => auditHistoricalPriceCsvAgainstCache(rows, reader, "2026-10-16"), [listing]) as
+      ReturnType<typeof auditHistoricalPriceCsvAgainstCache>;
+    expect(report.observations[0].status).toBe("CACHE_QUARANTINED");
+    expect(report.preview.rows[0].action).toBe("HOLD");
+    expect(hash(fs.readFileSync(filename))).toBe(before);
+  });
+
   it("does not initialize a missing database, even when invoked via the CLI", () => {
     const filename = priceDbPath();
     const csvPath = path.join(root,"no-cache.csv");
