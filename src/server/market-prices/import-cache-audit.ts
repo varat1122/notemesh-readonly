@@ -19,8 +19,8 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 10_000;
 
 export type CacheBar = {
-  date: string; open: number; high: number; low: number; close: number;
-  volume: number; adjustedClose: number | null; fetchedAt?: string;
+  date: string; open: number | null; high: number | null; low: number | null; close: number;
+  volume: number | null; adjustedClose: number | null; fetchedAt?: string;
 };
 export type CacheReader = {
   instruments(): unknown;
@@ -33,8 +33,10 @@ export type CacheObservation = {
   sourceLine: number; instrumentId: string; sessionDate: string;
   status: "MATCHING_SUPPLIED_FIELDS" | "DIFFERENT_FROM_CACHE" | "ABSENT_IN_CACHE" |
     "CACHE_INSTRUMENT_NOT_FOUND" | "CACHE_QUARANTINED" | "CACHE_READ_INCOMPLETE" |
-    "INVALID_OR_UNSUPPORTED_ID" | "INVALID_DATE" | "CACHE_CURRENCY_MISMATCH" | "NO_COMPARABLE_PRICE_FIELDS";
-  comparedFields: string[]; differentFields: string[]; cachedFetchedAt: string | null;
+    "INVALID_OR_UNSUPPORTED_ID" | "INVALID_DATE" | "CACHE_CURRENCY_MISMATCH" | "NO_COMPARABLE_PRICE_FIELDS" |
+    "PRECISION_LIMITED_MATCH_CANDIDATE" | "CACHE_FIELD_NOT_AVAILABLE";
+  comparedFields: string[]; differentFields: string[]; precisionLimitedFields: string[]; missingCachedFields: string[];
+  cachedFetchedAt: string | null;
 };
 
 /** CSV RFC-4180 quoting, CRLF and embedded newlines; retain physical source row numbers. */
@@ -118,6 +120,26 @@ function monthBounds(day: string): {start: string; end: string} {
 }
 
 /**
+ * The Yahoo Chart cache often contains float32-shaped JSON values, e.g. an
+ * observed 162.85000610351562 for a CSV quote written as "162.85". That is
+ * NOT evidence of exact equality: mark it as a precision-limited candidate,
+ * and keep the import HOLD. Only accept this label if the cached double is
+ * exactly the float32 encoding of the supplied decimal and the discrepancy
+ * stays within half of the last decimal place the owner supplied. This never
+ * applies to integer Volume or to arbitrary near prices.
+ */
+function floatPrecisionCandidate(text: string, cached: number, field: typeof NUMERIC[number]): boolean {
+  if (field === "volume" || !Number.isFinite(cached)) return false;
+  const value = text.replace(/^\+/, "");
+  if (!/^\d+(?:\.\d{1,8})?$/.test(value)) return false;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === cached || Math.fround(number) !== cached) return false;
+  const places = value.split(".")[1]?.length ?? 0;
+  const halfLastPlace = 0.5 * (10 ** -places);
+  return Math.abs(number - cached) <= halfLastPlace;
+}
+
+/**
  * Uses the existing cache reader for ONE instrument only. Query is bounded per calendar
  * month (<=31 daily rows); even 20y of source rows never requires a 20y reader response.
  * All comparisons are observational only; no baseline completion or rights inferred.
@@ -154,7 +176,8 @@ export function auditHistoricalPriceCsvAgainstCache(rows: readonly HistoricalInp
   }
   const observations: CacheObservation[] = rows.map(row => {
     const instrumentId=row.instrument_id.trim(), sessionDate=row.session_date.trim();
-    const base={sourceLine:row.sourceLine,instrumentId,sessionDate,comparedFields:[] as string[],differentFields:[] as string[],cachedFetchedAt:null as string|null};
+    const base={sourceLine:row.sourceLine,instrumentId,sessionDate,comparedFields:[] as string[],differentFields:[] as string[],
+      precisionLimitedFields:[] as string[],missingCachedFields:[] as string[],cachedFetchedAt:null as string|null};
     if (!instrument || instrumentId!==id) return {...base,status:"INVALID_OR_UNSUPPORTED_ID" as const};
     if (!validDay(sessionDate)) return {...base,status:"INVALID_DATE" as const};
     if (!declared) return {...base,status:"CACHE_INSTRUMENT_NOT_FOUND" as const};
@@ -167,22 +190,29 @@ export function auditHistoricalPriceCsvAgainstCache(rows: readonly HistoricalInp
     const comparable: Record<typeof NUMERIC[number], number|null> = {
       open:cached.open,high:cached.high,low:cached.low,close:cached.close,volume:cached.volume,adjusted_close:cached.adjustedClose,
     };
-    const comparedFields: string[] = [], differentFields: string[] = [];
+    const comparedFields: string[] = [], differentFields: string[] = [], precisionLimitedFields: string[] = [], missingCachedFields: string[] = [];
     for (const field of NUMERIC) {
       const supplied = row[field]?.trim();
       if (supplied == null || supplied === "") continue;
       comparedFields.push(field);
       const number = Number(supplied);
-      if (!/^\+?\d+(?:\.\d+)?$/.test(supplied) || !Number.isFinite(number) || comparable[field] == null || number !== comparable[field]) differentFields.push(field);
+      if (!/^\+?\d+(?:\.\d+)?$/.test(supplied) || !Number.isFinite(number)) differentFields.push(field);
+      else if (comparable[field] === null) missingCachedFields.push(field);
+      else if (number === comparable[field]) { /* Exact numeric equality, not price-basis or rights equality. */ }
+      else if (floatPrecisionCandidate(supplied, comparable[field], field)) precisionLimitedFields.push(field);
+      else differentFields.push(field);
     }
-    return {...base, comparedFields,differentFields,cachedFetchedAt:cached.fetchedAt??null,
-      status:!comparedFields.length ? "NO_COMPARABLE_PRICE_FIELDS" as const : differentFields.length ? "DIFFERENT_FROM_CACHE" as const : "MATCHING_SUPPLIED_FIELDS" as const};
+    const status = !comparedFields.length ? "NO_COMPARABLE_PRICE_FIELDS" : differentFields.length ? "DIFFERENT_FROM_CACHE" :
+      missingCachedFields.length ? "CACHE_FIELD_NOT_AVAILABLE" : precisionLimitedFields.length ? "PRECISION_LIMITED_MATCH_CANDIDATE" : "MATCHING_SUPPLIED_FIELDS";
+    return {...base, comparedFields,differentFields,precisionLimitedFields,missingCachedFields,cachedFetchedAt:cached.fetchedAt??null,status};
   });
   const statusCounts:Record<string,number>={};
   for(const x of observations) statusCounts[x.status]=(statusCounts[x.status]??0)+1;
   return {contract:"ios-price-csv-cache-audit-v0.1.0",mode:"READ_ONLY_NO_APPLY",preview,observations,statusCounts,notes:[
     "No DB writes, collector updates, provider calls or source/rights approvals occurred.",
     "MATCHING_SUPPLIED_FIELDS compares numeric fields only. It does not verify source, rights, adjusted basis, or Point-in-Time validity.",
+    "PRECISION_LIMITED_MATCH_CANDIDATE is neither an exact match nor an authorization to overwrite or suppress a conflict; review raw provider precision and price basis.",
+    "CACHE_FIELD_NOT_AVAILABLE reflects a null cached O/H/L/Volume field; no missing values are synthesized.",
     "The import preview retains HOLD without independent mapping, storage rights, and a complete baseline. No rows have been imported.",
     "Missing from the cache does not prove that an exchange session, entitlement, or historical row exists.",
   ]};
