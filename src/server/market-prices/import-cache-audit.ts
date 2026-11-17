@@ -26,7 +26,10 @@ export type CacheReader = {
   instruments(): unknown;
   read(input: {market: "US" | "TH" | "HK" | "JP"; symbol: string}, start?: string, end?: string, limit?: number): {
     instrument: {currency: string}; total: number; truncated: boolean; bars: CacheBar[];
-    qualityIssues?: {date: string; reason: string}[];
+    // PriceStore.read() returns untyped SQLite rows here; validate at this boundary.
+    qualityIssues?: unknown[];
+    qualityIssueCount?: number;
+    qualityIssuesTruncated?: boolean;
   };
 };
 export type CacheObservation = {
@@ -167,10 +170,22 @@ export function auditHistoricalPriceCsvAgainstCache(rows: readonly HistoricalInp
     for (const key of keys) {
       const {start,end} = monthBounds(`${key}-01`);
       const value = reader.read(instrument,start,end,1500);
-      if (value.total > 1500 || value.truncated || value.bars.length !== value.total) {
+      // The native SQLite reader intentionally exposes quality issue rows as unknown[].
+      // If the issue list is invalid or truncated, never infer the month is clean.
+      const issues = value.qualityIssues ?? [];
+      const isIssue = (item: unknown): item is { date: string; reason: string } =>
+        item !== null && typeof item === "object" &&
+        "date" in item && typeof item.date === "string" && validDay(item.date) &&
+        "reason" in item && typeof item.reason === "string" && item.reason.length > 0;
+      const checkedIssues: { date: string; reason: string }[] | null =
+        Array.isArray(issues) && issues.every(isIssue) ? issues : null;
+      const countValid = value.qualityIssueCount === undefined ||
+        (Number.isInteger(value.qualityIssueCount) && value.qualityIssueCount === issues.length);
+      if (value.total > 1500 || value.truncated || value.bars.length !== value.total ||
+        value.qualityIssuesTruncated === true || !checkedIssues || !countValid) {
         months.set(key,{bars:new Map(),quarantine:new Set(),incomplete:true,currency:value.instrument.currency});
       } else {
-        months.set(key,{bars:new Map(value.bars.map(x=>[x.date,x])),quarantine:new Set((value.qualityIssues??[]).map(x=>x.date)),incomplete:false,currency:value.instrument.currency});
+        months.set(key,{bars:new Map(value.bars.map(x=>[x.date,x])),quarantine:new Set(checkedIssues.map(x=>x.date)),incomplete:false,currency:value.instrument.currency});
       }
     }
   }
