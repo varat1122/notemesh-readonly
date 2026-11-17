@@ -55,8 +55,8 @@ describe("Historical CSV audit: native PriceStore Reader, NO APPLY",()=>{
     const row = {...base, close:"162.85", adjusted_close:"162.85", open:"", high:"", low:"", volume:""};
     const r=reader();
     r.read=()=>({instrument:{currency:"USD"},total:1,truncated:false,bars:[{
-      date:"2026-11-13",open:169.91000366210938,high:170,low:158.38999938964844,
-      close:162.85000610351562,volume:363819700,adjustedClose:162.85000610351562,
+      date:"2026-11-13",open:Math.fround(169.91),high:170,low:Math.fround(158.39),
+      close:Math.fround(162.85),volume:363819700,adjustedClose:Math.fround(162.85),
       fetchedAt:"2026-11-16T06:00:21.520Z"}],qualityIssues:[]});
     const report=audit([row],r);
     expect(report.observations[0]).toMatchObject({status:"PRECISION_LIMITED_MATCH_CANDIDATE",differentFields:[],
