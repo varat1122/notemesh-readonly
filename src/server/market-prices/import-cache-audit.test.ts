@@ -141,4 +141,29 @@ describe("Historical CSV audit: native PriceStore Reader, NO APPLY",()=>{
   it("checks cap before allocating huge source row array",()=>{
     expect(()=>parsePriceImportCsv("x".repeat(5*1024*1024+1))).toThrow("csv_exceeds_5mib_limit");
   });
+  it("fails closed on malformed, truncated or incomplete native quality issue lists", () => {
+    const malformed = reader();
+    const originalMalformed = malformed.read;
+    malformed.read = (input, start, end, limit) => ({
+      ...originalMalformed(input, start, end, limit), qualityIssues: [{ date: "not-a-date", reason: "invalid_provider_bar" }],
+      qualityIssueCount: 1,
+    });
+    expect(audit([base], malformed).observations[0].status).toBe("CACHE_READ_INCOMPLETE");
+
+    const truncated = reader();
+    const originalTruncated = truncated.read;
+    truncated.read = (input, start, end, limit) => ({
+      ...originalTruncated(input, start, end, limit), qualityIssues: [], qualityIssueCount: 101,
+      qualityIssuesTruncated: true,
+    });
+    expect(audit([base], truncated).observations[0].status).toBe("CACHE_READ_INCOMPLETE");
+
+    const mismatched = reader();
+    const originalMismatched = mismatched.read;
+    mismatched.read = (input, start, end, limit) => ({
+      ...originalMismatched(input, start, end, limit), qualityIssues: [], qualityIssueCount: 1,
+      qualityIssuesTruncated: false,
+    });
+    expect(audit([base], mismatched).observations[0].status).toBe("CACHE_READ_INCOMPLETE");
+  });
 });
