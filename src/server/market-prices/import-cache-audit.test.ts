@@ -51,6 +51,37 @@ describe("Historical CSV audit: native PriceStore Reader, NO APPLY",()=>{
     const result=audit([base],reader({close:11.00000001}));
     expect(result.observations[0].differentFields).toEqual(["close"]);
   });
+  it("isolates Yahoo float32 representation from genuine price conflicts",()=>{
+    const row = {...base, close:"162.85", adjusted_close:"162.85", open:"", high:"", low:"", volume:""};
+    const r=reader();
+    r.read=()=>({instrument:{currency:"USD"},total:1,truncated:false,bars:[{
+      date:"2026-11-13",open:169.91000366210938,high:170,low:158.38999938964844,
+      close:162.85000610351562,volume:363819700,adjustedClose:162.85000610351562,
+      fetchedAt:"2026-11-16T06:00:21.520Z"}],qualityIssues:[]});
+    const report=audit([row],r);
+    expect(report.observations[0]).toMatchObject({status:"PRECISION_LIMITED_MATCH_CANDIDATE",differentFields:[],
+      precisionLimitedFields:["close","adjusted_close"]});
+    expect(report.preview.rows[0].action).toBe("HOLD");
+    expect(audit([{...row,close:"162.84"}],r).observations[0]).toMatchObject({
+      status:"DIFFERENT_FROM_CACHE",differentFields:["close"]});
+    // The supplied source asserts eight decimal places, so the rounded float32
+    // cannot silently pass as a displayed-precision match.
+    expect(audit([{...row,close:"162.85000000"}],r).observations[0]).toMatchObject({
+      status:"DIFFERENT_FROM_CACHE",differentFields:["close"]});
+  });
+  it("preserves missing O/H/L/Volume from the newer PriceStore close-only schema",()=>{
+    const r=reader();
+    r.read=()=>({instrument:{currency:"USD"},total:1,truncated:false,bars:[{
+      date:"2026-11-13",open:null,high:null,low:null,close:11,volume:null,adjustedClose:null,
+      fetchedAt:"2026-11-16T06:00:00Z"}],qualityIssues:[]});
+    const full=audit([base],r);
+    expect(full.observations[0]).toMatchObject({status:"CACHE_FIELD_NOT_AVAILABLE",
+      missingCachedFields:["open","high","low","volume","adjusted_close"],differentFields:[]});
+    const closeOnly=audit([{...base,open:"",high:"",low:"",volume:"",adjusted_close:""}],r);
+    expect(closeOnly.observations[0]).toMatchObject({status:"MATCHING_SUPPLIED_FIELDS",comparedFields:["close"],
+      missingCachedFields:[]});
+    expect(closeOnly.preview.rows[0].action).toBe("HOLD");
+  });
   it("marks close-only rows as partial numeric observation, but holds import",()=>{
     const row={...base,open:"",high:"",low:"",volume:""};
     const result=audit([row]);
