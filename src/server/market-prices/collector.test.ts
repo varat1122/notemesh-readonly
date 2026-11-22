@@ -46,3 +46,38 @@ it("validates watchlists before creating a database or making a request", async 
   await expect(refreshPrices({ fetcher, pause })).rejects.toThrow("invalid_price_watchlist");
   expect(fs.existsSync(priceDbPath())).toBe(false);
 });
+
+it("does not call a temporarily deferred failed listing complete just because no retry is due", async () => {
+  const unavailable = vi.fn(async () => { throw new PriceError("provider_unavailable"); });
+  expect((await refreshPrices({ now: TEST_NOW, fetcher: unavailable, pause })).status).toBe("partial_failure");
+  const next = await refreshPrices({ now: TEST_NOW, fetcher: unavailable, pause });
+  expect(next).toMatchObject({ status: "pending_retry_or_coverage", remainingDue: 8 });
+  expect(next.results.every(r => r.status === "not_due")).toBe(true);
+  expect(unavailable).toHaveBeenCalledTimes(8);
+});
+
+it("keeps a failed refresh pending despite usable cached bars until a successful retry clears it", async () => {
+  const watchlist = [PILOT_INSTRUMENTS[0]];
+  const first = await refreshPrices({ watchlist, now: TEST_NOW, fetcher, pause });
+  expect(first).toMatchObject({ status: "complete", remainingDue: 0 });
+
+  const unavailable = vi.fn(async () => { throw new PriceError("provider_unavailable"); });
+  expect((await refreshPrices({ watchlist, now: TEST_NOW, force: true, fetcher: unavailable, pause })).status).toBe("partial_failure");
+
+  // Each invocation reopens the persistent database; the failure cannot be lost with process-local state.
+  const retry = vi.fn(async (input: InstrumentInput, options: { now?: Date } = {}) => fetcher(input, options));
+  const waiting = await refreshPrices({ watchlist, now: new Date(TEST_NOW.getTime() + 59 * 60 * 1000), fetcher: retry, pause });
+  expect(waiting).toMatchObject({ status: "pending_retry_or_coverage", remainingDue: 1 });
+  expect(waiting.results).toEqual([{ instrumentId: "US:NVDA", status: "not_due" }]);
+  expect(retry).not.toHaveBeenCalled();
+  const store = new PriceStore(priceDbPath());
+  try {
+    expect(store.read(watchlist[0]).total).toBe(2);
+    expect(store.instruments()[0]).toMatchObject({ lastError: "provider_unavailable" });
+  } finally { store.close(); }
+
+  const recovered = await refreshPrices({ watchlist, now: new Date(TEST_NOW.getTime() + 60 * 60 * 1000), fetcher: retry, pause });
+  expect(recovered).toMatchObject({ status: "complete", remainingDue: 0 });
+  expect(recovered.results[0].status).toBe("updated");
+  expect(retry).toHaveBeenCalledTimes(1);
+});

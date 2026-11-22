@@ -50,13 +50,16 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Fetch exact legacy code for disposable cross-version Judge tests
+        run: git fetch --no-tags --depth=1 origin 6cd9c3cd558dac3d67e9202d8652b406cfdc332a 44efef941f0b586ccd1f1cf84dc608c4f77eb6b2 1294bc8ae7e379ff1188e705ee74ad1c7fde2053
+
       - name: Test
         run: pnpm test
 
       # Only chromium: these check that pages render and forms work, which is
       # not a cross-browser question, and the download dominates the job time.
       - name: Install the browser for the end-to-end tests
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
 
       - name: End-to-end tests
         run: pnpm test:e2e
@@ -135,6 +138,20 @@ jobs:
         run: |
           docker exec nm node --input-type=module -e "for (const path of ['/api/market-prices-drive','/api/market-prices-drive/callback']) { const r = await fetch('http://127.0.0.1:3000'+path); if (r.status !== 401 || r.headers.get('cache-control') !== 'no-store') { console.error(path, r.status); process.exit(1); } }"
 
+      - name: C1 identity guard preserves legacy restart and refuses reserved pilot startup without mode
+        run: |
+          docker restart nm >/dev/null
+          ready=0
+          for i in $(seq 1 30); do
+            if docker exec nm node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+          if docker run --rm -e DATA_DIR=/tmp/ios-c1-pilot-ci-refused notemesh:ci node -e 'process.exit(0)' > /tmp/c1-refused.log 2>&1; then
+            echo 'reserved pilot startup unexpectedly admitted'; exit 1
+          fi
+          grep -q c1_pilot_mode_required_hold /tmp/c1-refused.log
+
       # /proc rather than ps: the slim image has no procps, and /proc is the
       # source ps reads anyway.
       - name: tini is PID 1 and node is its child
@@ -144,7 +161,7 @@ jobs:
           test "$pid1" = "tini"
           # By command line, not by the Name: field: Node 24 names its main
           # thread, so status reports MainThread rather than node.
-          children=$(docker exec nm sh -c 'for p in /proc/[0-9]*; do grep -q "^PPid:[[:space:]]*1$" "$p/status" 2>/dev/null && tr "\\0" " " < "$p/cmdline" && echo; done')
+          children=$(docker exec nm sh -c 'for p in /proc/[0-9]*; do if grep -q "^PPid:[[:space:]]*1$" "$p/status" 2>/dev/null; then tr "\\0" " " < "$p/cmdline" && echo; fi; done')
           echo "children of PID 1: $children"
           echo "$children" | grep -q "^node "
 

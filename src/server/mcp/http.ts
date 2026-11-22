@@ -7,6 +7,7 @@ import { withToolAuthMetadata } from "./tool-auth";
 import { canSaveAnalysis, saveScopeRequired, canSafeEdit, editScopeRequired, type McpEndpoint } from "./endpoint";
 import { createSafeEditMcpServer } from "./safe-edit-server";
 import { createSaveMcpServer } from "./save-server";
+import { trackToolExecution } from "./maintenance-tools";
 
 export const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
@@ -88,10 +89,10 @@ export async function serveMcp(request: Request, access: McpAccess, endpoint: Mc
 
   startLoopLagMonitor();
   if (endpoint === "research") ensureIndexerStarted();
-  const server = endpoint === "safe-edit" ? createSafeEditMcpServer(access) : endpoint === "save-analysis" ? createSaveMcpServer(access) : createMcpServer(access, {
+  const server = trackToolExecution(endpoint === "safe-edit" ? createSafeEditMcpServer(access) : endpoint === "save-analysis" ? createSaveMcpServer(access) : createMcpServer(access, {
     host: request.headers.get("host"),
     forwardedProto: request.headers.get("x-forwarded-proto"),
-  });
+  }));
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   });

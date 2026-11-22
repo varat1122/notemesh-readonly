@@ -1,4 +1,7 @@
 import { betterAuth } from "better-auth";
+import { getAdapter } from "better-auth/db/adapter";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type Database from "better-sqlite3";
 import { getMigrations } from "better-auth/db/migration";
 import { createAuthMiddleware, APIError } from "better-auth/api";
 import { apiKey } from "@better-auth/api-key";
@@ -24,10 +27,11 @@ export const DEFAULT_OAUTH_SCOPES = [
 // Registration eligibility is not a grant. Safe Edit requires an explicit scope request and new consent.
 export const OAUTH_SCOPES = [...DEFAULT_OAUTH_SCOPES, "vault:edit"] as const;
 import crypto from "node:crypto";
-import { db } from "./db";
+import { withAuthDatabaseOwner, d1DatabaseStatus } from "./db";
+import { maintenanceActive } from "./maintenance";
 import { env } from "./env";
 import { authLog } from "./auth-logger";
-import { userCount, withinClaimWindow, CLAIM_WINDOW_MINUTES, installSingleAdminGuard, extraAdminAccounts } from "./claim";
+import { userCount, withinClaimWindow, CLAIM_WINDOW_MINUTES, installSingleAdminGuard, extraAdminAccounts, type UserCount } from "./claim";
 import { audit } from "./audit";
 
 // Both used to live here, and auth is where the rest of the app reaches for
@@ -50,10 +54,24 @@ function authSecret(): string {
 // handful — but bounded so anonymous registration can't grow the DB forever.
 export const MAX_OAUTH_CLIENTS = 50;
 
-export const auth = betterAuth({
+/** Auth hooks and response normalization share the existing bounded Auth
+ * owner queue. Only the count runs under ownership; no request/password work
+ * or HTTP await is enclosed in a SQLite transaction. A denied/unknown count
+ * is never evidence of an unclaimed instance. The single_admin trigger remains
+ * the atomic cross-process admission boundary. */
+export async function authUserCount(): Promise<UserCount> {
+  try {
+    return await withAuthDatabaseOwner(async connection => userCount(connection));
+  } catch {
+    audit("usercount.failed", { message: "auth_count_admission_unavailable" });
+    return { known: false, error: "auth_count_admission_unavailable" };
+  }
+}
+
+function authOptions(connection: Database.Database) { return {
   baseURL: env.baseUrl,
   secret: authSecret(),
-  database: db(),
+  database: connection,
   // Filters one warning Better Auth emits about its own SQLite migration
   // output on every boot — see auth-logger.ts. Everything else passes through.
   logger: { log: authLog },
@@ -109,7 +127,7 @@ export const auth = betterAuth({
     // still inside the post-start claim window — see server/claim.ts.
     before: createAuthMiddleware(async (ctx) => {
       if (ctx.path === "/sign-up/email") {
-        const users = userCount();
+        const users = await authUserCount();
         if (!users.known) {
           // Never create an account on a guess. A database we cannot read is
           // not a database we know to be empty.
@@ -138,46 +156,8 @@ export const auth = betterAuth({
         audit("signup.accepted", {});
       }
 
-      // Anonymous dynamic client registration is the one open write endpoint,
-      // so bound how many rows a stranger can create. Evict clients that were
-      // registered but never used before refusing, since MCP clients routinely
-      // create throwaway registrations (a failed login leaves one behind).
-      if (ctx.path === "/oauth2/register") {
-        const d = db();
+      // DCR cap is enforced atomically by the owned adapter, not this hook.
 
-        // Only the counting is inside the try, and the refusal is outside it.
-        // Both used to be in, which meant the catch needed
-        // `if (e instanceof APIError) throw e` to let the deliberate rejection
-        // back out of its own safety net. That worked, and it put the one
-        // control on this endpoint one edit away from being silently swallowed:
-        // anything that stopped the refusal matching that instanceof — a
-        // wrapped error, a subclass, a careless refactor — would have removed
-        // the cap with nothing failing.
-        //
-        // null means the count could not be established. Registration then
-        // proceeds, deliberately: a bookkeeping failure must not lock out a
-        // legitimate connector.
-        let count: number | null = null;
-        try {
-          d.prepare(
-            `DELETE FROM "oauthClient"
-             WHERE createdAt < ?
-               AND clientId NOT IN (SELECT clientId FROM "oauthAccessToken")
-               AND clientId NOT IN (SELECT clientId FROM "oauthRefreshToken")
-               AND clientId NOT IN (SELECT clientId FROM "oauthConsent")`,
-          ).run(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
-          count = (d.prepare('SELECT COUNT(*) AS n FROM "oauthClient"').get() as { n: number }).n;
-        } catch (e) {
-          console.error("[auth] client-cap check failed:", e);
-        }
-
-        if (count !== null && count >= MAX_OAUTH_CLIENTS) {
-          audit("oauth.register.rejected", { reason: "client_cap", count });
-          throw new APIError("TOO_MANY_REQUESTS", {
-            message: "Too many registered OAuth clients on this instance.",
-          });
-        }
-      }
     }),
     after: createAuthMiddleware(async (ctx) => {
       // Audit sign-in outcomes (no credentials in the log).
@@ -251,48 +231,149 @@ export const auth = betterAuth({
       },
     }),
   ],
-});
+}; }
 
-let migrated = false;
 
-// Creates/updates Better Auth's own tables (user, session, account,
-// apikey, OAuth client/token tables) inside app.sqlite. Runs once per boot.
-// Better Auth 1.7 added `issuer` to the account table: NOT NULL, no default.
-// Its migrator refuses to add such a column to a populated table rather than
-// invent a value, so a deployment upgraded from 1.6 — one admin row — would
-// throw here on every boot and never sign in again. This server knows the
-// value: every account it creates is an email-and-password one, which 1.7
-// records as "local:credential". Added with that backfill before the
-// migrator runs, so it finds the column present and only adds its index.
-// Reproduced and pinned against a 1.6-shaped populated table in
-// auth-upgrade.test.ts.
-function backfillAccountIssuer(): void {
-  const d = db();
-  const table = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'account'").get();
-  if (!table) return;
+// Better Auth >=1.7.3 removed account.issuer. Do not silently alter a live
+// legacy authentication table during the dependency security upgrade.
+function assertLegacyAccountSchemaCleared(d: Database.Database): void {
+  const hasAccount = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'account'").get();
+  if (!hasAccount) return;
   const columns = d.prepare("PRAGMA table_info(account)").all() as { name: string }[];
-  if (columns.some((c) => c.name === "issuer")) return;
-  d.exec("ALTER TABLE account ADD COLUMN issuer TEXT NOT NULL DEFAULT 'local:credential'");
-  console.log("[auth] account table: added issuer for the Better Auth 1.7 upgrade");
-}
-
-export async function runAuthMigrations() {
-  if (migrated) return;
-  backfillAccountIssuer();
-  const { runMigrations } = await getMigrations(auth.options);
-  await runMigrations();
-  // The guard on the user table can only be created once Better Auth has
-  // created the table, so it lives here rather than with our own schema. And
-  // a database that already breaks the invariant — claimed before the guard
-  // existed, by more than one racer — is reported loudly rather than guessed
-  // about; the alert channel carries it too. Recovery is in SECURITY.md.
-  installSingleAdminGuard();
-  const extra = extraAdminAccounts();
-  if (extra > 0) {
-    console.error(
-      `[auth] this server has ${extra + 1} admin accounts and should have exactly one. ` +
-        `See SECURITY.md, "More than one admin account".`,
+  if (columns.some(c => c.name === "issuer")) {
+    throw new Error(
+      "Legacy Better Auth account.issuer detected; deployment held. " +
+      "A verified encrypted off-volume backup, isolated restore and separately reviewed production schema cleanup are required before this build can serve authentication.",
     );
   }
-  migrated = true;
 }
+
+type AuthAdapter = Awaited<ReturnType<typeof getAdapter>>;
+type RegistrationRoute = "dynamic" | "managed" | "other";
+interface AuthRuntime {
+  route: AsyncLocalStorage<RegistrationRoute>;
+  instance?: ReturnType<typeof createConfiguredAuth>;
+  flight?: Promise<ReturnType<typeof createConfiguredAuth>>;
+  failure?: unknown;
+  failed?: boolean;
+  attempts?: number;
+  retryAfter?: number;
+  retryFailure?: unknown;
+}
+const AUTH_RUNTIME = Symbol.for("notemesh.d1.auth-runtime.v1");
+function runtime(): AuthRuntime {
+  const g = globalThis as unknown as Record<symbol, Map<string, AuthRuntime> | undefined>;
+  const all = g[AUTH_RUNTIME] ??= new Map();
+  let state = all.get(env.dbPath);
+  if (!state) { state = { route: new AsyncLocalStorage() }; all.set(env.dbPath, state); }
+  return state;
+}
+
+/** The adapter's already-owned SQLite transaction is the final cap boundary.
+ * No caller body, userId=null heuristic, trigger, or hook count grants entry. */
+function enforceDynamicCap(d: Database.Database) {
+  if (!d.inTransaction) throw Error("d1_dcr_transaction_required");
+  d.prepare(`DELETE FROM "oauthClient" WHERE createdAt < ?
+    AND clientId NOT IN (SELECT clientId FROM "oauthAccessToken")
+    AND clientId NOT IN (SELECT clientId FROM "oauthRefreshToken")
+    AND clientId NOT IN (SELECT clientId FROM "oauthConsent")`)
+    .run(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+  const row = d.prepare('SELECT COUNT(*) AS n FROM "oauthClient"').get() as { n: number };
+  if (!Number.isSafeInteger(row?.n) || row.n < 0) throw Error("d1_dcr_count_unverified");
+  if (row.n >= MAX_OAUTH_CLIENTS) throw new APIError("TOO_MANY_REQUESTS", { message: "Too many registered OAuth clients on this instance." });
+}
+type TransactionAdapter = Omit<AuthAdapter, "transaction">;
+function ownedAdapter<T extends TransactionAdapter>(base: T): T {
+  return new Proxy(base, { get(target, key) {
+    const value = Reflect.get(target, key, target);
+    if (typeof value !== "function") return value;
+    if (key === "transaction") return (work: (adapter: TransactionAdapter) => Promise<unknown>) =>
+      withAuthDatabaseOwner(async () => Reflect.apply(value, target, [(tx: TransactionAdapter) => work(ownedAdapter(tx))]));
+    return (...args: unknown[]) => withAuthDatabaseOwner(async connection => {
+      if (key === "create" && (args[0] as { model?: string })?.model === "oauthClient") {
+        const route = runtime().route.getStore();
+        if (route !== "dynamic" && route !== "managed") throw Error("d1_dcr_route_binding_required");
+        if (!connection.inTransaction) throw Error("d1_dcr_atomic_adapter_transaction_required");
+        if (route === "dynamic") enforceDynamicCap(connection);
+      }
+      return Reflect.apply(value, target, args);
+    });
+  } });
+}
+function createConfiguredAuth(options: ReturnType<typeof authOptions>, adapter: AuthAdapter) {
+  return betterAuth({ ...options, database: () => ownedAdapter(adapter) });
+}
+async function readyAuth() {
+  const state = runtime();
+  if (state.failed || state.failure) throw state.failure;
+  if (state.instance) return state.instance;
+  if (state.flight) return state.flight;
+  if (state.retryAfter && Date.now() < state.retryAfter) throw state.retryFailure;
+  state.attempts = (state.attempts ?? 0) + 1;
+  let migrationStarted = false;
+  const flight = withAuthDatabaseOwner(async connection => {
+    const options = authOptions(connection);
+    assertLegacyAccountSchemaCleared(connection);
+    const migrations = await getMigrations(options);
+    // Once the migrator is entered its partial effects are not guessed away.
+    // Only a known pre-migration denial can qualify for a later retry.
+    migrationStarted = true;
+    await migrations.runMigrations();
+    installSingleAdminGuard(connection);
+    const extra = extraAdminAccounts(connection);
+    if (extra > 0) throw Error("d1_existing_multiple_admins_hold");
+    const adapter = await getAdapter(options);
+    const instance = createConfiguredAuth(options, adapter);
+    await instance.$context;
+    return instance;
+  }).then(instance => {
+    // Publish only after owned cleanup/outcome validation also succeeded.
+    state.instance = instance;
+    state.retryFailure = undefined; state.retryAfter = undefined;
+    return instance;
+  }).catch(error => {
+    const code = (error as { code?: unknown })?.code;
+    const message = error instanceof Error ? error.message : "";
+    const transient = code === "SQLITE_BUSY" || code === "SQLITE_BUSY_SNAPSHOT" ||
+      ["d1_auth_queue_full", "d1_auth_queue_deadline", "d1_research_owner_busy", "d1_native_owner_busy"].includes(message);
+    const database = d1DatabaseStatus();
+    if (!migrationStarted && transient && (state.attempts ?? 0) < 3 &&
+        !database.ownerActive && database.openTransactions === 0 && !database.quarantine && !maintenanceActive()) {
+      state.retryAfter = Date.now() + 100;
+      state.retryFailure = error;
+    } else { state.failure = error; state.failed = true; }
+    throw error;
+  }).finally(() => { if (state.flight === flight) state.flight = undefined; });
+  state.flight = flight;
+  return flight;
+}
+function handlerRoute(request: Request): RegistrationRoute {
+  if (request.method !== "POST") return "other";
+  const pathname = new URL(request.url).pathname;
+  return pathname === "/api/auth/oauth2/register" ? "dynamic" :
+    pathname === "/api/auth/oauth2/create-client" ? "managed" : "other";
+}
+const apiFacade = new Proxy({}, { get(_target, key) {
+  return async (...args: unknown[]) => {
+    const instance = await readyAuth();
+    const route: RegistrationRoute = key === "registerOAuthClient" ? "dynamic" : key === "createOAuthClient" ? "managed" : "other";
+    return runtime().route.run(route, () => Reflect.apply(Reflect.get(instance.api, key), instance.api, args));
+  };
+} });
+// Lazy public compatibility facade: importing a route cannot open SQLite or
+// start migrations. All real API/HTTP entrypoints join one bootstrap flight.
+export const auth = new Proxy({ handler: async (request: Request) => {
+  const instance = await readyAuth();
+  return runtime().route.run(handlerRoute(request), () => instance.handler(request));
+} }, { get(target, key) {
+  if (key === "handler") return target.handler;
+  if (key === "api") return apiFacade;
+  if (key === "$context") return readyAuth().then(instance => instance.$context);
+  if (key === "options") {
+    if (!runtime().instance) throw Error("d1_auth_not_ready");
+    return runtime().instance!.options;
+  }
+  return undefined;
+} }) as ReturnType<typeof createConfiguredAuth>;
+
+export async function runAuthMigrations() { await readyAuth(); }

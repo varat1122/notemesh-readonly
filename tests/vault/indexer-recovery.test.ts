@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
+import type { FSWatcher } from "chokidar";
 
 /**
  * The indexer's recovery model, pinned.
@@ -34,6 +36,9 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   // A started indexer holds a chokidar watcher; leave one open and the
   // process lingers.
   const g = globalThis as Record<string, unknown>;
@@ -41,6 +46,69 @@ afterEach(async () => {
   await live?.stop?.();
   fs.rmSync(root, { recursive: true, force: true });
   delete process.env.DATA_DIR;
+});
+
+describe("G06 native watcher and timer admission failures", () => {
+  it("a watcher failure racing a rebuild cannot be cleared by that same rebuild", async () => {
+    seed(60); const { indexer } = await load(); const i = indexer(); await i.start();
+    const watcher = (i as unknown as { watcher: FSWatcher }).watcher;
+    const rebuild = i.rebuild();
+    watcher.emit("error", new Error("synthetic-during-rebuild"));
+    await expect(rebuild).rejects.toThrow(/watch.*incomplete/);
+    expect(i.ready).toBe(false); expect(i.lastRebuildError).not.toBeNull();
+    await i.rebuild(); expect(i.ready).toBe(true); expect(i.lastRebuildError).toBeNull();
+  });
+  it("a physical file change handled by actual chokidar survives native BUSY and later rebuilds", async () => {
+    seed(1); const { indexer } = await load(); const i = indexer(); await i.start();
+    const watcher = (i as unknown as { watcher: FSWatcher }).watcher;
+    await vi.waitFor(() => expect(Object.values(watcher.getWatched()).flat()).toContain("n0.md"), { timeout: 2000 });
+    const other = new Database(path.join(root, "app.sqlite"), { timeout: 0 });
+    try {
+      other.exec("BEGIN IMMEDIATE");
+      fs.writeFileSync(path.join(vault, "n0.md"), "# Changed synthetic note\nnew text\n");
+      await vi.waitFor(() => expect(i.ready).toBe(false), { timeout: 2000 });
+      expect(i.lastRebuildError).toMatch(/watch.*incomplete/);
+    } finally { if (other.inTransaction) other.exec("ROLLBACK"); other.close(); }
+    await i.rebuild(); expect(i.ready).toBe(true);
+  });
+  it("a real watcher change callback cannot throw BUSY out of the server event loop", async () => {
+    seed(1); const { indexer } = await load(); const i = indexer(); await i.start();
+    const watcher = (i as unknown as { watcher: FSWatcher }).watcher;
+    const other = new Database(path.join(root, "app.sqlite"), { timeout: 0 });
+    try {
+      other.exec("BEGIN IMMEDIATE");
+      expect(() => watcher.emit("change", path.join(vault, "n0.md"))).not.toThrow();
+      expect(i.ready).toBe(false); expect(i.lastRebuildError).toMatch(/watch.*incomplete/);
+    } finally { if (other.inTransaction) other.exec("ROLLBACK"); other.close(); }
+    await i.rebuild(); expect(i.ready).toBe(true); expect(i.lastRebuildError).toBeNull();
+  });
+
+  it("unlink and watcher error events retain incomplete status without uncaught exceptions", async () => {
+    seed(1); const { indexer } = await load(); const i = indexer(); await i.start();
+    const watcher = (i as unknown as { watcher: FSWatcher }).watcher;
+    const other = new Database(path.join(root, "app.sqlite"), { timeout: 0 });
+    try {
+      other.exec("BEGIN IMMEDIATE");
+      expect(() => watcher.emit("unlink", path.join(vault, "n0.md"))).not.toThrow();
+      expect(i.ready).toBe(false);
+    } finally { if (other.inTransaction) other.exec("ROLLBACK"); other.close(); }
+    expect(() => watcher.emit("error", new Error("synthetic-watch-EIO"))).not.toThrow();
+    expect(i.ready).toBe(false); expect(i.lastRebuildError).toMatch(/watch.*incomplete/);
+  });
+
+  it("the debounced link timer catches native BUSY and requires successful rebuild", async () => {
+    seed(1); const { indexer } = await load(); const i = indexer(); await i.start();
+    const watcher = (i as unknown as { watcher: FSWatcher }).watcher;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    watcher.emit("change", path.join(vault, "n0.md"));
+    const other = new Database(path.join(root, "app.sqlite"), { timeout: 0 });
+    try {
+      other.exec("BEGIN IMMEDIATE");
+      expect(() => vi.advanceTimersByTime(1_000)).not.toThrow();
+      expect(i.ready).toBe(false); expect(i.lastRebuildError).toMatch(/watch.*incomplete/);
+    } finally { if (other.inTransaction) other.exec("ROLLBACK"); other.close(); vi.useRealTimers(); }
+    await i.rebuild(); expect(i.ready).toBe(true);
+  });
 });
 
 function seed(n: number) {
@@ -123,12 +191,10 @@ describe("the wipe at the top of a rebuild", () => {
     // has already committed by then and `notes` is empty; wrapped, the whole
     // wipe rolls back and the index is exactly what it was.
     const d = db();
-    const real = d.exec.bind(d);
-    const spy = vi.spyOn(d, "exec").mockImplementationOnce((sql: string) =>
-      real(sql.replace("DELETE FROM notes_fts;", "DELETE FROM notes_fts; DELETE FROM no_such_table;")),
-    );
+    // Fault the real schema rather than replacing the guarded native facade.
+    d.exec("ALTER TABLE notes_fts RENAME TO fixture_fts");
     await expect(indexer().rebuild()).rejects.toThrow(/no such table/);
-    spy.mockRestore();
+    d.exec("ALTER TABLE fixture_fts RENAME TO notes_fts");
 
     expect(notes(), "the wipe rolled back").toBe(6);
     // And the indexer is not wedged: the next rebuild is the ordinary one.
@@ -157,7 +223,7 @@ describe("a rebuild that fails", () => {
 });
 
 describe("a note that cannot be indexed", () => {
-  it("is skipped, and the rest of the vault still indexes", async () => {
+  it("keeps valid rows but reports incomplete coverage until a successful retry", async () => {
     seed(3);
     fs.writeFileSync(path.join(vault, "bad.md"), "# Bad\n");
     const { indexer, notes } = await load();
@@ -181,13 +247,17 @@ describe("a note that cannot be indexed", () => {
       return (realRead as any)(p, ...rest);
     }) as typeof fs.readFileSync);
     try {
-      await indexer().rebuild();
+      await expect(indexer().rebuild()).rejects.toThrow(/index_incomplete:1/);
     } finally {
       openSpy.mockRestore();
       readSpy.mockRestore();
     }
+    expect(indexer().ready).toBe(false);
+    expect(indexer().lastRebuildError).toMatch(/index_incomplete:1/);
+    expect(notes()).toBe(3);
+    await indexer().rebuild();
     expect(indexer().ready).toBe(true);
     expect(indexer().lastRebuildError).toBeNull();
-    expect(notes()).toBe(3);
+    expect(notes()).toBe(4);
   });
 });

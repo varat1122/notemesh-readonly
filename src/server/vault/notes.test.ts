@@ -2,7 +2,8 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
+import type * as Notes from "./notes";
+let {
   appendToNote,
   createNote,
   deleteNote,
@@ -26,8 +27,8 @@ import {
   MAX_FIND_MATCHES,
   MAX_PREVIEW_MATCHES,
   MAX_READ_BYTES,
-} from "./notes";
-import { VaultPathError } from "./paths";
+} = {} as typeof Notes;
+let VaultPathError: typeof import("./paths").VaultPathError;
 
 // Data-handling behaviour an assistant depends on: that a read window is
 // honest about what it left out, that appending doesn't silently mangle the
@@ -35,15 +36,47 @@ import { VaultPathError } from "./paths";
 
 let root: string;
 let vault: string;
+let fixtureConnection: {close:()=>void};
 
-beforeEach(() => {
+beforeEach(async () => {
+  // One disposable instance per test; never retain the previous fixture DB.
+  vi.resetModules();
+  delete (globalThis as Record<symbol,unknown>)[Symbol.for("notemesh.maintenance.registry.v1")];
   root = fs.mkdtempSync(path.join(os.tmpdir(), "notemesh-notes-"));
   vault = path.join(root, "vault");
   fs.mkdirSync(path.join(vault, "Projects"), { recursive: true });
   process.env.DATA_DIR = root;
+  ({
+  appendToNote,
+  createNote,
+  deleteNote,
+  editNote,
+  findInNote,
+  openAttachmentStream,
+  listAttachments,
+  listFolders,
+  listNotes,
+  moveNote,
+  noteExists,
+  prependToNote,
+  previewEdit,
+  readAttachment,
+  readNote,
+  readNoteRange,
+  updateNote,
+  DEFAULT_READ_LINES,
+  EXCERPT_CHARS,
+  MAX_ATTACHMENT_BYTES,
+  MAX_FIND_MATCHES,
+  MAX_PREVIEW_MATCHES,
+  MAX_READ_BYTES,
+  } = await import("./notes"));
+  fixtureConnection=(await import("../db")).db();
+  ({VaultPathError}=await import("./paths"));
 });
 
 afterEach(() => {
+  fixtureConnection.close();
   fs.rmSync(root, { recursive: true, force: true });
   delete process.env.DATA_DIR;
 });

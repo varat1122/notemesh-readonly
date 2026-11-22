@@ -67,13 +67,12 @@ const curatedAliases:Record<string,string>={
   "samsung electronics":"Samsung", "micron":"MU", "micron technology":"MU",
   "sk hynix":"SK hynix", "sk hynix inc":"SK hynix"
 };
-function rows(prefix:string):{path:string;frontmatter:string|null}[]{
-  return db().prepare("SELECT path,frontmatter FROM notes WHERE substr(path,1,?)=? ORDER BY path LIMIT 3000")
-    .all(prefix.length,prefix) as {path:string;frontmatter:string|null}[];
-}
-function stems(prefix:string){
-  return rows(prefix).filter(x=>x.path.endsWith(".md")&&!x.path.slice(prefix.length).includes("/"))
-    .map(x=>({...x,title:x.path.slice(prefix.length,-3)}));
+// Only top-level Markdown Hubs consume the bound. The extra row is a
+// completeness sentinel, never permission to resolve from a partial index.
+export function indexedTopLevelHubs(prefix:"01_Companies/"|"02_Industries_Themes/"){
+  const rows=db().prepare("SELECT path,frontmatter FROM notes WHERE path>=? AND path<? AND instr(substr(path,?),'/')=0 AND substr(path,-3)='.md' ORDER BY path LIMIT 3001")
+    .all(prefix,prefix.slice(0,-1)+"0",prefix.length+1) as {path:string;frontmatter:string|null}[];
+  return rows.map(x=>({...x,title:x.path.slice(prefix.length,-3)}));
 }
 function indexedAliases(frontmatter:string|null):string[]{
   if(!frontmatter)return [];
@@ -84,7 +83,11 @@ function indexedAliases(frontmatter:string|null):string[]{
       .flatMap(x=>Array.isArray(x)?x:[x]).filter((x):x is string=>typeof x==="string"&&x.length>1);
   }catch{return [];}
 }
-function findHub(label:string, indexed:ReturnType<typeof stems>, allowCurated:boolean){
+// Reuse the existing explicit Hub vocabulary for read-only retrieval. This is
+// not a security master, and does not change canonical writeback resolution.
+export {key as hubIdentityKey,indexedAliases as indexedHubAliases};
+function findHub(label:string, indexed:ReturnType<typeof indexedTopLevelHubs>, allowCurated:boolean){
+  if(indexed.length>3000)return null;
   const wanted=key(label);
   const exact=indexed.filter(x=>key(x.title)===wanted);
   if(exact.length===1)return {path:exact[0].path,resolution:"exact_existing_title" as const};
@@ -122,8 +125,8 @@ function brokerRevision(b:BrokerUpdate|undefined):RoutingV2["brokerRevision"]{
 }
 
 export function planCanonicalRoutingV2(input:RoutingV2Input):RoutingV2{
-  const companyIndex=stems("01_Companies/");
-  const industryIndex=stems("02_Industries_Themes/");
+  const companyIndex=indexedTopLevelHubs("01_Companies/");
+  const industryIndex=indexedTopLevelHubs("02_Industries_Themes/");
   const tags=input.entityRoles??[];
   const companyHubs:HubLink[]=[],industryHubs:HubLink[]=[];
   const unresolvedEntities:string[]=[],unresolvedThemes:string[]=[];

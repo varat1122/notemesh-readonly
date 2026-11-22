@@ -4,6 +4,11 @@ import type { McpAccess } from "./server";
 export type McpEndpoint = "research" | "save-analysis" | "safe-edit";
 export const EDIT_SCOPES = ["vault:read", "vault:edit"] as const;
 export const SAVE_SCOPES = ["vault:read", "inbox:submit"] as const;
+export const RESEARCH_SCOPES = ["vault:read"] as const;
+
+function scopesForEndpoint(endpoint: McpEndpoint) {
+  return endpoint === "research" ? RESEARCH_SCOPES : endpoint === "safe-edit" ? EDIT_SCOPES : SAVE_SCOPES;
+}
 
 export function mcpResourceUrl(endpoint: McpEndpoint): string {
   return `${env.baseUrl}/api/${endpoint === "research" ? "mcp" : endpoint}`;
@@ -17,7 +22,7 @@ export function protectedResourceMetadata(endpoint: McpEndpoint) {
   return {
     resource: mcpResourceUrl(endpoint),
     authorization_servers: [`${env.baseUrl}/api/auth`],
-    scopes_supported: [...(endpoint === "safe-edit" ? EDIT_SCOPES : SAVE_SCOPES)],
+    scopes_supported: [...scopesForEndpoint(endpoint)],
     bearer_methods_supported: ["header"],
   };
 }
@@ -25,7 +30,7 @@ export function protectedResourceMetadata(endpoint: McpEndpoint) {
 export function oauthChallenge(endpoint: McpEndpoint, insufficientScope = false): string {
   return `Bearer resource_metadata="${resourceMetadataUrl(endpoint)}", ` +
     (insufficientScope ? 'error="insufficient_scope", ' : "") +
-    `scope="${(endpoint === "safe-edit" ? EDIT_SCOPES : SAVE_SCOPES).join(" ")}"`;
+    `scope="${scopesForEndpoint(endpoint).join(" ")}"`;
 }
 
 // Do not derive this from approved consent, a client's registered scopes, or

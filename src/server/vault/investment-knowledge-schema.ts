@@ -5,7 +5,9 @@
  *
  * Input must already be parsed by the shared hardened splitFrontmatter parser.
  */
+import {isResearchReviewType,researchTrust,type ResearchTrust} from "./research-state";
 export interface SchemaInspection {
+  researchTrust:ResearchTrust|null;
   status: "read_time_adapter_only";
   role: "structured_claim" | "source_receipt" | "source" | "industry" | "company" | "timeline" |
     "thesis" | "evidence_register" | "review" | "historical_analysis" | "navigation" | "archive" | "method" | "other";
@@ -19,6 +21,7 @@ export interface SchemaInspection {
   sourceUrlAlias: string | null;
   eventDate: string | null;
   publishedAt: string | null;
+  analysisDate: string | null;
   importedAt: string | null;
   legacyDate: string | null;
   legacyImportedOn: string | null;
@@ -63,9 +66,7 @@ function roleOfNote(path:string, fm:Data):SchemaInspection["role"] {
     return "historical_analysis";
   if(["knowledge_index","company_history_index","topic_history_index","macro_hub",
       "chat_transcript_index","historical_navigation_redirect"].includes(t??""))return "navigation";
-  if(["news_thesis_review","investment_review","research_note","preferred_research_note",
-      "research_update","macro_research_note","dated_evidence_review","research_synthesis",
-      "research_map","import_review"].includes(t??""))return "review";
+  if(isResearchReviewType(t))return "review";
   if(t==="research_workflow"||path.startsWith("09_Templates/"))return "method";
   return "other";
 }
@@ -111,7 +112,7 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   if(sourceRaw&&!declaredSourceType&&!alias)
     warnings.push(sourceRaw==="unverified"?"source_type_misused_for_verification":"unmapped_legacy_source_type");
   if(alias)warnings.push("legacy_source_alias_retained_raw_provenance");
-  const dateFields=["event_date","published_at","received_at","imported_at","verified_at"] as const;
+  const dateFields=["event_date","published_at","analysis_date","received_at","imported_at","verified_at"] as const;
   for(const field of dateFields){
     if(fm[field]!==undefined&&fm[field]!==null&&strictDate(fm[field])===null)
       warnings.push("invalid_"+field);
@@ -139,7 +140,10 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   if(role==="structured_claim"){
     if(!asText(fm.domain))claimIssues.push("missing_domain");
     if(!asText(fm.entity))claimIssues.push("missing_top_level_entity");
-    if(!originalSource&&!sourceUrlAlias)claimIssues.push("missing_source_locator");
+    const received=fm.claim_persistence_version==="RI001-3"&&fm.origin==="received_user_source"&&fm.original_source===null&&
+      typeof fm.intake_id==="string"&&/^IN-[A-F0-9]{16}$/.test(fm.intake_id)&&fm.original_source_path===`00_Inbox/ChatGPT/Investment Intake - ${fm.intake_id}.md`;
+    if(received)warnings.push("received_source_reference_requires_receipt_readback");
+    if(!received&&!originalSource&&!sourceUrlAlias)claimIssues.push("missing_source_locator");
     if(!asText(fm.event_key))warnings.push("missing_event_key_needs_resolution");
     if(!claims.length)claimIssues.push("missing_claims");
     for(let i=0;i<Math.min(claims.length,100);i++){
@@ -151,7 +155,7 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
       if(!asText(c.unit))claimIssues.push(tag+"missing_unit");
       if(!asText(c.value))claimIssues.push(tag+"missing_literal_value");
       if(!asText(c.entity)&&!asText(fm.entity))claimIssues.push(tag+"missing_entity");
-      if(!asText(c.original_source)&&!asText(c.source_url)&&!originalSource&&!sourceUrlAlias)
+      if(!(received&&c.source_path===fm.original_source_path&&isObj(c.source_binding)&&c.source_binding.origin==="received_user_source")&&!asText(c.original_source)&&!asText(c.source_url)&&!originalSource&&!sourceUrlAlias)
         claimIssues.push(tag+"missing_source");
       // A child issuer intentionally overrides the parent. Never silently
       // attribute the child claim to the parent issuer for matching.
@@ -165,10 +169,10 @@ export function inspectCanonicalKnowledgeMetadata(path:string,fm:Data):SchemaIns
   if(role==="thesis"&&asText(fm.status)!=="owner_approved")
     warnings.push("thesis_not_owner_approved_by_status");
   return {
-    status:"read_time_adapter_only",role,declaredSourceType,rawSourceType,
+    status:"read_time_adapter_only",researchTrust:researchTrust(path,fm),role,declaredSourceType,rawSourceType,
     normalizedSourceType,sourceTypeMapping,independenceAssessment,
     declaredVerification:asText(fm.verification),
-    originalSource,sourceUrlAlias,eventDate,publishedAt,importedAt,
+    originalSource,sourceUrlAlias,eventDate,publishedAt,analysisDate:strictDate(fm.analysis_date),importedAt,
     legacyDate,legacyImportedOn,sourceHashScope,
     claimCount:claims.length,claimIssues:claimIssues.slice(0,35),
     warnings:[...new Set(warnings)].slice(0,20),canAutoUpdateThesis:false,

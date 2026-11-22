@@ -7,6 +7,7 @@ export default defineConfig({
     // so they run in node rather than a browser-like environment.
     environment: "node",
     include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
+    setupFiles: ["./tests/c1-instance-fixture-setup.ts"],
   },
   resolve: {
     // tsconfig declares "~/*" -> "./src/*", but that is TypeScript's resolution

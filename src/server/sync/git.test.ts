@@ -3,15 +3,15 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
+let {
   cloneVault,
   gitVersionOk,
   isGitRepo,
   looksLikeAuthFailure,
   probeRemote,
   repoDisplayName,
-} from "./git";
-import { runGit, runGitBuffer } from "./git-exec";
+} = {} as typeof import("./git");
+let { runGit, runGitBuffer } = {} as typeof import("./git-exec");
 
 // The sync plumbing either side of conflict resolution: proving the remote is
 // reachable before anything destructive happens, cloning, and classifying
@@ -19,6 +19,7 @@ import { runGit, runGitBuffer } from "./git-exec";
 
 let root: string;
 let remote: string;
+let fixtureConnection: {close:()=>void};
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
@@ -36,16 +37,25 @@ function git(cwd: string, ...args: string[]): string {
   }).toString();
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  // Each disposable instance owns its own DB/credentials connection.
+  vi.resetModules();
+  delete (globalThis as Record<symbol,unknown>)[Symbol.for("notemesh.maintenance.registry.v1")];
   root = fs.mkdtempSync(path.join(os.tmpdir(), "notemesh-git-"));
   remote = path.join(root, "remote.git");
   git(root, "init", "-q", "--bare", "-b", "main", "remote.git");
   // DATA_DIR drives env.vaultDir, which is where cloneVault writes.
   process.env.DATA_DIR = path.join(root, "data");
   fs.mkdirSync(path.join(root, "data"), { recursive: true });
+  ({cloneVault,gitVersionOk,isGitRepo,looksLikeAuthFailure,probeRemote,repoDisplayName}=await import("./git"));
+  ({runGit,runGitBuffer}=await import("./git-exec"));
+  fixtureConnection=(await import("../db")).db();
+  // Model an initialized app with no cloned vault yet, as the probe tests require.
+  fs.rmdirSync(path.join(root,"data","vault"));
 });
 
 afterEach(() => {
+  fixtureConnection.close();
   fs.rmSync(root, { recursive: true, force: true });
   delete process.env.DATA_DIR;
 });

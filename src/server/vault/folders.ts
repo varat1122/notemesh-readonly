@@ -1,8 +1,11 @@
+import { denyPilotRawWriter } from "../c1-pilot";
+import { touchesCanonicalOrProtectedFolder } from "../safe-edit/protected-records";
 import fs from "node:fs";
 import path from "node:path";
 import { env } from "../env";
 import { VaultPathError, resolveFolderPath, toVaultRelative } from "./paths";
-import { assertNoReservedSegments, isMarkdown } from "./notes";
+import { assertMoveLinkRewriteAllowed, assertNoReservedSegments, isMarkdown } from "./notes";
+import { assertRawMutationAllowed } from "./disk";
 import { rewriteLinksForMoves, type RewriteResult } from "./links";
 import { forgetModification } from "./modified";
 
@@ -46,8 +49,13 @@ function filesBeneath(dir: string, out: string[], depth = 0) {
  * knows who linked where.
  */
 export function moveFolder(folder: string, newFolder: string): FolderMove {
+  denyPilotRawWriter();
   const absFrom = resolveExistingFolder(folder);
   const absTo = resolveFolderPath(newFolder);
+  // WP2 (PD-11, all modes): folder moves never relocate canonical/protected
+  // roots or move content into them (before and after paths, checked before rename).
+  if (touchesCanonicalOrProtectedFolder(toVaultRelative(absFrom)) || touchesCanonicalOrProtectedFolder(toVaultRelative(absTo)))
+    throw new VaultPathError("canonical_or_protected_raw_write_refused");
   assertNoReservedSegments(absTo);
   if (fs.existsSync(absTo)) throw new VaultPathError(`Target already exists: ${toVaultRelative(absTo)}`);
   const fromRoot = path.resolve(absFrom) + path.sep;
@@ -65,6 +73,13 @@ export function moveFolder(folder: string, newFolder: string): FolderMove {
     moved.set(rel, `${to}/${rel.slice(from.length + 1)}`);
   }
 
+  // OD-10 F-1: a note whose metadata on disk is protected (a typed record under
+  // an ordinary name) does not move with its folder; checked before the rename.
+  for (const abs of files) if (isMarkdown(abs)) assertRawMutationAllowed(abs, null, moved.get(toVaultRelative(abs))!);
+
+  // A03 (WP2): refuse before renaming when the link rewrite below would have
+  // to edit a canonical/protected note (no partial move).
+  assertMoveLinkRewriteAllowed(new Map([...moved].filter(([a]) => !path.basename(a).startsWith("."))));
   fs.mkdirSync(path.dirname(absTo), { recursive: true });
   fs.renameSync(absFrom, absTo);
   // As moveNote does: a rename keeps each file's own time, and only the old
@@ -83,7 +98,10 @@ export function moveFolder(folder: string, newFolder: string): FolderMove {
 
 /** Removes an empty folder. Anything inside it is a reason to refuse. */
 export function deleteFolder(folder: string): string {
+  denyPilotRawWriter();
   const abs = resolveExistingFolder(folder);
+  if (touchesCanonicalOrProtectedFolder(toVaultRelative(abs)))
+    throw new VaultPathError("canonical_or_protected_raw_write_refused");
   const entries = fs.readdirSync(abs);
   if (entries.length > 0) {
     throw new VaultPathError(

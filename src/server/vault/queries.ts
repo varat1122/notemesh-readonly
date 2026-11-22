@@ -1,3 +1,4 @@
+import {researchTrust,type ResearchTrust} from "./research-state";
 import fs from "node:fs";
 import { countWords, stripCr } from "./text";
 import { extractStructure, splitFrontmatter } from "./markdown";
@@ -13,6 +14,7 @@ import { readNote } from "./notes";
 import { dailyNotePath } from "./daily";
 
 export interface SearchHit {
+  researchTrust:ResearchTrust|null;
   path: string;
   title: string;
   /** Plain text, safe to quote verbatim — carries no highlight markup. */
@@ -67,7 +69,16 @@ export interface SearchPage {
   total: number;
 }
 
-export function searchVault(query: string, opts: SearchOptions = {}): SearchPage {
+/** Server-only Judge selection policy, never a wire search option. Stable path
+ * discovery avoids BM25 corpus-statistic drift from this intake's own writes.
+ * Existing context role/chronology ranking still applies after discovery. */
+export interface JudgeSelectionPolicy { excludedPaths:readonly string[] }
+export function judgeExclusionSql(policy:JudgeSelectionPolicy|undefined,column="path"):string {
+  if(!policy)return "";
+  if(policy.excludedPaths.length>10||new Set(policy.excludedPaths).size!==policy.excludedPaths.length)throw Error("judge_exclusion_limit");
+  return policy.excludedPaths.length?` AND ${column} NOT IN (${policy.excludedPaths.map(()=>"?").join(",")})`:"";
+}
+export function searchVault(query: string, opts: SearchOptions = {}, judgePolicy?:JudgeSelectionPolicy): SearchPage {
   // Search keeps its own limits (20 / 100) rather than the list tools' 100 / 500:
   // every hit carries a snippet, so a page here is far heavier than a page of
   // paths. With offset a caller who wants more can page.
@@ -101,8 +112,10 @@ export function searchVault(query: string, opts: SearchOptions = {}): SearchPage
     where.push("COALESCE(notes.modified, notes.mtime) > ?");
     params.push(parseInstant(opts.modifiedAfter, timeZone));
   }
+  const exclusion=judgeExclusionSql(judgePolicy,"notes.path");
+  if(exclusion){where.push(exclusion.slice(5));params.push(...judgePolicy!.excludedPaths);}
   const from = "FROM notes_fts JOIN notes ON notes.path = notes_fts.path";
-  const order = opts.sort === "modified" ? "COALESCE(notes.modified, notes.mtime) DESC, notes.path" : "notes_fts.rank";
+  const order = judgePolicy ? "notes.path" : opts.sort === "modified" ? "COALESCE(notes.modified, notes.mtime) DESC, notes.path" : "notes_fts.rank";
 
   // A COUNT over the same MATCH is a posting-list walk — far cheaper than the
   // snippet() query below, which builds text for every row it returns. It is
@@ -115,7 +128,7 @@ export function searchVault(query: string, opts: SearchOptions = {}): SearchPage
   const rows = db()
     .prepare(
       `SELECT notes.path AS path, notes_fts.title AS title, snippet(notes_fts, 3, ?, ?, ' … ', ?) AS snippet,
-              COALESCE(notes.modified, notes.mtime) AS modified
+              COALESCE(notes.modified, notes.mtime) AS modified, notes.frontmatter AS frontmatter
        ${from} WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ? OFFSET ?`,
     )
     .all(HL_START, HL_END, snippetTokens, ...params, limit, offset) as {
@@ -123,9 +136,11 @@ export function searchVault(query: string, opts: SearchOptions = {}): SearchPage
     title: string;
     snippet: string;
     modified: number;
+    frontmatter: string;
   }[];
   return {
     hits: rows.map((r) => ({
+      researchTrust:researchTrust(r.path,JSON.parse(r.frontmatter||"{}")),
       path: r.path,
       title: r.title,
       ...splitHighlights(r.snippet),

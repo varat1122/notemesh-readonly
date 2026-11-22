@@ -1,8 +1,9 @@
 import { toSolidStartHandler } from "better-auth/solid-start";
-import { auth, runAuthMigrations } from "~/server/auth";
-import { userCount } from "~/server/claim";
+import { auth, authUserCount, runAuthMigrations } from "~/server/auth";
 import { audit } from "~/server/audit";
 import { normalizeClientRegistration } from "~/server/oauth-registration";
+import { d1DatabaseStatus } from "~/server/db";
+import { tracked } from "~/server/maintenance";
 
 const handler = toSolidStartHandler(auth);
 
@@ -44,8 +45,9 @@ async function withMigrations(
       .json()
       .then((b: { code?: string } | null) => b?.code)
       .catch(() => undefined);
-    const users = userCount();
-    if ((code === "FAILED_TO_CREATE_USER" || res.status >= 500) && users.known && users.count > 0) {
+    if (code !== "FAILED_TO_CREATE_USER" || d1DatabaseStatus().quarantine) return res;
+    const users = await authUserCount();
+    if (!d1DatabaseStatus().quarantine && users.known && users.count > 0) {
       audit("signup.rejected", { reason: "already_claimed_race" });
       return Response.json(
         { code: "ALREADY_CLAIMED", message: "This instance is already claimed." },
@@ -56,5 +58,5 @@ async function withMigrations(
   return res;
 }
 
-export const GET = (event: { request: Request }) => withMigrations(handler.GET, event);
-export const POST = (event: { request: Request }) => withMigrations(handler.POST, event);
+export const GET = tracked((event: { request: Request }) => withMigrations(handler.GET, event));
+export const POST = tracked((event: { request: Request }) => withMigrations(handler.POST, event));

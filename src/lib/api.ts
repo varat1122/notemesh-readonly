@@ -109,6 +109,8 @@ export const api = {
   getSetupStage: (() => call("getSetupStage")) as P<typeof Setup.getSetupStage>,
   getSetupProgress: (() => call("getSetupProgress")) as P<typeof Setup.getSetupProgress>,
   getClaimState: (() => call("getClaimState")) as P<typeof Setup.getClaimState>,
+  setupLocalPilotVault: ((input: { confirmLocalOnly: true }) =>
+    call("setupLocalPilotVault", [input])) as P<typeof Setup.setupLocalPilotVault>,
   relinkVault: (() => call("relinkVault")) as P<typeof Setup.relinkVault>,
   setupChooseBackend: ((kind: "obsidian" | "git") =>
     call("setupChooseBackend", [kind])) as P<typeof Setup.setupChooseBackend>,

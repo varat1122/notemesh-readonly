@@ -3,6 +3,7 @@ import { json } from "@solidjs/router";
 import type { APIEvent } from "@solidjs/start/server";
 import { PublicError } from "~/server/public-error";
 import { originAllowed } from "~/server/origin";
+import { tracked } from "~/server/maintenance";
 
 /**
  * The one door between the browser and the server.
@@ -81,6 +82,7 @@ const HANDLERS: Record<string, () => Promise<Handler>> = {
   syncNow: async () => (await import("~/server/admin")).syncNow,
   stopSync: async () => (await import("~/server/admin")).stopSync,
   restartSync: async () => (await import("~/server/admin")).restartSync,
+  enterMaintenance: async () => (await import("~/server/admin")).enterMaintenance,
   rebuildIndex: async () => (await import("~/server/admin")).rebuildIndex,
   reauth: async () => (await import("~/server/admin")).reauth,
 
@@ -88,6 +90,7 @@ const HANDLERS: Record<string, () => Promise<Handler>> = {
   getSetupStage: async () => (await import("~/server/setup")).getSetupStage,
   getSetupProgress: async () => (await import("~/server/setup")).getSetupProgress,
   getClaimState: async () => (await import("~/server/setup")).getClaimState,
+  setupLocalPilotVault: async () => (await import("~/server/setup")).setupLocalPilotVault,
   relinkVault: async () => (await import("~/server/setup")).relinkVault,
   setupChooseBackend: async () => (await import("~/server/setup")).setupChooseBackend,
   setupGitRepo: async () => (await import("~/server/setup")).setupGitRepo,
@@ -120,11 +123,10 @@ function methodNotAllowed() {
   );
 }
 
-export const GET = methodNotAllowed;
-export const PUT = methodNotAllowed;
-export const PATCH = methodNotAllowed;
-export const DELETE = methodNotAllowed;
-
+export const GET = tracked(methodNotAllowed);
+export const PUT = tracked(methodNotAllowed);
+export const PATCH = tracked(methodNotAllowed);
+export const DELETE = tracked(methodNotAllowed);
 /**
  * Nobody sends a megabyte of procedure arguments.
  *
@@ -165,7 +167,7 @@ async function readCappedBody(request: Request): Promise<string | null> {
   return new TextDecoder().decode(buf);
 }
 
-export async function POST(event: APIEvent) {
+async function handlePOST(event: APIEvent) {
   const fn = event.params.fn;
   if (!fn || !/^[a-zA-Z][a-zA-Z0-9]*$/.test(fn)) {
     return json({ error: "bad_request", message: "Invalid procedure name." }, { status: 400 });
@@ -190,9 +192,11 @@ export async function POST(event: APIEvent) {
   // server buffer and parse anything at all.
   //
   // Resolved for every procedure, not only the protected ones, because the
-  // answer also decides whether this request is throttled. A request with no
-  // cookie never reaches the database for it.
-  const { auth } = await import("~/server/auth");
+  // answer also decides whether this request is throttled.
+  const { auth, runAuthMigrations } = await import("~/server/auth");
+  // Better Auth 1.7.7 checks its schema before resolving a session. Initialize
+  // fresh databases first, and fail closed on an unresolved legacy schema.
+  await runAuthMigrations();
   const session = await auth.api.getSession({ headers: event.request.headers });
 
   if (!session) {
@@ -273,3 +277,6 @@ export async function POST(event: APIEvent) {
     );
   }
 }
+
+// Pending work until the handler settles, even if the client disconnects (maintenance drain).
+export const POST = tracked(handlePOST);

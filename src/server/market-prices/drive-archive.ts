@@ -97,6 +97,8 @@ export class GoogleDriveArchives implements ArchiveRepository {
     const id = result.files[0].id; return { id, bytes: await this.get(id) };
   }
   async publish(bytes: Buffer) {
+    // Remote writes (folder creation, upload) are checked at the HTTP choke
+    // point (drive-http.ts) immediately before each one is initiated.
     if (this.role === "priceArchive") unpackDriveArchive(bytes);
     else unpackPriceCatalogue(bytes);
     const folder = await this.folder(true);

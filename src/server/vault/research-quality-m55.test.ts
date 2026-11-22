@@ -18,7 +18,7 @@ const memory:ResearchClassification={domain:"industry",subject:"Memory",resolved
 describe("M5.5 pre-write research contract",()=>{
   it("validates an attributed Memory repost without upgrading it to a broker original",()=>{
     expect(validateResearchM55(memory,review)).toEqual([]);
-    expect(renderThaiResearchM55(review)).toContain("## Counter-evidence");
+    expect(renderThaiResearchM55(review)).toContain("## หลักฐานโต้แย้งและความเสี่ยง");
   });
   it("fails closed when the real-world caller omits classification metadata",()=>{
     expect(validateResearchM55({...memory,subject:"Cross Theme",resolvedSubjectPath:undefined,
@@ -34,4 +34,222 @@ describe("M5.5 pre-write research contract",()=>{
     expect(validateResearchM55(memory,{...review,translationTh:undefined,headlineTh:"Memory market update"})).toEqual(expect.arrayContaining([
       "headlineTh_thai_required","foreign_source_translation_missing"]));
   });
+  it("accepts an explicitly unresolved secondary-source guidance contradiction",()=>{
+    const input={...memory,domain:"company" as const,subject:"MU",sourceKind:"user_commentary",
+      contentTypes:["guidance","market_commentary"],originalDocumentAccess:"not_obtained" as const};
+    const assessment={metric:"revenue growth guidance",period:"FY2027",unit:"% YoY",
+      competingValues:["+20%","-20%"],resolution:"unresolved" as const,conclusion:"no_change" as const};
+    expect(validateResearchM55(input,{...review,claimAssessments:[assessment]})).toEqual([]);
+    expect(validateResearchM55(input,review)).toContain("guidance_claim_assessment_missing");
+    expect(renderThaiResearchM55({...review,claimAssessments:[assessment]})).toContain("FY2027");
+    expect(validateResearchM55({...input,sourceKind:"issuer_release"},review))
+      .toContain("guidance_claim_assessment_missing");
+  });
+  it("holds an explicit verified-fact assertion without proof even when classified as ordinary reported facts",()=>{
+    const asserted={...review,whatChangedTh:"ยืนยันแล้วว่ารายได้ MU FY2027 โต 20%",
+      thesisImplicationTh:"ต้องปรับเพิ่ม EPS ทันที"};
+    expect(validateResearchM55({...memory,sourceKind:"issuer_release",contentTypes:["reported_fact"]},asserted))
+      .toContain("explicit_verified_claim_requires_assessment");
+    expect(validateResearchM55(memory,review)).toEqual([]);
+  });
+  it.each([
+    "ไม่ใช่ Verified Fact",
+    "ไม่ถือเป็น Verified Fact",
+    "ไม่ถือว่าเป็น Verified Fact",
+    "ยังไม่ใช่ Verified Fact",
+    "This is not a verified fact",
+    "This isn't a verified fact",
+    "This does not constitute a verified fact",
+    "unverified fact",
+  ])("does not treat a negated or unverified fact phrase as an affirmative primary claim: %s",phrase=>{
+    const denial={...review,thesisImplicationTh:
+      `ข้อความสรุปนี้ ${phrase} จึงไม่เปลี่ยนสมมติฐานการลงทุนและต้องตรวจหลักฐานต้นฉบับก่อน`};
+    expect(validateResearchM55(memory,denial))
+      .not.toContain("explicit_verified_claim_requires_assessment");
+    const unresolved={entity:"MU",metric:"synthetic documentation",period:"2026",unit:"text",
+      competingValues:["unverified"],resolution:"unresolved" as const,conclusion:"no_change" as const};
+    expect(validateResearchM55(memory,{...denial,claimAssessments:[unresolved]}))
+      .not.toContain("unresolved_claim_asserted_as_verified");
+  });
+  it.each([
+    "เป็น Verified Fact",
+    "This is a verified fact",
+    "ไม่ใช่ Verified Fact; แต่ข้อมูลที่เหลือเป็น Verified Fact",
+    "not a verified fact; the following is a verified fact",
+    "ไม่ใช่ Verified Fact แต่ยืนยันแล้วว่ารายได้เพิ่มขึ้น",
+  ])("still requires assessment for an affirmative assertion in a mixed review: %s",phrase=>{
+    const asserted={...review,thesisImplicationTh:
+      `บทวิเคราะห์กล่าวว่า ${phrase} และต้องตรวจสอบสมมติฐานการลงทุนอย่างเป็นอิสระ`};
+    expect(validateResearchM55(memory,asserted))
+      .toContain("explicit_verified_claim_requires_assessment");
+  });
+  it("does not let a negator in one section excuse a claim in a different section",()=>{
+    const split={...review,headlineTh:"บทวิเคราะห์ฉบับนี้ไม่ใช่",
+      whatChangedTh:"Verified Fact เป็นข้อความยืนยันที่ยังไม่มีหลักฐานต้นฉบับรองรับ"};
+    expect(validateResearchM55(memory,split))
+      .toContain("explicit_verified_claim_requires_assessment");
+    const unresolved={entity:"MU",metric:"document-status",period:"2026",unit:"text",
+      competingValues:["unverified"],resolution:"unresolved" as const,conclusion:"no_change" as const};
+    expect(validateResearchM55(memory,{...split,claimAssessments:[unresolved]}))
+      .toContain("unresolved_claim_asserted_as_verified");
+  });
+  it("does not treat the ending of a different English word as the standalone negator not",()=>{
+    const ambiguous={...review,thesisImplicationTh:
+      "ข้อความกล่าวว่า cannot Verified Fact โดยไม่ให้หลักฐานต้นฉบับและต้องตรวจเพิ่มเติม"};
+    expect(validateResearchM55(memory,ambiguous))
+      .toContain("explicit_verified_claim_requires_assessment");
+  });
+  it("retains a valid English denial at the phrase boundary",()=>{
+    const denial={...review,thesisImplicationTh:
+      "ข้อความนี้ This cannot be a verified fact และต้องขอเอกสารประกอบเพิ่มเติม"};
+    expect(validateResearchM55(memory,denial))
+      .not.toContain("explicit_verified_claim_requires_assessment");
+  });
+  it.each([
+    "not not a verified fact",
+    "isn't not a verified fact",
+    "not not verified fact",
+    "is not not a verified fact",
+    "not a not a verified fact",
+    "not not not a verified fact",
+    "ไม่ใช่ไม่ใช่ Verified Fact",
+    "ยังไม่ใช่ไม่ใช่ Verified Fact",
+    "มิใช่ไม่ใช่ Verified Fact",
+    "ไม่ได้เป็น ไม่ใช่ Verified Fact",
+  ])("QD-01: double/ambiguous negation cannot bypass claim assessment: %s",phrase=>{
+    const ambiguous={...review,thesisImplicationTh:
+      `ข้อความจำลองนี้ ${phrase} จึงต้องตรวจสอบหลักฐานต้นฉบับและที่มาให้ครบถ้วน`};
+    expect(validateResearchM55(memory,ambiguous))
+      .toContain("explicit_verified_claim_requires_assessment");
+    const unresolved={entity:"MU",metric:"source authentication",period:"2026",unit:"text",
+      competingValues:["unverified"],resolution:"unresolved" as const,conclusion:"no_change" as const};
+    expect(validateResearchM55(memory,{...ambiguous,claimAssessments:[unresolved]}))
+      .toContain("unresolved_claim_asserted_as_verified");
+  });
+  it.each([
+    "not a verified fact",
+    "This is not a verified fact",
+    "This isn't a verified fact",
+    "This does not constitute a verified fact",
+    "This cannot be a verified fact",
+    "ไม่ใช่ Verified Fact",
+    "ยังไม่ใช่ Verified Fact",
+    "ไม่ถือว่าเป็น Verified Fact",
+  ])("QD-01: legitimate single denial is not an affirmative verified claim: %s",phrase=>{
+    const denial={...review,thesisImplicationTh:
+      `ข้อความทดลองนี้ ${phrase} จึงยังต้องตรวจเอกสารหลักฐานก่อนนำไปใช้ในสมมติฐานการลงทุน`};
+    expect(validateResearchM55(memory,denial))
+      .not.toContain("explicit_verified_claim_requires_assessment");
+  });
+  it("requires an AI claim decision when submitted guidance is mislabeled as reported_fact",()=>{
+    const renamed={...memory,sourceKind:"issuer_release",contentTypes:["reported_fact"]};
+    const original="MU FY2027 revenue guidance +20% according to source A; source B reports -20%.";
+    expect(validateResearchM55(renamed,review,original))
+      .toContain("source_text_guidance_assessment_missing");
+    const claim={entity:"MU",metric:"revenue guidance",period:"FY2027",unit:"% YoY",
+      competingValues:["+20%","-20%"],resolution:"unresolved" as const,
+      conclusion:"conditional" as const};
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[claim]},original)).toEqual([]);
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[{...claim,
+      conclusion:"confirmed"}]},original)).toContain("thesis_conclusion_exceeds_evidence");
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[claim],
+      whatChangedTh:"พิสูจน์แล้วว่าบริษัท MU เพิ่ม Guidance 20%"},original))
+      .toContain("unresolved_claim_asserted_as_verified");
+    expect(validateResearchM55(renamed,{...review,claimAssessments:[claim],
+      headlineTh:"ยืนยันแล้วว่า MU Guidance +20%"},original))
+      .toContain("unresolved_claim_asserted_as_verified");
+  });
+  it("holds fabricated confirmation of contradictory unverified FY2027 guidance",()=>{
+    const input={...memory,domain:"company" as const,subject:"MU",sourceKind:"user_commentary",
+      contentTypes:["guidance"],originalDocumentAccess:"not_obtained" as const};
+    const claim={metric:"revenue guidance",period:"FY2027",unit:"% YoY",competingValues:["+20%","-20%"],
+      resolution:"verified_primary" as const,conclusion:"confirmed" as const};
+    expect(validateResearchM55(input,{...review,claimAssessments:[claim]})).toEqual(expect.arrayContaining([
+      "conflicting_claims_unresolved","verified_claim_without_primary_evidence",
+      "primary_evidence_receipt_validation_pending"]));
+    expect(validateResearchM55({...input,originalDocumentAccess:"full_original"},
+      {...review,claimAssessments:[{...claim,primaryEvidenceReceipt:"caller-invented-receipt"}]}))
+      .toContain("primary_evidence_receipt_validation_pending");
+    const unresolved={...claim,resolution:"unresolved" as const};
+    expect(validateResearchM55(input,{...review,claimAssessments:[unresolved]})).toContain("thesis_conclusion_exceeds_evidence");
+    expect(validateResearchM55(input,{...review,claimAssessments:[{...unresolved,conclusion:"no_change"}],
+      thesisImplicationTh:"ยืนยันแล้วว่าต้องปรับเพิ่ม EPS ทันที"})).toContain("unresolved_claim_asserted_as_verified");
+  });
+});
+
+const languageFields=["headlineTh","translationTh","whatChangedTh","mechanismTh","thesisImplicationTh","counterEvidenceTh","requiredEvidenceTh"] as const;
+const untranslated="The company's revenue improves as demand recovers. Margins remain uncertain and the cash flow forecast requires independent verification.";
+const wrappers=[
+  ["straight quotes",(s:string)=>`"${s}"`],
+  ["curly quotes",(s:string)=>`“${s}”`],
+  ["single quotes",(s:string)=>`'${s}'`],
+  ["blockquote",(s:string)=>`> ${s}`],
+  ["backtick fence",(s:string)=>`\x60\x60\x60text\n${s}\n\x60\x60\x60`],
+  ["tilde fence",(s:string)=>`~~~text\n${s}\n~~~`],
+  ["inline code",(s:string)=>`\x60${s}\x60`]
+] as const;
+const languageIssue=(field:typeof languageFields[number])=>field==="translationTh"?"translation_not_thai":`${field}_thai_required`;
+
+describe("RI-001 final mechanical Thai language calibration",()=>{
+  it.each(wrappers)("rejects short Thai prefix + English-only %s in every prose field",(_name,wrap)=>{
+    for(const field of languageFields){
+      const issues=validateResearchM55(memory,{...review,[field]:`สรุปเป็นภาษาไทย\n\n${wrap(untranslated)}`});
+      expect(issues,field).toContain(languageIssue(field));
+    }
+  });
+  it.each([
+    "Revenue, EBITDA, Margin, Guidance, FCF, ROIC ดีขึ้นแต่ยังต้องติดตาม",
+    "Revenue เพิ่ม แต่ EBITDA Margin ลด ขณะที่ Guidance ชี้ว่า FCF และ ROIC ยังอ่อน",
+    "MU Backlog และ FCF เพิ่ม แต่ ROIC ยังต่ำกว่า WACC",
+    "NVIDIA Corporation และ Advanced Micro Devices ยังต้องตรวจผลต่อ operating leverage และ free cash flow ก่อนสรุป"
+  ])("accepts mixed Thai finance narration without a term/name allowlist: %s",text=>{
+    for(const field of languageFields)expect(validateResearchM55(memory,{...review,[field]:text}),field).not.toContain(languageIssue(field));
+  });
+  it.each(wrappers)("allows genuine supporting %s with substantive Thai narration",(_name,wrap)=>{
+    const explanation="ข้อความนี้เป็นเพียงข้ออ้างของบริษัทที่ยังต้องตรวจสอบกับเอกสารต้นฉบับและงวดบัญชี โดยความต้องการซื้ออาจเปลี่ยนแปลงได้และไม่ควรใช้ข้อความที่อ้างมาแทนคำอธิบายผลกระทบด้านรายได้ ต้นทุน และความเสี่ยงทั้งหมด";
+    expect(validateResearchM55(memory,{...review,mechanismTh:explanation+"\n\n"+wrap("Orders can be cancelled and shipment is not guaranteed.")})).toEqual([]);
+  });
+  it("allows formulas, numbers, inline terms, company names and actual code with Thai explanation",()=>{
+    const text='NVIDIA ใช้ "FCF" ประกอบการประเมิน แต่ต้องแยกผลจากการลงทุนและเงินทุนหมุนเวียนออกจากการเติบโตของรายได้ก่อนสรุป\n\n```js\nconst fcf = operatingCashFlow - capex;\n```\n\nสูตร `ROIC = NOPAT / investedCapital` ช่วยเปรียบเทียบผลตอบแทน แต่ยังต้องตรวจสอบนิยามและช่วงเวลาของตัวเลข';
+    expect(validateResearchM55(memory,{...review,mechanismTh:text})).toEqual([]);
+  });
+  it("rejects untranslated dominance, a standalone English paragraph and unclosed fences",()=>{
+    const padded="คำอธิบายภาษาไทยมีความยาวพอสมควร แต่ไม่ใช่คำแปลหรือการวิเคราะห์เนื้อหาทั้งหมด";
+    for(const text of [padded+'\n\n"'+untranslated.repeat(12)+'"',padded+"\n\n"+untranslated,
+      "สรุปเป็นภาษาไทย\n```text\n"+untranslated]){
+      expect(validateResearchM55(memory,{...review,translationTh:text})).toContain("translation_not_thai");
+    }
+  });
+  it("treats Thai marks as parts of words, not extra votes; isolated Thai letters/digits cannot establish narration",()=>{
+    for(const text of ["ก English analysis with only one Thai letter.","๑๒๓ Revenue and EBITDA improve.","่่่่่่ Revenue and EBITDA improve.","กกกกกกกก \""+untranslated+'"'])
+      expect(validateResearchM55(memory,{...review,mechanismTh:text})).toContain("mechanismTh_thai_required");
+  });
+  it("does not claim semantic translation fidelity from a mechanical language PASS",()=>{
+    // Deliberately unrelated Thai: semantic adequacy belongs to LLM/reviewer.
+    expect(validateResearchM55(memory,{...review,translationTh:"ต้นไม้ในสวนเติบโตและต้องได้รับน้ำอย่างเพียงพอทุกวัน"},"Revenue was reported by the company.")).not.toContain("translation_not_thai");
+  });
+});
+
+
+describe("Thai supporting-text boundary edge cases",()=>{
+  it("cannot split foreign prose into short quoted/code pieces or put it in a fence info string",()=>{
+    const prefix="คำแปลภาษาไทยมีดังนี้";
+    for(const payload of [
+      '"Revenue" "is" "expected" "to" "increase" "next" "year"',
+      "```text\nRevenue is\nexpected to\nincrease next\nyear\n```",
+      "```"+untranslated+"\n```"
+    ])expect(validateResearchM55(memory,{...review,translationTh:prefix+"\n\n"+payload})).toContain("translation_not_thai");
+  });
+  it("keeps contractions, nested code delimiters and display formulas as supporting text",()=>{
+    const explanation="ข้อความที่อ้างจากบริษัทนี้ยังต้องตรวจสอบกับเอกสารต้นฉบับก่อนสรุปผลต่อรายได้และต้นทุน โดยสูตรเป็นเพียงวิธีคำนวณและไม่ได้ยืนยันว่าตัวเลขตั้งต้นถูกต้อง";
+    for(const supporting of ["'The company's orders remain uncertain.'","‘The company’s orders remain uncertain.’",
+      "````js\nconst label = `company`;\n`````","$$ROIC = NOPAT / investedCapital$$"])
+      expect(validateResearchM55(memory,{...review,mechanismTh:explanation+"\n\n"+supporting})).toEqual([]);
+  });
+});
+
+
+it.each(wrappers)("rejects a Thai label even when its %s English payload is short",(_name,wrap)=>{
+  for(const field of languageFields)for(const english of ["Revenue","Revenue grew.","Growth remains uncertain."])
+    expect(validateResearchM55(memory,{...review,[field]:"คำแปลภาษาไทยมีดังนี้\n\n"+wrap(english)}),field).toContain(languageIssue(field));
 });

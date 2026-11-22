@@ -1,8 +1,9 @@
+import {assertReceivedClaimWrite} from "../vault/canonical-claims";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
-import { db } from "../db";
+import { db, assertResearchEntry } from "../db";
 import { env } from "../env";
 import { assertHeadroom } from "../vault/disk";
 import { resolveNotePath, toVaultRelative, openNoFollow, assertDescriptorInVault } from "../vault/paths";
@@ -12,7 +13,32 @@ import { splitFrontmatter, extractStructure } from "../vault/markdown";
 import { audit } from "../audit";
 import { previewSchema, applySchema, operationId as idSchema, type PreviewInput } from "./schema";
 
+import {assertReviewChronology,assertReviewPreviewAdmission,hasRuntimeReviewLineage} from "./research-lineage";
+import {assertProtectedRecord} from "./protected-records";
+import {assertResearchStateAuthority} from "../vault/research-state";
+import {assertDeclaredEvidenceAuthority,assertPrimaryMetadataAuthority} from "./primary-authority";
+import {assertResearchJudgeWrite,currentJudgeGate,assertJudgeAdmissionOrder,type JudgeGate} from "./research-judge-gate";
+import {appearancePayloadSchema,appearanceRows,requireAppearance,sealAppearance,type AppearancePayload} from "../vault/intake-appearances";
+import {assertNoMaintenance, maintenanceActive, withD1NativeInterlock} from "../maintenance";
+import {c1Pilot,withPilotAdmissionLock} from "../c1-pilot";
+import {assertPilotPreview,assertPilotApply,recordPilotSource,isC1OrdinaryGenericTarget} from "./c1-pilot-review";
+import {isCanonicalCompanyReview,assertRevisionGate,hasRevisionAdmission,revisionReviewEvidence} from "./canonical-review-revision-pilot";
+import {assertSourceEventWrite,sourceEventReviewEvidence,hasSourceEventGate,sourceEventTargets} from "./source-event-admission";
+import {authorityRegimeActive,isReservedOperationId,bindPreviewWitness,witnessFor,assertWitnessCurrent,consumeCanonicalWitness,
+  predatesMigrationEpoch,bumpAuthorityEpoch,currentAuthorityMode,type PlanHandle,type CanonicalKind} from "./admission";
+import {canonicalNamespaceKind} from "./protected-records";
+
 export const sha256 = (s:string|Buffer) => crypto.createHash("sha256").update(s).digest("hex");
+const revisionPilotActive=()=>process.env.IOS_C1_REVISION_PILOT==="synthetic";
+/** Dedicated ICR revision route: the disposable pilot, or OFF (OD-06: usable
+ * wherever OD-04 removes the generic canonical route). Never C1. */
+const revisionRouteActive=()=>revisionPilotActive()||currentAuthorityMode()==="off";
+/** WP2 generic-route refusal (OD-04+OD-06, all modes including OFF): reserved
+ * canonical IDs and canonical namespaces belong to the kernel routes only. */
+function assertGenericAllowed(operationId:string,path:string){
+  if(isReservedOperationId(operationId))throw Error("canonical_operation_namespace_reserved");
+  if(canonicalNamespaceKind(path))throw Error("canonical_route_required");
+}
 const MAX_BYTES = 100_000;
 const TTL = 30 * 60_000;
 export function assertEnabled() {
@@ -26,6 +52,7 @@ interface RecordRow {
   status:string; approval:string|null; receipt:string|null;
 }
 function store() {
+  assertResearchEntry();
   const d=db();
   d.exec(`CREATE TABLE IF NOT EXISTS safe_edit_operations (
     id TEXT PRIMARY KEY, actor TEXT NOT NULL, payload TEXT NOT NULL,
@@ -57,6 +84,7 @@ function target(p:string) {
   if(p.split(/[\\/]/).includes("..")) throw Error("Traversal is not allowed");
   const abs=resolveNotePath(p), rel=toVaultRelative(abs);
   if(!rel.endsWith(".md")) throw Error("Only Markdown notes can be edited");
+  assertProtectedRecord(rel);
   if(/^(07_Sources|06_Portfolio)(\/|$)/i.test(rel)) throw Error("Source archives and portfolio records are protected; save a separate correction/review");
   if(!fs.statSync(path.dirname(abs)).isDirectory()) throw Error("Parent folder must already exist");
   return {abs,rel};
@@ -88,19 +116,16 @@ function document(s:string) {
 function eventKey(e:NonNullable<PreviewInput["evidence"]>) {
   return sha256(JSON.stringify([e.entity,e.event,e.period,e.originalSource].map(x=>x.trim().normalize("NFC").toLowerCase())));
 }
-function checkEvidence(input:PreviewInput,before:string) {
+function checkEvidence(input:PreviewInput) {
   const e=input.evidence;
   if(input.path.startsWith("05_Thesis/")&&!e&&input.change.kind!=="rollback") throw Error("Thesis edits require a structured evidence review");
   if(!e) return;
+  assertDeclaredEvidenceAuthority(e);
   if(e.classification==="duplicate") throw Error("Duplicate evidence cannot mutate living knowledge");
   if(e.classification==="confirmation"&&(!e.independent||e.sourceType==="archived_ai")) throw Error("Confirmation requires independent evidence; archived AI is not independent");
-  if(e.verification==="verified_against_primary"&&(!e.primaryUrl||!e.verified_at||e.sourceType!=="primary")) throw Error("Primary verification requires a dated primary source actually reviewed");
-  if(e.sourceType==="archived_ai"&&e.verification==="verified_against_primary") throw Error("Archived AI cannot be upgraded to verified fact");
   const previous=store().prepare("SELECT verification,delta_hash FROM safe_edit_claims WHERE event_key=? AND path=?").all(eventKey(e),input.path) as {verification:string;delta_hash:string}[];
   if(previous.some(r=>r.delta_hash===sha256(e.delta.trim()))) throw Error("Duplicate event and delta already recorded");
   if(previous.length&&e.classification==="new_event") throw Error("Known event: classify as added_detail, correction, contradiction or unresolved");
-  const fm=splitFrontmatter(before).data;
-  if(fm.verification==="not_reverified"&&input.change.kind==="frontmatter"&&input.change.properties.verification==="verified_against_primary"&&e.verification!=="verified_against_primary") throw Error("Not-reverified evidence cannot be promoted without primary verification");
   for(const rel of e.relatedPaths) {
     const resolved=resolveNotePath(rel);
     if(!fs.existsSync(resolved)) throw Error("Related evidence path does not exist");
@@ -134,8 +159,6 @@ function calculate(input:PreviewInput,before:string,actor:string):string {
   const c=input.change;
   if(c.kind==="replace") return exactReplace(before,c.oldText,c.newText);
   if(c.kind==="frontmatter") {
-    const current=document(before).data.verification;
-    if(c.properties.verification==="verified_against_primary"&&current!=="verified_against_primary"&&input.evidence?.verification!=="verified_against_primary") throw Error("Verification upgrade requires primary evidence review");
     return frontmatter(before,c.properties);
   }
   if(c.kind==="create") return c.content;
@@ -189,34 +212,125 @@ function publicPreview(r:RecordRow) {
     diff:diff(r.before_text,r.after_text),warnings:warnings(r.before_text,r.after_text),
     evidenceEventKey:input.evidence?eventKey(input.evidence):null,
     requiresAdminApproval:requiresApproval(r),approved:Boolean(r.approval),
+    ...(c1Pilot()?{pilotReviewRequired:!/^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/.test(input.path)&&!isC1OrdinaryGenericTarget(input.path),humanPresence:"not_verified"}:{}),
     approvalUrl:`${env.baseUrl}/api/safe-edit-approval?id=${r.id}`};
 }
 function requiresApproval(r:RecordRow) {
   const p=JSON.parse(r.payload) as PreviewInput;
   // Protect all thesis changes, including first creation and rollback; never
   // infer investment approval from an OAuth grant or model-supplied boolean.
-  return p.path.startsWith("05_Thesis/") || [r.before_text,r.after_text].some(text=>{
+  return hasSourceEventGate(p.path)||p.path.startsWith("05_Thesis/") || hasRevisionAdmission(r.id) || (revisionRouteActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path)) || [r.before_text,r.after_text].some(text=>{
     const data=document(text).data;
     return data.user_endorsed===true || data.user_endorsed==="true" || data.status==="user_endorsed";
   });
 }
-export function preview(input:unknown,actor:string) {
+export function preview(input:unknown,actor:string) {return withPilotAdmissionLock(()=>previewWithLineage(input,actor,false));}
+/** Canonical preview helpers (WP2): each requires a live PlanHandle minted by
+ * the admission kernel for exactly this server-computed operation/path/change;
+ * the witness is written in the same transaction as the preview row. */
+export function previewCanonicalSource(handle:PlanHandle,input:unknown,actor:string) {return withPilotAdmissionLock(()=>{
+ const result=previewWithLineage(input,actor,false,true,false,{handle,kind:"source_intake"});recordPilotSource(result.operationId,actor);return result;
+});}
+export function previewCanonicalReview(handle:PlanHandle,input:unknown,actor:string) {return withPilotAdmissionLock(()=>previewWithLineage(input,actor,true,false,false,{handle,kind:"canonical_review"}));}
+export function previewCanonicalAssessedClaim(handle:PlanHandle,input:unknown,actor:string) {return withPilotAdmissionLock(()=>previewWithLineage(input,actor,true,false,false,{handle,kind:"structured_claim"}));}
+/** Non-event canonical Claim step (formerly generic preview inside canonical prepare). */
+export function previewCanonicalClaim(handle:PlanHandle,input:unknown,actor:string) {return withPilotAdmissionLock(()=>previewWithLineage(input,actor,false,false,false,{handle,kind:"structured_claim"}));}
+/** Only the receipt-validated dedicated revision handler may call this. */
+export function previewCanonicalRevision(handle:PlanHandle,input:unknown,actor:string){return withPilotAdmissionLock(()=>previewWithLineage(input,actor,false,false,true,{handle,kind:"review_revision"}));}
+/** Internal canonical admission only; no caller-facing event/approval API. */
+export function recordResearchJudgeGate(sourceOperationId:string,actor:string,gate:JudgeGate,withdrawal?:{current:JudgeGate;sourceTextSha256?:string}){
+  assertNoMaintenance("research judge admission");assertEnabled();const source=owned(sourceOperationId,actor),target=gate.targets.find(t=>t.kind==="source_intake");
+  if(!target||target.operationId!==source.id||target.path!==JSON.parse(source.payload).path||target.sha256!==source.after_hash||
+    splitFrontmatter(source.after_text).data.intake_id!==gate.intakeId||gate.actor!==actor)throw Error("research_judge_source_admission_hold");
+  // Serialize the authoritative re-read/check/append across connections. A
+  // concurrent HOLD must not be overwritten by a previously checked PASS retry.
+  withPilotAdmissionLock(()=>store().transaction(()=>{
+    assertNoMaintenance("research judge admission journal");
+    const current=currentJudgeGate(gate.intakeId);
+    // A withdrawal authenticated against an earlier snapshot cannot replace a
+    // newer admission. Recheck under the same SQLite IMMEDIATE lock as append.
+    if(withdrawal){
+      if(gate.decision==="PASS"||JSON.stringify(current)!==JSON.stringify(withdrawal.current))throw Error("research_judge_withdrawal_superseded_hold");
+      if(withdrawal.sourceTextSha256!==undefined&&
+        (JSON.parse(source.payload).change?.kind!=="create"||!["preview","written"].includes(source.status)||
+        splitFrontmatter(source.after_text).data.source_text_sha256!==withdrawal.sourceTextSha256||sha256(source.after_text)!==source.after_hash))
+        throw Error("research_judge_source_admission_hold");
+    }
+    assertJudgeAdmissionOrder(current,gate);
+    const recorded={...gate,revokedAt:gate.decision==="PASS"?undefined:
+      current?.decision!=="PASS"&&current?.packetEnvelopeDigest===gate.packetEnvelopeDigest?current.revokedAt:Date.now()};
+    if(JSON.stringify(current)!==JSON.stringify(recorded)){
+      log(source.id,actor,"research_judge_gate",recorded as unknown as Record<string,unknown>);
+      // A restrictive assessment advances the intake epoch: pending non-Source
+      // witnesses of this intake can no longer be approved or consumed.
+      if(gate.decision!=="PASS")bumpAuthorityEpoch("intake",gate.intakeId);
+    }
+  }).immediate());
+}
+/** Internal canonical accounting; not a generic event writer or MCP operation.
+ * SQLite transaction serializes retries. Existing DB maintenance fence applies.
+ * The source operation owns the proposed bytes; a pending event is not a receipt. */
+export function recordCanonicalAppearance(raw:AppearancePayload,actor:string){
+  assertNoMaintenance("canonical appearance admission");assertEnabled();const p=appearancePayloadSchema.parse(raw),source=row(p.sourceOperationId);
+  if(!actor.startsWith("oauth:")||sha256(actor)!==p.actorSha256||
+    (source.status!=="written"&&source.actor!==actor)||!["preview","written"].includes(source.status)||
+    JSON.parse(source.payload).change?.kind!=="create"||JSON.parse(source.payload).path!==p.sourcePath||source.after_hash!==p.sourceNoteSha256||
+    document(source.after_text).data.intake_id!==p.intakeId||document(source.after_text).data.source_text_sha256!==p.receivedTextSha256)
+    throw Error("appearance_source_admission_hold");
+  assertHeadroom(Buffer.byteLength(JSON.stringify(p))*3+32000);
+  return store().transaction(()=>{
+    assertNoMaintenance("canonical appearance journal");
+    const rows=appearanceRows(p.appearanceId);
+    if(rows.length)return requireAppearance(p);
+    const recordedAt=new Date().toISOString();
+    store().prepare("INSERT INTO safe_edit_events VALUES(?,?,?,?,?)").run(recordedAt,source.id,actor,"raw_appearance",JSON.stringify(sealAppearance(p,recordedAt)));
+    // Source text and locators stay out of operator logs.
+    audit("safe_edit_raw_appearance",{operationId:source.id,appearanceId:p.appearanceId,intakeId:p.intakeId});
+    return requireAppearance(p);
+  })();
+}
+function checkStoredReviewLineage(r:RecordRow){
+  if(JSON.parse(r.payload).change?.kind!=="create"||!hasRuntimeReviewLineage(r.after_text))return;
+  const event=store().prepare("SELECT at FROM safe_edit_events WHERE operation_id=? AND actor=? AND event='preview' ORDER BY at LIMIT 1").get(r.id,r.actor) as {at:string}|undefined;
+  assertReviewChronology(r,event?.at);
+}
+function previewWithLineage(input:unknown,actor:string,canonical:boolean,canonicalSource=false,revision=false,kernel?:{handle:unknown;kind:CanonicalKind}) {
   assertEnabled();const p=previewSchema.parse(input);const t=target(p.path);p.path=t.rel;
   if(store().prepare("SELECT 1 FROM safe_edit_operations WHERE json_extract(payload,'$.path')=? AND status='writing' LIMIT 1").get(p.path)) throw Error("This path has an interrupted operation; administrator recovery required");
   const before=read(t.abs);
+  const managedRevision=revisionRouteActive()&&isCanonicalCompanyReview(p.path)&&before!==null;
+  if(managedRevision&&!revision)throw Error("canonical_review_revision_dedicated_route_required");
+  if(revision&&(!managedRevision||p.change.kind!=="append"||c1Pilot()))throw Error("canonical_review_revision_scope_hold");
+  // More specific pre-existing dedicated-route refusals keep their codes.
+  if(!kernel)assertGenericAllowed(p.operationId,p.path);
   if(p.change.kind==="create"?before!==null:before===null) throw Error("Create never overwrites; other edits require an existing note");
   const existing=store().prepare("SELECT * FROM safe_edit_operations WHERE id=?").get(p.operationId) as RecordRow|undefined;
   if(existing) {
     if(existing.actor!==actor||existing.payload!==JSON.stringify(p)) throw Error("Operation ID reused for different input or actor");
+    // An enrolled revision binds the original token/expiry/approval. Refuse
+    // identical reprepare BEFORE token rotation or any journal mutation.
+    if(revision||hasRevisionAdmission(existing.id))throw Error("revision_admission_replay_hold");
     if(existing.status==="preview") {
+      assertSourceEventWrite(p.operationId,p.path,existing.before_text,existing.after_text,actor,p.change,"preview",canonical||revision);
+      assertResearchJudgeWrite(p.path,existing.before_text,existing.after_text,actor,"preview");
+      assertPilotPreview(p.operationId,p.path,existing.before_text,existing.after_text,actor,canonicalSource);
+      assertReceivedClaimWrite(p.path,existing.before_text,existing.after_text,actor,"preview");
+      checkStoredReviewLineage(existing);
+      assertDeclaredEvidenceAuthority(p.evidence);
+      assertPrimaryMetadataAuthority(document(existing.before_text).data,document(existing.after_text).data);
+      assertResearchStateAuthority(document(existing.before_text).data,document(existing.after_text).data);
+      assertProtectedRecord(p.path,document(existing.before_text).data,document(existing.after_text).data);
       // A lost response must not strand a canonical source forever. Rotate the
       // one-use token for the SAME actor and payload; invalidate prior tokens
       // and any approval so the exact diff must be reviewed again. Never
       // refresh a written/interrupted operation or a changed on-disk target.
       if(sha256(before??"")!==existing.before_hash) throw Error("Preview version changed; operator reconciliation required");
       const nextToken=crypto.randomBytes(32).toString("hex");
-      store().prepare("UPDATE safe_edit_operations SET token_hash=?,expires=?,approval=NULL WHERE id=? AND status='preview'")
-        .run(sha256(nextToken),Date.now()+TTL,existing.id);
+      store().transaction(()=>{
+        if(kernel)bindPreviewWitness(kernel.handle,{kind:kernel.kind,operationId:p.operationId,path:p.path,change:p.change,beforeHash:existing.before_hash,afterHash:existing.after_hash,actor});
+        store().prepare("UPDATE safe_edit_operations SET token_hash=?,expires=?,approval=NULL WHERE id=? AND status='preview'")
+          .run(sha256(nextToken),Date.now()+TTL,existing.id);
+      })();
       log(existing.id,actor,"preview_token_rotated",{path:p.path});
       return {...publicPreview(row(existing.id)),previewToken:nextToken,retry:"token_rotated_previous_token_invalid"};
     }
@@ -224,12 +338,17 @@ export function preview(input:unknown,actor:string) {
   }
   const size=store().prepare("SELECT count(*) AS n,coalesce(sum(length(CAST(before_text||after_text AS BLOB))),0) AS bytes FROM safe_edit_operations").get() as {n:number;bytes:number};
   if(size.n>=1000||size.bytes+200_000>20_000_000) throw Error("Safe Edit journal quota reached; administrator archival required");
-  document(before??"");checkEvidence(p,before??"");
+  document(before??"");checkEvidence(p);
   const after=calculate(p,before??"",actor);
+  assertSourceEventWrite(p.operationId,p.path,before??"",after,actor,p.change,"preview",canonical||revision);
+  assertResearchJudgeWrite(p.path,before??"",after,actor,"preview");
+  assertPilotPreview(p.operationId,p.path,before??"",after,actor,canonicalSource);
+  assertReceivedClaimWrite(p.path,before??"",after,actor,"preview");
   const afterMetadata=document(after).data,beforeMetadata=document(before??"").data;
-  if(afterMetadata.verification==="verified_against_primary"&&beforeMetadata.verification!=="verified_against_primary") {
-    if(p.evidence?.verification!=="verified_against_primary" || ["archived_ai","chatgpt_analysis"].includes(String(afterMetadata.source_type))) throw Error("Primary verification cannot be asserted by note content without a primary evidence review");
-  }
+  if(p.change.kind==="create")assertReviewPreviewAdmission(after,canonical);
+  assertPrimaryMetadataAuthority(beforeMetadata,afterMetadata);
+  assertResearchStateAuthority(beforeMetadata,afterMetadata);
+  assertProtectedRecord(p.path,beforeMetadata,afterMetadata);
   warnings(before??"",after);
   // Body operations cannot silently introduce metadata or rewrite provenance.
   if(p.change.kind==="replace"||p.change.kind==="append") {
@@ -244,29 +363,66 @@ export function preview(input:unknown,actor:string) {
   }
   assertHeadroom(Buffer.byteLength(after)+Buffer.byteLength(before??"")*3+32_000);
   const token=crypto.randomBytes(32).toString("hex"),expires=Date.now()+TTL;
-  store().prepare("INSERT INTO safe_edit_operations VALUES(?,?,?,?,?,?,?,?,?,'preview',NULL,NULL)").run(p.operationId,actor,JSON.stringify(p),before??"",after,sha256(before??""),sha256(after),sha256(token),expires);
+  store().transaction(()=>{
+    store().prepare("INSERT INTO safe_edit_operations VALUES(?,?,?,?,?,?,?,?,?,'preview',NULL,NULL)").run(p.operationId,actor,JSON.stringify(p),before??"",after,sha256(before??""),sha256(after),sha256(token),expires);
+    // Kernel routes: witness row bound 1:1 in the same transaction (no handle,
+    // forged handle or member mismatch => no preview row either).
+    if(kernel)bindPreviewWitness(kernel.handle,{kind:kernel.kind,operationId:p.operationId,path:p.path,change:p.change,beforeHash:sha256(before??""),afterHash:sha256(after),actor});
+  })();
   log(p.operationId,actor,"preview",{path:p.path,beforeHash:sha256(before??""),afterHash:sha256(after),reason:p.reason});
   return {...publicPreview(row(p.operationId)),previewToken:token};
 }
-export function adminPreview(id:string) { assertEnabled();return publicPreview(row(id)); }
-export function approve(id:string,adminId:string,afterHash:string) {
+function reviewedEvidence(r:RecordRow,p:PreviewInput){
+  const id=r.id,semantic=sourceEventReviewEvidence(p.path);
+  let revision:ReturnType<typeof revisionReviewEvidence>|null=null;
+  if(hasRevisionAdmission(id)||(revisionRouteActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path))){
+    const g=assertRevisionGate(id,p.path,r.before_text,r.after_text,r.actor);
+    revision=revisionReviewEvidence(g);
+  }
+  if(!revision&&!semantic)return null;
+  const w=witnessFor(id);
+  const provenance=w?{witnessPlanId:w.plan_id,baseTier:w.base_tier,baseSha256:w.base_sha256,
+    legacyTargetAdoption:w.base_tier?{baseTier:w.base_tier,baseSha256:w.base_sha256,resultTier:"server_witnessed_revision_on_legacy_base"}:null}:null;
+  const evidence={...(revision??{}),...(semantic?{sourceEventEvidence:semantic}:{}),...(provenance?{provenance}:{}),operationId:id,actor:r.actor,beforeHash:r.before_hash,afterHash:r.after_hash};
+  return {...evidence,reviewedEvidenceDigest:sha256(JSON.stringify(evidence)),fullBefore:r.before_text,fullAfter:r.after_text};
+}
+export function adminPreview(id:string) {
+  assertEnabled();const r=row(id),p=JSON.parse(r.payload) as PreviewInput,evidence=reviewedEvidence(r,p);
+  return {...publicPreview(r),...(evidence?{...evidence,reviewerScope:"authenticated_dashboard_session_attestation_not_human_presence"}:{})};
+}
+export function approve(id:string,adminId:string,afterHash:string,reviewedEvidenceDigest?:string) {
+  if(c1Pilot())throw Error("c1_pilot_explicit_bundle_review_required");
   assertEnabled();const r=row(id);
+  assertProtectedRecord((JSON.parse(r.payload) as PreviewInput).path,document(r.before_text).data,document(r.after_text).data);
   if(r.status!=="preview"||Date.now()>r.expires||afterHash!==r.after_hash) throw Error("Approval expired or does not match the reviewed diff");
+  const p=JSON.parse(r.payload) as PreviewInput;
+  const w=witnessFor(id);
+  if(w)assertWitnessCurrent(w,r.actor);
+  else if(authorityRegimeActive()&&(canonicalNamespaceKind(p.path)||isReservedOperationId(id)))
+    throw Error(predatesMigrationEpoch(id)?"authority_superseded_by_migration":"canonical_witness_required");
+  const evidence=reviewedEvidence(r,p);
+  if(evidence&&reviewedEvidenceDigest!==evidence.reviewedEvidenceDigest)throw Error("revision_reviewed_source_evidence_hold");
+  if(r.approval===`admin:${adminId}`){
+    const previous=store().prepare("SELECT detail FROM safe_edit_events WHERE operation_id=? AND event='approved' AND actor=? ORDER BY rowid DESC LIMIT 1").get(id,r.approval) as {detail:string}|undefined;
+    if(previous&&JSON.parse(previous.detail).afterHash===afterHash&&JSON.parse(previous.detail).reviewedEvidenceDigest===reviewedEvidenceDigest)return {approved:true};
+  }
   store().prepare("UPDATE safe_edit_operations SET approval=? WHERE id=? AND status='preview'").run(`admin:${adminId}`,id);
-  log(id,`admin:${adminId}`,"approved",{afterHash});return {approved:true};
+  log(id,`admin:${adminId}`,"approved",{afterHash,...(evidence?{reviewedEvidenceDigest}:{})});return {approved:true};
 }
 function backupDir() {
+  assertResearchEntry();
   const dir=path.join(env.dataDir,"safe-edit-backups");
-  try{fs.mkdirSync(dir,{mode:0o700});}catch(e){if((e as NodeJS.ErrnoException).code!=="EEXIST") throw e;}
+  try{withD1NativeInterlock("business",()=>fs.mkdirSync(dir,{mode:0o700}));}catch(e){if((e as NodeJS.ErrnoException).code!=="EEXIST") throw e;}
   const stat=fs.lstatSync(dir);if(stat.isSymbolicLink()||!stat.isDirectory()) throw Error("Unsafe backup directory");
   return dir;
 }
 function backupPath(id:string) {return path.join(backupDir(),`${idSchema.parse(id)}.md`);}
 function durable(file:string,content:string) {
-  const fd=fs.openSync(file,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o600);
-  try{fs.writeFileSync(fd,content);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
+  assertResearchEntry();
+  const fd=withD1NativeInterlock("business",()=>fs.openSync(file,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o600));
+  try{withD1NativeInterlock("business",()=>fs.writeFileSync(fd,content));withD1NativeInterlock("business",()=>fs.fsyncSync(fd));}finally{fs.closeSync(fd);}
 }
-function syncDir(dir:string) {const fd=fs.openSync(dir,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);try{fs.fsyncSync(fd);}finally{fs.closeSync(fd);}}
+function syncDir(dir:string) {const fd=fs.openSync(dir,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);try{withD1NativeInterlock("business",()=>fs.fsyncSync(fd));}finally{fs.closeSync(fd);}}
 function backup(r:RecordRow,p:PreviewInput) {
   const name=backupPath(r.id);
   if(fs.existsSync(name)) {if(sha256(fs.readFileSync(name))!==r.before_hash) throw Error("Existing backup checksum mismatch");}
@@ -291,39 +447,98 @@ function atomic(r:RecordRow,p:PreviewInput) {
     if(sha256(read(abs)??"")!==r.before_hash) throw Error("Version conflict before publish");
     const current=fs.statSync(dir),opened=fs.fstatSync(fd);
     if(current.ino!==opened.ino||current.dev!==opened.dev) throw Error("Parent folder changed during edit");
-    if(p.change.kind==="create") fs.linkSync(temp,dest);
-    else fs.renameSync(temp,dest);
-    fs.fsyncSync(fd);
-  } finally {if(temp) fs.rmSync(temp,{force:true});fs.closeSync(fd);}
+    if(p.change.kind==="create") withD1NativeInterlock("business",()=>fs.linkSync(temp,dest));
+    else withD1NativeInterlock("business",()=>fs.renameSync(temp,dest));
+    withD1NativeInterlock("business",()=>fs.fsyncSync(fd));
+  } finally {if(temp&&!maintenanceActive()) withD1NativeInterlock("business",()=>fs.rmSync(temp,{force:true}));fs.closeSync(fd);}
 }
 export function status(id:string,actor:string) {
   const r=owned(id,actor);
   return {operationId:id,status:r.status,path:(JSON.parse(r.payload) as PreviewInput).path,
     beforeHash:r.before_hash,afterHash:r.after_hash,receipt:r.receipt?JSON.parse(r.receipt):null};
 }
-export function apply(input:unknown,actor:string) {
+/** Generic apply: never an escape hatch for kernel-witnessed operations and,
+ * once the regime is active, never for canonical IDs/namespaces. */
+export function apply(input:unknown,actor:string) {return applyWithAdmission(input,actor,false,false,false);}
+/** Kernel canonical apply for Source and non-event steps: requires the witness. */
+export function applyCanonicalStep(input:unknown,actor:string) {return applyWithAdmission(input,actor,false,false,true);}
+/** Internal dedicated revision route only; no public schema flag enables it. */
+export function applyCanonicalRevision(input:unknown,actor:string) {return applyWithAdmission(input,actor,true,false,true);}
+export function applyCanonicalAssessed(input:unknown,actor:string){return applyWithAdmission(input,actor,false,true,true);}
+function assertReviewedApproval(r:RecordRow,p:PreviewInput){
+  const evidence=reviewedEvidence(r,p);
+  const approved=store().prepare("SELECT detail FROM safe_edit_events WHERE operation_id=? AND event='approved' AND actor=? ORDER BY rowid DESC LIMIT 1")
+    .get(r.id,r.approval) as {detail:string}|undefined;
+  const detail=approved?JSON.parse(approved.detail):null;
+  if(!r.approval||!evidence||detail?.afterHash!==r.after_hash||detail?.reviewedEvidenceDigest!==evidence.reviewedEvidenceDigest)
+    throw Error("revision_reviewed_source_evidence_hold");
+}
+function assertAssessedBundleApproval(p:PreviewInput){
+  for(const t of sourceEventTargets(p.path)){
+    const r=row(t.operationId!);
+    if(!["preview","written"].includes(r.status))throw Error("source_event_bundle_not_ready");
+    // Written members retain their actual receipt; pending members all require
+    // exact approval before the first non-Source write. No subset fallback.
+    if(r.status!=="written")assertReviewedApproval(r,JSON.parse(r.payload));
+  }
+}
+function applyWithAdmission(input:unknown,actor:string,revision:boolean,canonicalAssessed:boolean,kernelRoute:boolean) {
+  assertResearchEntry();
   assertEnabled();const args=applySchema.parse(input),r=owned(args.operationId,actor);
+  const p=JSON.parse(r.payload) as PreviewInput;
+  const witness=witnessFor(r.id);
+  // Pending pre-WP2/pre-epoch authority stays usable until the authorized
+  // migration epoch (OD-05); once the regime is active it must be re-prepared.
+  if(kernelRoute&&!witness&&r.status!=="written"&&authorityRegimeActive())
+    throw Error(predatesMigrationEpoch(r.id)?"authority_superseded_by_migration":"canonical_witness_required");
+  const managedRevision=hasRevisionAdmission(r.id)||(revisionRouteActive()&&r.before_text!==""&&isCanonicalCompanyReview(p.path));
+  if(managedRevision&&!revision)throw Error("canonical_review_revision_dedicated_route_required");
+  if(revision&&!managedRevision)throw Error("canonical_review_revision_scope_hold");
+  if(hasSourceEventGate(p.path)&&!revision&&!canonicalAssessed)throw Error("source_event_dedicated_apply_required");
+  // A02: generic apply never consumes a kernel witness and never applies a
+  // canonical ID/namespace, in every mode (pending pre-WP2 canonical authority
+  // completes only through the dedicated kernel route, OD-05).
+  if(!kernelRoute&&(witness||isReservedOperationId(r.id)||canonicalNamespaceKind(p.path)))
+    throw Error(!witness&&predatesMigrationEpoch(r.id)?"authority_superseded_by_migration":"canonical_route_required");
   if(!crypto.timingSafeEqual(Buffer.from(sha256(args.previewToken),"hex"),Buffer.from(r.token_hash,"hex"))||args.expectedHash!==r.before_hash) throw Error("Invalid preview token or expected hash");
   if(r.status==="written") return status(r.id,actor);
+  checkStoredReviewLineage(r);
   if(Date.now()>r.expires) throw Error("Preview expired; review a fresh diff");
-  if(requiresApproval(r)&&!r.approval) throw Error("Explicit admin approval of this exact thesis diff is required; open approvalUrl");
-  const p=JSON.parse(r.payload) as PreviewInput;
+  if(requiresApproval(r)&&!r.approval) throw Error("Explicit authenticated dashboard approval of this exact protected/revision diff is required; open approvalUrl");
+  if(managedRevision||hasSourceEventGate(p.path))assertReviewedApproval(r,p);
+  assertAssessedBundleApproval(p);
   if(r.status==="writing") throw Error("Interrupted write: inspect receipt and backup; do not replay without recovery review");
   // Cross-process lock deliberately has no stale timeout. A crash requires
   // administrator recovery, rather than silently racing an unknown writer.
   const lock=path.join(env.dataDir,"safe-edit.lock");
-  fs.mkdirSync(lock,{mode:0o700});
+  withD1NativeInterlock("business",()=>fs.mkdirSync(lock,{mode:0o700}));
   try {
     const {abs}=target(p.path),current=read(abs);
     if((p.change.kind==="create"?current!==null:current===null)||sha256(current??"")!==r.before_hash) throw Error("Version conflict: re-preview; another writer changed this note");
-    checkEvidence(p,current??"");
-    document(r.after_text);assertHeadroom(Buffer.byteLength(r.before_text)*2+Buffer.byteLength(r.after_text)+64_000);
+    checkEvidence(p);
+    if(managedRevision||hasSourceEventGate(p.path))assertReviewedApproval(r,p);
+    assertSourceEventWrite(r.id,p.path,current??"",r.after_text,actor,p.change,"apply");
+    assertAssessedBundleApproval(p);
+    assertResearchJudgeWrite(p.path,current??"",r.after_text,actor,"apply");
+    assertPilotApply(r.id,p.path,current??"",r.after_text,actor);
+    assertReceivedClaimWrite(p.path,current??"",r.after_text,actor,"apply");
+    assertPrimaryMetadataAuthority(document(current??"").data,document(r.after_text).data);
+    assertResearchStateAuthority(document(current??"").data,document(r.after_text).data);
+    assertProtectedRecord(p.path,document(current??"").data,document(r.after_text).data);
+    assertHeadroom(Buffer.byteLength(r.before_text)*2+Buffer.byteLength(r.after_text)+64_000);
     backup(r,p);
     const receipt={operationId:r.id,path:p.path,beforeHash:r.before_hash,afterHash:r.after_hash,
       writtenAt:null as string|null,write:"pending",readback:"pending",reindex:"pending",
       sync:"unverified",remoteSync:"unverified",mobileSync:"unverified",backup:`safe-edit-backups/${r.id}.md`,
       approval:r.approval,review:p.evidence??null};
-    store().prepare("UPDATE safe_edit_operations SET status='writing',receipt=? WHERE id=?").run(JSON.stringify(receipt),r.id);
+    // T-04 / R-1: the single witness consumption commits atomically with the
+    // journal transition to 'writing' (after the idempotent backup). A failure
+    // before it leaves the witness unconsumed and the preview retryable; after
+    // it, the existing interrupted-write recovery owns the operation.
+    store().transaction(()=>{
+      if(witness)consumeCanonicalWitness(r.id,actor);
+      store().prepare("UPDATE safe_edit_operations SET status='writing',receipt=? WHERE id=?").run(JSON.stringify(receipt),r.id);
+    })();
     log(r.id,actor,"write_started",{path:p.path,beforeHash:r.before_hash,afterHash:r.after_hash});
     try {
       atomic(r,p);
@@ -342,10 +557,24 @@ export function apply(input:unknown,actor:string) {
       // A rename may have happened even when fsync/readback/index fails.
       // Persist truthful stages; never roll over a concurrent device edit.
       if(sha256(read(abs)??"")===r.after_hash) {receipt.write="written";receipt.writtenAt??=new Date().toISOString();}
-      store().prepare("UPDATE safe_edit_operations SET receipt=? WHERE id=?").run(JSON.stringify(receipt),r.id);
-      log(r.id,actor,"interrupted",{path:p.path,write:receipt.write});throw e;
+      if(e instanceof Error)Object.defineProperty(e,"writeOutcome",{value:{...receipt}});
+      try {
+        store().prepare("UPDATE safe_edit_operations SET receipt=? WHERE id=?").run(JSON.stringify(receipt),r.id);
+        log(r.id,actor,"interrupted",{path:p.path,write:receipt.write});
+      } catch(journalError) {
+        if(e instanceof Error)Object.defineProperty(e,"journalError",{value:journalError});
+      }
+      throw e;
     }
     return status(r.id,actor);
-  } catch(e) {log(r.id,actor,"refused",{path:p.path});throw e;}
-  finally {fs.rmdirSync(lock);}
+  } catch(e) {
+    try{log(r.id,actor,"refused",{path:p.path});}catch(journalError){
+      if(e instanceof Error&&!Object.hasOwn(e,"journalError"))Object.defineProperty(e,"journalError",{value:journalError});
+    }
+    throw e;
+  } finally {
+    // A barrier leaves the owned lock/temp for explicit recovery; it never
+    // grants a callback-wide completion/cleanup permit after DRAINING.
+    if(!maintenanceActive())withD1NativeInterlock("business",()=>fs.rmdirSync(lock));
+  }
 }

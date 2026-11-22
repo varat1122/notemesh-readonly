@@ -1,3 +1,7 @@
+import { denyPilotRawWriter } from "../c1-pilot";
+import { db } from "../db";
+import { assertRawContentAllowed, assertRawWriteAllowed } from "../safe-edit/protected-records";
+import {researchTrust,type ResearchTrust} from "./research-state";
 import fs from "node:fs";
 import path from "node:path";
 import { env } from "../env";
@@ -16,7 +20,8 @@ import {
   MAX_INDEX_BYTES,
   MAX_WRITE_BYTES,
 } from "./paths";
-import { writeVaultFile } from "./disk";
+import { assertHeadroom, assertRawMutationAllowed, writeVaultFile } from "./disk";
+import { newTarget, rewriteText } from "./links";
 import { extractStructure, splitFrontmatter } from "./markdown";
 import { createdFor, forgetModification, isoInZone, modifiedFor } from "./modified";
 import { configuredTimeZone } from "./timezone";
@@ -66,6 +71,7 @@ export const MAX_READ_LINES = 20000;
 export const MAX_READ_BYTES = 100 * 1000;
 
 export interface NoteChunk {
+  researchTrust:ResearchTrust|null;
   path: string;
   content: string;
   totalLines: number;
@@ -94,6 +100,7 @@ export function readNoteRange(
     truncatedForSize = true;
   }
   const out: NoteChunk = {
+    researchTrust:researchTrust(rel,splitFrontmatter(content).data),
     path: rel,
     content: slice.join("\n"),
     totalLines: lines.length,
@@ -288,12 +295,17 @@ export function assertNoReservedSegments(abs: string) {
 }
 
 export function createNote(notePath: string, content: string): string {
+  denyPilotRawWriter();
   const abs = resolveNotePath(notePath);
   assertNoReservedSegments(abs);
   if (fs.existsSync(abs)) {
     throw new VaultPathError(`Note already exists: ${toVaultRelative(abs)} (use update_note to replace it)`);
   }
   assertWriteSize(content);
+  // OD-10 F-3: every refusal (path, proposed metadata, headroom) comes before
+  // mkdir, so a refused create leaves no empty directory behind.
+  assertRawMutationAllowed(abs, content);
+  assertHeadroom(Buffer.byteLength(content, "utf8"));
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   writeVaultFile(abs, content);
   return toVaultRelative(abs);
@@ -828,11 +840,85 @@ function clipLine(line: string): string {
   return line.length <= EXCERPT_CHARS ? line : line.slice(0, EXCERPT_CHARS) + "…";
 }
 
+/**
+ * A03 (WP2): a move is followed by a link rewrite in every note that links to
+ * the moved paths. A canonical/protected linking note can never be rewritten by
+ * a raw writer, so refuse BEFORE any rename rather than leave a partial move.
+ * Conservative: callers that skip the rewrite are refused too.
+ *
+ * OD-10 A03: the rewrite itself is projected here, writing nothing, exactly as
+ * links.ts rewriteLinksForMoves performs it after the rename (same index rows,
+ * same post-move basename counts, same newTarget/rewriteText), and every
+ * projected note passes the same metadata-aware guard its later write would.
+ */
+export function assertMoveLinkRewriteAllowed(moves: Map<string, string>): void {
+  if (moves.size === 0) return;
+  const d = db();
+  const select = d.prepare("SELECT source_path, target, resolved_path FROM links WHERE resolved_path = ?");
+  // Per source note, each raw target and the moved file it resolved to.
+  const bySource = new Map<string, Map<string, string>>();
+  for (const from of moves.keys()) {
+    for (const r of select.all(from) as { source_path: string; target: string; resolved_path: string }[]) {
+      const targets = bySource.get(r.source_path) ?? new Map<string, string>();
+      targets.set(r.target.trim(), r.resolved_path);
+      bySource.set(r.source_path, targets);
+    }
+  }
+  if (bySource.size === 0) return;
+  // Basenames as they will be after the moves, for the ambiguity check.
+  const stripMd = (p: string) => (p.toLowerCase().endsWith(".md") ? p.slice(0, -3) : p);
+  const counts = new Map<string, number>();
+  const paths = (d.prepare("SELECT path FROM notes UNION ALL SELECT path FROM attachments").all() as { path: string }[])
+    .map((r) => r.path)
+    .filter((p) => !moves.has(p))
+    .concat([...moves.values()]);
+  for (const p of paths) {
+    const base = path.basename(stripMd(p)).toLowerCase();
+    counts.set(base, (counts.get(base) ?? 0) + 1);
+  }
+  const basenameCount = (base: string) => counts.get(base.toLowerCase()) ?? 0;
+  for (const [source, targets] of bySource) {
+    const to = moves.get(source);
+    const refused = () => new VaultPathError(`canonical_link_rewrite_refused: ${source} links to ${[...targets.values()][0]}`);
+    // OD-10 F-1: the linking note's path, its path after the moves and its
+    // metadata on disk (a typed protected note under an ordinary name).
+    const abs = path.join(env.vaultDir, source);
+    try {
+      assertRawMutationAllowed(abs, null, ...(to ? [to] : []));
+    } catch {
+      throw refused();
+    }
+    // Before the rename the source is still here, with the bytes the rewrite will read.
+    if (!fs.existsSync(abs)) continue;
+    const replacement = (t: string) => {
+      const from = targets.get(t)!;
+      return newTarget(t, from, moves.get(from)!, basenameCount);
+    };
+    // No target changes its text: rewriteText returns null and nothing is written.
+    if ([...targets.keys()].every((t) => replacement(t) === null)) continue;
+    const content = readVaultFile(abs);
+    const rewritten = rewriteText(content, new Set(targets.keys()), replacement);
+    if (!rewritten) continue;
+    try {
+      assertRawContentAllowed(to ?? source, content, rewritten.text);
+    } catch {
+      throw refused();
+    }
+  }
+}
+
 export function moveNote(notePath: string, newPath: string): { from: string; to: string } {
+  denyPilotRawWriter();
   const absFrom = resolveNotePath(notePath);
   const absTo = resolveNotePath(newPath);
+  // WP2 (PD-11, all modes): a rename may neither move a canonical/protected
+  // record nor create one under a canonical/protected path; checked before any rename.
+  for (const rel of [toVaultRelative(absFrom), toVaultRelative(absTo)]) assertRawWriteAllowed(rel);
   if (!fs.existsSync(absFrom)) throw new VaultPathError(`Note not found: ${notePath}`);
   if (fs.existsSync(absTo)) throw new VaultPathError(`Target already exists: ${toVaultRelative(absTo)}`);
+  // OD-10 F-1: nor move a note whose metadata on disk is protected.
+  assertRawMutationAllowed(absFrom, null, toVaultRelative(absTo));
+  assertMoveLinkRewriteAllowed(new Map([[toVaultRelative(absFrom), toVaultRelative(absTo)]]));
   fs.mkdirSync(path.dirname(absTo), { recursive: true });
   fs.renameSync(absFrom, absTo);
   // A rename keeps the file's own time; only the old path's record is stale.
@@ -841,8 +927,12 @@ export function moveNote(notePath: string, newPath: string): { from: string; to:
 }
 
 export function deleteNote(notePath: string): string {
+  denyPilotRawWriter();
   const abs = resolveNotePath(notePath);
+  assertRawWriteAllowed(toVaultRelative(abs));
   if (!fs.existsSync(abs)) throw new VaultPathError(`Note not found: ${notePath}`);
+  // OD-10 F-1: nor delete a note whose metadata on disk is protected.
+  assertRawMutationAllowed(abs);
   fs.rmSync(abs);
   forgetModification(toVaultRelative(abs));
   return toVaultRelative(abs);

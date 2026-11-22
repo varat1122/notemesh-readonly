@@ -20,7 +20,8 @@ import type {SetupStage} from "~/server/setup";
 // "configure" into login + vault picker, so it runs one step longer than git.
 // Before a backend is chosen the longer path is assumed, which is why the total
 // can tick down rather than up.
-function stepsFor(backend: "obsidian" | "git" | null): SetupStage[] {
+function stepsFor(backend: "obsidian" | "git" | null, localOnly = false): SetupStage[] {
+    if (localOnly) return ["admin", "local-vault", "timezone", "notifications"];
     return backend === "git"
         ? ["admin", "backend", "git", "timezone", "notifications"]
         : ["admin", "backend", "obsidian-login", "vault", "timezone", "notifications"];
@@ -31,7 +32,7 @@ export default function Setup() {
     const navigate = useNavigate();
 
     const stage = () => progress()?.stage;
-    const steps = () => stepsFor(progress()?.backend ?? null);
+    const steps = () => stepsFor(progress()?.backend ?? null, progress()?.localOnly ?? false);
     const stepNumber = () => steps().indexOf(stage()!) + 1;
 
     return (
@@ -56,6 +57,9 @@ export default function Setup() {
                         <Match when={s === "backend"}>
                             <BackendStep onDone={refetch}/>
                         </Match>
+                        <Match when={s === "local-vault"}>
+                            <LocalVaultStep onDone={refetch}/>
+                        </Match>
                         <Match when={s === "git"}>
                             <GitStep onDone={refetch}/>
                         </Match>
@@ -76,7 +80,10 @@ export default function Setup() {
                                 <header>
                                     <strong>Setup complete</strong>
                                 </header>
-                                <p>Your vault is syncing and the MCP endpoint is live.</p>
+                                <Show when={progress()?.localOnly} fallback={<p>Your vault is syncing and the MCP endpoint is live.</p>}>
+                                    <p>Your local research vault is configured. There is no external Sync or remote backup.
+                                        Research saves still require their existing review and authorization checks.</p>
+                                </Show>
                                 <button onClick={() => navigate("/")}>Go to Dashboard</button>
                             </article>
 
@@ -86,6 +93,7 @@ export default function Setup() {
                   which is much less than people assume — so the ask reads as
                   ordinary housekeeping rather than a warning about their
                   notes. */}
+                            <Show when={!progress()?.localOnly}>
                             <article>
                                 <header>
                                     <strong>One last thing: watch the disk</strong>
@@ -114,6 +122,7 @@ export default function Setup() {
                                     <b>cannot be shrunk</b>, and Hobby caps at 5&nbsp;GB.
                                 </p>
                             </article>
+                            </Show>
 
                         </Match>
                     </Switch>
@@ -122,6 +131,30 @@ export default function Setup() {
             <RepoFooter/>
         </main>
     );
+}
+
+function LocalVaultStep(props: { onDone: () => void }) {
+    const [confirmed, setConfirmed] = createSignal(false);
+    const [busy, setBusy] = createSignal(false);
+    const [error, setError] = createSignal<string | null>(null);
+    return <article>
+        <header><strong>Local disposable Research Vault</strong></header>
+        <p>This pilot stores research only in this isolated instance. It has no Git or Obsidian Sync
+            and no remote backup. Removing its storage loses the local data.</p>
+        <p>Setup prepares empty research folders. It does not create company identities, research notes,
+            verified evidence or reviewer approvals.</p>
+        <label><input type="checkbox" checked={confirmed()} disabled={busy()}
+            onChange={e => setConfirmed(e.currentTarget.checked)}/>
+            I understand and want to configure this local-only pilot vault.</label>
+        <Show when={error()}><p role="alert">{error()} Setup may have partial effects; an operator must inspect
+            the reported failure before retrying. Do not clear a lock or change database flags.</p></Show>
+        <button disabled={!confirmed() || busy() || Boolean(error())} aria-busy={busy()} onClick={async () => {
+            setBusy(true);
+            try { await api.setupLocalPilotVault({confirmLocalOnly: true}); props.onDone(); }
+            catch (e) { setError(e instanceof Error ? e.message : "Local setup was not confirmed."); }
+            finally { setBusy(false); }
+        }}>Configure local vault</button>
+    </article>;
 }
 
 /**
@@ -501,6 +534,22 @@ function ObsidianStep(props: { onDone: () => void }) {
     const [mfa, setMfa] = createSignal("");
     const [error, setError] = createSignal<string | null>(null);
     const [busy, setBusy] = createSignal(false);
+    const [switching, setSwitching] = createSignal(false);
+
+    async function useGitInstead() {
+        setError(null);
+        setSwitching(true);
+        try {
+            // This setup stage is only shown before a vault is linked. The
+            // existing admin-protected action updates the backend choice.
+            await api.setupChooseBackend("git");
+            props.onDone();
+        } catch (e) {
+            setError(String((e as { message?: string })?.message ?? e));
+        } finally {
+            setSwitching(false);
+        }
+    }
 
     async function submit(e: Event) {
         e.preventDefault();
@@ -552,10 +601,20 @@ function ObsidianStep(props: { onDone: () => void }) {
                 <Show when={error()}>
                     <p class="error">{error()}</p>
                 </Show>
-                <button type="submit" aria-busy={busy()} disabled={busy()}>
+                <button type="submit" aria-busy={busy()} disabled={busy() || switching()}>
                     Sign In to Obsidian
                 </button>
             </form>
+            <p class="muted">Selected Obsidian Sync by mistake?</p>
+            <button
+                type="button"
+                class="secondary"
+                aria-busy={switching()}
+                disabled={busy() || switching()}
+                onClick={useGitInstead}
+            >
+                {switching() ? "Switching…" : "Use a Git Repo instead"}
+            </button>
         </article>
     );
 }

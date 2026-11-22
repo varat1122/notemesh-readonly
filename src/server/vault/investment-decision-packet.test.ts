@@ -36,6 +36,62 @@ async function packet(input:typeof nvda|typeof macro|any){
   return {review,packet:buildInvestmentDecisionPacket(input,review)};
 }
 describe("universal investment decision packet",()=>{
+  it.each(["source_type","source_tier"])("RC4 C2/C3 %s declaration and Primary Evidence filename remain candidates with an open primary gap",async key=>{
+    const rel="10_Knowledge/Macro and Markets/Primary Evidence - Vietnam GDP.md";
+    const bytes=`---\ncountry: Vietnam\n${key}: primary\nsource_url: ${macro.originalSource}\n---\n# Vietnam GDP\nCandidate release with no server PEV.\n`;
+    await add(rel,bytes);
+    const {packet:p}=await packet(macro);
+    expect(p.historicalContext.sourcePointers.some(x=>x.path===rel)).toBe(true);
+    expect(p.historicalContext.noteDeclaredPrimaryCandidates).toContain(rel);
+    expect(p.historicalContext.primaryVerification).toEqual({status:"not_performed",serverVerifiedPrimaryPaths:[],gap:"exact_scope_pev_validation_required"});
+    expect(p.historicalContext.missing.join(" ")).toContain("primary macro/statistical evidence not established");
+    expect(p.claimGate.externalPrimaryVerification).toBe("not_performed");
+    expect(p.thesisDecision.canAutoUpdateThesis).toBe(false);expect(fs.readFileSync(path.join(vault,rel),"utf8")).toBe(bytes);
+  });
+  it("D2 legacy primary metadata stays an unverified candidate across Context, Decision Packet and Ledger",async()=>{
+    await add("01_Companies/NVDA.md","# NVDA\nSynthetic issuer context");
+    const rel="08_Daily_Weekly/Research Indexes/Primary Evidence - NVDA legacy.md";
+    const bytes=`---\nentity: NVDA\nsource_type: primary\nverification: verified_against_primary\nprimary_url: ${nvda.originalSource}\nverified_at: 2026-11-01\nclaims:\n  - claim_id: LEGACY-NVDA\n    metric: ${nvda.metric}\n    period: ${nvda.period}\n    value: '${nvda.value}'\n    unit: ${nvda.unit}\n    original_source: ${nvda.originalSource}\n    verification: verified_against_primary\n---\n# NVDA historical cash flow declaration\n`;
+    await add(rel,bytes);
+    const {buildInvestmentContextPack}=await import("./investment-context");
+    const context=buildInvestmentContextPack({question:"NVDA cash flow",issuers:["NVDA"]});
+    expect(context.status).toBe("retrieval_only_not_verified");
+    expect(context.items.find(x=>x.path===rel)).toMatchObject({declaredVerification:"verified_against_primary",evidenceUse:"unverified_candidate"});
+    const {packet:p}=await packet(nvda);
+    expect(p.status).toBe("analyst_review_packet_not_verified");
+    expect(p.claimGate).toMatchObject({externalPrimaryVerification:"not_performed",sourceIndependence:"not_assessed"});
+    expect(p.historicalContext.noteDeclaredPrimaryCandidates).toContain(rel);
+    expect(p.historicalContext.primaryVerification).toEqual({status:"not_performed",serverVerifiedPrimaryPaths:[],gap:"exact_scope_pev_validation_required"});
+    expect(p.historicalContext.missing.join(" ")).toContain("Server-verified primary evidence not established");
+    expect(p.historicalContext.sourcePointers.find(x=>x.path===rel)?.evidenceUse).toBe("unverified_candidate");
+    expect(p.evidenceVerificationLedger.entries.find(x=>x.path===rel)).toMatchObject({
+      noteDeclaredVerification:"verified_against_primary",originalVerifiedThisRun:false,originalSourceIndependent:"unknown"});
+    expect(p.thesisDecision.canAutoUpdateThesis).toBe(false);
+    expect(fs.readFileSync(path.join(vault,rel),"utf8")).toBe(bytes);
+  });
+  it("RI-001 resolves only issuer-context aliases while keeping claim/entity and security identities intact",async()=>{
+    await add("01_Companies/TSMC.md","---\naliases: [TSM]\n---\n# TSMC company");
+    const thesis="05_Thesis/TSMC - Current Thesis.md";
+    await add(thesis,"---\nsource_type: chatgpt_history\nverification: not_reverified\n---\n# Historical TSMC draft\n## Counter-evidence\nCapacity and margins need original sources.");
+    const before=fs.readFileSync(path.join(vault,thesis));
+    const {packet:p}=await packet({...nvda,entity:"TSM",statement:"TSM company cash flow research"});
+    expect(p.entity).toBe("TSM");expect(p.changeLogDraft.entity).toBe("TSM");
+    expect(p.historicalContext.issuerResolution[0]).toMatchObject({requested:"TSM",contextKey:"TSMC",status:"indexed_alias"});
+    expect(p.historicalContext.protectedThesisPaths).toContain(thesis);
+    expect(p.claimGate.sourceIndependence).toBe("not_assessed");
+    expect(p.thesisDecision.canAutoUpdateThesis).toBe(false);
+    expect(p.pricingAndPortfolio.marketPricing).toBe("not_checked");
+    expect(fs.readFileSync(path.join(vault,thesis))).toEqual(before);
+  });
+  it("RI-001 never upgrades archived AI verification labels into primary candidates",async()=>{
+    const archive="07_Sources/ChatGPT/Vietnam GDP.md";
+    await add(archive,"---\ncountry: Vietnam\nsource_type: primary\nverification: verified_against_primary\nsource_url: https://example.gov/gdp\n---\n# Vietnam GDP\nVietnam GDP historical AI recap");
+    const {packet:p}=await packet(macro);
+    expect(p.historicalContext.sourcePointers.find(x=>x.path===archive)?.evidenceUse).toBe("historical_context_only");
+    expect(p.historicalContext.noteDeclaredPrimaryCandidates).not.toContain(archive);
+    expect(p.historicalContext.missing.join(" ")).toContain("primary macro/statistical");
+    expect(p.claimGate.externalPrimaryVerification).toBe("not_performed");
+  });
   it("does not infer issuer approval, cash-flow impact or a Thesis change from a matching source",async()=>{
     await add("05_Thesis/NVDA - Current Thesis.md",
       "---\nverification: not_reverified\nstatus: draft_from_archived_evidence\n---\n# NVDA draft Thesis\nRisks require receipts.");

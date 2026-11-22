@@ -24,6 +24,14 @@ const news={domain:"industry",entities:["SK hynix","Micron"],themes:["Memory"],
   topic:"Synthetic HBM4 investor comment",sourceKind:"broker_research",inputFormat:"screenshot",
   sourceChat:"Micro 251026",sourceLanguage:"en",eventDate:"2026-10-21",
   extractedText:"Synthetic user screenshot describes HBM4 yield, unrelated to issuer confirmation.",
+  sourceChannel:"broker_research",originalDocumentAccess:"excerpt_only" as const,
+  researchReview:{headlineTh:"ข่าวสมมติกล่าวถึงข้อมูลที่ยังต้องตรวจสอบต้นฉบับ",
+    translationTh:"ภาพหน้าจอสมมติที่ผู้ใช้ส่งกล่าวถึงอัตราผลผลิต HBM4 และไม่ได้เกี่ยวข้องกับการยืนยันจากบริษัท",
+    whatChangedTh:"เป็นข้อมูลที่ผู้ใช้ส่งมาและยังไม่ได้ตรวจสอบกับหลักฐานต้นฉบับ",
+    mechanismTh:"ความต้องการและกำลังการผลิตอาจส่งผลต่อรายได้และกำไร แต่ยังต้องตรวจสอบข้อมูลจริง",
+    thesisImplicationTh:"ยังไม่เปลี่ยนสมมติฐานการลงทุนหรือประมาณการกำไร",
+    counterEvidenceTh:"ต้นทุนและอัตราผลผลิตจริงอาจแตกต่างจากคาด",
+    requiredEvidenceTh:"ต้องตรวจเอกสารบริษัทและวันที่ประกาศก่อนใช้ข้อมูล"},
   completedAnalysis:"## ข้อสรุป\nHBM4 qualification remains unverified; do not change issuer thesis."
 };
 function parseResearch(result:any){
@@ -65,7 +73,11 @@ it("M5.3 Web tool contract: research MCP recipe → scoped Safe Edit preview/app
   const safe=await connect(createSafeEditMcpServer(editAccess));
   try{
     const tools=await safe.client.listTools();
-    expect(tools.tools).toHaveLength(14);
+    expect(tools.tools).toHaveLength(22);
+    for(const name of ["prepare_source_event_packet","source_event_result_contract"]){
+      expect(tools.tools.find(x=>x.name===name)?.annotations?.readOnlyHint).toBe(true);
+    }
+    expect(tools.tools.find(x=>x.name==="preflight_research_decision_v2")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.some(x=>x.name==="preview_edit")).toBe(true);
     const first=parseResearch(await research.client.callTool({name:"plan_investment_writeback",arguments:news}));
     expect(first.status).toBe("read_only_plan_not_written");
@@ -73,18 +85,24 @@ it("M5.3 Web tool contract: research MCP recipe → scoped Safe Edit preview/app
       protectedNotesTouched:false,sourcePreservation:"text_only_binary_not_verified"});
     const expected=first.safeEditWorkflow.steps;
     expect(expected).toHaveLength(2);
+    // WP2 (OD-04+OD-06): the read-only recipe is applied through the dedicated canonical
+    // MCP writer; the generic preview_edit route refuses canonical IDs/namespaces.
     for(const step of expected){
       expect(step.state).toBe("needs_create");
-      const prev=parseSafe(await safe.client.callTool({name:"preview_edit",arguments:step.safeEditRequest}));
-      expect(prev.status).toBe("preview");
+      const refused=await safe.client.callTool({name:"preview_edit",arguments:step.safeEditRequest});
+      expect(refused.isError).toBe(true);expect(JSON.stringify(refused)).toContain("canonical_operation_namespace_reserved");
       expect(fs.existsSync(path.join(vault,step.path))).toBe(false);
-      const written=parseSafe(await safe.client.callTool({name:"apply_edit",arguments:{
-        operationId:prev.operationId,previewToken:prev.previewToken,expectedHash:prev.beforeHash
-      }}));
-      expect(written).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified",
-        mobileSync:"unverified",remoteSync:"unverified"}});
+    }
+    const prepared=parseSafe(await safe.client.callTool({name:"prepare_canonical_writeback",arguments:news}));
+    expect(prepared.previews.map((x:any)=>x.path)).toEqual(expected.map((x:any)=>x.path));
+    expect(prepared.previews.map((x:any)=>x.operationId)).toEqual(expected.map((x:any)=>x.safeEditRequest.operationId));
+    const saved=parseSafe(await safe.client.callTool({name:"apply_canonical_writeback",arguments:{input:news,planId:prepared.planId,
+      authorizations:prepared.previews.map((x:any)=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}))}}));
+    expect(saved.status).toBe("saved_verified");
+    for(const prev of prepared.previews){
       const status=parseSafe(await safe.client.callTool({name:"get_edit_status",arguments:{operationId:prev.operationId}}));
-      expect(status.status).toBe("written");
+      expect(status).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified",
+        mobileSync:"unverified",remoteSync:"unverified"}});
     }
     const again=parseResearch(await research.client.callTool({name:"plan_investment_writeback",arguments:news}));
     expect(again.safeEditWorkflow).toMatchObject({status:"saved_verified",readyForNextNews:true,

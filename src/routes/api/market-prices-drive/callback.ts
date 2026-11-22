@@ -3,8 +3,9 @@ import { auth, runAuthMigrations } from "~/server/auth";
 import { env } from "~/server/env";
 import { finishDriveConsent } from "~/server/market-prices/drive-auth";
 import { driveAdminHeaders as headers, prepareDriveCredential } from "~/server/market-prices/drive-admin";
+import { tracked } from "~/server/maintenance";
 
-export async function GET({ request }: APIEvent) {
+async function handleGET({ request }: APIEvent) {
   await runAuthMigrations(); const admin = await auth.api.getSession({ headers: request.headers });
   if (!admin) return new Response("Administrator session required. Reconnect from the signed-in setup page.", { status: 401, headers });
   const url = new URL(request.url);
@@ -15,3 +16,6 @@ export async function GET({ request }: APIEvent) {
     return new Response(null, { status: 303, headers: { ...headers, Location: `${env.baseUrl}/api/market-prices-drive?prepared=${id}` } });
   } catch { return new Response("Google Drive connection refused, expired or cancelled. Return to the setup page and try a fresh consent. No price backend was activated.", { status: 400, headers }); }
 }
+
+// Pending work until the handler settles, even if the client disconnects (maintenance drain).
+export const GET = tracked(handleGET);

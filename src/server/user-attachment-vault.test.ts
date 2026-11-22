@@ -5,14 +5,52 @@ const jpg=Buffer.concat([Buffer.from([0xff,0xd8,0xff,0xe0,0x00,0x10]),Buffer.fro
 const png=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from("synthetic PNG image bytes")]);
 const pdf=Buffer.from("%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n%%EOF");
 beforeEach(()=>{
+ // Independent disposable instance per case, not a restart simulation.
+ delete (globalThis as Record<symbol,unknown>)[Symbol.for("notemesh.maintenance.registry.v1")];
  root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),"user-screenshot-vault-")));
  vault=path.join(root,"vault");fs.mkdirSync(vault,{recursive:true});
  process.env.DATA_DIR=root;process.env.ENCRYPTION_KEY??=Buffer.alloc(32,4).toString("base64");
  process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";vi.resetModules();
 });
 afterEach(()=>{
+ vi.restoreAllMocks();
  fs.rmSync(root,{recursive:true,force:true});
  delete process.env.DATA_DIR;delete process.env.SAFE_EDIT_ENABLED;delete process.env.SAFE_EDIT_SINGLE_WRITER;
+});
+
+describe("G04 attachment native admission",()=>{
+ it("refuses before any directory or file effect when already DRAINING",async()=>{
+  const {beginMaintenance}=await import("./maintenance");beginMaintenance();
+  const {storeUserAttachment}=await import("./user-attachment-vault");
+  expect(()=>storeUserAttachment({base64:jpg.toString("base64"),contentType:"image/jpeg"})).toThrow();
+  expect(fs.readdirSync(vault)).toEqual([]);
+ });
+ it("barrier after temp write denies publication, preserves bytes, and reports explicit HOLD",async()=>{
+  const {beginMaintenance}=await import("./maintenance");
+  const {storeUserAttachment}=await import("./user-attachment-vault");
+  const open=fs.openSync,close=fs.closeSync;let tempFd=-1,stopped=false;
+  vi.spyOn(fs,"openSync").mockImplementation(((p:fs.PathLike,...args:unknown[])=>{
+   const fd=(open as any)(p,...args);if(String(p).endsWith(".tmp"))tempFd=fd;return fd;
+  }) as typeof fs.openSync);
+  vi.spyOn(fs,"closeSync").mockImplementation(fd=>{close(fd);if(fd===tempFd&&!stopped){stopped=true;beginMaintenance();}});
+  let error:any;try{storeUserAttachment({base64:jpg.toString("base64"),contentType:"image/jpeg"});}catch(e){error=e;}
+  expect(error.attachmentOutcome).toMatchObject({status:"HOLD",effectsStarted:true,publication:"not_attempted",indexed:false,quarantineVerified:true});
+  const dir=path.join(vault,"07_Sources/ChatGPT/Attachments"),names=fs.readdirSync(dir);
+  expect(names).toHaveLength(1);expect(names[0].endsWith(".tmp")).toBe(true);
+  expect(fs.readFileSync(path.join(dir,names[0]))).toEqual(jpg);
+  expect(fs.existsSync(path.join(root,"app.sqlite"))).toBe(false);
+ });
+ it("post-link unlink failure is quarantined; retry cannot silently trust a two-link inode",async()=>{
+  const {storeUserAttachment,inspectUserAttachment}=await import("./user-attachment-vault");
+  const unlink=fs.unlinkSync;
+  vi.spyOn(fs,"unlinkSync").mockImplementation(p=>{if(String(p).endsWith(".tmp"))throw Error("synthetic-unlink-EIO");unlink(p);});
+  let error:any;try{storeUserAttachment({base64:jpg.toString("base64"),contentType:"image/jpeg"});}catch(e){error=e;}
+  expect(error.attachmentOutcome).toMatchObject({status:"HOLD",publication:"linked",indexed:false,quarantineVerified:true});
+  const {createHash}=await import("node:crypto"),digest=createHash("sha256").update(jpg).digest("hex");
+  expect(()=>inspectUserAttachment({sha256:digest,contentType:"image/jpeg"})).toThrow(/unsafe/);
+  expect(()=>storeUserAttachment({base64:jpg.toString("base64"),contentType:"image/jpeg"})).toThrow();
+  expect(JSON.parse(fs.readFileSync(path.join(root,"maintenance.json"),"utf8")).state).toBe("draining");
+ });
 });
 describe("content-addressed, no-clobber original user attachment",()=>{
  it("writes exact screenshot JPEG bytes into the vault and reopens SHA-256",async()=>{

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {kernelCanonicalCreate} from "../../../tests/source-event-fixture";
 const root=fs.mkdtempSync(path.join(os.tmpdir(),"investment-safe-edit-"));
 process.env.DATA_DIR=root;process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";
 const actor="oauth:synthetic",vault=path.join(root,"vault"),original="---\nstatus: draft\nverification: not_reverified\ncustom: preserved # keep comment\n---\n# NVDA synthetic only\n\n## Evidence\nExisting statement.\n\n## Risks\nCounter evidence.\n";
@@ -141,7 +142,7 @@ it("rollback refuses a corrupted backup without overwriting the current note",()
 });
 
 
-it("P0 synthetic end-to-end: historical retrieval → raw capture → linked review → timeline → verified readback → idempotent retry",async()=>{
+it("P0 synthetic end-to-end: historical retrieval → raw capture → linked review → protected timeline refusal → idempotent retry",async()=>{
   // Synthetic-only fixture. No production Vault, broker claims or actual
   // company business data are touched by this test.
   const {reindexPath}=await import("../vault/indexer");
@@ -197,12 +198,21 @@ it("P0 synthetic end-to-end: historical retrieval → raw capture → linked rev
     });
     return {preview,receipt};
   }
-  const original=reviewedWrite(raw,{kind:"create",content:[
+  // WP2 (OD-04+OD-06): planner canonical destinations are written through the kernel
+  // route only; generic Safe Edit refuses canonical namespaces in every mode.
+  async function canonicalWrite(kind:"source_intake"|"canonical_review",relative:string,change:{kind:"create";content:string}){
+    const [w]=await kernelCanonicalCreate([{kind,path:relative,content:change.content}],actor,{reason:"Synthetic closed-loop integration verification"});
+    const receipt=engine.status(w.operationId,actor);
+    expect(receipt).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified",
+      remoteSync:"unverified",mobileSync:"unverified"}});
+    return {preview:w,receipt};
+  }
+  const original=await canonicalWrite("source_intake",raw,{kind:"create",content:[
     "---","type: investment_raw_intake","source_type: user_supplied",
     "verification: not_reverified", "event_date: null", "---",
     "# SYNZ Synthetic Original User Input", "", text,""
   ].join("\n")});
-  const reviewResult=reviewedWrite(review,{kind:"create",content:[
+  const reviewResult=await canonicalWrite("canonical_review",review,{kind:"create",content:[
     "---","type: investment_research_review","source_type: archived_ai",
     "verification: not_reverified","event_date: null","---",
     "# SYNZ Synthetic Review — Not Issuer Verified", "",
@@ -214,25 +224,23 @@ it("P0 synthetic end-to-end: historical retrieval → raw capture → linked rev
     "## Analysis",
     "A demo mention does not prove bookings, ARR, cash flow, or thesis change.",""
   ].join("\n")});
-  const timelineResult=reviewedWrite(timeline,{
-    kind:"append",heading:"Chronology",date:"2026-10-19",content:[
-      "Synthetic source submission — not an independently verified event",
-      "[["+review.replace(/\.md$/,"")+"|Source-attributed review]]",
-      "<!-- investment-intake:"+planned.planId+" -->"
-    ].join("\n")
-  });
+  const timelineBefore=readNote(timeline).content;
+  expect(()=>reviewedWrite(timeline,{kind:"append",heading:"Chronology",date:"2026-10-19",
+    content:"A generic reviewed token does not authorize a curated Timeline."})).toThrow(/protected_record/);
   expect(readNote(raw).content).toContain(text);
   expect(readNote(review).content).toContain(raw.replace(/\.md$/,""));
-  expect(readNote(timeline).content).toContain("<!-- investment-intake:"+planned.planId+" -->");
+  expect(readNote(timeline).content).toBe(timelineBefore);
 
   const repeated=planInvestmentWriteback(submission);
   expect(repeated.planId).toBe(planned.planId);
   expect(repeated.routes.find(x=>x.kind==="raw_input")?.action).toBe("link_existing_or_hold");
   expect(repeated.routes.find(x=>x.kind==="research_review")?.action).toBe("link_existing_or_hold");
-  expect(repeated.routes.find(x=>x.kind==="company_timeline_candidate")?.action).toBe("link_existing_or_hold");
-  // Stable apply receipt is safe to retry, with no additional append.
-  expect(apply(timelineResult.preview)).toEqual(timelineResult.receipt);
-  expect(readNote(timeline).content.match(/investment-intake:IN-/g)).toHaveLength(1);
+  expect(repeated.gates.canAutoWrite).toBe(false);
+  // Source/Review receipts remain safe to retry; no Timeline authorization exists.
+  expect(()=>apply(reviewResult.preview as never)).toThrow(/canonical_route_required/);
+  expect(engine.applyCanonicalStep({operationId:reviewResult.preview.operationId,previewToken:reviewResult.preview.previewToken,
+    expectedHash:reviewResult.preview.beforeHash},actor)).toEqual(reviewResult.receipt);
+  expect(readNote(timeline).content).toBe(timelineBefore);
   expect(engine.status(original.preview.operationId,actor).status).toBe("written");
   expect(engine.status(reviewResult.preview.operationId,actor).status).toBe("written");
 });

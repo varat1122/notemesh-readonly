@@ -45,6 +45,7 @@ const PUBLIC_RPC = [
 ];
 
 const PROTECTED_RPC = [
+  "setupLocalPilotVault",
   "getSetupPage",
   "getKeysPage",
   "getStatusPage",
@@ -62,6 +63,7 @@ const PROTECTED_RPC = [
   "acknowledgeNotifications",
   "syncNow",
   "stopSync",
+  "enterMaintenance",
   "restartSync",
   "rebuildIndex",
   "reauth",
@@ -329,7 +331,8 @@ describe("OAuth discovery", () => {
     // matters in practice because Codex prefers server-advertised scopes over
     // its own config, so whatever is here is what the user is asked to approve.
     const pr = await (await fetch(`${server.url}/.well-known/oauth-protected-resource`)).json();
-    expect(pr.scopes_supported).toEqual(["vault:read", "inbox:submit"]);
+    expect(pr.scopes_supported).toEqual(["vault:read"]);
+    expect(pr.scopes_supported).not.toContain("inbox:submit");
     expect(pr.scopes_supported).not.toContain("offline_access");
     expect(pr.scopes_supported).not.toContain("openid");
   });
@@ -393,7 +396,7 @@ describe("the unauthenticated MCP challenge", () => {
     expect(challenge).toContain(
       `resource_metadata="${server.url}/.well-known/oauth-protected-resource"`,
     );
-    expect(challenge).toContain('scope="vault:read inbox:submit"');
+    expect(challenge).toContain('scope="vault:read"');
   });
 
   it.each(["GET", "DELETE"])(
@@ -406,7 +409,7 @@ describe("the unauthenticated MCP challenge", () => {
       const res = await fetch(`${server.url}/api/mcp`, { method });
       expect(res.status).toBe(401);
       expect(res.headers.get("www-authenticate")).toContain("resource_metadata=");
-      expect(res.headers.get("www-authenticate")).toContain('scope="vault:read inbox:submit"');
+      expect(res.headers.get("www-authenticate")).toContain('scope="vault:read"');
     },
   );
 

@@ -1,3 +1,4 @@
+import { c1Pilot } from "./c1-pilot";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -5,10 +6,13 @@ import { env } from "./env";
 import { getSetting } from "./db";
 import { nextIntake, acknowledge } from "./intake";
 import { syncBackend, syncKind } from "./sync";
+import { maintenanceActive, worker } from "./maintenance";
 
 export const cloudIntakeEnabled = () => process.env.CLOUD_INTAKE === "1";
-let timer: ReturnType<typeof setInterval> | undefined;
-let busy = false;
+// Timer and busy flag live in the process-wide maintenance registry: the built
+// server evaluates this module once per router bundle, and a drain started in
+// one bundle must see and stop a tick started in the other.
+const state = () => worker("cloudIntake");
 let lastRun: string | null = null;
 let lastResult = "waiting";
 let verifiedStart: number | null | undefined;
@@ -23,13 +27,17 @@ export function cloudIntakeStatus() {
 // One synchronous consumer in this single-replica deployment. The old worker
 // endpoint is disabled in cloud mode, so a desktop cannot race this importer.
 export function processCloudIntake() {
-  if (!cloudIntakeEnabled() || busy || getSetting("vault_configured") !== "true" || syncKind() !== "obsidian") return;
+  if (c1Pilot()) return;
+  if (maintenanceActive() || !cloudIntakeEnabled() || state().busy || getSetting("vault_configured") !== "true" || syncKind() !== "obsidian") return;
   const sync = syncBackend();
   const status = sync.status();
-  if (status.state !== "running") return;
+  // Do not dequeue or acknowledge while a guarded mutation is admitted.
+  // This consumer is synchronous: an active import finishes before another
+  // request can admit an edit. Git intake remains unsupported/queued above.
+  if (status.state !== "running" || sync.isEditPaused?.()) return;
   if (sync.getLogs().some(l => l.line === "[sync-policy] Verified bidirectional sync." && (!status.startedAt || l.ts >= status.startedAt))) verifiedStart = status.startedAt;
   if (verifiedStart !== status.startedAt) return;
-  busy = true;
+  state().busy = true;
   try {
     const item = nextIntake();
     lastRun = new Date().toISOString();
@@ -50,12 +58,24 @@ export function processCloudIntake() {
       acknowledge({ id: item.id, status: "blocked", paths: [], message: String(e instanceof Error ? e.message : e).slice(0,1000) });
       lastResult = "blocked";
     }
-  } finally { busy = false; }
+  } finally { state().busy = false; }
 }
 
 export function ensureCloudIntakeStarted() {
-  if (!cloudIntakeEnabled() || timer) return;
+  if (c1Pilot()) return;
+  const w = state();
+  if (!cloudIntakeEnabled() || w.timer || maintenanceActive()) return;
   const tick = () => { try { processCloudIntake(); } catch { lastResult = "retrying"; } };
-  timer = setInterval(tick, 5000);
-  timer.unref();
+  w.timer = setInterval(tick, 5000);
+  w.timer.unref();
+}
+
+export function stopCloudIntake() {
+  const w = state();
+  if (w.timer) clearInterval(w.timer);
+  w.timer = undefined;
+}
+
+export function cloudIntakeBusy(): boolean {
+  return state().busy;
 }

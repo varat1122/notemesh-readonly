@@ -6,19 +6,30 @@
  * Never edits the vault or upgrades protected investment decisions.
  */
 import { readNote } from "./notes";
+import {canonicalHttpSourceUrl as canonicalSourceUrl} from "../source-url";
 import { db } from "../db";
-import { buildInvestmentContextPack, type Focus } from "./investment-context";
-import { reviewInvestmentClaim, type Domain, type ReviewClass } from "./investment-claim-review";
+import { buildInvestmentContextPack, type Focus, type IdentityHoldDiscovery,type ResearchFallback } from "./investment-context";
+import { reviewInvestmentClaim, claimIntegrityCoverage, claimIntegrityWarning, type ClaimIntegrityCoverage, type Domain, type ReviewClass } from "./investment-claim-review";
 import { inspectUserAttachment, type AttachmentType } from "../user-attachment-vault";
 import { planCanonicalRoutingV2, type RoutingV2, type ContentType, type EntityTag,
   type BrokerUpdate } from "./investment-routing-v2";
 import { buildCanonicalSafeEditWorkflow, type CanonicalSafeEditWorkflow } from "./canonical-writeback-workflow";
+import type {IntakeClaim,ResearchLineage} from "./canonical-claims";
 import type { ThaiResearchReview } from "./research-quality-m55";
 import {resolveSourceIdentityM56, type SourceIdentityResolution} from "./source-identity-m56";
+import {inspectSourceArchiveProvenance,type SourceArchiveProvenance} from "./source-archive-provenance-p0";
+import type {AppearanceInput} from "./intake-appearances";
+import {planReviewReuse,type ReviewReuse,type ExistingReviewSelection} from "./canonical-review-reuse";
+
+import {validateMacroSubject,readMacroSourceScope,macroHistoryScope,type MacroSubject,type MacroScopeResolution} from "./macro-source-scope";
+import {indexedRead,receiptProvenance} from "./investment-research-context";
+import {preservedSubmittedText} from "./research-decision-v2";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
 export interface WritebackInput {
+  appearance?:AppearanceInput;
+  macroSubject?:MacroSubject;
   domain:Domain;
   entities:string[];
   topic:string;
@@ -33,6 +44,11 @@ export interface WritebackInput {
   rawAttachmentPath?:string|null;
   rawAttachmentSha256?:string|null;
   rawAttachmentContentType?:AttachmentType|null;
+  claims?:IntakeClaim[];
+  researchLineage?:ResearchLineage;
+  /** Explicit, opt-in *historical retrieval* cutoff, not analysisAsOf or file mtime.
+   * Server receipt-bound PIT selection still determines evidence eligibility. */
+  historyCutoff?:string;
   claim?:{metric:string;period:string;statement:string;value?:string;unit?:string};
   focus?:Focus;
   /** Optional M5.2 caller-declared labels; never silently treat them as verified facts. */
@@ -51,11 +67,14 @@ export interface WritebackInput {
   originalDocumentAccess?:"full_original"|"excerpt_only"|"not_obtained";
   /** M5.6: an existing Source receipt must be proven against original bytes and chronology. */
   existingIntakeId?:string;
+  existingReview?:ExistingReviewSelection;
 }
 type Route={kind:"raw_input"|"research_review"|"company_timeline_candidate"|"industry_context_candidate"|"claim_registry_candidate";
   action:"candidate_create"|"candidate_append_after_review"|"link_existing_or_hold";
   path:string|null;reason:string;requiresReview:boolean};
 export interface WritebackPlan {
+  macroScope?:MacroScopeResolution;
+  reviewReuse:ReviewReuse;
   status:"read_only_plan_not_written";
   planId:string;
   entityScope:string[];
@@ -70,6 +89,9 @@ export interface WritebackPlan {
     rawAttachmentPath:string|null;
     attachmentVerified:boolean;
     originalSourceVerified:false;
+    originalSourceArchive:SourceArchiveProvenance|null;
+    archiveProvenanceStatus:ReturnType<typeof inspectSourceArchiveProvenance>["status"];
+    archiveProvenanceReason:ReturnType<typeof inspectSourceArchiveProvenance>["reason"];
     preservation:"needs_safe_edit_raw_capture"|"stored_original_user_bytes";
   };
   chronology:{
@@ -77,10 +99,12 @@ export interface WritebackPlan {
     importedAt:"not_yet_written";
   };
   historical:{
+    fallback:ResearchFallback;
     source:"bounded_lexical_context_not_exhaustive";
     selected:number;
     paths:string[];
     missing:string[];
+    identityHoldDiscovery:IdentityHoldDiscovery[];
   };
   historicalEventReview:{
     status:"possible_same_event_candidates"|"none_selected_not_proof_new";
@@ -94,7 +118,7 @@ export interface WritebackPlan {
     scanTruncated:boolean;
     duplicateAdjudicated:false;
   };
-  exactClaimReview:{status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
+  exactClaimReview:ClaimIntegrityCoverage & {status:"not_checked_missing_exact_fields"|"checked_indexed_claim_candidates";
     classification:ReviewClass|null;matchingClaimPaths:string[];scanTruncated:boolean|null};
   routingV2:RoutingV2;
   safeEditWorkflow?:CanonicalSafeEditWorkflow;
@@ -126,17 +150,6 @@ const MAX_TEXT=12000;
  * Accept only exact issuer + asserted original event date + canonical URL.
  * File modified/imported dates never identify an economic event.
  */
-function canonicalSourceUrl(value:string):string|null{
-  try {
-    const u=new URL(value.replace(/[),.;]+$/g,""));
-    if(!["https:","http:"].includes(u.protocol)||u.username||u.password)return null;
-    u.hash="";
-    for(const k of [...u.searchParams.keys()])
-      if(/^utm_|^(?:fbclid|gclid)$/i.test(k))u.searchParams.delete(k);
-    u.searchParams.sort();
-    return u.toString();
-  }catch{return null;}
-}
 function relatedIssuer(f:Record<string,unknown>,issuer:string):boolean{
   const names=[f.company,f.entity,f.ticker,f.issuer].flatMap(v=>Array.isArray(v)?v:[v]);
   return names.some(v=>typeof v==="string"&&v.trim().toUpperCase()===issuer.trim().toUpperCase());
@@ -203,6 +216,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     throw Error("Entity roles must refer to explicitly declared entities (maximum 12)");
   if(input.brokerUpdate?.estimateChanges && input.brokerUpdate.estimateChanges.length>12)
     throw Error("At most 12 attributed broker estimate changes per plan");
+  if(input.claims&&!input.captureOnly&&!input.completedAnalysis&&!input.researchReview)
+    throw Error("claim_persistence_requires_capture_only_or_research_review");
   if((input.completedAnalysis!==undefined||input.researchReview!==undefined||input.captureOnly===true) && (!input.sourceChat?.trim()||input.sourceChat.length>120))
     throw Error("M5.3 captureOnly/completedAnalysis requires sourceChat (1-120)");
   if(input.captureOnly===true&&(input.completedAnalysis!==undefined||input.researchReview!==undefined))
@@ -215,6 +230,33 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     rawAttachmentSha256:input.rawAttachmentSha256,eventDate,publicationDate,
     verifiedAttachmentPath:verifiedAttachment?actualAttachmentPath:null,
     existingIntakeId:input.existingIntakeId});
+  let macroScope:MacroScopeResolution|undefined=input.macroSubject===undefined?undefined:
+    validateMacroSubject(input.macroSubject,input.extractedText,input.domain,entities);
+  if(sourceIdentity.existingSourcePath&&(input.domain==="macro"||macroScope)){
+    const note=indexedRead(sourceIdentity.existingSourcePath);
+    if(note.fm.macro_subject!==undefined||macroScope){
+      try{
+        const text=preservedSubmittedText(note.raw);
+        if(text===null)throw Error("macro_source_text_hold");
+        const binding=readMacroSourceScope(note.fm.macro_subject,text,note.fm.source_text_sha256);
+        if(input.domain!=="macro"||entities.length!==1||entities[0].trim().normalize("NFC").toUpperCase()!==binding.key||
+          (macroScope&&(!macroScope.binding||JSON.stringify(macroScope.binding)!==JSON.stringify(binding)))||
+          receiptProvenance("source_intake",sourceIdentity.existingSourcePath,note.raw).tier!=="server_witnessed")
+          throw Error("macro_source_existing_scope_hold");
+        macroScope={binding,reason:null};
+      }catch{macroScope={binding:null,reason:"macro_source_existing_scope_hold"};}
+    }
+  }
+  // A valid text declaration is not permission to change the effective
+  // research scope or a broker's origin. Preserve Source-only capture while
+  // the existing workflow/Judge scope-issue gates hold all non-Source steps.
+  const focus=input.focus??(input.sourceKind==="broker_research"?"broker":input.domain==="macro"?"macro":"general");
+  if(macroScope?.binding){
+    if(input.sourceKind==="broker_research")macroScope={binding:null,reason:"macro_source_kind_scope_hold"};
+    else if(focus!=="macro")macroScope={binding:null,reason:"macro_history_scope_contract_hold"};
+  }
+  const archiveWitness=inspectSourceArchiveProvenance(input.sourceUrl,eventDate,publicationDate);
+  const originalSourceArchive=archiveWitness.snapshot;
   const planId=sourceIdentity.planId;
   const rawPath="00_Inbox/ChatGPT/Investment Intake - "+planId+".md";
   // Same digest is a stable idempotency key across repeated routing calls.
@@ -232,25 +274,27 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   // a second Timeline event even when a new research note already exists.
   const timelineRecorded=Boolean(timelinePath && timelineExists &&
     readNote(timelinePath).content.includes("<!-- investment-intake:"+planId+" -->"));
-  const focus=input.focus??(input.sourceKind==="broker_research"?"broker":input.domain==="macro"?"macro":"general");
   const pack=buildInvestmentContextPack({
     question:(T(input.topic)+" "+entities.join(" ")+" "+text.slice(0,450)).slice(0,1150),
-    issuers:[...new Set([
+    issuers:macroScope?.binding?undefined:[...new Set([
       ...routingV2.companyHubs.map(x=>x.path.slice("01_Companies/".length,-3)),
       ...(input.domain==="company"?entities.map(x=>safeTicker(x)).filter((x):x is string=>!!x):[])
     ])].filter(x=>/^[A-Z][A-Z0-9.-]{0,11}$/.test(x)).slice(0,6),
     industry:routingV2.industryHubs.length?
       routingV2.industryHubs.map(x=>x.label).join(" / ").slice(0,140):
       input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
+    ...(macroScope?.binding?{macroScope:macroHistoryScope(macroScope.binding)}:{}),
     focus,maxNotes:10,maxChars:8500
   });
-  // Only high-scoring, issuer-scoped Company Research excerpts are candidate
-  // prior events; legacy archived AI is NOT a verified fact or duplicate verdict.
-  // No similarity score by itself establishes identical original source/vintage.
-  const candidateEventPaths=pack.items.filter(x=>
+  // Preserve literal historical hints when identity resolution HOLDs, without
+  // treating them as mapped issuers. Otherwise retain the existing high-score
+  // Company Research candidates. Neither path adjudicates event equivalence.
+  const candidateEventPaths=[...new Set([...pack.contextBundles.map(b=>b.reviewPath),...pack.identityHoldDiscovery.flatMap(x=>x.candidatePaths),...pack.items.filter(x=>
     input.domain==="company" && x.role==="research" &&
     x.path.startsWith("10_Knowledge/Company Research/") && x.score>=110
-  ).slice(0,4).map(x=>x.path);
+  ).map(x=>x.path)])].slice(0,4);
+  const reviewReuse=planReviewReuse({selection:input.existingReview,domain:input.domain,planId,sourcePath:rawPath,
+    existingSourcePath:sourceIdentity.existingSourcePath,sourceUrl:canonicalSourceUrl(input.sourceUrl),eventDate,publicationDate,pack,historicalCandidatePaths:candidateEventPaths});
   // The same broker/industry source can mention several declared companies.
   // Reconcile all already-resolved issuer identities by exact URL/event date,
   // never counting co-mentions or raw message repetitions as independent proof.
@@ -264,17 +308,20 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   const claimReady=Boolean(claim&&T(claim.metric)&&T(claim.period)&&T(claim.statement).length>=8&&
     claim.value?.trim()&&claim.unit?.trim()&&input.sourceUrl?.trim()&&entities.length===1);
   let classification:ReviewClass|null=null,matched:string[]=[],truncated:boolean|null=null;
+  let integrity=claimIntegrityCoverage();
   if(claimReady&&claim){
     const c=reviewInvestmentClaim({
       domain:input.domain,entity:entities[0],metric:claim.metric,period:claim.period,
       statement:claim.statement,originalSource:input.sourceUrl!,value:claim.value,unit:claim.unit,
       eventDate, publishedAt:publicationDate,focus,maxCandidates:8
     });
-    classification=c.classification;
+    integrity=claimIntegrityCoverage(c);
+    classification=integrity.integrityHold?"unresolved":c.classification;
     matched=[...new Set(c.matchingClaims.map(x=>x.path))].slice(0,8);
     truncated=c.metadataScan.truncated;
   }
-  const duplicates=classification==="duplicate_candidate";
+  const integrityHold=integrity.integrityHold===true;
+  const duplicates=!integrityHold&&classification==="duplicate_candidate";
   const warnings=[
     "Input and any source labels are user/analyst supplied; no issuer, broker report, translation or number independently verified.",
     "Input language is only caller-declared; do not silently translate, paraphrase or claim unreadable screenshot portions were extracted.",
@@ -283,6 +330,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     "Dates are supplied, not inferred from the chat date. Owner-approved thesis and market price-in require separate evidence.",
     "Historical pointers are bounded lexical discovery; missed prior broker PTs, same-event reposts and counter-evidence remain possible."
   ];
+  if(integrityHold)warnings.unshift(claimIntegrityWarning(integrity));
   if(input.sourceKind==="broker_research")
     warnings.push("Broker model/version dedup requires exact bank, report date, prior same-bank PT, EPS vintage and actual report; 'reiterates' is not a new PT raise.");
   if(routingV2.unresolvedEntities.length||routingV2.unresolvedThemes.length)
@@ -290,25 +338,29 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   if(input.brokerUpdate)
     warnings.push("M5.2 broker PT/estimate old→new figures are caller-declared; same bank and dated versions are necessary but not independent verification or consensus.");
   if(input.sourceKind==="issuer_release"||input.sourceKind==="regulatory_filing")
-    warnings.push("Source URL supplied is not proof that the original was fetched or verified.");
+    warnings.push(originalSourceArchive?
+      "Original source bytes are archived and hash-readback intact on this server; this still does not prove publisher signature, claim truth or independent confirmation.":
+      "Source URL supplied is not proof that the original was fetched or verified.");
+  if(archiveWitness.status==="HOLD")warnings.push("Archive provenance HOLD: "+archiveWitness.reason+"; retain historical Source/Review bytes and receipts. Separate reviewed repair required.");
   if(!input.sourceUrl)warnings.push("Original source URL absent; screenshots and snippets are attributed inputs, not independently validated source records.");
   if(candidateEventPaths.length)warnings.push("Matching-title historical research candidates require same original event/source/date review before creating a new distinct analysis; selection is not a deduplication verdict.");
+  if(pack.identityHoldDiscovery.length)warnings.push("Issuer identity HOLD: literal historical candidates are retained separately for review, not verified mappings or adjudicated duplicate events. Do not infer resolved identity from discovery hints.");
   if(sameSourceEvent)warnings.push("Existing issuer/date/original-URL source records found: review original event and provenance before creating a second Timeline entry. This is NOT a verified duplicate classification.");
   if(input.inputFormat!=="text"&&!verifiedAttachment)
     warnings.push("No verified, matching original image/PDF attachment bytes; call scoped Safe Edit store_user_attachment first.");
   const routes:Route[]=[
     {kind:"raw_input",action:rawExists?"link_existing_or_hold":"candidate_create",path:rawPath,
       reason:rawExists?"A note with the deterministic intake ID already exists; inspect identity/hash before linking.":"Preserve exact supplied text and attribution with a traceable link to actual image/PDF if available.",requiresReview:true},
-    {kind:"research_review",action:reviewExists?"link_existing_or_hold":"candidate_create",path:reviewPath,
-      reason:candidateEventPaths.length?
+    {kind:"research_review",action:reviewExists||integrityHold||reviewReuse.status!=="no_reuse_selected"?"link_existing_or_hold":"candidate_create",path:reviewReuse.selectedReview?.reviewPath??reviewPath,
+      reason:reviewReuse.status!=="no_reuse_selected"?"Possible prior event: "+reviewReuse.reasons.join("; "):integrityHold?claimIntegrityWarning(integrity):candidateEventPaths.length?
         "Possible prior event research exists: inspect original source, event date, metric and period before creating a distinct analysis; never count reposts twice.":
         "Separate sourced statements, user input, broker/management commentary, AI interpretation, contrary evidence, event chronology and thesis delta.",requiresReview:true}
   ];
   if(timelinePath)
     routes.push({kind:"company_timeline_candidate",
-      action:timelineExists&&!duplicates&&!timelineRecorded&&!sameSourceEvent?"candidate_append_after_review":"link_existing_or_hold",
+      action:timelineExists&&!integrityHold&&!duplicates&&!timelineRecorded&&!sameSourceEvent?"candidate_append_after_review":"link_existing_or_hold",
       path:timelinePath,requiresReview:true,
-      reason:timelineRecorded?"Intake ID already recorded in this Timeline; do not append the same text a second time.":
+      reason:integrityHold?claimIntegrityWarning(integrity):timelineRecorded?"Intake ID already recorded in this Timeline; do not append the same text a second time.":
         sameSourceEvent?"Same declared issuer, event date, and original source URL already referenced by existing notes: inspect candidatePaths and do NOT add a new Timeline event until source-level adjudication.":
         duplicates?"Exact numeric claim duplicate candidate: link existing event, no repeated timeline proof.":
         timelineExists?"Timeline exists; append only when dated source/event dedup and materiality confirmed; include <!-- investment-intake:"+planId+" --> in the approved append for idempotent retries.":
@@ -316,14 +368,14 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   else routes.push({kind:"industry_context_candidate",action:"link_existing_or_hold",
     path:routingV2.industryHubs.length===1?routingV2.industryHubs[0].path:null,requiresReview:true,
     reason:"Multi-issuer, non-ticker or macro item: use existing indexed Industry/Macro hubs only after dated source/event review; this is a link candidate, not an auto-append."});
-  if(claimReady&&!duplicates)
-    routes.push({kind:"claim_registry_candidate",action:"candidate_create",path:null,requiresReview:true,
-      reason:"Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
+  if(claimReady&&!duplicates&&!input.claims)
+    routes.push({kind:"claim_registry_candidate",action:integrityHold?"link_existing_or_hold":"candidate_create",path:null,requiresReview:true,
+      reason:integrityHold?claimIntegrityWarning(integrity):"Claim-level metric/period/units submitted, but original source and historical duplicates require verification before a unique canonical claim ID."});
   const needed=[
     "Preserve user text verbatim in a non-protected raw intake note using separately authorized Safe Edit and verify its receipt.",
     verifiedAttachment?"Link the hash-verified original user attachment in the raw intake note; preserve original language and distinguish source attribution.":"For screenshot/PDF, archive its actual bytes with Safe Edit store_user_attachment and inspect it before claiming raw attachment preservation.",
     "Read selected historical notes in full; confirm same event, same broker/model vintage, report date, primary provenance and conflicting evidence.",
-    duplicates?"Link the already registered matching Claim ID; do not add a second structured metric or mark an old event as new.":
+    integrityHold?claimIntegrityWarning(integrity):duplicates?"Link the already registered matching Claim ID; do not add a second structured metric or mark an old event as new.":
       "Resolve duplicate/new/added_detail/correction/unresolved before writing an event or new structured claim.",
     "Draft independent research analysis in the same input language where appropriate, using clearly attributed source and AI interpretation.",
     "Preview/approve/apply one non-protected write at a time; verify readback, reindex, links, retry identity and rollback capability.",
@@ -333,16 +385,17 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     status:"read_only_plan_not_written",planId,entityScope:entities,domain:input.domain,
     inputFormat:input.inputFormat,sourceKind:input.sourceKind,
     sourceLanguage:input.sourceLanguage?T(input.sourceLanguage):null,
-    sourceIdentity,
+    sourceIdentity,...(macroScope?{macroScope}:{}),
     sourceCapture:{
       textDigest:sourceIdentity.textSha256,extractedTextIsOriginalBinary:false,
       rawAttachmentPath:actualAttachmentPath,
       attachmentVerified:verifiedAttachment,originalSourceVerified:false,
+      originalSourceArchive,archiveProvenanceStatus:archiveWitness.status,archiveProvenanceReason:archiveWitness.reason,
       preservation:verifiedAttachment?"stored_original_user_bytes":"needs_safe_edit_raw_capture"
     },
     chronology:{eventDate,publicationDate,importedAt:"not_yet_written"},
-    historical:{source:"bounded_lexical_context_not_exhaustive",
-      selected:pack.selected,paths:pack.items.map(x=>x.path),missing:pack.incomplete},
+    historical:{source:"bounded_lexical_context_not_exhaustive",fallback:pack.researchFallback,
+      selected:pack.selected,paths:pack.items.map(x=>x.path),missing:pack.incomplete,identityHoldDiscovery:pack.identityHoldDiscovery},
     historicalEventReview:{
       status:candidateEventPaths.length?"possible_same_event_candidates":"none_selected_not_proof_new",
       candidatePaths:candidateEventPaths,duplicateAdjudicated:false
@@ -355,9 +408,9 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
         "same_explicit_unscoped_event_date_and_canonical_source_url",
       scanTruncated:sourceMatches.scanTruncated,duplicateAdjudicated:false
     },
-    exactClaimReview:{status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
+    exactClaimReview:{...integrity,status:claimReady?"checked_indexed_claim_candidates":"not_checked_missing_exact_fields",
       classification,matchingClaimPaths:matched,scanTruncated:truncated},
-    routingV2,
+    routingV2,reviewReuse,
     routes,gates:{
       fullSourceRead:false,attachmentArchived:verifiedAttachment,duplicateAdjudicated:false,
       sourceIndependenceVerified:false,canAutoUpdateThesis:false,
@@ -366,5 +419,8 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   };
   if(input.completedAnalysis!==undefined||input.researchReview!==undefined||input.captureOnly===true)
     plan.safeEditWorkflow=buildCanonicalSafeEditWorkflow(input,plan);
+  for(const step of plan.safeEditWorkflow?.steps??[])if(step.kind==="structured_claim")
+    plan.routes.push({kind:"claim_registry_candidate",action:step.state==="needs_create"?"candidate_create":"link_existing_or_hold",
+      path:step.path,requiresReview:true,reason:"Source-scoped unverified observation; use the exact Safe Edit recipe and receipt/readback/index/link checks. No primary verification or additional origin independence."});
   return plan;
 }

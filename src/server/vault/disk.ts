@@ -1,3 +1,4 @@
+import { denyPilotRawWriter } from "../c1-pilot";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -5,6 +6,7 @@ import { db } from "../db";
 import { env } from "../env";
 import { VaultPathError, assertDescriptorInVault, formatBytes, toVaultRelative } from "./paths";
 import { recordLocalModification } from "./modified";
+import { assertRawContentAllowed } from "../safe-edit/protected-records";
 
 /**
  * How much room the vault has left, and what is using it.
@@ -198,6 +200,10 @@ export interface WriteOptions {
 }
 
 export function writeVaultFile(abs: string, content: string, opts: WriteOptions = {}): void {
+  denyPilotRawWriter();
+  // WP2 (PD-11, OD-04, all modes): raw writers never write canonical or
+  // protected records; canonical routes use the Safe Edit kernel.
+  assertRawMutationAllowed(abs, content);
   const bytes = Buffer.from(content, "utf8");
   assertHeadroom(bytes.length);
   const sync = opts.sync !== false;
@@ -257,6 +263,18 @@ export function writeVaultFile(abs: string, content: string, opts: WriteOptions 
   // Written, so this is its modification time from here on, whatever git
   // remembers about the path from before (vault/modified.ts).
   recordLocalModification(toVaultRelative(abs));
+}
+
+/**
+ * OD-10 F-1 (PD-11, all modes): before any raw mutation — write, create, move,
+ * delete or link rewrite — the path(s), the note's metadata on disk and the
+ * proposed metadata (null for a move or delete) must all be unprotected, so a
+ * protected `type` under an ordinary name can be neither written, removed,
+ * renamed nor deleted raw.
+ */
+export function assertRawMutationAllowed(abs: string, after: string | null = null, ...alsoPaths: string[]): void {
+  const before = lstatOrNull(abs)?.isFile() ? fs.readFileSync(abs, "utf8") : null;
+  for (const rel of [toVaultRelative(abs), ...alsoPaths]) assertRawContentAllowed(rel, before, after);
 }
 
 function lstatOrNull(p: string): fs.Stats | null {

@@ -1,7 +1,9 @@
+import { denyPilotRawWriter } from "../c1-pilot";
 import { execa, type Result } from "execa";
 import fs from "node:fs";
 import path from "node:path";
 import { env, ensureDataDirs } from "../env";
+import { mutationFenced } from "../maintenance";
 
 // Resolve the ob binary: explicit override, then PATH (Docker installs it
 // globally), then the local node_modules/.bin (dev).
@@ -49,6 +51,10 @@ export async function runOb(
   args: string[],
   opts: { timeoutMs?: number; stdinInput?: string; redactSecrets?: (string | undefined)[] } = {},
 ): Promise<ObResult> {
+  denyPilotRawWriter();
+  // Every ob command (settings sync included) is refused once maintenance has
+  // settled, and the process-level guard runs before any directory is made.
+  if (mutationFenced()) return { ok: false, stdout: "", stderr: "maintenance", combined: "Maintenance is active; ob refused" };
   ensureDataDirs();
   let res: Result;
   try {

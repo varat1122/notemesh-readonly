@@ -8,6 +8,7 @@ import { db } from "../db";
 import { env } from "../env";
 import { toVaultRelative, isSafeVaultPath, openNoFollow, MAX_INDEX_BYTES } from "./paths";
 import { createdFor, modifiedFor } from "./modified";
+import { maintenanceActive } from "../maintenance";
 
 // Notes skipped for size. They are listed and readable but absent from the
 // index, and get_vault_info reports how many so the absence from search is
@@ -175,6 +176,7 @@ export function reindexPath(relPath: string) {
     resolveLinksFor(relPath);
   } catch (e) {
     console.error("[indexer] reindexPath failed:", e);
+    throw new Error("index_rebuild_required", { cause: e });
   }
 }
 
@@ -252,20 +254,23 @@ function resolveAllLinks() {
 
 // Attachments are tracked by path only — enough to resolve embeds.
 function indexAttachment(relPath: string, absPath: string) {
+  let st: fs.Stats;
   try {
-    const st = fs.lstatSync(absPath);
+    st = fs.lstatSync(absPath);
     if (st.isSymbolicLink() || !st.isFile()) return;
     if (!isSafeVaultPath(absPath)) return;
-    db()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  // Native admission/SQLite errors are not a vanished-file condition.
+  db()
       .prepare(
         `INSERT INTO attachments (path, mtime, size, modified, created) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size, modified=excluded.modified,
            created=excluded.created`,
       )
       .run(relPath, Math.round(st.mtimeMs), st.size, modifiedFor(relPath, st.mtimeMs), createdFor(relPath, st));
-  } catch {
-    // vanished between event and stat
-  }
 }
 
 class VaultIndexer {
@@ -280,10 +285,24 @@ class VaultIndexer {
   // first. Index-backed tools still answer while warming; they just may see a
   // partial vault, and this is how they can tell.
   ready = false;
+  private backgroundFailureEpoch = 0;
+
+  private backgroundFailure(stage: string, error: unknown) {
+    this.backgroundFailureEpoch++;
+    this.ready = false;
+    const code = (error as { code?: unknown })?.code;
+    // Status/logs retain a bounded category, not arbitrary watcher payloads.
+    this.lastRebuildError = `index_watch_incomplete:${stage}:${typeof code === "string" ? code.slice(0, 80) : "error"}`;
+    console.error(`[indexer] ${this.lastRebuildError}; full rebuild required`);
+  }
 
   private scheduleLinkResolve() {
     if (this.resolveTimer) clearTimeout(this.resolveTimer);
-    this.resolveTimer = setTimeout(() => resolveAllLinks(), 1_000);
+    this.resolveTimer = setTimeout(() => {
+      this.resolveTimer = null;
+      try { resolveAllLinks(); }
+      catch (error) { this.backgroundFailure("link_timer", error); }
+    }, 1_000);
   }
 
   // Full rebuild, yielding to the event loop between batches. This used to be
@@ -292,6 +311,8 @@ class VaultIndexer {
   // dead. Callers can await it; readiness is exposed via `ready`.
   async rebuild(): Promise<void> {
     if (this.building) return this.building;
+    if (maintenanceActive()) throw Error("Maintenance is active; the index is not rebuilt");
+    const failureEpoch = this.backgroundFailureEpoch;
     this.building = (async () => {
       // Cleared before the wipe, not after the first build only. It used to be
       // set once and never unset, so a rebuild from the Status tab — which
@@ -310,15 +331,16 @@ class VaultIndexer {
         ),
       )();
       oversized.clear();
+      const incomplete: string[] = [];
       const notes: string[] = [];
       const attachments: string[] = [];
       const walk = (dir: string, depth = 0) => {
-        if (depth > 32) return;
+        if (depth > 32) throw Error("index_walk_depth_incomplete");
         let entries: fs.Dirent[];
         try {
           entries = fs.readdirSync(dir, { withFileTypes: true });
-        } catch {
-          return;
+        } catch (error) {
+          throw new Error("index_walk_incomplete", { cause: error });
         }
         for (const entry of entries) {
           if (entry.name.startsWith(".")) continue;
@@ -341,6 +363,7 @@ class VaultIndexer {
           indexFile(toVaultRelative(notes[i]), notes[i]);
         } catch (e) {
           console.error(`[indexer] skipped ${toVaultRelative(notes[i])}:`, e);
+          if (incomplete.length < 64) incomplete.push(toVaultRelative(notes[i]));
         }
         if (i % 50 === 49) await yieldToLoop();
       }
@@ -349,11 +372,17 @@ class VaultIndexer {
         if (i % 200 === 199) await yieldToLoop();
       }
       resolveAllLinks();
+      if (incomplete.length) throw Error(`index_incomplete:${incomplete.length}${incomplete.length === 64 ? "+" : ""}`);
+      if (failureEpoch !== this.backgroundFailureEpoch) throw Error("index_watch_incomplete_during_rebuild");
       this.lastFullIndexAt = Date.now();
       this.ready = true;
     })()
       .then(
         () => {
+          if (failureEpoch !== this.backgroundFailureEpoch) {
+            this.ready = false;
+            throw Error("index_watch_incomplete_during_rebuild");
+          }
           this.lastRebuildError = null;
         },
         (e: unknown) => {
@@ -394,26 +423,44 @@ class VaultIndexer {
     const onChange = (absPath: string) => {
       // Defense in depth: only index paths that are genuinely inside the vault
       // with no symlinked component (indexFile re-checks, but reject early).
-      if (!isSafeVaultPath(absPath)) return;
-      const rel = toVaultRelative(absPath);
-      if (absPath.toLowerCase().endsWith(".md")) indexFile(rel, absPath);
-      else indexAttachment(rel, absPath);
-      this.scheduleLinkResolve();
+      try {
+        if (!isSafeVaultPath(absPath)) return;
+        const rel = toVaultRelative(absPath);
+        if (absPath.toLowerCase().endsWith(".md")) indexFile(rel, absPath);
+        else indexAttachment(rel, absPath);
+        this.scheduleLinkResolve();
+      } catch (error) { this.backgroundFailure("change", error); }
     };
     this.watcher.on("add", onChange);
     this.watcher.on("change", onChange);
     this.watcher.on("unlink", (absPath: string) => {
-      const rel = toVaultRelative(absPath);
-      if (rel.startsWith("..") || path.isAbsolute(rel)) return;
-      removeFile(rel);
-      this.scheduleLinkResolve();
+      try {
+        const rel = toVaultRelative(absPath);
+        if (rel.startsWith("..") || path.isAbsolute(rel)) return;
+        removeFile(rel);
+        this.scheduleLinkResolve();
+      } catch (error) { this.backgroundFailure("unlink", error); }
     });
+    this.watcher.on("error", error => this.backgroundFailure("watcher", error));
     await this.rebuild();
   }
 
   async stop() {
+    if (this.resolveTimer) clearTimeout(this.resolveTimer);
+    this.resolveTimer = null;
     await this.watcher?.close();
     this.watcher = null;
+  }
+
+  /** Stop watching and drop a pending link pass; a running rebuild is waited for by drain. */
+  async stopForMaintenance() {
+    if (this.resolveTimer) clearTimeout(this.resolveTimer);
+    this.resolveTimer = null;
+    await this.stop();
+  }
+
+  isQuiescent(): boolean {
+    return !this.watcher && !this.building && !this.resolveTimer;
   }
 }
 
@@ -429,7 +476,9 @@ let indexBootChecked = false;
 // request never waits on a full-vault scan. The rebuild yields to the event
 // loop, so requests are served (against a partial index) while it warms.
 export function ensureIndexerStarted() {
-  if (indexBootChecked) return;
+  // Before the latch: a process that booted into maintenance never wipes or
+  // rebuilds the derived index, and still starts normally after a resume.
+  if (indexBootChecked || maintenanceActive()) return;
   indexBootChecked = true;
   // The disk watcher rides the same first-request hook: the other thing the
   // process should be doing from its first request onward.

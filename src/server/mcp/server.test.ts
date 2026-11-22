@@ -49,6 +49,7 @@ const READ_TOOLS = [
   "get_links",
   "get_outline",
   "get_vault_info",
+  "inspect_intake_appearances",
   "investment_context_pack",
   "list_attachments",
   "list_directory",
@@ -63,6 +64,7 @@ const READ_TOOLS = [
   "plan_pdf_extraction_coverage",
   "plan_review_revision",
   "preview_edit",
+  "preview_hybrid_claim_reconciliation",
   "random_note",
   "read_attachment",
   "read_note",
@@ -508,5 +510,32 @@ verification: not_reverified
       await client.close().catch(() => {});
       await server.close().catch(() => {});
     }
+  });
+});
+
+describe("MI04 public read-only PIT descriptor",()=>{
+  it("exposes and binds cutoff over actual MCP, rejects ambiguous dates and preserves legacy calls",async()=>{
+    const {Client}=await import("@modelcontextprotocol/sdk/client/index.js");
+    const {InMemoryTransport}=await import("@modelcontextprotocol/sdk/inMemory.js");
+    const server=(await import("./server")).createMcpServer({read:true,write:false,label:"mi04-read"});
+    const [ct,st]=InMemoryTransport.createLinkedPair();
+    const client=new Client({name:"mi04-compatibility",version:"1.0"});
+    await server.connect(st);await client.connect(ct);
+    try{
+      const tool=(await client.listTools()).tools.find(t=>t.name==="investment_context_pack")!;
+      expect(tool.inputSchema.properties).toHaveProperty("historyCutoff");
+      expect(tool.inputSchema.required).not.toContain("historyCutoff");
+      const call=async(args:Record<string,unknown>)=>{
+        const r=await client.callTool({name:"investment_context_pack",arguments:{question:"Synthetic historical context",...args}});
+        const text=(r.content as Array<{type:string;text?:string}>).find(c=>c.type==="text")?.text;
+        return {r,data:text&&!r.isError?JSON.parse(text):null};
+      };
+      const cutoff="2026-11-02T16:59:59.999Z";
+      const pit=await call({historyCutoff:cutoff});
+      expect(pit.r.isError).not.toBe(true);expect(pit.data.retrieval.scope.historyCutoff).toBe(cutoff);
+      expect(pit.data.items).toEqual([]);
+      expect((await call({})).data.retrieval.scope.historyCutoff).toBeUndefined();
+      expect((await call({historyCutoff:"2026-11-02"})).r.isError).toBe(true);
+    }finally{await client.close();await server.close();}
   });
 });

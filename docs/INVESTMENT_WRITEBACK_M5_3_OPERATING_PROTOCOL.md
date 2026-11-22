@@ -33,13 +33,18 @@ For each input item:
    Feed Only, translate non-Thai input fully in original ordering while keeping
    numbers, tables, source claims and caveats; then provide a concise one-line
    Thai headline and investment interpretation. Retain translation in
-   `completedAnalysis`, separate from preserved `extractedText`.
+   `researchReview.translationTh`, separate from preserved `extractedText`.
+   Thai input needs no duplicate translation. Use only the actually read scope;
+   never fabricate missing pages. A mechanical language PASS does not verify
+   translation completeness or source claims.
 2. Query historical notes, Current Thesis/Evidence Register where relevant,
    and counter-evidence. Source/date/vintage duplicate candidates can block a
    second canonical review; they do not block raw source preservation.
 3. Call `plan_investment_writeback` with original `sourceChat`, input metadata,
-   `contentTypes[]`, `entityRoles[]`, `themes[]` and `completedAnalysis`.
-   Feed Only instead sets `captureOnly:true` and omits `completedAnalysis`.
+   `contentTypes[]`, `entityRoles[]`, `themes[]`, `sourceChannel`,
+   `originalDocumentAccess` and typed `researchReview` (including `attributedOrigin`
+   where required). Freeform `completedAnalysis` alone now holds the Review.
+   Feed Only instead sets `captureOnly:true` and omits both analysis inputs.
 4. Inspect `safeEditWorkflow.steps` in source-then-review order:
    - `needs_create`: invoke existing Safe Edit `preview_edit` with the exact
      `safeEditRequest` (change.kind=`create`); then authorized `apply_edit` with its token
@@ -164,3 +169,300 @@ planner, a consent-scoped Safe Edit server, preview/apply receipts, indexed
 search, and protected-note invariance against a temporary local Vault. It
 does **not** certify the installed ChatGPT Web host against a deployed M5.3
 endpoint or any real device's Obsidian Sync.
+
+
+## C1 Research Draft trust contract — RI001-DRAFT-2
+
+This additive contract follows IOS Master 2.0.0 §09 and the accepted C1 Draft
+policy in IOS-ORCH-RI-001. It uses existing Markdown, indexed frontmatter and
+Safe Edit; no DB schema/migration or writer is added.
+
+New canonical Research Reviews carry `research_status=draft`,
+`usage_tier=historical_analysis_only`, `independent_evidence_increment=0`,
+`comparator_eligible=false`, `critic_independence=not_verified`, and
+`research_state_version=RI001-DRAFT-1`. These are conservative use restrictions,
+not a semantic assessment, verified fact, independent critic attestation or
+Owner-approved Thesis. `saved_verified` continues to describe persistence
+(write/readback/index/links), never Research Reviewed.
+
+The stored Draft metadata format remains `RI001-DRAFT-1`; this projection-policy
+upgrade does not change historical bytes, identities or receipts.
+
+The typed `researchTrust` projection accompanies canonical steps, Search hits,
+paged note reads, Context Pack items/Source-Review bundles, claim-review pointers,
+Decision Packet references and the next Judge packet's historical evidence.
+`preview_hybrid_claim_reconciliation` exposes trust for structured candidates
+and historical readbacks, explicitly distinguishing `note_readback` from
+`indexed_metadata_only` when a read fails. These labels grant no write authority.
+Source artifacts project as `source_only` / `attributed_source_only`; this does
+not assert that an associated Review is missing. The label is derived from note
+type, **not** from a canonical Source receipt: `source_authentication=not_established`,
+`source_label_basis=note_type_declaration_not_receipt`, and
+`persistence_verification=not_assessed_by_trust_projection` are explicit even when
+a caller declares primary metadata. Receipt/readback and primary-evidence
+validation remain separate server contracts.
+
+The shared Review taxonomy includes `dated_evidence_review`, `research_map` and
+`import_review`, with or without archived-AI metadata. Historical unlabeled Reviews
+remain `unclassified` / `historical_analysis_only`. Neither repeat retrieval nor
+multiple Claims/Reviews grants independent evidence or comparator eligibility.
+`analysis_as_of` comes only from a valid declared `knowledge_cutoff_as_of`;
+`analysis_created_at` remains separate. Read projections do not authenticate
+these dates or substitute event/import/file time. No critic run is inferred
+from `critic_independence=not_verified`.
+
+There is no authorized Reviewed/comparator/Approved-Thesis transition or trusted
+independent-critic attestation API in this candidate. Caller-declared promotion
+labels remain untrusted historical data on read; generic Safe Edit cannot mint
+such promotions or remove managed Draft restrictions. Existing legacy writers
+without managed labels remain compatible and unclassified. Historical accepted
+Review bytes and real receipts are revalidated against exact pre-policy
+renderings, never rewritten to insert labels.
+
+Judge `RI001-JUDGE-5` remains All-or-Hold for the entire assessed non-Source
+bundle. Required independent critic unavailable, operational read/search failure,
+failed required assessment, stale scope or changed content still HOLD. There is
+no Draft fallback exception. Source preservation remains subject to existing
+rights, identity/provenance, writer and maintenance controls. A fresh packet and
+assessment are required when content changes. The sealed packet and journal gate
+also bind projection policy `RI001-DRAFT-2`; earlier pending Judge-5 authority
+with a missing or `RI001-DRAFT-1` policy stamp cannot authorize new Claims/Review. Re-prepare with a fresh assessment;
+do not edit old journals or receipts. Deliberate bounded omissions remain
+explicit and are not automatically a HOLD.
+
+Independent security review, the exact Reviewed/critic promotion contract, and
+separately authorized WORK runtime acceptance remain external gates. CI uses
+simulated assessments to test enforcement and does not certify LLM research
+quality. This change authorizes no deployment, live mutation, automatic protected
+record update, backup/restore or first-cutover operation.
+
+### Experimental risk-based Draft admission — RI001-DRAFT-RISK-1 (revision 1.1)
+
+This CI candidate implements the ORCH clarification for IOS-ORCH-RI-001 under
+Master 2.0.0 §09. It does not amend the Master or authenticate an LLM.
+RI001-JUDGE-6 preserves Judge-5 All-or-Hold, RI001-DRAFT-2 trust projection and
+stored Draft metadata. The protocol increment prevents an older writer from
+ignoring the new risk-policy stamp and using its pending PASS gates.
+
+Every newly issued Judge packet seals a `riskPolicy` and `riskScope` inventory:
+received text SHA, complete proposed Review digest, each structured Claim and
+relationship, every selected historical note SHA, and `broker_provenance` (source
+kind plus the exact broker update, including its absence). Broker updates are
+sealed as `provenance.brokerVintage` and rendered separately from typed Review
+prose; their entire payload participates in the quantitative scan. The typed result must echo
+the exact envelope digest and supply `riskAssessment` for every inventory key.
+It contains six materiality findings: financial figures/forecasts, valuation /
+thesis / mechanism, material relationships, correction / contradiction / vintage,
+unsupported/unresolved assertions, and Protected authority. Each finding requires
+a rationale and exact UTF-16/SHA citations to both the received Source and an
+actually receipted historical Source. Standalone and Review-paired historical
+Sources are supported. History receipts are read, never issued by this check,
+and revalidated at non-Source admission alongside existing selection freshness.
+New Source receipts remain pending until the normal Source write actually finishes.
+
+Only an `added_detail` with all required semantic checks PASS, all six findings
+`absent`, complete bound materiality coverage, and no other current gate HOLD is
+eligible. `materialRisk=false`, the event label, an empty Claim list, citation
+existence or a statement saying "low risk" cannot alone grant the exception.
+Evaluation and pre-SDK restrictive withdrawal use the same risk evaluator.
+Malformed risk evidence in an otherwise matching authenticated submission cannot
+hide withdrawal behind SDK rejection. Prior HOLD/FAIL is terminal for that
+exact envelope: recovery still requires a later fresh packet and bound assessment.
+A required Claim/Review HOLD/FAIL blocks the entire assessed non-Source bundle.
+
+RISK-1 deliberately abstains on Unicode numeric characters anywhere in received
+text or proposed Review/Claim/relationship values, not only the quoted excerpt or
+selected Claim list. This is a conservative *quantitative-scope unsupported* HOLD,
+not a financial-materiality classifier or a permanent rule that all numbers are
+high risk. Benign dates, numbered labels or administrative quantities in those
+texts can therefore HOLD. Declared financial content, guidance/estimate roles,
+unresolved Review claims and supplier/customer relationships also retain HOLD.
+Any non-null `brokerUpdate` / sealed `brokerVintage`, or `sourceKind=broker_research`,
+is ineligible for the routine exemption even with no numbers, `contentTypes:["other"]`,
+`materialRisk=false`, or all-absent risk findings. This includes qualitative ratings.
+A material/uncertain finding HOLDs; an unsupported finding or any required semantic
+FAIL fails the bundle. No independent critic provenance is available here; a
+same-chat second PASS cannot override these outcomes. Other event classes have no
+new low-risk exemption in this first version: **new_event is HOLD** in this opt-in
+JUDGE-6 RISK-1 tier. This is deliberately not equivalent to earlier JUDGE-5
+new_event PASS behavior. Source-only preservation remains
+available under existing rights/provenance/maintenance controls.
+
+A successful write remains only `draft` / `historical_analysis_only`, with
+`comparator_eligible=false`, `independent_evidence_increment=0` and
+`critic_independence=not_verified`. No primary, comparator, Reviewed or Thesis
+promotion is introduced. Ungated legacy intake is unchanged; an enrolled intake
+cannot escape its gate by deleting `researchJudge` or switching to a generic writer.
+
+Compatibility: revision `RI001-DRAFT-RISK-1.1` binds the previously omitted broker
+rendering inputs without changing JUDGE-6 or note/receipt formats. Pending RISK-1
+(and pre-RISK-1) Judge PASS gates cannot authorize new non-Source writes after
+upgrade; the existing exact risk-policy admission check also rejects 1.1 gates
+on the pre-fix RISK-1 reader. Re-prepare/reassess under the new descriptor; do not patch
+old journals or backfill policy stamps. Old Judge-5 sealed envelopes remain authenticatable ONLY
+for restrictive legacy withdrawal, never new PASS admission. Historical note bytes and completed receipts
+are not migrated or invalidated. Clients must refresh the result descriptor before
+attempting the new eligibility path. No DB migration, key change or new writer.
+
+Trust limit: exact bindings establish the assessed scope, not that an analyst
+actually read it or reasoned correctly. A deliberately false but fully bound
+materiality assessment (including a material assertion written wholly in words)
+is not semantically disproven by backend text rules. Actual analyst/LLM fidelity
+and independent review remain required; no regex or mock is a research judge.
+
+Testing: `risk-draft-admission.test.ts` exercises the real new policy and real
+Safe Edit/MCP with simulated semantic results. The pre-existing lifecycle suites
+use the explicit test-only `legacy-risk-oracle.ts` to retain their financial
+fixtures while testing seal/freshness/withdrawal/CAS/receipt controls. Their PASS
+is NOT RISK-1 financial eligibility. A real-policy cross-version test separately
+checks withdrawal/denial of an actual 6cd9c3cd legacy PASS without rewriting history.
+Neither group establishes live semantic or deployment acceptance. No general
+Research Product Acceptance is claimed. The D1 upgrade regression additionally
+executes actual 44efef94 modules to produce pre-fix broker/routine PASS gates,
+then verifies restrictive upgrade admission and immutable Source receipts.
+
+### Disposable analyst-assisted checkpoint — C1-ANALYST-REVIEW-1
+
+This opt-in successor of PR #168 is an experimental **whole-instance** restriction,
+not a change to Master 2.0.0, RISK-1.1, shared legacy permissions, or a production
+release. With `C1_RESEARCH_PILOT` absent, only normal, never-enrolled legacy
+instances retain their behavior. A reserved `ios-c1-pilot-*` DATA_DIR fails closed
+without the flag, even before its first database is created. Initialization
+appends a server-owned `c1_pilot_instance` event to the existing Safe Edit journal.
+Any `c1_pilot_*` enrollment (including pre-hardening Source/assessment/review
+events) remains restrictive after restart or relocation. A missing flag or
+unreadable identity state cannot reopen legacy writers. The shared guard runs
+before database initialization, at writer entrypoints and at container startup
+(maintenance keeps its existing earlier, DB-free precedence). No unenrollment,
+re-sealing, journal deletion or downgrade-to-unrestricted procedure is provided.
+
+R1 identity enforcement inspects the persisted journal once at process bootstrap
+and once per newly opened writable app connection, before pragmas/migrations or
+worker admission. SQLite reads the WAL as well as the main database; a missing
+database is checked when it first appears. Hot `db()`/writer/sync/HTTP checks use
+a shared process-lifetime latch plus constant-time configuration and filesystem
+identity checks, not repeated journal scans or extra SQLite connections. The
+latch is shared across emitted router bundles. Changing DATA_DIR, enabling pilot
+mode on a live legacy process, disabling it on a pilot process, or replacing an
+inspected database fails closed. A failure is sticky until process restart;
+restoring the flag cannot clear it. Legitimate restarts revalidate durable
+identity. There is no live legacy-to-pilot or unenrollment transition. This adds
+no schema migration or index: the unindexed compatibility scan is a startup
+cost, not a per-request cost. External direct journal mutation while a legacy
+process is running is unsupported under the exclusive-writer prerequisite;
+this latch is not a polling monitor for an uncooperative second writer.
+
+`C1_RESEARCH_PILOT=disposable` requires an owner-created, exclusive temporary
+`DATA_DIR` named `ios-c1-pilot-*` beneath the OS temporary directory, its own
+`vault/`, no symlinks, and no Railway project/service environment. Other values
+fail closed. Do not enable/disable this mode on an existing running/shared writer.
+Use one process/replica, the existing single-writer Safe Edit permission, a fresh
+fixture database, no external Sync/desktop/importer/CLI writer and no live data.
+A directory name is **not** an OS sandbox: root access, direct SQL/filesystem
+access and an uncooperative external process remain outside this contract.
+
+The server, rather than a local controller, enforces:
+
+1. Canonical Source-only preview records an internal Source-admission event;
+   its exact add-only Source bytes may be applied independently of research
+   eligibility. Caller-declared Source metadata cannot create this admission.
+2. Every non-Source target must belong to a current, exact, eligible Judge PASS
+   bundle. Fresh unenrolled intakes cannot use an unjudged Draft fallback in this
+   instance. Generic create/append/frontmatter/replace/rollback cannot introduce
+   another target or change protected records. Preview and apply require the
+   exact eligible target operation ID, path and bytes: identical content under
+   an alternative operation ID is refused, including pre-hardening preview
+   tokens. Canonical Source admission likewise requires its enrolled operation
+   ID. Legitimate exact-ID writes/retries keep the existing receipt identity.
+3. Canonical preparation can produce exact **review-only previews** before the
+   checkpoint. A preview token alone is not write authority. The existing
+   `approvalUrl` presents ALL target diffs, exact received Source, sealed packet,
+   selected history, assessments and materiality findings as untrusted text.
+   Previews are journal records, not Vault writes or write receipts.
+4. The existing authenticated dashboard session (not a caller-supplied OAuth/MCP
+   reviewer label) submits an explicit decision, semantic preflight verdict,
+   materiality disposition and rationale bound to the displayed digest.
+   `approve` cannot override semantic HOLD/FAIL, material/unresolved risk, backend
+   Judge HOLD/FAIL, missing coverage, expired input or changed history. A recorded
+   restrictive preflight also blocks further non-Source preparation for that
+   envelope. A fresh sealed packet, fresh bound assessment and new explicit
+   review are required to recover; a new preview is insufficient.
+5. A signed checkpoint binds policy, instance, OAuth actor, Source/Claim/Draft
+   paths and bytes, exact packet/result, selected history/scope, every before/after
+   diff, token hashes and preview expiries. Its expiry is at most fifteen minutes
+   and never beyond the existing packet/preview expiry. Existing Safe Edit locks,
+   CAS, Judge/history/source/receipt checks are repeated before **each** non-Source
+   publication. Preview rotation invalidates the checkpoint. Same-intake actual
+   writes retain existing narrowly receipt-bound freshness exclusions.
+6. Reviewer decisions, enrollment and preview rotation use the existing write
+   lock and IMMEDIATE journal transaction. Busy/stale locks refuse admission;
+   they never expire themselves or prove another writer is gone. Existing
+   single-process/exclusive-writer prerequisites remain mandatory.
+7. Existing canonical receipts are byte/schema-compatible. Additional
+   `c1_pilot_*` journal events record assessment, reviewer decision and admission;
+   an admission event is **not** a write/readback/index receipt. Only the existing
+   engine produces the latter. Partial Source persistence is reported truthfully;
+   re-prepare remaining targets and review the new exact bundle before retry.
+
+The shared raw Markdown writer, direct create/move/delete and folder operations,
+legacy intake importer/enqueue, Git and Obsidian command/sync entrypoints are
+fenced in this instance. The pilot Safe Edit sync branch requires locally
+quiescent Git/Obsidian/intake workers, since it deliberately has no device Sync.
+It does not claim remote sync or cross-machine exclusion. Original attachments
+and source archives retain their existing separate source-preservation controls;
+index/auth/journal bookkeeping remains necessary. No new write engine, database
+schema, primary receipt, external LLM service or paid resource is introduced.
+
+**Trust boundary:** the semantic preflight is an analyst/reviewer judgment of
+Source AND History AND proposed Draft, not a backend economic classifier and not
+`preflight_research_decision_v2` (which checks reference integrity). The dashboard
+records a session attestation, with `humanPresence=not_verified` and
+`criticIndependence=not_verified`. A test-created session/approval is explicitly
+simulated. An approved but dishonest semantic judgment cannot be disproven by
+these mechanical bindings. No independent critic, real human presence, verified
+financial fact, comparator eligibility, approved Thesis or general Research
+Product Acceptance is established. Draft retains its existing restrictive trust
+labels. A material case cannot borrow this checkpoint to waive RISK-1.1.
+
+#### Client handoff and evidence limits
+
+The current shared **NoteMesh M4 Safe Edit Web** and **Investment OS Safe Edit Chat**
+tool descriptors inspected on 2026-11-10 have typed Review fields but lack
+`researchJudge`; neither exposes the current packet handoff. They cannot perform
+this pilot by installing a local controller or calling a differently named tool.
+No shared connector was called or modified during development.
+
+Owner-controlled prerequisites for an actual ChatGPT-room test (not performed):
+
+- Authorize a separate disposable HTTPS origin running the exact reviewed
+  candidate with the isolation/single-writer prerequisites above. Do not replace
+  shared staging, attach its volume/key or connect an existing live writer.
+- Register/connect a separate ChatGPT connector to `<origin>/api/safe-edit` and
+  refresh its descriptors. Protected-resource discovery is
+  `<origin>/.well-known/oauth-protected-resource/api/safe-edit`; OAuth issuer is
+  `<origin>/api/auth`, resource/audience is exactly `<origin>/api/safe-edit`,
+  scopes `vault:read vault:edit`, using the existing authorization-code/PKCE and
+  owner consent flow. A read-only/API-key credential cannot grant edit/review.
+- Expose existing `prepare_research_judge_packet`,
+  `research_judge_result_contract`, typed `prepare_canonical_writeback` and
+  `apply_canonical_writeback`. Both canonical schemas must retain complete
+  `researchReview`, claims/lineage/appearance and `researchJudge.packet/result`:
+  body/digest/packetId/actorLabelSha256/issuedAt/expiresAt/seal, exact result
+  envelope/review digests, checks, references and RISK-1.1 inventory/findings.
+  Do not reduce nested fields to a stale M4 descriptor. Refresh OAuth consent
+  where audience/scopes changed. No new audience or reviewer MCP tool is added.
+- Use the authenticated dashboard approval URL for explicit semantic/diff review.
+  No MCP approval tool, OAuth payload field or old exact-hash-only approval can
+  impersonate this reviewer session. Then apply unchanged authorized targets.
+- Verify actual ChatGPT rendering, handoff, explicit review, refusal cases and
+  cold retrieval on that authorized disposable endpoint. This is **PENDING**.
+
+Local tests cover actual HTTP on loopback, real OAuth/PKCE/consent and emitted
+server bundles as well as SDK InMemoryTransport. Neither is a ChatGPT room nor an
+externally reachable authorized endpoint. The Quay/Vela/Arbor/Birch tests are
+**NEW synthetic mechanism fixtures** from ORCH's scenario contract, not the
+unavailable original WORK corpus. WORK's historical controller-only 27/27 remains
+separate reported evidence. Quay/Vela preflight HOLD judgments are supplied and
+bound; CI proves their enforcement, not autonomous economic reasoning. Arbor
+persists an attributed Draft after explicit simulated review; Birch's benign
+planned date still encounters the accepted RISK-1.1 backend HOLD. No Gold changes.

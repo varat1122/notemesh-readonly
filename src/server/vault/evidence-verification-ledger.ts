@@ -1,5 +1,5 @@
 import { db } from "../db";
-import type { IncomingClaim, ClaimReview } from "./investment-claim-review";
+import { claimIntegrityCoverage, claimIntegrityWarning, type ClaimIntegrityCoverage, type IncomingClaim, type ClaimReview } from "./investment-claim-review";
 
 /**
  * Bounded, READ-ONLY provenance ledger. "verified_against_primary" is
@@ -29,6 +29,7 @@ export interface EvidenceLedgerRow {
 }
 export interface EvidenceVerificationLedger {
   status:"metadata_lineage_only_no_external_verification";
+  historicalIntegrity:ClaimIntegrityCoverage;
   entity:string;
   metric:string;
   period:string;
@@ -169,11 +170,13 @@ export function buildEvidenceVerificationLedger(input:IncomingClaim,review:Claim
     "Obtain dated consensus/expectations, price basis and authorized portfolio exposure separately before Price In or sizing claims.",
     "Prepare a separate analyst-reviewed Thesis Proposal with Change Log and explicit owner-approved Protected Vault edit."
   ];
+  const historicalIntegrity=claimIntegrityCoverage(review);
+  if(historicalIntegrity.integrityHold)needs.unshift(claimIntegrityWarning(historicalIntegrity));
   if(review.metadataScan.truncated)needs.unshift("Metadata scan truncated; do not treat results as comprehensive.");
   if(!matched.length)needs.unshift("No indexed same-metric candidate selected; this is NOT evidence that the event is new.");
   if(conflict)needs.unshift("Conflicting values appear in like-for-like note metadata; adjudicate against original source before classification.");
   return {
-    status:"metadata_lineage_only_no_external_verification",
+    status:"metadata_lineage_only_no_external_verification",historicalIntegrity,
     entity:input.entity,metric:input.metric,period:input.period,
     incoming:{originalSource:input.originalSource,value:input.value??null,unit:input.unit??null,
       eventDate:input.eventDate??null,publishedAt:input.publishedAt??null,dateSource:"caller_input_unverified"},

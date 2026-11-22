@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { db } from "./db";
+import { assertMutationAllowed } from "./maintenance";
 import { env } from "./env";
+import {archiveEligibleUrl,canonicalSourceUrl} from "./source-url";
 
 /**
  * Internal, authenticated-ingest ADAPTER DEPENDENCY — not an MCP write action.
@@ -44,16 +46,10 @@ function validTimestamp(s:string):boolean {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(s)&&
     !Number.isNaN(d.valueOf())&&d.toISOString().slice(0,19)===s.slice(0,19);
 }
-function normalizedSource(source:string):string{
-  let u:URL;
-  try{u=new URL(source);}catch{throw new Error("source_url_invalid");}
-  if(u.protocol!=="https:"||!u.hostname||u.username||u.password||u.port)
-    throw new Error("source_url_must_be_standard_https");
-  u.hash="";
-  for(const k of [...u.searchParams.keys()])
-    if(/^utm_|^(fbclid|gclid)$/i.test(k))u.searchParams.delete(k);
-  u.searchParams.sort();
-  return u.toString(); // URL path/query values remain case-sensitive
+export function normalizedArchiveSource(source:string):string{
+  const canonical=archiveEligibleUrl(source);
+  if(!canonical)throw new Error("source_url_must_be_standard_https");
+  return canonical;
 }
 function sourceDir():string {
   const root=path.resolve(env.dataDir);
@@ -93,6 +89,9 @@ function getRow(row:Row,validateBytes:boolean):DocumentSnapshot{
     archiveStatus,publisherAuthenticityVerified:false,originalDocumentSignatureVerified:false};
 }
 function safeBlobWrite(bytes:Buffer,digest:string){
+  // A late continuation (e.g. a fetch that outlived its disconnected request)
+  // must not write once maintenance has settled.
+  assertMutationAllowed("source archive write");
   const target=blobPath(digest);
   const parent=path.dirname(target);
   fs.mkdirSync(parent,{recursive:true,mode:0o700});
@@ -121,9 +120,9 @@ export function captureOriginalDocumentBytes(input:DocumentArchiveInput):Documen
     throw new Error("source_document_invalid_size");
   if(!validTimestamp(input.capturedAt))throw new Error("capture_timestamp_invalid");
   if(!input.reviewerOrOperator.trim()||input.reviewerOrOperator.length>160)throw new Error("operator_label_required");
-  if(!normalizedSource(input.retrievedFrom))throw new Error("retrieved_url_required");
-  const key=normalizedSource(input.originalSource);
-  if(input.captureMethod==="authorized_external_download"&&normalizedSource(input.retrievedFrom)!==key)
+  if(!normalizedArchiveSource(input.retrievedFrom))throw new Error("retrieved_url_required");
+  const key=normalizedArchiveSource(input.originalSource);
+  if(input.captureMethod==="authorized_external_download"&&normalizedArchiveSource(input.retrievedFrom)!==key)
     throw new Error("download_url_must_match_original_source");
   if(input.contentType==="application/pdf"&&!input.bytes.subarray(0,5).equals(Buffer.from("%PDF-")))
     throw new Error("file_is_not_pdf");
@@ -154,13 +153,60 @@ export function inspectOriginalSourceHistory(originalSource:string,validateBytes
   changesObserved:boolean;limitReached:boolean;
   publisherAuthenticityVerified:false;
 }{
-  const key=normalizedSource(originalSource);
+  const key=normalizedArchiveSource(originalSource);
   const all=db().prepare("SELECT * FROM source_snapshots WHERE source_key = ? ORDER BY revision LIMIT 101")
     .all(key) as Row[];
+  if(!all.length){
+    // Older archive keys may predate the shared trailing-punctuation policy.
+    // Never silently call that expected state absent or rewrite historical IDs.
+    // Only K + trailing literal punctuation is a legacy compatibility candidate.
+    // Keep the full canonical key (including query); filter the whole suffix in
+    // SQL BEFORE LIMIT so query variants and punctuation filenames cost no slots.
+    const keys:{source_key:string}[]=[];
+    const range=db().prepare(`SELECT DISTINCT source_key FROM source_snapshots
+      WHERE source_key >= ? AND source_key < ? AND rtrim(source_key, '),.;') = ?
+      ORDER BY source_key LIMIT ?`);
+    for(const suffix of [")",",",".",";"]){
+      const upper=String.fromCharCode(suffix.charCodeAt(0)+1);
+      keys.push(...range.all(key+suffix,key+upper,key,101-keys.length) as {source_key:string}[]);
+      if(keys.length>100)throw Error("source_archive_alias_scan_limit");
+    }
+    if(keys.some(row=>canonicalSourceUrl(row.source_key)===key))throw Error("source_archive_legacy_url_binding");
+  }
   const truncated=all.length>100;
   const snapshots=all.slice(0,100).map(x=>getRow(x,validateBytes));
   return {status:"source_byte_archive_inspection_only",originalSource,revisionCount:snapshots.length,
     snapshots,changesObserved:snapshots.length>1,limitReached:truncated,publisherAuthenticityVerified:false};
+}
+
+/** Exact readback of one server-recorded byte snapshot. A digest/ID alone
+ * never certifies that the publisher authored the bytes or a claim is true. */
+export function inspectOriginalSourceSnapshot(snapshotId:string):DocumentSnapshot|null {
+  if(!/^[a-f0-9]{64}$/.test(snapshotId))return null;
+  const row=db().prepare("SELECT * FROM source_snapshots WHERE snapshot_id = ?")
+    .get(snapshotId) as Row|undefined;
+  if(!row)return null;
+  try{return getRow(row,true);}catch{return null;}
+}
+
+/** A bounded literal anchor check on the same stored, SHA-verified bytes.
+ * For now PDF/other opaque formats fail closed; page/text extraction needs
+ * its own audited locator protocol, not a text search over compressed bytes. */
+export function archivedSourceContainsLiteral(snapshotId:string,literal:string):boolean {
+  if(!/^[a-f0-9]{64}$/.test(snapshotId)||literal.length<12||literal.length>2000)return false;
+  const row=db().prepare("SELECT * FROM source_snapshots WHERE snapshot_id = ?")
+    .get(snapshotId) as Row|undefined;
+  if(!row||!["text/html","text/plain","application/xml","text/xml","application/json"].includes(row.content_type))return false;
+  try{
+    if(getRow(row,true).archiveStatus!=="intact_stored_bytes")return false;
+    const fd=fs.openSync(blobPath(row.sha256),fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
+    try {
+      const st=fs.fstatSync(fd);
+      if(!st.isFile()||st.nlink!==1||st.size!==row.byte_length)return false;
+      const bytes=fs.readFileSync(fd);
+      return sha256(bytes)===row.sha256&&bytes.includes(Buffer.from(literal,"utf8"));
+    }finally{fs.closeSync(fd);}
+  }catch{return false;}
 }
 
 
