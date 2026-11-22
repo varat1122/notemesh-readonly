@@ -22,7 +22,6 @@ it("C1 journey: reviewed Draft, duplicate, Source-only HOLD, cold readback and f
    body:JSON.stringify({email:"admin@example.com",password:"correct-horse-battery-staple"})});expect(r.status).toBe(200);return r.headers.get("set-cookie")!.split(";")[0];};
   let cookie=await login();
   expect((await rpc(s,"setupLocalPilotVault",[{confirmLocalOnly:true}],cookie)).status).toBe(200);
-  fs.mkdirSync(path.join(root,"vault/01_Companies"));fs.writeFileSync(path.join(root,"vault/01_Companies/TESTB.md"),"# TESTB synthetic journey fixture\n");
   fs.mkdirSync(path.join(root,"vault/05_Thesis"));fs.writeFileSync(path.join(root,"vault/05_Thesis/Protected.md"),"# Protected journey bytes\n");
   expect((await rpc(s,"rebuildIndex",[],cookie)).status).toBe(200);
   const oauth=async(endpoint:Endpoint)=>{
@@ -54,6 +53,14 @@ it("C1 journey: reviewed Draft, duplicate, Source-only HOLD, cold readback and f
   const decode=(result:any)=>{expect(result.isError,JSON.stringify(result)).not.toBe(true);const outer=JSON.parse(result.content[0].text);return JSON.parse(outer.result.split("\n").slice(1,-1).join("\n"));};
   const prepare=async(input:object)=>decode(await call("prepare_canonical_writeback",input));
   const save=async(input:object,p:any)=>decode(await call("apply_canonical_writeback",{input,planId:p.planId,authorizations:p.previews.map((t:any)=>({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash}))}));
+  // In-app Company Hub onboarding: setup created only the empty parent; the Hub
+  // note is an ordinary receipted Safe Edit create (no filesystem fixture).
+  expect(fs.readdirSync(path.join(root,"vault/01_Companies"))).toEqual([]);
+  const hub=decode(await call("create_note",{operationId:"C1-JOURNEY-HUB",path:"01_Companies/TESTB.md",reason:"C1 Company Hub onboarding",content:"# TESTB\n"}));
+  expect(hub.pilotReviewRequired).toBe(false);
+  const hubApplied=decode(await call("apply_edit",{operationId:hub.operationId,previewToken:hub.previewToken,expectedHash:hub.beforeHash}));
+  expect(hubApplied).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified"}});
+  expect(fs.readFileSync(path.join(root,"vault/01_Companies/TESTB.md"),"utf8")).toBe("# TESTB\n");
   const editTools=(await mcp("safe-edit",edit,"tools/list",{})).result.tools.map((t:{name:string})=>t.name);
   expect(editTools).toEqual(expect.arrayContaining(["prepare_research_judge_packet","research_judge_result_contract","prepare_canonical_writeback","apply_canonical_writeback","get_edit_status"]));
   expect(editTools.some((n:string)=>/approv|review_decision/.test(n))).toBe(false);

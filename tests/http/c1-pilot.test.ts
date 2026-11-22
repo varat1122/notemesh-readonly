@@ -36,15 +36,16 @@ it("C1 local network: audience/descriptor, explicit dashboard review, raw/generi
   expect(local.status,JSON.stringify(local)).toBe(200);
   expect(local.body.result).toMatchObject({configured:true,settings:"acknowledged",externalSync:false,remoteBackup:false});
   expect(fs.readdirSync(path.join(root,"vault"),{recursive:true}).map(String).sort()).toEqual([
-   "00_Inbox","00_Inbox/ChatGPT","10_Knowledge","10_Knowledge/Company Research","10_Knowledge/Industry and Concepts","10_Knowledge/Macro and Markets"].sort());
+   "00_Inbox","00_Inbox/ChatGPT","10_Knowledge","10_Knowledge/Company Research","10_Knowledge/Industry and Concepts","10_Knowledge/Macro and Markets","01_Companies"].sort());
   expect(await(await fetch(s.url+"/api/health")).json()).toMatchObject({configured:true});
   expect((await rpc(s,"setupLocalPilotVault",[{confirmLocalOnly:true}],cookie)).body.result).toMatchObject({settings:"unchanged",createdDirectories:[]});
   for(const [fn,args] of [["setupChooseBackend",["git"]],["setupGitRepo",["https://example.org/fixture.git","main","fixture","synthetic"]],["setupObsidianLogin",["fixture@example.org","synthetic"]],["setupListVaults",[]],["setupConfigureVault",["fixture","synthetic"]]] as [string,unknown[]][])
    expect((await rpc(s,fn,args,cookie)).status).toBe(409);
   expect((await rpc(s,"setTimezone",["UTC"],cookie)).status).toBe(200);
   expect((await rpc(s,"acknowledgeNotifications",[],cookie)).status).toBe(200);
-  // Explicit test fixture, AFTER proving onboarding created no Hub or note.
-  fs.mkdirSync(path.join(root,"vault/01_Companies"));
+  // Explicit test fixture, AFTER proving onboarding created only the empty Hub
+  // parent and no Hub or other note (in-app Hub creation: c1-pilot-journey).
+  expect(fs.readdirSync(path.join(root,"vault/01_Companies"))).toEqual([]);
   fs.writeFileSync(path.join(root,"vault/01_Companies/TESTA.md"),"# TESTA synthetic network fixture\n");
   fs.mkdirSync(path.join(root,"vault/05_Thesis"));fs.writeFileSync(path.join(root,"vault/05_Thesis/Protected.md"),"# Protected synthetic bytes\n");
   expect((await rpc(s,"rebuildIndex",[],cookie)).status).toBe(200);

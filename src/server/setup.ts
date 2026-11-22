@@ -109,8 +109,12 @@ export async function getSetupProgress(): Promise<{
 }
 
 const LOCAL_VAULT_NAME = "C1 Local Research Lab";
+// 01_Companies is the Company Hub parent only: an empty folder, no Hub note.
+// Hubs are then created through ordinary receipted Safe Edit (C1 has no other
+// folder writer). Appended last so existing partial-effect ordering is kept.
 const LOCAL_DIRECTORIES = ["00_Inbox", "00_Inbox/ChatGPT", "10_Knowledge",
-  "10_Knowledge/Company Research", "10_Knowledge/Industry and Concepts", "10_Knowledge/Macro and Markets"] as const;
+  "10_Knowledge/Company Research", "10_Knowledge/Industry and Concepts", "10_Knowledge/Macro and Markets",
+  "01_Companies"] as const;
 const localConfirmation = z.object({ confirmLocalOnly: z.literal(true) }).strict();
 function denyRemotePilotSetup() {
   if (c1Pilot()) throw new PublicError("c1_local_only_remote_setup_denied", 409);

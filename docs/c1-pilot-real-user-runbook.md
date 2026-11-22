@@ -86,8 +86,24 @@ Saved Reviews always carry `historical_analysis_only`, `comparator_eligible: fal
 5. **Admin and vault setup:**
    - Within 30 minutes of start, claim the admin from a separate browser.
    - Call RPC `setupLocalPilotVault {confirmLocalOnly:true}` and `setTimezone`.
-   - Optionally create the company hub note `01_Companies/<TICKER>.md` (no digits in the
-     ticker).
+     - Setup creates seven empty folders, including the Company Hub parent `01_Companies/`.
+       It creates **no** Hub or other note.
+     - An instance configured by an earlier candidate (six folders) HOLDs with
+       `c1_local_setup_directory_missing_hold` on re-run. It is never silently repaired; recreate
+       the disposable instance instead.
+   - **Company Hub (required for `domain:"company"`).** After the Edit connector is bound,
+     create `01_Companies/<TICKER>.md` in-app with Safe Edit `create_note` followed by
+     `apply_edit`:
+     - This is an ordinary target (`pilotReviewRequired:false`). The apply receipt must read
+       `write/readback/reindex: verified`.
+     - Never place the file on disk out of band; an out-of-band file is a test fixture, not
+       onboarding.
+     - The ticker must contain no digits.
+     - A Hub `aliases:` entry (for example `Azure` on `MSFT`) is a lexical issuer-context
+       mapping only. Add it **only** with Owner approval, in this disposable C1 only, and after
+       checking that no other Hub claims the alias (a collision is `ambiguous_hold`).
+     - The actor that creates or edits a Hub influences issuer resolution and history selection.
+       Record who created it and its receipt in the evidence.
 6. **Two OAuth protected resources (two connectors):**
    - **Edit connector:** resource `BASE_URL/api/safe-edit`, metadata
      `/.well-known/oauth-protected-resource/api/safe-edit`, scopes `vault:read vault:edit`.

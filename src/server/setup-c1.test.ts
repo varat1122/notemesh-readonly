@@ -26,7 +26,7 @@ let setup: typeof import("./setup"), database: typeof import("./db"), maintenanc
 const confirmation = { confirmLocalOnly: true as const };
 const globals = ["notemesh.c1-pilot.identity.v1", "notemesh.maintenance.registry.v1", "notemesh.d1.native-interlock.v1", "notemesh.d1.database-owners.v1"];
 const resetGlobals = () => { for (const name of globals) delete (globalThis as Record<symbol, unknown>)[Symbol.for(name)]; };
-const directories = ["00_Inbox", "00_Inbox/ChatGPT", "10_Knowledge", "10_Knowledge/Company Research", "10_Knowledge/Industry and Concepts", "10_Knowledge/Macro and Markets"];
+const directories = ["00_Inbox", "00_Inbox/ChatGPT", "10_Knowledge", "10_Knowledge/Company Research", "10_Knowledge/Industry and Concepts", "10_Knowledge/Macro and Markets", "01_Companies"];
 const observedSettings = () => {
   const read = new Database(path.join(root, "app.sqlite"), { readonly: true, fileMustExist: true });
   try { return read.prepare("SELECT key,value FROM settings ORDER BY key").all(); } finally { read.close(); }
@@ -44,7 +44,7 @@ beforeEach(async () => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); resetGlobals(); fs.rmSync(root, { recursive: true, force: true }); });
 
-it("creates exactly the six folders and only truthful settings, with idempotent readback", async () => {
+it("creates exactly the seven folders (Company Hub parent included, no Hub note) and only truthful settings, with idempotent readback", async () => {
   expect(await setup.getSetupProgress()).toMatchObject({ stage: "local-vault", backend: null, localOnly: true });
   expect(await setup.setupLocalPilotVault(confirmation)).toMatchObject({ ok: true, configured: true, externalSync: false,
     remoteBackup: false, createdDirectories: directories, settings: "acknowledged", lock: "released" });
@@ -126,6 +126,26 @@ it("does not follow a symlink and reports already-created empty folders accurate
     expect(error.c1SetupOutcome).toMatchObject({ createdDirectories: ["00_Inbox", "00_Inbox/ChatGPT"], settings: "not_attempted", lock: "released" });
     expect(fs.readdirSync(outside)).toEqual([]); expect(observedSettings()).toEqual([]);
   } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+});
+it("refuses a symlinked Company Hub parent without following it, after the six earlier folders", async () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "outside-hub-"));
+  try {
+    fs.symlinkSync(outside, path.join(root, "vault/01_Companies"));
+    const error = await setup.setupLocalPilotVault(confirmation).catch(e => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.c1SetupOutcome).toMatchObject({ createdDirectories: directories.slice(0, 6), settings: "not_attempted", lock: "released" });
+    expect(fs.readdirSync(outside)).toEqual([]); expect(observedSettings()).toEqual([]);
+    expect(fs.lstatSync(path.join(root, "vault/01_Companies")).isSymbolicLink()).toBe(true);
+  } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+});
+it("an instance configured under the earlier six-folder layout holds instead of silently adding the Hub parent", async () => {
+  await setup.setupLocalPilotVault(confirmation);
+  fs.rmdirSync(path.join(root, "vault/01_Companies"));
+  const before = observedSettings();
+  await expect(setup.setupLocalPilotVault(confirmation)).rejects.toThrow("c1_local_setup_directory_missing_hold");
+  expect(fs.existsSync(path.join(root, "vault/01_Companies"))).toBe(false);
+  expect(observedSettings()).toEqual(before);
+  expect(fs.existsSync(path.join(root, "safe-edit.lock"))).toBe(false);
 });
 it("partial EACCES preserves original error and does not claim configuration or no effects", async () => {
   const mkdir = fs.mkdirSync, denied = Object.assign(Error("synthetic-EACCES"), { code: "EACCES" });
