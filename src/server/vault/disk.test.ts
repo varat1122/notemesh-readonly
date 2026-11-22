@@ -110,7 +110,9 @@ describe("diskStatus", () => {
     const d=(await import("../db")).db();
     fs.rmSync(root,{recursive:true,force:true});
     try{await expect(status()).rejects.toThrow(/c1_pilot_instance_changed_hold/);}
-    finally{d.close();}
+    // Fixture teardown only: the guarded close takes the D1 launch lock in
+    // DATA_DIR, so give the (still disappeared) instance an empty directory.
+    finally{fs.mkdirSync(root,{recursive:true});d.close();}
   });
 });
 

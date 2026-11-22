@@ -153,9 +153,11 @@ describe("RI001 general persistence convergence",()=>{
   it("P-1 legacy HOLD journal derives withdrawal time read-only; fresh recovery remains available",async()=>{
     vi.useFakeTimers({toFake:["Date"]});const data=await judged({...input,appearance}),p=await prepare(data),held=structuredClone(data);
     held.researchJudge.result.review.verdict="HOLD";await prepare(held);const withdrawn=Date.now();
-    const sql=(await import("../db")).db(),original=sql.prepare.bind(sql),events=sql.prepare("SELECT * FROM safe_edit_events").all();
-    const spy=vi.spyOn(sql,"prepare").mockImplementation((query:string)=>{
-      const statement=original(query);
+    const sql=(await import("../db")).db(),original=(await import("better-sqlite3")).default.prototype.prepare as (this:unknown,source:string)=>any,events=sql.prepare("SELECT * FROM safe_edit_events").all();
+    // Delegate to the raw native prepare: the guarded facade already holds the D1
+    // interlock around this call, so delegating back through it would nest it.
+    const spy=vi.spyOn(sql,"prepare").mockImplementation(function(this:unknown,query:string){
+      const statement=original.call(this,query);
       if(query.includes("SELECT detail,at,rowid FROM safe_edit_events WHERE event='research_judge_gate'")){
         const get=statement.get.bind(statement);
         return {...statement,get:(...args:unknown[])=>{
@@ -210,13 +212,15 @@ describe("RI001 general persistence convergence",()=>{
     const data=await judged({...input,appearance}),p=await prepare(data),gates=await import("../safe-edit/research-judge-gate"),old=gates.currentJudgeGate(p.planId)!;
     gates.assertJudgeAdmissionOrder(old,old); // Caller checked before concurrent withdrawal.
     const held=structuredClone(data);held.researchJudge.result.review.verdict="HOLD";await prepare(held);
-    const engine=await import("../safe-edit/engine"),sql=(await import("../db")).db(),original=sql.prepare.bind(sql),Database=(await import("better-sqlite3")).default;
+    const engine=await import("../safe-edit/engine"),sql=(await import("../db")).db(),original=(await import("better-sqlite3")).default.prototype.prepare as (this:unknown,source:string)=>any,Database=(await import("better-sqlite3")).default;
     const other=new Database((await import("../env")).env.dbPath,{timeout:0});let checks=0;
-    const spy=vi.spyOn(sql,"prepare").mockImplementation((query:string)=>{
+    // Delegate to the raw native prepare: the guarded facade already holds the D1
+    // interlock around this call, so delegating back through it would nest it.
+    const spy=vi.spyOn(sql,"prepare").mockImplementation(function(this:unknown,query:string){
       if(query.includes("SELECT detail,at,rowid FROM safe_edit_events WHERE event='research_judge_gate'")){
         checks++;expect(sql.inTransaction).toBe(true);expect(()=>other.exec("BEGIN IMMEDIATE")).toThrow(/locked/);
       }
-      return original(query);
+      return original.call(this,query);
     });
     try{expect(()=>(engine.recordResearchJudgeGate(old.targets[0].operationId,actor,old))).toThrow("research_judge_revoked_envelope_hold");}
     finally{spy.mockRestore();if(other.inTransaction)other.exec("ROLLBACK");other.close();}
@@ -414,9 +418,11 @@ describe("RI001 general persistence convergence",()=>{
     const data=await judged({...input,appearance}),p=await prepare(data),gates=await import("../safe-edit/research-judge-gate"),gate=gates.currentJudgeGate(p.planId)!;
     const importedEngine=await import("../safe-edit/engine");
     // Emulate only reading a pre-remediation gate; no forged journal/receipt.
-    const sql=(await import("../db")).db(),original=sql.prepare.bind(sql);
-    const spy=vi.spyOn(sql,"prepare").mockImplementation((query:string)=>{
-      const statement=original(query);
+    const sql=(await import("../db")).db(),original=(await import("better-sqlite3")).default.prototype.prepare as (this:unknown,source:string)=>any;
+    // Delegate to the raw native prepare: the guarded facade already holds the D1
+    // interlock around this call, so delegating back through it would nest it.
+    const spy=vi.spyOn(sql,"prepare").mockImplementation(function(this:unknown,query:string){
+      const statement=original.call(this,query);
       if(query.includes("SELECT detail,at,rowid FROM safe_edit_events WHERE event='research_judge_gate'")){
         const {packetEnvelopeDigest:_,packetIssuedAt:__,...legacy}=gate;void _;void __;
         return {...statement,get:()=>({detail:JSON.stringify(legacy)})} as typeof statement;

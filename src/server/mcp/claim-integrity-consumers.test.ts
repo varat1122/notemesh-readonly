@@ -166,12 +166,14 @@ it("13 unknown-scope failures preserve detail truncation across consumers withou
  for(const c of [route.exactClaimReview,packet.claimGate,t.historicalIntegrity])expect(c).toMatchObject({coverage:"incomplete",integrityHoldCount:13,integrityHoldsTruncated:true,integrityHold:true});
 });
 it("25,000 + sentinel incompleteness propagates without validating or rescuing the sentinel",async()=>{
- const sql=(await import("../db")).db(),original=sql.prepare.bind(sql),claimReader=await import("../vault/canonical-claims"),read=vi.spyOn(claimReader,"readPersistedClaim");
+ const sql=(await import("../db")).db(),original=(await import("better-sqlite3")).default.prototype.prepare as (this:unknown,source:string)=>any,claimReader=await import("../vault/canonical-claims"),read=vi.spyOn(claimReader,"readPersistedClaim");
  const page=Array.from({length:25001},(_,i)=>({path:i===25000?"10_Knowledge/Company Research/Investment Claim - ICL-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF.md":`07_Sources/${i}.md`,frontmatter:JSON.stringify({entity:"OTHER"})}));
- vi.spyOn(sql,"prepare").mockImplementation((source:string)=>{
+  // Delegate to the raw native prepare: the guarded facade already holds the D1
+ // interlock around this call, so delegating back through it would nest it.
+ vi.spyOn(sql,"prepare").mockImplementation(function(this:unknown,source:string){
   if(source.startsWith("SELECT path, frontmatter FROM notes WHERE frontmatter IS NOT NULL OR path GLOB"))return {all:(n:number)=>{expect(n).toBe(25001);return page;}} as unknown as ReturnType<typeof sql.prepare>;
   if(source.startsWith("SELECT COUNT(*) AS n FROM notes WHERE frontmatter IS NOT NULL OR path GLOB"))return {get:()=>({n:25001})} as unknown as ReturnType<typeof sql.prepare>;
-  return original(source);
+  return original.call(this,source);
  });
  const direct=await query(url),h=(await import("../vault/investment-hybrid-readonly")).hybridClaimPreview(incoming),route=(await import("../vault/investment-writeback-router")).planInvestmentWriteback(routerInput),packet=(await import("../vault/investment-decision-packet")).buildInvestmentDecisionPacket(incoming,direct),t=(await import("../vault/thesis-proposal-gate")).assessThesisProposal(proposal);
  expect(direct.metadataScan.notesScanned).toBe(25000);expect(read).not.toHaveBeenCalled();expect(h.classification).toBe("HOLD_METADATA_COVERAGE");

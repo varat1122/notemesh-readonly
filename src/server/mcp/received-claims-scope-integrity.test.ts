@@ -126,15 +126,17 @@ it("HOLD detail overflow reports all observed failures and deterministic truncat
  expect(r.possibleHistoricalPaths.some(x=>paths.includes(x.path))).toBe(false);
 });
 it.each([25000,25001])("metadata scan remains bounded with %i rows and excludes its sentinel",async total=>{
- const sql=(await import("../db")).db(),realPrepare=sql.prepare.bind(sql),binding=await import("../vault/canonical-claims"),reads=vi.spyOn(binding,"readPersistedClaim");
+ const sql=(await import("../db")).db(),realPrepare=(await import("better-sqlite3")).default.prototype.prepare as (this:unknown,source:string)=>any,binding=await import("../vault/canonical-claims"),reads=vi.spyOn(binding,"readPersistedClaim");
  const sentinel="10_Knowledge/Company Research/Investment Claim - ICL-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF.md";
  // Unit-level query sentinel injection; no forged DB rows, files or receipts.
  const page=Array.from({length:total},(_,i)=>({path:i===25000?sentinel:`07_Sources/unrelated-${i}.md`,frontmatter:JSON.stringify({entity:"UNRELATED"})}));
  const all=vi.fn((limit:number)=>{expect(limit).toBe(25001);return page;});
- vi.spyOn(sql,"prepare").mockImplementation((source:string)=>{
+ // Delegate to the raw native prepare: the guarded facade already holds the D1
+ // interlock around this call, so delegating back through it would nest it.
+ vi.spyOn(sql,"prepare").mockImplementation(function(this:unknown,source:string){
   if(source.startsWith("SELECT path, frontmatter FROM notes WHERE frontmatter IS NOT NULL OR path GLOB"))return {all} as unknown as ReturnType<typeof sql.prepare>;
   if(source.startsWith("SELECT COUNT(*) AS n FROM notes WHERE frontmatter IS NOT NULL OR path GLOB"))return {get:()=>({n:total})} as unknown as ReturnType<typeof sql.prepare>;
-  return realPrepare(source);
+  return realPrepare.call(this,source);
  });
  const r=await query(url);expect(all).toHaveBeenCalledOnce();expect(reads).not.toHaveBeenCalled();expect(r.metadataScan).toMatchObject({notesScanned:25000,truncated:total>25000,integrityHoldCount:0,coverage:total>25000?"incomplete":"bounded_scan_no_integrity_hold"});
  expect(r.matchingClaims).toHaveLength(0);expect(r.claimBindingHolds).toHaveLength(0);expect(r.possibleHistoricalPaths.map(x=>x.path)).not.toContain(sentinel);
