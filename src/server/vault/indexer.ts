@@ -146,11 +146,13 @@ function indexFile(relPath: string, absPath: string) {
     // rest, and add only new targets unresolved for the link pass. Resetting
     // every row to NULL left a window, up to the debounced pass, in which a
     // stop or crash persisted unresolved links behind a verified receipt.
+    // At most two statements (never more than the old DELETE + one INSERT per link).
     const targets = JSON.stringify([...new Set(parsed.links)]);
     d.prepare("DELETE FROM links WHERE source_path = ? AND target NOT IN (SELECT value FROM json_each(?))")
       .run(relPath, targets);
-    d.prepare("INSERT OR IGNORE INTO links (source_path, target, resolved_path) SELECT ?, value, NULL FROM json_each(?)")
-      .run(relPath, targets);
+    if (parsed.links.length)
+      d.prepare("INSERT OR IGNORE INTO links (source_path, target, resolved_path) SELECT ?, value, NULL FROM json_each(?)")
+        .run(relPath, targets);
     d.prepare("DELETE FROM tags WHERE path = ?").run(relPath);
     const insTag = d.prepare("INSERT OR IGNORE INTO tags (path, tag) VALUES (?, ?)");
     for (const tag of parsed.tags) insTag.run(relPath, tag);
