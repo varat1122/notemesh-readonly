@@ -17,6 +17,7 @@ Source-only and is not reusable for Review.
 | Cloud/desktop intake, legacy importer, raw note/folder/disk writes | Refused (`c1_pilot_*`). |
 | Prices | `refreshPrices` refused (`c1_pilot_price_writer_denied`). Collector timer never starts, even with `MARKET_PRICES_ENABLED=1`. *(New in this candidate.)* |
 | Google Drive/OAuth egress | Every request refused before `fetch()` (`c1_pilot_external_drive_denied`). *(New.)* |
+| Price store / tools | An on-disk writable `PriceStore` refuses to open, and no price tools are offered on `/api/mcp`, even with `MARKET_PRICES_ENABLED=1`. |
 | Writes | Only the canonical Source/Draft path through `/api/safe-edit` (`prepare_*`/`apply_canonical_writeback`), plus the dashboard reviewer decision. |
 | Identity | `DATA_DIR` must be a real directory under the OS tmpdir whose name starts `ios-c1-pilot-`, with a real `vault/` (no symlink). Any `RAILWAY_*` id is refused, so this cannot run on Railway. A process without `C1_RESEARCH_PILOT=disposable` on that directory HOLDs. |
 
@@ -28,6 +29,10 @@ Server-side Source URL download (`archive_original_source`) stays refused unless
 Sources for the pilot.
 
 ## 1. Policy facts CHAT must design around (RISK-1.1, unchanged)
+
+The exact gate table and the two-case feasibility are in
+`docs/ios-ri001-risk-2-quant-primary-proposal.md` §1–2. To check a candidate excerpt for digits
+before any run, use the one-liner in §2 of that document.
 
 A Draft/Review is admitted (Judge `PASS`) **only** when every one of these holds:
 

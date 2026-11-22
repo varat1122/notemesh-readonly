@@ -3,9 +3,11 @@ import { z } from "zod";
 import { marketSchema, isoDate, PriceError, BENCHMARKS } from "../market-prices/model.ts";
 import { readCachedPrices } from "../market-prices/backend.ts";
 import { eventAnalysisSchema, analyzePriceEvent } from "../market-prices/event-analysis.ts";
+import { c1Pilot } from "../c1-pilot.ts";
 
 export function registerPriceTools(server: McpServer): void {
-  if (process.env.MARKET_PRICES_ENABLED !== "1") return;
+  // C1 has no price data or egress: do not offer tools that cannot answer.
+  if (process.env.MARKET_PRICES_ENABLED !== "1" || c1Pilot()) return;
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: process.env.MARKET_PRICES_STORAGE === "google-drive" };
   const reply = async (read: () => unknown) => {
     try { return { content: [{ type: "text" as const, text: JSON.stringify(await read()) }] }; }

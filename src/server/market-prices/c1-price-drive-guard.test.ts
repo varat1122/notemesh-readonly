@@ -42,6 +42,9 @@ it("C1 refuses the price writer, the collector timer and every Drive request bef
   await expect(googleBytes("https://www.googleapis.com/drive/v3/files", { method: "POST" })).rejects.toMatchObject({ code: "c1_pilot_external_drive_denied" });
   await expect(googleJson("https://oauth2.googleapis.com/token")).rejects.toMatchObject({ code: "c1_pilot_external_drive_denied" });
   expect(fetch).not.toHaveBeenCalled();
+  // Constructor-level defense in depth: no on-disk writable store opens at all.
+  const { PriceStore } = await import("./store.ts");
+  expect(() => new PriceStore(path.join(root, "prices.sqlite"), true)).toThrow("c1_pilot_price_writer_denied");
   expect(fs.readdirSync(root).filter(name => /price|maintenance-writers/.test(name))).toEqual([]);
 });
 
@@ -52,8 +55,11 @@ it("an unflagged process on a pilot directory holds instead of writing prices", 
   await expect(refreshPrices({ fetcher: async () => { throw Error("must not fetch"); } })).rejects.toThrow("c1_pilot_mode_required_hold");
 });
 
-it("a normal instance still reaches Drive through the same choke point", async () => {
+it("a normal instance still opens a writable store and reaches Drive through the same choke point", async () => {
   instance(false);
+  const { PriceStore } = await import("./store.ts");
+  new PriceStore(path.join(root, "prices.sqlite"), true).close();
+  expect(fs.existsSync(path.join(root, "prices.sqlite"))).toBe(true);
   const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
   const { googleJson } = await import("./drive-http.ts");
   await expect(googleJson("https://oauth2.googleapis.com/token")).resolves.toEqual({});

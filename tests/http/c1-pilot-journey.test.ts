@@ -136,6 +136,8 @@ it("C1 journey: reviewed Draft, duplicate, Source-only HOLD, cold readback and f
   expect(listed.map(x=>x.name)).toEqual(expect.arrayContaining(["search_vault","read_note","get_links","investment_context_pack"]));
   // The only non-read tool is the legacy inbox archive, which needs inbox:submit and is C1-denied.
   expect(listed.filter(x=>x.annotations?.readOnlyHint!==true).map(x=>x.name)).toEqual(["submit_investment_notes"]);
+  // MARKET_PRICES_ENABLED=1 is set above: C1 still offers no price tools.
+  expect(listed.filter(x=>/price/.test(x.name)).map(x=>x.name)).toEqual([]);
   const vaultFiles=()=>fs.readdirSync(path.join(root,"vault"),{recursive:true}).map(String).sort();
   const filesBefore=vaultFiles(),submit=await mcp("research",fresh,"tools/call",{name:"submit_investment_notes",arguments:{}});
   expect(submit.status!==200||submit.result?.isError===true).toBe(true);expect(vaultFiles()).toEqual(filesBefore);

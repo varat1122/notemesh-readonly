@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import {preparedPricePragma,readOnlyPricePragma} from "./read-only-pragma.ts";
 import { instrument, isoDate, PRICE_POLICY, PriceError, type InstrumentInput, type PriceBar, type PriceSnapshot } from "./model.ts";
 import { announceWriter, type WriterHandle } from "../maintenance.ts";
+import { c1Pilot } from "../c1-pilot.ts";
 
 export function priceDatabaseLimit(): number {
   const mb = Number(process.env.MARKET_PRICES_MAX_DB_MB ?? "4");
@@ -54,6 +55,9 @@ export class PriceStore {
     this.filename = typeof filename === "string" ? filename : ":memory:";
     this.writable = writable;
     if (writable && !this.memory) {
+      // Defense in depth for the C1 whole-instance pilot: no on-disk price
+      // writer may open, whichever route reaches the constructor.
+      if (c1Pilot()) throw new PriceError("c1_pilot_price_writer_denied");
       try {
         this.writer = announceWriter("price");
       } catch (error) {
