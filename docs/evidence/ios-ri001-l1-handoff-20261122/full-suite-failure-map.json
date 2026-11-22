@@ -1,0 +1,389 @@
+{
+ "counts": {
+  "passed": 3286,
+  "failed": 63,
+  "skipped": 6
+ },
+ "numFailed": 63,
+ "codexNotReproduced": [],
+ "failures": [
+  {
+   "path": "src/server/account-issuer-cleanup.test.ts",
+   "test": "PR #135 account.issuer cleanup procedure reports without changing anything, then cleans so 1.7.7 boots and the admin signs in",
+   "msg": "Error: Write-ahead log is not empty: stop the app (or checkpoint) before --apply",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/auth-guard.test.ts",
+   "test": "the guard on Better Auth's user table reports a database that already holds more than one account, and reinstalls the guard",
+   "msg": "AssertionError: expected \"error\" to be called with arguments: [ StringMatching{\u2026} ]",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/d1-recovery-closure.test.ts",
+   "test": "G06E records actual lock-only legacy writer incompatibility; mixed-version remains HOLD",
+   "msg": "AssertionError: Supply exact frozen b1c2a416 maintenance.ts + env.ts from evidence: expected undefined to be truthy",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/d1-recovery-closure.test.ts",
+   "test": "G06E actual G05 legacy pending witness is preserved, never auto-migrated or cleared",
+   "msg": "AssertionError: expected undefined to be truthy",
+   "inCodex37": true
+  },
+  {
+   "path": "tests/http/c1-pilot.test.ts",
+   "test": "C1 local network: audience/descriptor, explicit dashboard review, raw/generic refusal, Source and Draft",
+   "msg": "AssertionError: expected false to be true // Object.is equality",
+   "inCodex37": false
+  },
+  {
+   "path": "tests/perf/vault-ops.test.ts",
+   "test": "a 2,000-note vault indexes, lists, searches, and finds within bounds",
+   "msg": "AssertionError: expected 57788.698209 to be less than 30000",
+   "inCodex37": false
+  },
+  {
+   "path": "tests/perf/vault-ops.test.ts",
+   "test": "a 2,000-note vault moves a folder of 50 notes with links from everywhere, opening only the notes that link",
+   "msg": "AssertionError: expected 478 to be less than or equal to 54",
+   "inCodex37": true
+  },
+  {
+   "path": "tests/perf/vault-ops.test.ts",
+   "test": "a 2,000-note vault renames a hub note that a thousand notes link to by path, rewriting all of them",
+   "msg": "AssertionError: expected 2017 to be less than or equal to 2002",
+   "inCodex37": true
+  },
+  {
+   "path": "tests/vault/hostile-content.test.ts",
+   "test": "walking a hostile filesystem stops at the depth limit instead of recursing forever",
+   "msg": "Error: index_walk_depth_incomplete",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/mcp/claim-integrity-consumers.test.ts",
+   "test": "25,000 + sentinel incompleteness propagates without validating or rescuing the sentinel",
+   "msg": "Error: d1_native_interlock_recovery_hold",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/mcp/general-persistence.test.ts",
+   "test": "RI001 general persistence convergence P-1 legacy HOLD journal derives withdrawal time read-only; fresh recovery remains available",
+   "msg": "Error: d1_native_interlock_recovery_hold",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/mcp/general-persistence.test.ts",
+   "test": "RI001 general persistence convergence P-1 journal rechecks a stale prevalidated PASS inside an immediate transaction",
+   "msg": "AssertionError: expected [Function] to throw error including 'research_judge_revoked_envelope_hold' but got 'd1_native_interlock_recovery_ho",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/mcp/general-persistence.test.ts",
+   "test": "RI001 general persistence convergence F-1 ingress honors maintenance before any gate journal write",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/mcp/general-persistence.test.ts",
+   "test": "RI001 general persistence convergence F-1 missing pre-remediation admission fingerprint cannot authorize generic non-Source writes",
+   "msg": "AssertionError: expected [Function] to throw error matching /admission_binding/ but got 'd1_native_interlock_recovery_hold'",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/mcp/general-persistence.test.ts",
+   "test": "RI001 general persistence convergence disabled writer/maintenance refuses new appearance journal records",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/mcp/legacy-judge-admission.test.ts",
+   "test": "L2-H authoritative transactional recheck rejects a withdrawal against superseded legacy snapshot",
+   "msg": "AssertionError: expected [Function] to throw error including 'research_judge_withdrawal_superseded_\u2026' but got 'd1_native_interlock_recovery_",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/mcp/macro-source-history.test.ts",
+   "test": "sentinel overflow stays bounded and self-write is excluded before the bound",
+   "msg": "Error: STACK_TRACE_ERROR",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/mcp/received-claims-scope-integrity.test.ts",
+   "test": "metadata scan remains bounded with 25000 rows and excludes its sentinel",
+   "msg": "Error: d1_native_interlock_recovery_hold",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/mcp/received-claims-scope-integrity.test.ts",
+   "test": "metadata scan remains bounded with 25001 rows and excludes its sentinel",
+   "msg": "Error: d1_native_interlock_recovery_hold",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/mcp/source-review-reuse.test.ts",
+   "test": "context budget fallback exposes receipt/trust-bound research without pretending it was selected",
+   "msg": "Error: STACK_TRACE_ERROR",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/mcp/standalone-source-history.test.ts",
+   "test": "deterministic bounded omissions and unselected changes do not invalidate unchanged effective selection",
+   "msg": "Error: STACK_TRACE_ERROR",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/safe-edit/wp2-admission-authority.test.ts",
+   "test": "S01: candidate diff stays inside the Scope v1.0.1 allowlist (no forbidden path, <=19 production files)",
+   "msg": "AssertionError: expected '6bc96f53eac6e138a901a86894a7df53756c2\u2026' to be '6446c4cd8c6cf63f155aa85c751d955486533\u2026' // Object.is equality",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "probeMerge reports clean when the two sides touch different notes",
+   "msg": "AssertionError: expected false to be true // Object.is equality",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "probeMerge reports clean when the same note changes in different places",
+   "msg": "AssertionError: expected false to be true // Object.is equality",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "probeMerge reports the conflicting path when both sides change the same region",
+   "msg": "AssertionError: expected [] to deeply equal [ 'Daily/2026-08-03.md' ]",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "a clean merge keeps both sides preserves the assistant's append and the device's heading edit",
+   "msg": "AssertionError: expected false to be true // Object.is equality",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "a conflict saves the assistant's version alongside, and never leaves markers",
+   "msg": "AssertionError: expected [] to deeply equal [ Array(1) ]",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "a conflict commits the copy so it reaches the user's other devices",
+   "msg": "AssertionError: expected 'Daily/2026-08-03.md\\nProjects/Alpha.m\u2026' to contain 'Conflicted copy notemesh'",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "a conflict leaves a clean tree on a single commit",
+   "msg": "AssertionError: expected '0' to be '1' // Object.is equality",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "binary attachments writes the conflict copy byte-for-byte, not as mangled text",
+   "msg": "TypeError: The \"path\" argument must be of type string. Received undefined",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "a conflict where one side deleted keeps copies aligned with paths, null where there was nothing of ours to save",
+   "msg": "AssertionError: expected [] to deeply equal [ 'Daily/2026-08-03.md', \u2026(1) ]",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "D1 command-specific merge-tree outcome returns conflict status1 and exact paths without quarantining normal reconciliation",
+   "msg": "AssertionError: expected { ok: false, stdout: '', \u2026(4) } to match object { ok: false, code: 1, \u2026(1) }",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "D1 command-specific merge-tree outcome malformed status1 output cannot masquerade as an observed conflict",
+   "msg": "AssertionError: expected { ok: false, stdout: '', \u2026(4) } to match object { ok: false, \u2026(2) }",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "D1 command-specific merge-tree outcome a syntactically valid OID must resolve to an actual tree object",
+   "msg": "AssertionError: expected { ok: false, stdout: '', \u2026(4) } to match object { ok: false, \u2026(1) }",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "D1 command-specific merge-tree outcome retains unknown outcome when Daily/2026-08-03.md changes during a real merge probe",
+   "msg": "AssertionError: expected { ok: false, stdout: '', \u2026(4) } to match object { ok: false, \u2026(2) }",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "D1 command-specific merge-tree outcome retains unknown outcome when .git/index changes during a real merge probe",
+   "msg": "AssertionError: expected { ok: false, stdout: '', \u2026(4) } to match object { ok: false, \u2026(2) }",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "D1 command-specific merge-tree outcome retains unknown outcome when .git/HEAD changes during a real merge probe",
+   "msg": "AssertionError: expected { ok: false, stdout: '', \u2026(4) } to match object { ok: false, \u2026(2) }",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "D1 command-specific merge-tree outcome retains unknown outcome when .git/config changes during a real merge probe",
+   "msg": "AssertionError: expected { ok: false, stdout: '', \u2026(4) } to match object { ok: false, \u2026(2) }",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "D1 command-specific merge-tree outcome bounds snapshot bytes before reading a large sparse fixture",
+   "msg": "AssertionError: expected { ok: false, stdout: '', \u2026(4) } to match object { ok: false, \u2026(2) }",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conflict.test.ts",
+   "test": "D1 command-specific merge-tree outcome keeps non-conflict merge errors restrictive rather than treating every nonzero as conflict",
+   "msg": "AssertionError: expected { ok: false, stdout: '', \u2026(4) } to match object { ok: false, \u2026(1) }",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'git' lands in backoff when sync fails, and resetAndStart runs it again",
+   "msg": "AssertionError: expected 'stopped' to be 'running' // Object.is equality",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'git' lands in needs-reauth on rejected credentials and stays there until resetAndStart",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'git' treats notifyLocalChange as a request to publish, or ignores it, but never fails",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'git' puts note() in the log, collapsing repeats, without counting as activity",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'git' resolves syncNow with ok and output on a stopped backend, never throwing",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'obsidian' starts stopped, with the full status shape",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'obsidian' runs on start and stops on stop, stamping stateSince at each change",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'obsidian' lands in backoff when sync fails, and resetAndStart runs it again",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'obsidian' lands in needs-reauth on rejected credentials and stays there until resetAndStart",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'obsidian' treats notifyLocalChange as a request to publish, or ignores it, but never fails",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'obsidian' puts note() in the log, collapsing repeats, without counting as activity",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/conformance.test.ts",
+   "test": "SyncBackend conformance: 'obsidian' resolves syncNow with ok and output on a stopped backend, never throwing",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/git-backend.test.ts",
+   "test": "a conflict, end to end pushes the conflicted copy to the remote and stays running",
+   "msg": "AssertionError: expected 'stopped' to be 'running' // Object.is equality",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/git-backend.test.ts",
+   "test": "what a conflict tells connectors posts a one-shot notice naming the copy, and the state says when it changed",
+   "msg": "AssertionError: expected [] to have a length of 1 but got +0",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/git-exec-d1.test.ts",
+   "test": "strict oracle: a pre-launched Git child cannot write a business file after DRAINING",
+   "msg": "AssertionError: expected true to be false // Object.is equality",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/git-safe-edit.integration.test.ts",
+   "test": "preserves a simultaneous remote edit as original and the guarded edit as a conflict copy without force pushing",
+   "msg": "AssertionError: expected undefined to be truthy",
+   "inCodex37": false
+  },
+  {
+   "path": "src/server/sync/git-safe-edit.integration.test.ts",
+   "test": "keeps local changes on delayed/rejected push and delivers through a later normal retry",
+   "msg": "AssertionError: expected false to be true // Object.is equality",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/git-safe-edit.integration.test.ts",
+   "test": "recovers from a real non-fast-forward rejection without a force push",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/git-safe-edit.integration.test.ts",
+   "test": "does not steal a mutation lock left by a SIGTERM-terminated process",
+   "msg": "Error: Maintenance: d1_maintenance_admission_denied",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/git.test.ts",
+   "test": "probeRemote fails on a remote that does not exist",
+   "msg": "Error: maintenance_active",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/git.test.ts",
+   "test": "probeRemote does not create anything when the probe fails",
+   "msg": "Error: maintenance_active",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/sync/git.test.ts",
+   "test": "runGit never waits on an interactive credential prompt",
+   "msg": "AssertionError: expected null to be 19 // Object.is equality",
+   "inCodex37": true
+  },
+  {
+   "path": "src/server/vault/disk.test.ts",
+   "test": "diskStatus refuses a disappeared instance instead of reporting its old cached DB as current",
+   "msg": "Error: d1_native_lock_unavailable_hold",
+   "inCodex37": true
+  }
+ ]
+}

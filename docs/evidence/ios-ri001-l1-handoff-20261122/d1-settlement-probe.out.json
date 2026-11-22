@@ -1,0 +1,59 @@
+{
+ "probe": "d1-settlement",
+ "uid": 0,
+ "results": [
+  {
+   "name": "child_same_pgid",
+   "mode": "A",
+   "settlement": null,
+   "lateBusinessAfterBarrier": [
+    "late-business"
+   ]
+  },
+  {
+   "name": "child_same_pgid",
+   "mode": "B",
+   "settlement": {
+    "verified": true,
+    "killed": 2
+   },
+   "lateBusinessAfterBarrier": []
+  },
+  {
+   "name": "bg_descendant_same_pgid",
+   "mode": "A",
+   "settlement": null,
+   "lateBusinessAfterBarrier": [
+    "bg-business"
+   ]
+  },
+  {
+   "name": "bg_descendant_same_pgid",
+   "mode": "B",
+   "settlement": {
+    "verified": true,
+    "killed": 3
+   },
+   "lateBusinessAfterBarrier": []
+  },
+  {
+   "name": "setsid_double_fork_daemon",
+   "mode": "A",
+   "settlement": null,
+   "lateBusinessAfterBarrier": [
+    "daemon-business"
+   ]
+  },
+  {
+   "name": "setsid_double_fork_daemon",
+   "mode": "B",
+   "settlement": {
+    "verified": true,
+    "killed": 2
+   },
+   "lateBusinessAfterBarrier": [
+    "daemon-business"
+   ]
+  }
+ ]
+}
