@@ -1,5 +1,6 @@
 import { PriceError } from "./model.ts";
 import { assertWritePermitted, beginWork, endWork } from "../maintenance.ts";
+import { c1Pilot } from "../c1-pilot.ts";
 
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -15,6 +16,8 @@ const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * price writer's lock) and the 25 s timeout bounds it below the drain deadline.
  */
 export async function googleBytes(url: string, init: RequestInit = {}, maxBytes = 65536): Promise<Buffer> {
+  // C1 has no Drive/OAuth egress at all, reads included.
+  if (c1Pilot()) throw new PriceError("c1_pilot_external_drive_denied");
   const target = new URL(url);
   if (target.protocol !== "https:" || !["www.googleapis.com", "oauth2.googleapis.com"].includes(target.hostname) ||
     target.username || target.password || target.port) throw new PriceError("drive_origin_refused");

@@ -141,11 +141,16 @@ function indexFile(relPath: string, absPath: string) {
       parsed.headings.join("\n"),
       parsed.body,
     );
-    d.prepare("DELETE FROM links WHERE source_path = ?").run(relPath);
-    const insLink = d.prepare(
-      "INSERT OR IGNORE INTO links (source_path, target, resolved_path) VALUES (?, ?, NULL)",
-    );
-    for (const target of parsed.links) insLink.run(relPath, target);
+    // The watcher re-indexes bytes a tool already indexed and resolved. Keep
+    // rows whose target is still present (with their resolution), drop the
+    // rest, and add only new targets unresolved for the link pass. Resetting
+    // every row to NULL left a window, up to the debounced pass, in which a
+    // stop or crash persisted unresolved links behind a verified receipt.
+    const targets = JSON.stringify([...new Set(parsed.links)]);
+    d.prepare("DELETE FROM links WHERE source_path = ? AND target NOT IN (SELECT value FROM json_each(?))")
+      .run(relPath, targets);
+    d.prepare("INSERT OR IGNORE INTO links (source_path, target, resolved_path) SELECT ?, value, NULL FROM json_each(?)")
+      .run(relPath, targets);
     d.prepare("DELETE FROM tags WHERE path = ?").run(relPath);
     const insTag = d.prepare("INSERT OR IGNORE INTO tags (path, tag) VALUES (?, ?)");
     for (const tag of parsed.tags) insTag.run(relPath, tag);

@@ -4,6 +4,7 @@ import { instrumentSchema, instrument, PILOT_INSTRUMENTS, BENCHMARKS, MAX_PRICE_
 import { PriceStore, priceDbPath } from "./store.ts";
 import { fetchYahooDaily } from "./yahoo.ts";
 import { maintenanceActive, withMaintenanceWriter, worker } from "../maintenance.ts";
+import { c1Pilot } from "../c1-pilot.ts";
 
 export function priceWatchlist(): InstrumentInput[] {
   try {
@@ -37,6 +38,9 @@ export interface RefreshOptions {
   fetcher?: typeof fetchYahooDaily; pause?: (ms: number) => Promise<unknown>;
 }
 export async function refreshPrices(options: RefreshOptions = {}) {
+  // C1 is a whole-instance, no-egress research pilot: no price writer, no
+  // Yahoo/Drive fetch, whatever the environment enables.
+  if (c1Pilot()) throw new PriceError("c1_pilot_price_writer_denied");
   // Before any store, lease, Drive refresh or fetch: the CLI is a separate
   // process and reads the same durable record (or NOTEMESH_MAINTENANCE=1).
   if (maintenanceActive()) throw new PriceError("maintenance_active");
@@ -107,7 +111,7 @@ export async function collectIntoPriceStore(store: PriceStore, options: RefreshO
 const state = () => worker("priceCollector");
 export function ensurePriceCollectorStarted(): void {
   const w = state();
-  if (process.env.MARKET_PRICES_ENABLED !== "1" || w.timer || maintenanceActive()) return;
+  if (process.env.MARKET_PRICES_ENABLED !== "1" || c1Pilot() || w.timer || maintenanceActive()) return;
   const tick = async () => {
     if (w.busy || maintenanceActive()) return;
     w.busy = true;
