@@ -1,8 +1,9 @@
-# RI001-DRAFT-RISK-2.0-QP — proposal for quantitative PRIMARY research (DESIGN ONLY) — v0.2
+# RI001-DRAFT-RISK-2.0-QP — proposal for quantitative PRIMARY research (DESIGN ONLY) — v0.3
 
-**Status: PROPOSAL v0.2 / NOT IMPLEMENTED / NOT APPROVED.** v0.2 reconciles the
-G3/G7/G8/G9 contradiction in v0.1 (blob at commit `7e5ee75`); see §3.0. §1 and §2 are unchanged
-from v0.1. This document does not change
+**Status: PROPOSAL v0.3 / NOT IMPLEMENTED / NOT APPROVED.** v0.3 resolves the v0.2 internal
+adversarial self-review (CD-1 to CD-6, DG-1 to DG-8) written by the author; see §3.0. That
+self-review is **not** an independent review. Earlier versions: v0.1 `7e5ee75`, v0.2 `6bfd5c7`.
+§1 and §2 are unchanged. This document does not change
 RISK-1.1, the Judge or the reviewer, and it adds no runtime path.
 
 Implementation requires both of these, in this order:
@@ -57,216 +58,272 @@ between kinds of digits, and G9 has no way to be satisfied.
 - Preflight a candidate before any run. This is the same predicate as G5, applied to both texts:
   `node -e 'const t=require("fs").readFileSync(0,"utf8");const m=[...t.matchAll(/\p{N}+/gu)].map(x=>[x.index,x[0]]);console.log(m.length?m:"digit-free")' < excerpt.txt`
 
-## 3. Proposal: `RI001-DRAFT-RISK-2.0-QP` — v0.2 (supersedes v0.1 §3 at `7e5ee75`)
+## 3. Proposal: `RI001-DRAFT-RISK-2.0-QP` — v0.3 (supersedes v0.2 §3 at `6bfd5c7`)
 
-### 3.0 What changed v0.1 → v0.2 (contract reconciliation, Main adjudication 2026-11-22)
+### 3.0 Change log
 
-- **v0.1 contradiction, accepted.** v0.1 said G1–G4 and G6–G11 stay "exactly as they are" while
-  replacing G9. It also expected an MSFT earnings PASS. That positive is impossible under the
-  RISK-1.1 rules:
-  - G3 holds a `material` financial-figures disposition;
-  - G7 holds `materialRisk:true` and any event that is not `added_detail`;
-  - G8 holds the honest `earnings` content type.
+- **v0.1 → v0.2.** Reconciled the G3/G7/G8/G9 contradiction: bounded tier semantics, and a critic
+  that can only add HOLD/FAIL. v0.1 is at `7e5ee75`, v0.2 at `6bfd5c7`.
+- **v0.2 → v0.3.** Resolves the author's internal adversarial self-review of v0.2: six Confirmed
+  Defects (CD) and eight Design Gaps (DG). **That self-review is not an independent review.**
 
-  v0.1 was therefore internally inconsistent. Do not sign it off.
-- **What v0.2 does.** It defines tier-specific semantics for **G3, G5, G7, G8 and G9 only** (§3.2,
-  §3.3), backed by new mandatory gates S, N and R (§3.5–§3.7). Every other gate is unchanged
-  (§3.1 matrix).
-- **The core separation (§3.2).**
-  - *Material financial fact*: an honest property of the content, for example quarterly segment
-    revenue.
-  - *Unresolved risk*: unsupported, uncertain, contradictory, forward-looking, or a binding
-    defect.
+| Finding (v0.2) | v0.3 resolution | Section |
+|---|---|---|
+| CD-1: S6 whole section vs "every digit in received text classified" | Token classes apply only to **asserted** text: Review, claims, relationships. Received/section digits are bound by S1/S5/S6 hashes. | §3.6 |
+| CD-2: S6 vs the `extractedText` cap of 12,000 characters | QP Source text is **derived by the server** from the archived snapshot and section id, under its own bound. Oversize means HOLD, never truncation. | §3.4 |
+| CD-3: new `official_statistics` breaks the strict enum | **Removed.** Use the existing `macro_data`/`reported_fact`/`earnings` and the existing source kinds. | §3.1, §3.2 |
+| CD-4: critic label collides with `draftMetadata.critic_independence` | `critic_independence: "not_verified"` stays **unchanged**. New separate keys `qp_*`. | §3.10 |
+| CD-5: no root of trust for signers | Owner-signed registry, root fingerprint pinned in source, verified at boot, monotonic version. QP stays disabled without it. | §3.7 |
+| CD-6: "critic ≠ actor" across namespaces is uncheckable | Registry principals declare their OAuth subjects. Overlaps are rejected. Labelled as attestation (residual). | §3.7 |
+| DG-1: G3 for official statistics ambiguous | `material_primary_actual` is defined to cover issuer financial actuals **and** official statistical measurements. D2 methodology is a G5-only relaxation. | §3.2, §3.3 |
+| DG-2: privileged classification is caller-controlled | **Sentence-bound Review** plus per-claim and per-sentence classes, all inside the R3-signed scope. R3 has a `classification_fidelity` dimension. | §3.6, §3.7 |
+| DG-3: numeric misattribution in prose | **No raw digits in authored prose.** All digit-bearing tokens are server-rendered from bound placeholders. | §3.6 |
+| DG-4: CER spec incomplete | Full CER spec: server recomputation, hidden content, footnotes, spans, scale scopes, Unicode rules, iXBRL fact binding, differential fuzzing. | §3.5 |
+| DG-5: G4 relevance not checked | QP history must be a native intake with its own S1 snapshot, the same issuer or series, and an attested earlier publication. Bootstrap procedure stated; first-ever disclosures HOLD by design. | §3.2 G4 |
+| DG-6: one event per packet | Classification per claim and per sentence. Vintage is part of the claim key. | §3.6 |
+| DG-7: "C1/default stay 1.1" only documented | `qpEnabled()` fail-closed predicate is required in code. | §3.10 |
+| DG-8: capacity limits unstated | At most 8 asserted values. References and quotes bounded. Overflow is HOLD, never silent truncation. | §3.6 |
 
-  The first may proceed to PASS only through verified bindings plus a critic attestation. The
-  second stays HOLD or FAIL in every tier.
-- **A critic never repairs facts.** Every fact, binding and source gate is evaluated
-  independently. A critic signature can only *add* HOLD or FAIL. It can never turn another gate's
-  HOLD into PASS.
-- **Honest classification is mandatory.** Earnings stay `contentTypes:["earnings"]` and
-  `materialRisk:true`. A periodic release stays `new_event`. Trimming, reclassifying or removing
-  digits to obtain PASS is itself a FAIL condition (§3.8, T-N5).
+**Unchanged from v0.2:**
+- Honest classification is mandatory; manipulation is FAIL.
+- A critic never repairs facts.
+- Fixed evaluation order.
+- Material financial *facts* are separated from unresolved *risk*.
+- Guidance, broker, consensus, derived arithmetic, recast comparisons, PDF, PIT and competing
+  values all remain HOLD.
 
 ### 3.1 Old → New gate matrix
 
-| Gate | RISK-1.1 (unchanged default; also C1) | 2.0-QP (opt-in instance policy) | Kind |
+| Gate | RISK-1.1 (default and C1, unchanged) | 2.0-QP (opt-in, `qpEnabled()` only) | Kind |
 |---|---|---|---|
-| G1 Binding | Exact envelope, scope, policy stamp | Same; stamp `RI001-DRAFT-RISK-2.0-QP`. Scope inventory adds the S/N/R artefact digests. | invariant (extended) |
-| G2 Coverage | All six dimensions, all scope keys | Same | invariant |
-| G3 Disposition | Any non-`absent` disposition is HOLD (`unsupported` FAIL) | Per-dimension table §3.2. Only `financial_figures_forecasts` may carry a new `material_primary_actual` disposition. Every other non-`absent` value stays HOLD/FAIL. | **changed, bounded** |
-| G4 Dual basis | Source span plus receipt-bound native history span | Same. A legacy note without a native C1 receipt can never be history (row E). | invariant |
-| G5 Digits | Any `\p{N}` is HOLD | Every digit run in exactly one sealed token class (N1–N4, §3.6). An unclassified digit is HOLD. | **changed** |
+| G1 Binding | Envelope, scope inventory, policy stamp | Same; stamp `RI001-DRAFT-RISK-2.0-QP`. The inventory adds snapshot, CER, section, claim, sentence, R2 and R3 digests and the registry version. | invariant (extended) |
+| G2 Coverage | All six dimensions, all keys | Same, plus every Review sentence and every claim has a class (§3.6) | invariant (extended) |
+| G3 Disposition | Non-`absent` is HOLD; `unsupported` FAIL | §3.2. Only `financial_figures_forecasts` may use `material_primary_actual`, covering issuer financial actuals and official statistical measurements. | **changed, bounded** |
+| G4 Dual basis | Source span plus receipt-bound native history span | Same, **plus** a QP history qualification (§3.2) | invariant (tightened) |
+| G5 Digits | Any `\p{N}` anywhere is HOLD | Received/section digits are bound by S1/S5/S6. **Authored text has no raw digits at all**: the Review prose, claim statements and relationship text. Every digit-bearing token in them is a server-rendered placeholder (§3.6). | **changed** |
 | G6 Broker | HOLD | HOLD | invariant |
-| G7 Event / materialRisk | HOLD if `materialRisk` or the event is not `added_detail` | `materialRisk:true` allowed **only** when every material item is a `material_primary_actual`. Events: `added_detail` and `new_event` allowed (the latter only for a primary periodic release, §3.2). `duplicate` stays HOLD. `correction`/`contradiction`/`unresolved` stay HOLD. | **changed, bounded** |
-| G8 Declared material scope | HOLD on earnings, guidance, broker_*, portfolio_snapshot, guidance/estimate claim classes, unresolved claims, supplier/customer, more than one competing value | `earnings` (historical actuals) and a new `official_statistics` content type become eligible. **Everything else in G8 stays HOLD unchanged**: guidance, broker_*, portfolio_snapshot, management_guidance, analyst_estimate, unresolved, supplier/customer, competing values. | **changed, bounded** |
-| G9 Critic | Always HOLD when required (no verifiable critic) | Required for **every** QP-eligible material item. Satisfied only by an R3 attestation that is valid, authorized and PASS on all dimensions (§3.7). Any other critic state is HOLD; a critic FAIL is FAIL. | **changed** |
-| G10 Context | issuer hub, PIT, PDF/mixed/screenshot, typed Review, history, retrieval | Same. PDF still HOLD (no canonicalizer). | invariant |
-| G11 Promotion | Never `verified_primary` | Same. A QP PASS never promotes. | invariant |
-| C1 reviewer | Dashboard attestation, cannot override | Same, and *additional*. It never substitutes for R2 or R3. | invariant |
-| S, N, R (new) | — | Mandatory for any QP eligibility (§3.5–§3.7) | new |
+| G7 Event / materialRisk | HOLD unless `added_detail`; `materialRisk` HOLD | §3.2. `new_event` only for a primary periodic release, and only if **every** claim and sentence class is admissible. | **changed, bounded** |
+| G8 Declared material | HOLD on the listed types and classes | Existing enum only: `earnings` / `reported_fact` / `macro_data` are eligible when every claim class is `historical_actual`. Everything else in G8 is unchanged and HOLDs. **No new enum value.** | **changed, bounded** |
+| G9 Critic | Unsatisfiable, therefore HOLD | Satisfied only by a valid R3 from a registry-authorized principal, PASS on all dimensions **including `classification_fidelity`** (§3.7) | **changed** |
+| G10 Context | issuer hub, PIT, PDF, typed Review, history, retrieval | Same. QP additionally requires a valid S1 snapshot and a CER section. | invariant (extended) |
+| G11 Promotion | Never `verified_primary` | Same | invariant |
+| C1 reviewer | Dashboard attestation, cannot override | Same; QP itself is **disabled in C1** (§3.10) | invariant |
+| S / N / R / registry | — | Mandatory (§3.4–§3.7) | new |
 
-### 3.2 Exact tier semantics for G3 / G7 / G8 / G9
+Fixed evaluation order:
+**registry → S → N (CER, claims, sentences, placeholders) → R2 → G1–G8, G10, G11 → R3 critic**.
+The result is the most restrictive outcome. A critic can only add HOLD or FAIL.
 
-**G3, per risk dimension, under 2.0-QP:**
+### 3.2 Tier semantics for G3 / G4 / G7 / G8 / G9
 
-| Dimension | `absent` | `material` | `material_primary_actual` (new) | `uncertain` | `unsupported` |
-|---|---|---|---|---|---|
-| financial_figures_forecasts | pass | HOLD | eligible **iff** every material financial item is an N1 claim with a valid R2 receipt, is a historical actual (not a forecast or guidance), and has no derived arithmetic | HOLD | FAIL |
-| valuation_thesis_mechanism | pass | HOLD (thesis/valuation implications stay outside Draft authority) | not allowed (FAIL as schema misuse) | HOLD | FAIL |
-| material_relationships | pass | HOLD | not allowed | HOLD | FAIL |
-| correction_contradiction_vintage | pass | HOLD | not allowed | HOLD | FAIL |
-| unsupported_or_unresolved_assertions | pass | HOLD | not allowed | HOLD | FAIL |
-| protected_authority | pass | HOLD | not allowed | HOLD | FAIL |
+**G3.** `material_primary_actual` is allowed on `financial_figures_forecasts` only. Under QP that
+dimension is defined to cover issuer-reported historical financial actuals and official
+statistical measurements, such as an index level or published rate. It is eligible **iff**:
 
-**G7, event and materialRisk:**
+- every material quantitative assertion is an N1 claim with class `historical_actual`;
+- each such claim has a valid R2;
+- there is no derived arithmetic and no forecast.
 
-| Classification | Condition | 2.0-QP result |
-|---|---|---|
-| `added_detail` | any | eligible (other gates apply) |
-| `new_event` | Source is a primary periodic release: issuer 10-Q/10-K/earnings EX-99.1, or an official statistical release; `published_at` bound (S3); not a restructuring/M&A/guidance announcement | eligible |
-| `new_event` | anything else | HOLD |
-| `duplicate` | — | HOLD for Review, unchanged (existing dedup; no new Review) |
-| `correction` / `contradiction` / `unresolved` | — | HOLD (invariant) |
+All other dimensions keep the v0.2 table: `material`/`uncertain` HOLD, `unsupported` FAIL, and
+`material_primary_actual` used elsewhere is a schema-misuse FAIL. Classification of the dimension
+is attested by R3 `classification_fidelity`.
 
-`materialRisk:true` with *only* `material_primary_actual` material items is eligible. With any
-other material item it is HOLD.
+**G4 under QP.** Each history item used by a finding must meet all of:
 
-**G8:** eligible content types are `earnings` (historical actuals only) and `official_statistics`
-(new). Every other G8 trigger is unchanged and HOLDs:
+- **(a)** be a native Source intake receipted in this instance, as today;
+- **(b)** carry its own S1 archive snapshot;
+- **(c)** have the same exact issuer resolution (company) or the same series id/agency (macro) as
+  the new claim scope;
+- **(d)** have an attested `published_at` (from the R2 signer) earlier than the new Source's
+  attested `published_at`.
 
-- content types guidance, broker_rating, broker_price_target, broker_estimate, portfolio_snapshot;
-- claim classes management_guidance and analyst_estimate;
-- an unresolved claim assessment;
-- supplier/customer roles;
-- more than one competing value.
+Bootstrap, honest only:
+- Capture the prior-period primary document first (`captureOnly`, archived), with its real
+  `known_at` and its attested historical `published_at`.
+- Never backdate `known_at`. Never use legacy Vault notes.
+- A first-ever disclosure with no prior primary document (IPO, a new series) **HOLDs by design**.
 
-**G9, critic:** `criticRequired` is computed exactly as in RISK-1.1. Under QP it is satisfied
-**only** if all of these hold:
+**G7.** As v0.2, with one change: `new_event` is admissible only for a primary periodic release
+(issuer 10-Q/10-K/earnings EX-99.1; an official statistical release) **and only when every claim
+and sentence class is admissible** (§3.6). Any `guidance_forecast`, `restructuring_mna`,
+`restatement_recast`, `other_material` or `unclassified` item HOLDs the **whole** Draft. The Source
+is preserved.
 
-- R3 is present and its signature is valid;
-- it binds this envelope, result and scope digest;
-- it is unexpired and unconsumed;
-- the critic principal is authorized for this source family and is distinct from the actor and
-  from the R2 principals;
-- every dimension verdict is PASS.
+**G8.** Uses the existing strict enum:
+- `earnings`, `reported_fact` and `macro_data` are QP-eligible when every claim class is
+  `historical_actual`.
+- `guidance`, `broker_*`, `portfolio_snapshot`, `analyst_opinion`, `market_commentary`, the claim
+  classes `management_guidance`/`analyst_estimate`, an unresolved assessment, supplier/customer
+  roles and more than one competing value all HOLD (unchanged).
+- Source kinds: `regulatory_filing` / `issuer_release` (MICRO) and `official_macro` (MACRO).
 
-Otherwise the result is HOLD, and a critic FAIL is FAIL. Evaluation order is fixed:
-**source (S) → token and claim binding (N) → receipts (R2) → G1–G8 and G10–G11 → critic (R3)**.
-The result is the most restrictive outcome across all steps.
+**G9.** `criticRequired` is computed as in RISK-1.1. Under QP it is satisfied only per §3.7.
 
-### 3.3 Decision table (required cases)
+### 3.3 Decision table
 
-| Case | Example | 2.0-QP outcome | Why |
-|---|---|---|---|
-| **A** Official primary historical actuals, consolidated or segment, complete provenance | MSFT FY27Q1 10-Q segment revenue and operating income (USD millions, three months ended 2026-09-30, recast two-segment basis as the issuer presents it) | **PASS-eligible Draft.** Requires: S1–S6; N1 table binding per value (§3.5); R2 per material value; R3 PASS; `new_event` periodic release; Review restates values verbatim with unit and period. | Material fact, fully bound; no unresolved risk |
-| **B** Issuer guidance or forecast | "expects next-quarter revenue of …" | **HOLD** (G8 guidance invariant). Source saved. | Forward-looking; outside the actuals tier |
-| **C1** Unit, period or GAAP mismatch with the signed scope | Review states a non-GAAP figure as GAAP, or a value under the wrong period | **FAIL** (`claim_scope_mismatch`). Binding contradicts R2. | Falsified binding |
-| **C2** Comparison across bases not recast by the issuer | Old three-segment FY26 value compared with a new two-segment FY27 value | **HOLD** (`recast_basis_comparison_unsupported`) | No issuer-published comparable |
-| **C3** Derived arithmetic | Growth %, margin or sum computed by the analyst | **HOLD** (`derived_value_not_supported_v2_0`) | Only issuer- or agency-published figures |
-| **D1** Official BLS published figure | A CPI-U index level or percent change for a published reference month, with SA/NSA, series id and release vintage | **PASS-eligible.** Same requirements as A, with `official_statistics`. | Official actual, fully bound |
-| **D2** BLS methodology about the missing October 2025 data | Explaining that BLS did not collect October 2025 prices and used approximations for seasonal-factor computation | **Methodology Draft eligible** only with N2/N4 tokens (method name, reference-period label) and no N1 value for October 2025. Any October 2025 index level or rate, or any interpolated figure presented as official, is **FAIL** (`no_official_value_for_period`). | Never invent or imply an official CPI level |
-| **E** Old legacy Source without a native C1 history receipt | MSFT FY26Q4 Vault note with `source_sha256: null` | **HOLD** (G4 invariant). History must be a canonical intake receipted in the same instance. | Cannot prove prior known-at |
+| Case | 2.0-QP outcome |
+|---|---|
+| **A** Primary historical actuals (MSFT FY27Q1 segment revenue/op. income, as presented) | **PASS-eligible** when all of these hold: S1–S7; CER + iXBRL-bound N1 per asserted value; every value rendered from a placeholder; every sentence bound and classed `historical_actual`/`context`; R2 per value; R3 PASS including `classification_fidelity`; G4-QP history (for example the prior-period 10-Q/10-K captured first) |
+| **B** Guidance or forecast, with or without digits | **HOLD.** A `guidance_forecast` sentence or claim class HOLDs the whole Draft; the Source is saved. |
+| **C1** Value bound to the wrong row, column, period, basis, sign or scale relative to the CER/iXBRL fact or R2 scope | **FAIL** `claim_scope_mismatch` |
+| **C2** Old-basis vs recast comparison not published by the issuer | **HOLD** |
+| **C3** Derived arithmetic | **HOLD** (no placeholder exists for computed values) |
+| **D1** Official BLS published measurement (`macro_data`, `official_macro`; series id, reference period, SA/NSA, base, vintage) | **PASS-eligible** under the same requirements as A |
+| **D2** BLS methodology (missing October 2025 data handling) | Eligible as a **G5-only** relaxation: identifier and period placeholders only, no N1, G3 all `absent`, class `methodology`/`context`. Any October 2025 level or rate, or any interpolated figure presented as official, is **FAIL** `no_official_value_for_period`. |
+| **E** Legacy note or unreceipted history | **HOLD** (G4) |
+| **F** A filing mixing actuals with M&A/restructuring/guidance text | **HOLD** for the whole Draft if any such sentence is present (classes are per sentence); the Source is saved. Splitting is allowed only as two honest Drafts, and the actuals Draft must itself pass G2 coverage of the full section (S6) with no omission of material counter-context, attested by R3. |
 
-### 3.4 Source validation (S, all mandatory)
+### 3.4 Source validation (S)
 
-- **S1** Original bytes in the content-addressed archive: approved origin, exact host, HTTPS, no
-  redirects, permitted content type, size cap, archive fetcher network isolation. The packet binds
-  `snapshotId`, raw `sha256`, URL, and the issuer/agency document identity (accession number or
-  release id plus series id).
-- **S2** A source-rights record per origin, covering terms of use and retention. **An allowlist
-  entry is not a rights approval.** Adding `www.bls.gov` or issuer hosts is a separate Owner
-  action; nothing is changed by this proposal.
-- **S3** Dates are separate, bound fields: `published_at` (document), `period` (claim),
-  `known_at` (server capture) and `event`. A "last modified" date is never an event date.
-- **S4** PDF, mixed and screenshot formats remain HOLD (G10).
-- **S5** The received text (what the model saw) must equal the canonical section text (§3.5) for
-  every cited span; otherwise HOLD.
-- **S6** Section completeness: the packet carries the **whole** canonical section or table that
-  contains each claim, including headings, unit-scale line and column headers. It is never a
-  caller-chosen excerpt. The critic attests that it reviewed that whole range.
+- **S1** Archive snapshot of the original bytes. Unchanged from v0.2: exact approved host, HTTPS,
+  no redirect, permitted content type, size cap, isolated fetcher network.
+- **S2** Source-rights record per origin; **an allowlist entry is not a rights approval**. Owner
+  action, separate.
+- **S3** Separate fields `published_at` / `period` / `known_at` / `event`. Under QP,
+  `published_at` is **attested in R2**, not caller-declared.
+- **S4** PDF, mixed and screenshot formats HOLD.
+- **S5 (changed)** The QP Source text is the server-derived CER text of
+  `{snapshotId, sectionId}`. A caller `extractedText` is not used for QP. The model sees the server
+  text.
+- **S6 (changed)** The section is the whole CER section/table containing every asserted value: its
+  headings, scale lines, column headers and footnotes.
+  - Bound: `QP_SECTION_MAX_CHARS`, proposed 100,000 characters, below the 250,000 packet limit.
+  - An oversize section is **HOLD** (`qp_section_too_large`), never truncated.
+  - The packet binds `cerSha256`, `sectionId`, `sectionSpan` and `sectionSha256`.
+- **S7 (new)** The archive fetch remains an MCP-tracked tool execution under the maintenance
+  fence (`assertMutationAllowed`). See RR-4 for its graceful-drain semantics.
 
-### 3.5 Claim and table binding (N1 requirements)
+### 3.5 CER and claim binding (N1)
 
-Literal substring presence in raw bytes is **not** sufficient: a number may appear in the wrong
-row, period or basis. Each N1 value binds to:
+**Canonicalizer**, `canonicalizerVersion` pinned:
 
-- **Canonical Evidence Representation (CER).** A pinned, deterministic canonicalizer
-  (`canonicalizerVersion`) converts archived HTML into a hashed text and table model (`cerSha256`):
-  - HTML entities decoded;
-  - whitespace normalized;
-  - NFC;
-  - **digits, signs, parentheses, separators and currency symbols preserved literally**;
+- The **server recomputes** the CER from the archived bytes on every evaluation. No caller-supplied
+  CER is accepted.
+- Deterministic HTML → `{text, tables[], spans}`:
+  - entities decoded through a pinned table;
+  - whitespace normalized; NFC;
+  - **digits, signs, parentheses, separators and currency symbols kept literally**;
   - no numeric conversion.
-- **Table path.**
-  - `tableId`, plus the full row header path (for example segment → line item);
-  - the column header path, i.e. the period (for example "Three Months Ended September 30, 2026");
-  - `scaleLabel`, the unit scale in force for the cell, such as "(In millions, except per share
-    amounts)";
-  - `basisLabel` (GAAP / non-GAAP / as recast);
-  - the cell text.
-- **Dual spans.** Each of these has two spans: one in the CER (`cerSpan`) and the original raw
-  byte offsets in the archived document (`rawSpan`): the cell, every header in its path, and the
-  scale line.
-- **Claim dimensions** must equal the R2-signed scope exactly: `entity`, `metric`, `period`,
-  `unit` (including scale), `accountingBasis` (standard, scope, recast flag, definition); for
-  statistics also SA/NSA, series id, base period and vintage.
-- **No clipping, rounding or rescaling** (`claim-value-anchor` semantics). The Review restates the
-  cell value verbatim with its scale and period label.
+- **Excluded and non-citable:** `script`, `style`, comments, `display:none`/`hidden`/`aria-hidden`
+  elements, `ix:hidden`, `ix:header`.
+- **Tables:** rowspan/colspan expanded into a cell grid; row header paths and column header paths
+  computed.
+- **Footnotes:** `<sup>` and footnote markers are separate tokens and are **never** part of a cell
+  value.
+- **Scale:** the signer **declares** the per-row `scaleLabel` (for example "In millions, except per
+  share amounts"). The canonicalizer only verifies that the label is a literal within the section.
+- **Values HOLD** if a value span contains non-ASCII digits, mixed-script digits, bidi controls or
+  zero-width characters (`qp_value_unicode_hold`).
+- **Dual spans:** every cell, header, scale line and footnote has a `cerSpan` and the original raw
+  byte `rawSpan`. The mapping is recomputed server-side and is monotonic.
+- **Assurance:** differential testing against a second, independent HTML parser, plus fuzzing, is
+  required before any sign-off.
 
-### 3.6 Numeric token classes (G5 under QP)
+**SEC iXBRL binding** (mandatory when the archived filing is inline XBRL): each N1 binds an
+`ix:nonFraction` fact with:
 
-Every `\p{N}` run in the received text, the proposed Review and the claims belongs to exactly one
-class:
+- `name` (concept);
+- `contextRef`, resolved to period and axis/member (for example segment);
+- `unitRef`, `scale`, `decimals`, `sign`.
 
-- **N1** a claim value (§3.5).
-- **N2** a document or method identifier, declared as a typed span that is an exact CER literal:
-  form type, accession number, series id, method name, ticker.
-- **N3** a document date equal to a bound S3 field.
-- **N4** a reference-period label equal to a bound claim period, or a declared methodology period
-  (row D2).
+The displayed literal, the declared scale and sign, the period and the dimension members must all
+agree with the fact; otherwise **FAIL** `claim_scope_mismatch`. A filing without the expected
+iXBRL fact is HOLD.
 
-An unclassified digit is HOLD. A digit in Review prose that is not a verbatim N1–N4 restatement is
-HOLD.
+**Official statistics binding:** agency, series id, reference period, SA/NSA, base (for example
+`1982-84=100` as a unit literal), release vintage and table cell spans.
 
-### 3.7 Reviewer and critic authority (R)
+**Claim dimensions** equal the R2-signed scope exactly: entity, metric, period, unit+scale,
+`accountingBasis` (standard/scope/recast flag/definition) and vintage. Literal anchoring is as in
+`claim-value-anchor`: no clipping, rounding or rescaling.
 
-- **R1 Actor.** Unchanged: the OAuth access label. It is not a human or model identity.
-- **R2 Primary receipt.** M551 extended with the §3.5 binding fields (`canonicalizerVersion`,
-  `cerSha256`, `tableId`, header paths, `scaleLabel`, `basisLabel`, `cerSpan`, `rawSpan`):
-  - two out-of-band Ed25519 signatures, reviewer and approver;
-  - competing values adjudicated (more than one remains HOLD in v2.0).
-- **R3 Critic attestation.** A new signed object over the envelope digest, result digest, scope
-  digest and the reviewed section range, with per-dimension verdicts and references. Expiry no
-  later than the packet's. Single-use at the apply critical section.
-- **Authority is not keys.** The signer registry (out of band, public keys only) records for each
-  key:
-  - a principal id;
-  - its role (reviewer / approver / critic);
-  - an Owner-signed appointment with scope (source families and metrics);
-  - effective and revocation dates;
-  - an identity-verification statement.
+### 3.6 Asserted-text rules (replaces G5 for authored text)
 
-  Rules:
-  - R2 needs two distinct **principals**, and R3 needs a third distinct principal. None may equal
-    the analyst actor's principal.
-  - **Distinct keys prove distinct keys only.** They do not prove distinct humans, literacy,
-    authorization or absence of collusion. These facts are attested outside the server and
-    recorded as `criticIndependence:"key_attested_out_of_band"` and
-    `humanPresence:"not_verified"`. Neither label is `verified_human`.
-  - No MCP route creates or approves R2 or R3. A user-supplied, self-issued or copied receipt or
-    critic attestation is invalid.
-  - A QP PASS never grants Verified Primary.
+- **Structured QP Review.** Each Review field is an array of sentences `{text, class, refs[]}`.
+  - Every sentence must have one to four refs: an exact CER span or a claim key. An unreferenced
+    sentence is HOLD.
+  - Classes: `historical_actual`, `methodology`, `context`, `guidance_forecast`,
+    `restructuring_mna`, `restatement_recast`, `other_material`.
+  - Only `historical_actual`, `methodology` and `context` are admissible.
+- **No raw digits** (`\p{N}`, Thai digits included) in authored sentence text, claim statements or
+  relationship text. Digit-bearing tokens appear only as **server-rendered placeholders**:
+  - `{{value:claim_N}}` renders "value unit, period, basis";
+  - `{{period:claim_N}}`;
+  - `{{id:span_K}}` for a form, accession, series or method identifier that is an exact CER
+    literal;
+  - `{{date:published_at|period}}`.
 
-### 3.8 Test matrix (written before any implementation; fixtures synthetic or archived-public, no live writes)
+  A raw digit is HOLD. An unknown placeholder is FAIL.
+- **Claims.** At most **8** asserted N1 values per Draft (existing caps: `intakeClaimsSchema`
+  `.max(8)`, Judge `claims .max(8)`). More values are HOLD (`qp_claim_capacity`), never silent
+  selection.
+  - Each claim has `class` and `vintage`.
+  - A superseding vintage is a new claim requiring competing-value adjudication, which stays HOLD
+    in v2.0.
+- **Received/section text digits** need no classification. They are bound by S1/S5/S6. The analyst
+  and the critic must still assess the whole section (G2/S6).
 
-**Every RISK-1.1 test stays unchanged and green.** A 1.1 instance given QP artefacts still holds.
+### 3.7 Authority: registry, R2, R3
+
+**Registry** `QP_SIGNER_REGISTRY` (new; root of trust):
+
+- A JSON document `{registryVersion, issuedAt, entries[], revocations[]}`.
+- Signed by an **Owner offline Ed25519 root key**. Its public-key fingerprint is **pinned in
+  source** (`QP_REGISTRY_ROOT_FINGERPRINT`) and can change only through a reviewed code change.
+- Verified at boot. Rejected if the signature is invalid, or the version is lower than the stored
+  high-water mark (no rollback).
+- Any registry failure disables QP (fail closed). RISK-1.1 is unaffected.
+- Each entry has:
+  - `principalId`;
+  - `principalType: "human"|"ai"`;
+  - `roles: reviewer|approver|critic`;
+  - `scope {sourceFamilies, metrics}`;
+  - `oauthSubjects[]`;
+  - `keyId`, `publicKeyPem`;
+  - `effectiveFrom`, optional `revokedAt`.
+- For QP, the existing `PRIMARY_EVIDENCE_SIGNERS_JSON` keys must also appear in the registry with
+  matching roles. That env variable alone is insufficient.
+
+**R2 (primary receipt)** is M551 extended with:
+
+- `canonicalizerVersion`, `cerSha256`, `sectionId`, cell, header and scale `cerSpan`/`rawSpan`;
+- the iXBRL fact id;
+- attested `published_at`;
+- vintage and claim class.
+
+Requirements: two distinct registry principals; both in scope; neither linked to the actor's OAuth
+subject.
+
+**R3 (critic attestation)**, signed over:
+
+- the envelope digest, result digest and scope digest;
+- `cerSha256`, `sectionId`, the set of R2 receipt ids, and the sentence/claim class map;
+- the registry version.
+
+It carries per-dimension verdicts, **including `classification_fidelity`**. It is single-use at the
+apply critical section and expires no later than the packet. The critic is a third distinct
+principal, in scope, with no shared OAuth subject with the actor or with the R2 principals.
+
+**Separation checks** are on principal ids and declared OAuth subjects. They are attestations, not
+proof. Labels:
+- `qp_critic_basis: "registry_principal_key_attested"`;
+- `qp_critic_principal_type: human|ai`;
+- `humanPresence: not_verified`.
+
+**No MCP route** creates R2, R3 or the registry. A user-supplied, self-issued, expired, revoked,
+out-of-scope or registry-unknown attestation is HOLD.
+
+### 3.8 Test matrix (written before implementation; all RISK-1.1 tests unchanged and green)
+
+**Retained from v0.2.** Meaning unchanged; mechanics per v0.3. Values are bound via CER/iXBRL
+and rendered via placeholders; the T-D2 methodology uses identifier and period placeholders only.
 
 | ID | Scenario | Expected |
 |---|---|---|
 | T-A1 | Honest MSFT-style segment actuals: earnings content type, `materialRisk:true`, `new_event` periodic release, full section CER, N1 per value, R2 + R3 PASS | **PASS** Draft with restrictive labels; Source + Review receipts; resolved link |
 | T-A2 | Same as T-A1 for a consolidated total and a per-share value (scale "except per share") | PASS; per-share unit bound separately |
 | T-D1 | BLS CPI index level, SA, series id, vintage, R2 + R3 | PASS |
-| T-D2 | Methodology Draft on the missing October 2025 data with N2/N4 only | PASS-eligible methodology Draft |
+| T-D2 | Methodology Draft on the missing October 2025 data with identifier and period placeholders only (no N1) | PASS-eligible methodology Draft |
 | T-D3 | T-D2 plus an "October 2025 CPI" value or an interpolated level | FAIL `no_official_value_for_period` |
 | T-B1 | Guidance sentence or `guidance` content type | HOLD; Source saved |
 | T-B2 | Broker or consensus estimate | HOLD |
@@ -288,39 +345,89 @@ HOLD.
 | T-V1 | Old binary or RISK-1.1 instance reading a QP gate | fail closed |
 | T-I1 | Invariants: protected bytes unchanged; immutable Source; receipts and resolved links cold-verified; no `verified_primary`; maintenance refusal; C1 no Git/Prices ingress | unchanged |
 
-### 3.9 Remaining risks after v0.2 (for the independent reviewers)
+**New in v0.3:**
 
-1. **Canonicalizer correctness.** It is new code on a trust path. It needs its own review,
-   fuzzing and fixed versions. A wrong canonicalization defeats S5 and S6.
-2. **Critic quality.** A signature proves a key acted, not that the review was competent.
-   Mitigations are the "critic can only add HOLD" rule and fact gates evaluated first. A
-   competent-but-wrong critic remains a residual risk.
-3. **Signer governance.** Principal identity, appointment and revocation live outside the
-   single-admin server. Collusion between principals cannot be excluded technically.
-4. **Periodic-release `new_event` boundary.** A filing can also contain restructuring or M&A text.
-   Those claims must be held, while actuals may still pass. This needs per-claim classification
-   tests.
-5. **Recast and restatement.** A later issuer restatement creates a new vintage. The old Draft
-   stays historical. Detection relies on new receipts, not on automatic tracking.
-6. **Legal rights and retention** per origin are Owner/legal decisions (S2), not engineering ones.
-7. **Scope creep.** Derived arithmetic, competing values, PDF and guidance all remain HOLD in
-   v2.0. Any extension needs a new version and a new review.
+| ID | Scenario | Expected |
+|---|---|---|
+| T-W1 | Full income-statement section with many unselected rows; two asserted values | PASS-eligible: unselected digits need no class; the two values are bound |
+| T-W2 | Section above `QP_SECTION_MAX_CHARS` | HOLD `qp_section_too_large`, no truncation |
+| T-W3 | Caller `extractedText` differs from the server CER section | CER used; mismatch recorded; caller text is never the QP Source |
+| T-X1 | iXBRL `sign="-"` or `scale` disagreeing with displayed text or declared scale; wrong `contextRef` period or segment member | FAIL `claim_scope_mismatch` |
+| T-X2 | Footnote `<sup>` adjacent to a value; rowspan/colspan headers; repeated "except per share" scale | Value excludes the footnote; correct header path; per-share row unit separate |
+| T-X3 | Hidden (`display:none`, `ix:hidden`) duplicate of a value used as the anchor | HOLD (non-citable) |
+| T-X4 | Fullwidth, Arabic-Indic or mixed digits, a bidi or zero-width character inside a value | HOLD `qp_value_unicode_hold` |
+| T-X5 | Two independent parsers disagree on the cell grid | HOLD (implementation-time differential test) |
+| T-P1 | Raw digit typed in a Review sentence; unknown placeholder | HOLD / FAIL |
+| T-P2 | Correct literal attached to the wrong segment in prose | Impossible by construction (values only via `{{value:claim_N}}` with metric/period rendered) |
+| T-P3 | A digit-free guidance or M&A sentence classed `context`, or unreferenced | Unreferenced: HOLD. Misclassed: R3 `classification_fidelity` must HOLD; test with a negligent-critic fixture showing that the server still HOLDs on the unreferenced variant |
+| T-P4 | Nine asserted values | HOLD `qp_claim_capacity` |
+| T-K1 | Unsigned or invalidly signed registry; lower `registryVersion` replayed; revoked key; key outside scope | QP disabled or HOLD |
+| T-K2 | Actor OAuth subject listed for an R2 or R3 principal; R3 principal equal to an R2 principal | HOLD |
+| T-K3 | M551 env key not in the registry | HOLD for QP; RISK-1.1 unaffected |
+| T-H1 | QP history without its own S1 snapshot, different issuer/series, or later attested `published_at` | HOLD |
+| T-Q1 | `qpEnabled()` with `c1Pilot()` true, or the opt-in absent | RISK-1.1 path; QP artefacts HOLD |
+| T-M1 | Old binary receiving QP-only input fields | Strict reject, no write; Source-only capture via existing fields still works |
+| T-M2 | A QP Draft read by `researchTrust` | `research_status: draft`; `critic_independence: not_verified`; `qp_*` keys ignored by old readers |
 
-### 3.10 Compatibility, migration and rollout (unchanged in intent from v0.1)
+### 3.9 Residual risks (not technically removable; for independent reviewers and Owner)
 
-- New stamp and Judge protocol increment invalidate pending RISK-1.1 gates restrictively.
-- Opt-in per instance. The default **and C1 stay at RISK-1.1**.
-- New frontmatter labels only: `risk_policy`, `critic_attestation_id`, `primary_receipts`,
-  `cer_sha256`.
+1. **RR-1 Key ≠ human.** In a personal deployment with a single admin, the Owner may hold every
+   key. An AI principal remains an AI (`principalType` is a declaration). There is no technical
+   proof of independence or competence.
+2. **RR-2 Critic error or collusion.** Mitigated by placeholders, sentence binding and fact gates
+   first. Not eliminated.
+3. **RR-3 Canonicalizer or iXBRL resolver bugs** sit on the trust path. Mitigated by a pinned
+   version, a differential parser and fuzzing.
+4. **RR-4 Archive fetch under graceful drain.** `mutationFenced` admits in-flight work during
+   DRAINING; this is not under the strict D1 oracle. Belongs in the ADR-D1-GIT-01 scope.
+5. **RR-5 Legal rights and retention** (S2) are Owner/legal decisions.
+6. **RR-6 First-ever disclosures and long sections HOLD** (product cost).
+7. **RR-7 Mixed-version rollout:** QP gates HOLD on old binaries (intended).
+8. **RR-8 Root-key custody.** Loss or compromise of the Owner root key compromises the registry.
+   Rotation needs a code change, by design.
 
-Rollout gates (none approved):
-1. Independent security and source/research review of **v0.2**.
-2. Owner decision to implement exactly this restricted tier.
-3. Separate Owner action on source rights and allowlist.
-4. Separate out-of-band key ceremony and signer governance (WORK).
-5. Isolated implementation with the §3.8 tests first.
-6. Exact-tree CI.
-7. Independent delta review.
-8. Separate isolated real-source E2E grant.
+### 3.10 Compatibility, enforcement and rollout
 
-Full L1 SECURITY HOLD (ADR-D1-GIT-01) is independent and still applies before any release.
+- **Enforcement:** `qpEnabled()` returns true only if all of:
+  - `RESEARCH_RISK_POLICY === "2.0-QP"`;
+  - **not** `c1Pilot()`;
+  - the registry is valid and current.
+
+  Otherwise the RISK-1.1 path applies and QP artefacts HOLD. **The default and C1 remain
+  RISK-1.1.**
+- **Schemas:**
+  - New QP-only input fields (`primarySection {snapshotId, sectionId}`, structured sentences,
+    placeholders) are advertised only by QP instances. Old binaries reject them strictly, with no
+    write.
+  - **No change to existing enums** (`contentTypes`, `sourceKind`).
+  - New stamp and Judge protocol increment invalidate pending gates restrictively.
+- **Metadata:**
+  - `draftMetadata` is **unchanged**, including `critic_independence: "not_verified"` and
+    `RESEARCH_STATE_POLICY`.
+  - New keys only: `qp_risk_policy`, `qp_critic_attestation_id`, `qp_critic_basis`,
+    `qp_critic_principal_type`, `qp_primary_receipts`, `qp_cer_sha256`, `qp_registry_version`.
+  - `researchTrust` and `assertResearchStateAuthority` only compare `draftMetadata` keys
+    (`research-state.ts`), so readers stay compatible.
+- **Rollout gates (none approved):**
+  1. Independent security and source/research review of **v0.3**.
+  2. Owner decisions in §3.11.
+  3. Owner decision to implement exactly this tier.
+  4. Source rights and allowlist action.
+  5. Root-key and signer ceremony (WORK).
+  6. Isolated implementation with §3.8 tests first.
+  7. Exact-tree CI.
+  8. Independent delta review.
+  9. Separate isolated real-source E2E grant.
+
+  Full L1 SECURITY HOLD (ADR-D1-GIT-01) still applies before any release.
+
+### 3.11 Open Owner decisions (not assumed by this document)
+
+1. **Critic principal type:** human-only, or AI allowed (labelled `qp_critic_principal_type: ai`,
+   never `human`).
+2. **Who holds the Owner offline root key**, and the custody and rotation procedure.
+3. **Minimum distinct principals.** The proposal uses three (R2 × 2 + R3). Decide whether any
+   principal may be the Owner.
+4. **`QP_SECTION_MAX_CHARS`** value (proposed 100,000).
+5. **Initial source families and metrics** in registry scope, for example SEC filings for listed
+   issuers and BLS CPI only.
