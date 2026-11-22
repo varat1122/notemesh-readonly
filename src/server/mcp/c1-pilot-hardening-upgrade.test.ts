@@ -60,7 +60,7 @@ it("F1 old generic alias token is refused at real MCP apply; exact canonical IDs
  const server=createSafeEditMcpServer({read:true,write:false,label:actor,scopes:["vault:read","vault:edit"]});
  const client=new Client({name:"C1-HARDENING-MECHANISM",version:"1"}),[a,b]=InMemoryTransport.createLinkedPair();await server.connect(b);await client.connect(a);
  try{
-  const denied=await client.callTool({name:"apply_edit",arguments:auth(manifest.alias)});expect(denied.isError).toBe(true);expect(JSON.stringify(denied)).toContain("c1_pilot");
+  const denied=await client.callTool({name:"apply_edit",arguments:auth(manifest.alias)});expect(denied.isError).toBe(true);expect(JSON.stringify(denied)).toContain("canonical_route_required");
   expect(sql.prepare("SELECT count(*) n FROM safe_edit_operations WHERE status='written' AND json_extract(payload,'$.path') NOT LIKE '00_Inbox/%'").get()).toEqual({n:0});
   const api=await import("./canonical-writeback");
   await expect(api.applyCanonicalWriteback({input:manifest.data,planId:manifest.p.planId,authorizations:manifest.p.previews.map((t:any)=>auth(t.kind==="canonical_review"?manifest.alias:t))},actor)).rejects.toThrow();
@@ -68,16 +68,18 @@ it("F1 old generic alias token is refused at real MCP apply; exact canonical IDs
   expect((await api.applyCanonicalWriteback(input,actor)).status).toBe("saved_verified");
   const retry=await api.applyCanonicalWriteback({...input,authorizations:[]},actor);expect(retry.status).toBe("saved_verified");
   const t=manifest.p.previews.find((t:any)=>t.kind==="canonical_review"),engine=await import("../safe-edit/engine");
-  expect(engine.apply(auth(t),actor).receipt).toEqual(engine.status(t.operationId,actor).receipt);
+  expect(()=>engine.apply(auth(t),actor)).toThrow(/canonical_route_required/);
+  expect(engine.applyCanonicalStep(auth(t),actor).receipt).toEqual(engine.status(t.operationId,actor).receipt);
   expect(sql.prepare("SELECT count(*) n FROM safe_edit_operations WHERE status='written' AND json_extract(payload,'$.path') NOT LIKE '00_Inbox/%'").get()).toEqual({n:1});
   await preserved();
  }finally{await client.close();await server.close();}
 });
-it("F1 exact reviewed operation ID works through generic apply with valid receipt and idempotent retry",async()=>{
+it("F1 exact reviewed pre-WP2 operation ID completes through the dedicated kernel route (generic apply refused, OD-04+OD-06) with valid receipt and idempotent retry",async()=>{
  await opened();const engine=await import("../safe-edit/engine");
  const t=manifest.p.previews.find((t:any)=>t.kind==="canonical_review");
- const first=engine.apply(auth(t),actor);expect(first.status).toBe("written");
- expect(engine.apply(auth(t),actor)).toEqual(first);
+ expect(()=>engine.apply(auth(t),actor)).toThrow(/canonical_route_required/);
+ const first=engine.applyCanonicalStep(auth(t),actor);expect(first.status).toBe("written");
+ expect(engine.applyCanonicalStep(auth(t),actor)).toEqual(first);
  const {createReceipt}=await import("../vault/investment-research-context");
  expect(createReceipt("canonical_review",t.path,fs.readFileSync(path.join(root,"vault",t.path),"utf8"))).toBe(t.operationId);
  await preserved();

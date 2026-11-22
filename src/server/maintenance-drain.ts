@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { d1DatabaseStatus } from "./db";
 import { env } from "./env";
 import { c1Pilot } from "./c1-pilot";
 import { priceDbPath } from "./market-prices/store";
@@ -91,8 +92,12 @@ export function drainReport(): { quiescent: boolean; report: DrainReport; invent
   const work = pendingWork();
   const rows = writingRows();
   const writers = inventoryState();
+  const database = d1DatabaseStatus();
   const report: DrainReport = {
     pendingWork: work.count,
+    d1OwnerSettled: !database.ownerActive,
+    d1QuarantineClear: database.quarantine === null,
+    d1OpenTransactions: database.openTransactions,
     pendingHttp: work.kinds.filter((k) => k === "http").length,
     pendingTools: work.kinds.filter((k) => k.startsWith("mcp")).length,
     untrackedRequests: work.untracked,
@@ -114,7 +119,7 @@ export function drainReport(): { quiescent: boolean; report: DrainReport; invent
     otherLiveServers: writers.otherServers,
     writerInventoryIntact: writers.uncertain === null,
   };
-  const quiescent = work.count === 0 && work.untracked === 0 && rows === 0 && writers.writers === 0 &&
+  const quiescent = !database.ownerActive && database.quarantine === null && database.openTransactions === 0 && work.count === 0 && work.untracked === 0 && rows === 0 && writers.writers === 0 &&
     writers.otherServers === 0 && writers.uncertain === null && Object.values(report).every((v) => v !== false);
   return { quiescent, report, inventoryUncertain: writers.uncertain };
 }
@@ -138,18 +143,26 @@ function sqliteBarrier(): DrainReport {
   if (!fs.existsSync(env.dbPath)) out.appDbBarrier = true;
   else {
     // The server's own connection where it has one (a fresh one could checkpoint the WAL on close).
-    const own = [...registry().connections].find((c) => c.open !== false) as unknown as
+    const live = [...registry().connections].filter((c) => c.open !== false);
+    if (live.some(c => (c as unknown as { inTransaction?: boolean }).inTransaction)) return out;
+    const own = live[0] as unknown as
       { exec(sql: string): unknown; pragma(sql: string, o?: { simple?: boolean }): unknown; inTransaction?: boolean } | undefined;
     if (own && !own.inTransaction) {
       const wait = own.pragma("busy_timeout", { simple: true });
+      if (typeof wait !== "number" || !Number.isSafeInteger(wait) || wait < 0) return out;
       try {
-        own.pragma("busy_timeout = 100");
+        own.pragma("busy_timeout = 0");
         take(own);
         out.appDbBarrier = true;
       } catch {
         out.appDbBarrier = false;
       } finally {
-        own.pragma(`busy_timeout = ${Number(wait) || 5000}`);
+        try {
+          own.pragma(`busy_timeout = ${wait}`);
+        } catch {
+          out.appDbBarrier = false;
+          registry().heldClosed = "d1_busy_timeout_restore_uncertain";
+        }
       }
     } else if (!own) out.appDbBarrier = barrierOn(env.dbPath, take);
   }

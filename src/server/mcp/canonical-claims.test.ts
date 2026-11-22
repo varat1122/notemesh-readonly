@@ -57,6 +57,36 @@ async function apply(data:WritebackInput,p:Awaited<ReturnType<typeof prepare>>){
   authorizations:p.previews.map(x=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}))},actor);}
 async function retrieve(c:IntakeClaim){return (await import("../vault/investment-claim-review")).reviewInvestmentClaim({domain:"company",entity:c.entity,metric:c.metric,period:c.period,unit:c.unit,value:c.value,evidenceClass:c.evidenceClass,statement:c.statement,originalSource:url});}
 async function journal(){return (await import("../db")).db().prepare("SELECT * FROM safe_edit_operations ORDER BY id").all() as {id:string;status:string;after_text:string}[];}
+/** WP2: simulate competing canonical planners. Each planner is the real
+ * kernel capability holder of its own module graph (fresh graph, so the
+ * canonical-writeback module of the next graph still claims normally). */
+async function competingReviewPreviews(requests:{operationId:string;path:string;reason:string;change:{kind:"create";content:string}}[]){
+  vi.resetModules();
+  const admission=await import("../safe-edit/admission"),engine=await import("../safe-edit/engine");
+  const open=admission.claimCanonicalPlanCapability("writeback");
+  const previews=requests.map(r=>engine.previewCanonicalReview(open({intakeId:r.path.match(/IN-[A-F0-9]{16}/)?.[0]??null,actor,
+    recipeVersion:"test-competing-planner",members:[{kind:"canonical_review",operationId:r.operationId,path:r.path,change:r.change}]}),r,actor));
+  vi.resetModules();
+  return {engine,previews};
+}
+/** WP2: replay server-planned steps through the kernel route (fresh module registry,
+ * optional lineage-guard mocks on that registry's instance; mocks are restored before return). */
+async function kernelSteps(steps:{kind:string;safeEditRequest?:{operationId:string;path:string;reason:string;change:{kind:string;content?:string}}|null}[],
+  mocks:("assertReviewPreviewAdmission"|"assertReviewChronology")[],applyNow:boolean){
+  vi.resetModules();
+  const guard=await import("../safe-edit/research-lineage"),spies=mocks.map(m=>vi.spyOn(guard,m).mockImplementation(()=>{}));
+  const admission=await import("../safe-edit/admission"),engine=await import("../safe-edit/engine");
+  const live=steps.filter(s=>s.safeEditRequest).map(s=>({kind:s.kind as "source_intake"|"canonical_review"|"structured_claim",req:s.safeEditRequest!}));
+  try{
+    const h=admission.claimCanonicalPlanCapability("writeback")({intakeId:null,actor,recipeVersion:"test-kernel-replay",
+      members:live.map(s=>({kind:s.kind,operationId:s.req.operationId,path:s.req.path,change:s.req.change}))});
+    return {engine,results:live.map(s=>{
+      const fn=s.kind==="source_intake"?engine.previewCanonicalSource:s.kind==="canonical_review"?engine.previewCanonicalReview:engine.previewCanonicalClaim;
+      const p=fn(h,s.req,actor);
+      return {p,receipt:applyNow?engine.applyCanonicalStep({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor):null};
+    })};
+  }finally{spies.forEach(x=>x.mockRestore());}
+}
 function assertProtected(){for(const p of protectedPaths)expect(fs.readFileSync(path.join(vault,p),"utf8")).toBe("# Isolated protected fixture\n");}
 
 describe("RI-001 source-scoped multi-claim persistence",()=>{
@@ -453,7 +483,7 @@ describe("RI-001 persistence reliability closure",()=>{
     const old=(await plan()).safeEditWorkflow!.steps.at(-1)!;
     vi.setSystemTime(new Date("2026-11-06T10:02:00Z"));
     const engine=await import("../safe-edit/engine");
-    expect(()=>engine.preview(old.safeEditRequest,actor)).toThrow("canonical_review_requires_prepare");
+    expect(()=>engine.preview(old.safeEditRequest,actor)).toThrow("canonical_operation_namespace_reserved");
     expect(await journal()).toEqual([]);
     const p=await prepare();expect((await apply(input,p)).status).toBe("saved_verified");
     const fm=(await import("../vault/markdown")).splitFrontmatter(fs.readFileSync(path.join(vault,old.path),"utf8")).data;
@@ -519,8 +549,7 @@ describe("RI-001 journal recovery and historical compatibility",()=>{
     // Simulate concurrent planners before any has admitted a preview. All
     // proposals have real runtime times, no journal/receipt manipulation.
     for(let i=0;i<count;i++){vi.setSystemTime(start+i*100);requests.push((await plan()).safeEditWorkflow!.steps.at(-1)!.safeEditRequest!);}
-    const engine=await import("../safe-edit/engine");
-    for(const request of requests)engine.previewCanonicalReview(request,actor);
+    await competingReviewPreviews(requests as never);
     const p=await prepare();expect(p.workflowStatus).toBe("hold_review_lineage");
     expect(p.lineageIssues).toContain(count>16?"review_lineage_scan_limit":"review_runtime_chronology_ambiguous");
     expect(p.previews.map(r=>r.kind)).toEqual(["source_intake","structured_claim","structured_claim"]);
@@ -536,13 +565,9 @@ describe("RI-001 journal recovery and historical compatibility",()=>{
     // Reproduce pre-fix admission policy ONLY while seeding this historical
     // fixture. The real engine performs every write/readback/index and issues
     // every receipt; no fabricated receipt or direct journal mutation.
-    const guard=await import("../safe-edit/research-lineage");
-    const admission=vi.spyOn(guard,"assertReviewPreviewAdmission").mockImplementation(()=>{});
-    const chronology=vi.spyOn(guard,"assertReviewChronology").mockImplementation(()=>{});
-    const engine=await import("../safe-edit/engine");
-    try{for(const step of w.steps){const p=engine.preview(step.safeEditRequest,actor);
-      expect(engine.apply({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor).receipt).toMatchObject({write:"written",readback:"verified",reindex:"verified"});
-    }}finally{admission.mockRestore();chronology.mockRestore();}
+    // WP2: the historical steps are replayed through the kernel route (generic canonical writes are refused).
+    for(const {receipt} of (await kernelSteps(w.steps,["assertReviewPreviewAdmission","assertReviewChronology"],true)).results)
+      expect(receipt!.receipt).toMatchObject({write:"written",readback:"verified",reindex:"verified"});
     const rows=await journal(),bytes=w.steps.map(s=>fs.readFileSync(path.join(vault,s.path)));
     vi.resetModules();const p=await prepare();expect(p.workflowStatus).toBe("hold_review_lineage");
     expect(p.lineageIssues).toEqual(["review_runtime_chronology_unverified"]);expect(p.previews).toEqual([]);
@@ -554,11 +579,10 @@ describe("RI-001 journal recovery and historical compatibility",()=>{
   it("refuses to apply an old invalid preview even with a valid token; partial Source remains recoverable",async()=>{
     vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-11-06T10:00:00Z"));
     const w=(await plan()).safeEditWorkflow!;vi.setSystemTime(new Date("2026-11-06T10:02:00Z"));
-    const guard=await import("../safe-edit/research-lineage"),engine=await import("../safe-edit/engine");
-    const admission=vi.spyOn(guard,"assertReviewPreviewAdmission").mockImplementation(()=>{});
-    let p;try{p=engine.preview(w.steps.at(-1)!.safeEditRequest,actor);}finally{admission.mockRestore();}
-    expect(()=>engine.apply({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor)).toThrow("review_runtime_chronology_unverified");
-    const next=await prepare();expect(next.lineageIssues).toEqual(["review_runtime_chronology_unverified"]);
+    // WP2: the old invalid preview is minted on the kernel route (generic canonical previews are refused).
+    const {engine,results:[{p}]}=await kernelSteps([w.steps.at(-1)!],["assertReviewPreviewAdmission"],false);
+    expect(()=>engine.applyCanonicalStep({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor)).toThrow("review_runtime_chronology_unverified");
+    vi.resetModules();const next=await prepare();expect(next.lineageIssues).toEqual(["review_runtime_chronology_unverified"]);
     expect((await apply(input,next)).status).toBe("hold_review_lineage");expect(fs.existsSync(path.join(vault,w.steps.at(-1)!.path))).toBe(false);assertProtected();
   });
   it("same-event material/correction candidates hold Claims; a separately dated event is not collapsed",async()=>{
@@ -584,7 +608,7 @@ describe("RI-001 canonical lineage admission boundary",()=>{
     try{await server.connect(b);await client.connect(a);
       for(const [name,args] of [["preview_edit",request],["create_note",{operationId:request.operationId,path:request.path,reason:request.reason,content:request.change.content}]] as const){
         const r=await client.callTool({name,arguments:{...args,canonical:true}});expect(r.isError).toBe(true);
-        expect(JSON.stringify(r.content)).toContain("canonical_review_requires_prepare");
+        expect(JSON.stringify(r.content)).toContain("canonical_operation_namespace_reserved");
       }
       expect(await journal()).toEqual([]);
       const prepared=await client.callTool({name:"prepare_canonical_writeback",arguments:{...input}});expect(prepared.isError).not.toBe(true);
@@ -595,11 +619,11 @@ describe("RI-001 canonical lineage admission boundary",()=>{
     vi.useFakeTimers({toFake:["Date"]});const start=Date.parse("2026-11-06T10:00:00Z");
     const requests=[];
     for(let i=0;i<18;i++){vi.setSystemTime(start+i*100);requests.push((await plan()).safeEditWorkflow!.steps.at(-1)!.safeEditRequest!);}
-    const engine=await import("../safe-edit/engine");const previews=requests.map(r=>engine.previewCanonicalReview(r,actor));
+    const {engine,previews}=await competingReviewPreviews(requests as never);
     // This is an already issued exact authorization, not automatic selection by
     // the planner. Write Source/Claims normally, then its authorized Review.
     const capture={...input,researchReview:undefined,captureOnly:true};await apply(capture,await prepare(capture));
-    const chosen=previews[5];engine.apply({operationId:chosen.operationId,previewToken:chosen.previewToken,expectedHash:chosen.beforeHash},actor);
+    const chosen=previews[5];engine.applyCanonicalStep({operationId:chosen.operationId,previewToken:chosen.previewToken,expectedHash:chosen.beforeHash},actor);
     const old=await journal();vi.resetModules();
     const p=await prepare();expect(p.workflowStatus).toBe("saved_verified");expect(p.lineageIssues).toEqual([]);expect(p.previews).toEqual([]);
     expect(await journal()).toEqual(old);for(const c of claims)expect((await retrieve(c)).matchingClaims[0].reviewScanComplete).toBe(true);assertProtected();

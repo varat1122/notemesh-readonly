@@ -117,8 +117,11 @@ async function denyGeneric(applyFailure=/research_judge/){
   const engine=await import("../safe-edit/engine"),sql=(await import("../db")).db();
   for(const t of manifest.preview.previews.filter(t=>t.kind!=="source_intake")){
     const payload=(sql.prepare("SELECT payload FROM safe_edit_operations WHERE id=?").get(t.operationId) as {payload:string}).payload;
-    expect(()=>engine.preview(JSON.parse(payload),actor)).toThrow(/research_judge/);
-    expect(()=>engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(applyFailure);
+    // WP2 (OD-04+OD-06, A02): the generic route refuses canonical IDs in every mode;
+    // the dedicated kernel route (pending pre-WP2 authority, OD-05) keeps the legacy judge denial.
+    expect(()=>engine.preview(JSON.parse(payload),actor)).toThrow(/canonical_operation_namespace_reserved/);
+    expect(()=>engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/canonical_route_required/);
+    expect(()=>engine.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(applyFailure);
     expect(fs.existsSync(path.join(dataRoot,"vault",t.path))).toBe(false);
   }
   expect(await writtenNonSource()).toEqual({n:0});

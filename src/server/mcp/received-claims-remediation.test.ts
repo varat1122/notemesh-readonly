@@ -136,14 +136,18 @@ it("P1 received markers outside reserved path cannot opt into unversioned fallba
  fs.writeFileSync(path.join(vault,p),content);(await import("../vault/indexer")).reindexPath(p);
  const found=await query(plan.safeEditWorkflow!.steps[0].path);expect(found.matchingClaims).toHaveLength(0);expect(found.claimBindingHolds.map(h=>h.path)).toEqual([p]);
 });
-it("P1 public apply rejects pending-only Source; succeeds after genuine Source receipt",async()=>{
+it("P1 public generic apply refuses canonical tokens; kernel apply rejects pending-only Source and succeeds after genuine Source receipt",async()=>{
  const data={...received,claims:[claims[0]],captureOnly:true,researchReview:undefined},p=await prepare(data),c=p.previews.find(s=>s.kind==="structured_claim")!,source=p.previews[0],w=await wire();
  const args=(t:typeof c)=>({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash});
  try{
-  const refused=await w.client.callTool({name:"apply_edit",arguments:args(c)});expect(refused.isError).toBe(true);expect(JSON.stringify(refused)).toContain("index_missing");
+  // WP2 (OD-04+OD-06, A02): the public generic route refuses canonical tokens; the
+  // dedicated kernel route keeps the Source-receipt-before-Claim ordering.
+  const refused=await w.client.callTool({name:"apply_edit",arguments:args(c)});expect(refused.isError).toBe(true);expect(JSON.stringify(refused)).toContain("canonical_route_required");
+  const engine=await import("../safe-edit/engine");
+  expect(()=>engine.applyCanonicalStep(args(c),actor)).toThrow(/index_missing/);
   expect(fs.existsSync(path.join(vault,c.path))).toBe(false);
-  expect((await w.client.callTool({name:"apply_edit",arguments:args(source)})).isError).not.toBe(true);
-  expect((await w.client.callTool({name:"apply_edit",arguments:args(c)})).isError).not.toBe(true);
+  expect(engine.applyCanonicalStep(args(source),actor).status).toBe("written");
+  expect(engine.applyCanonicalStep(args(c),actor).status).toBe("written");
   const found=await query(source.path);expect(found.classification).toBe("duplicate_candidate");expect(found.matchingClaims[0].persistence).toBe("receipt_readback_index_link_verified");
  }finally{await w.close();}
 });

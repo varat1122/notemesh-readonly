@@ -413,6 +413,10 @@ export function isMaintenanceLatched(): boolean {
  * Throws, entering nothing, if a fresh record cannot be written.
  */
 export function beginMaintenance(): MaintenanceRecord {
+  return withD1NativeInterlock("barrier", beginMaintenanceLocked);
+}
+
+function beginMaintenanceLocked(): MaintenanceRecord {
   const r = registry();
   if (r.latched) return r.latched;
   const current = readMaintenanceRecord();
@@ -881,4 +885,186 @@ export function maintenanceResponse(request: Request, status: MaintenanceStatus)
     JSON.stringify({ error: "maintenance", message: "This server is in maintenance. No request is admitted until the owner resumes it.", maintenance: view }),
     { status: 503, headers: { ...headers, "Retry-After": "300" } },
   );
+}
+
+// G01 laboratory delta: one synchronous native launch and durable barrier
+// publication share an OS-visible interlock. It is never held across await.
+// A crashed/replaced lock is a recovery HOLD; time/pid alone never steals it.
+const D1_INTERLOCK = Symbol.for("notemesh.d1.native-interlock.v1");
+interface D1InterlockState { active: boolean; poisoned: boolean }
+function d1InterlockState(): D1InterlockState {
+  const g = globalThis as unknown as Record<symbol, D1InterlockState | undefined>;
+  return g[D1_INTERLOCK] ??= { active: false, poisoned: false };
+}
+// G06-E lab: a durable intent precedes native effects. Unknown outcomes retain
+// that intent and the owned lock; absence never means rollback/no business write.
+// This fences only cooperating current-version processes, not old binaries.
+const d1WitnessPath = () => path.join(env.dataDir, ".d1-native-outcome.pending");
+interface D1Witness {
+  version: 2; id: string; owner: Owner; lock: { dev: number; ino: number };
+  kind: "business" | "barrier" | "termination"; operation: string;
+  phase: "native_launch_pending" | "pre_effect_failed" | "outcome_unknown" | "release_failed";
+}
+interface D1NativeOptions {
+  /** Static internal descriptor only; never SQL, source text or credentials. */
+  operation?: string;
+  /** May only make admission MORE restrictive by retaining the witness. */
+  uncertainOnError?: (error: unknown) => boolean;
+}
+function d1Error(code: string, cause?: unknown) { return Object.assign(new Error(code, { cause }), { code }); }
+function d1Attach(error: unknown, key: string, value: unknown) {
+  if (error instanceof Error && !Object.hasOwn(error, key)) {
+    try { Object.defineProperty(error, key, { value }); } catch { /* Frozen primary remains primary. */ }
+  }
+}
+function assertD1WitnessAbsent() {
+  let st: fs.Stats;
+  try { st = fs.lstatSync(d1WitnessPath()); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw d1Error("d1_native_witness_unreadable_hold", error);
+  }
+  let w: D1Witness;
+  try {
+    if (!st.isFile() || st.isSymbolicLink() || st.nlink !== 1 || st.size > MAX_RECORD_BYTES) throw Error("witness_type");
+    const fd = fs.openSync(d1WitnessPath(), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    try {
+      const opened = fs.fstatSync(fd);
+      if (opened.dev !== st.dev || opened.ino !== st.ino || opened.nlink !== 1) throw Error("witness_identity");
+      const bytes = Buffer.alloc(MAX_RECORD_BYTES + 1), n = fs.readSync(fd, bytes, 0, bytes.length, 0);
+      if (n > MAX_RECORD_BYTES) throw Error("witness_size");
+      w = JSON.parse(bytes.subarray(0, n).toString("utf8"));
+    } finally { fs.closeSync(fd); }
+    if (w.version === (1 as number)) throw d1Error("d1_native_legacy_witness_recovery_hold");
+    if (w.version !== 2 || !ID.test(w.id) || !parseOwner(w.owner) ||
+        !Number.isSafeInteger(w.lock?.dev) || !Number.isSafeInteger(w.lock?.ino) ||
+        !["business", "barrier", "termination"].includes(w.kind) ||
+        !/^[a-z0-9_.:-]{1,80}$/.test(w.operation) ||
+        !["native_launch_pending", "pre_effect_failed", "outcome_unknown", "release_failed"].includes(w.phase)) throw Error("witness_fields");
+  } catch (error) {
+    if ((error as { code?: string }).code === "d1_native_legacy_witness_recovery_hold") throw error;
+    throw d1Error("d1_native_witness_integrity_hold", error);
+  }
+  if (w.phase !== "native_launch_pending") throw d1Error("d1_native_outcome_recovery_hold");
+  if (!ownerAlive(w.owner)) throw d1Error("d1_native_stale_witness_recovery_hold");
+  // Liveness is only a diagnostic, never proof of progress or permission to
+  // steal. An alive but wedged owner still denies every other native launch.
+  throw d1Error("d1_native_contention");
+}
+export function withD1NativeInterlock<T>(kind: "business" | "barrier" | "termination", run: () => T,
+  options: D1NativeOptions = {}): T {
+  const state = d1InterlockState();
+  if (state.active || state.poisoned) throw d1Error("d1_native_interlock_recovery_hold");
+  const operation = options.operation ?? `native.${kind}`;
+  if (!/^[a-z0-9_.:-]{1,80}$/.test(operation)) throw d1Error("d1_native_operation_invalid");
+  assertD1WitnessAbsent();
+  const lock = path.join(env.dataDir, ".d1-native-launch.lock");
+  try { fs.mkdirSync(lock, { mode: 0o700 }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      assertD1WitnessAbsent(); // Distinguish a concurrently published live intent.
+      throw d1Error("d1_native_lock_recovery_hold", error);
+    }
+    throw d1Error("d1_native_lock_unavailable_hold", error);
+  }
+  const identity = fs.lstatSync(lock);
+  state.active = true;
+  let witness: fs.Stats | undefined, witnessCreated = false, admitted = false;
+  let nativeStarted = false, nativeCompleted = false, retain = false;
+  let primary: unknown, failed = false, result: T | undefined;
+  const record: D1Witness = { version: 2, id: crypto.randomUUID(), owner: SELF,
+    lock: { dev: identity.dev, ino: identity.ino }, kind, operation, phase: "native_launch_pending" };
+  const annotate = (error: unknown, outcome: "unknown" | "not_started" | "threw") => {
+    if (outcome === "unknown" && (!(error instanceof Error) || !Object.isExtensible(error))) {
+      // A frozen/primitive cause must not erase the uncertain outcome. Keep
+      // the original as cause, with no mutation of that original value.
+      primary = new Error(error instanceof Error ? error.message : "d1_native_outcome_unknown", { cause: error });
+      d1Attach(primary, "code", (error as { code?: string })?.code ?? "d1_native_outcome_unknown");
+      error = primary;
+    }
+    d1Attach(error, "d1Outcome", { operation, nativeStarted, nativeCompleted, outcome });
+  };
+  const retainOutcome = (phase: D1Witness["phase"]) => {
+    state.poisoned = true;
+    registry().heldClosed = "d1_native_outcome_recovery_hold";
+    if (!witness) return;
+    // The initial durable intent already denies restart. If this diagnostic
+    // update tears/fails it remains an integrity/recovery HOLD, never absent.
+    try {
+      const fd = fs.openSync(d1WitnessPath(), fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW ?? 0));
+      try {
+        const st = fs.fstatSync(fd);
+        if (!st.isFile() || st.nlink !== 1 || st.dev !== witness.dev || st.ino !== witness.ino) throw Error("witness_owner_lost");
+        record.phase = phase;
+        fs.ftruncateSync(fd, 0); fs.writeFileSync(fd, JSON.stringify(record) + "\n"); fs.fsyncSync(fd);
+      } finally { fs.closeSync(fd); }
+    } catch (error) { registry().persistUncertain = true; d1Attach(primary, "d1WitnessError", error); }
+  };
+  try {
+    try {
+      assertD1WitnessAbsent();
+      // Check the barrier under the physical launch lock BEFORE publication.
+      // A denied business launch leaves no new pending witness.
+      if (kind === "business") assertNoMaintenance("native launch");
+      const fd = fs.openSync(d1WitnessPath(), fs.constants.O_WRONLY | fs.constants.O_CREAT |
+        fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0), 0o600);
+      witnessCreated = true;
+      try { witness = fs.fstatSync(fd); fs.writeFileSync(fd, JSON.stringify(record) + "\n"); fs.fsyncSync(fd); }
+      finally { fs.closeSync(fd); }
+      fsyncDir(env.dataDir);
+      admitted = true;
+      nativeStarted = true;
+      result = run();
+      nativeCompleted = true;
+      if (result && typeof (result as { then?: unknown }).then === "function") {
+        retain = true; throw d1Error("d1_native_interlock_async_forbidden");
+      }
+    } catch (error) {
+      failed = true; primary = error;
+      if (nativeStarted) {
+        const code = (error as { code?: string })?.code;
+        // Native I/O exhaustion/failure may follow partial effects. Never
+        // infer no-write merely because the callback did not return.
+        retain ||= ["COMMIT_UNKNOWN", "EIO", "ENOSPC", "ETIMEDOUT"].includes(code ?? "");
+        try { retain ||= options.uncertainOnError?.(error) === true; }
+        catch { retain = true; }
+      }
+    }
+    if ((witnessCreated && !admitted) || retain) {
+      annotate(primary, nativeStarted ? "unknown" : "not_started");
+      retainOutcome(nativeStarted ? "outcome_unknown" : "pre_effect_failed");
+      throw primary;
+    }
+    try {
+      if (witness) {
+        const st = fs.lstatSync(d1WitnessPath());
+        if (!st.isFile() || st.nlink !== 1 || st.dev !== witness.dev || st.ino !== witness.ino)
+          throw d1Error("d1_native_outcome_owner_lost");
+      }
+      const current = fs.lstatSync(lock);
+      if (current.dev !== identity.dev || current.ino !== identity.ino || current.isSymbolicLink())
+        throw d1Error("d1_native_interlock_owner_lost");
+      fs.rmdirSync(lock);
+      fsyncDir(env.dataDir);
+      // A resurrected deletion causes a conservative HOLD. Native durability
+      // must precede this point (SQLite FULL is configured in db.ts).
+      if (witness) fs.unlinkSync(d1WitnessPath());
+    } catch (releaseError) {
+      if (!failed) { failed = true; primary = releaseError; }
+      else d1Attach(primary, "d1ReleaseError", releaseError);
+      annotate(primary, nativeStarted ? "unknown" : "not_started");
+      retainOutcome("release_failed");
+      // Supplementary lock-only compatibility protection; the durable witness
+      // remains authoritative when restoration itself fails. Never steal.
+      try {
+        try { fs.mkdirSync(lock, { mode: 0o700 }); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+        fsyncDir(env.dataDir);
+      } catch (restoreError) {
+        registry().persistUncertain = true; d1Attach(releaseError, "restoreError", restoreError);
+      }
+    }
+    if (failed) { annotate(primary, nativeStarted ? "threw" : "not_started"); throw primary; }
+    return result as T;
+  } finally { state.active = false; }
 }

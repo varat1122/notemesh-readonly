@@ -1,20 +1,21 @@
+import {macroHistoryScopeSchema,type MacroHistoryScope} from "./macro-source-scope";
 import {preservedSubmittedText} from "./research-decision-v2";
 import {discoverStandaloneSources,type StandaloneSourceBinding,type StandaloneSourceScan} from "./standalone-source-context";
 import fs from "node:fs";
 import {createHash} from "node:crypto";
-import {RetrievalObserver,type RetrievalCoverage} from "./investment-retrieval-coverage";
+import {historyCutoffSchema,RetrievalObserver,type RetrievalCoverage} from "./investment-retrieval-coverage";
 import { searchVault, judgeExclusionSql, type JudgeSelectionPolicy } from "./queries";
 import { db } from "../db";
 import { readNote } from "./notes";
 import { resolveNotePath, resolveFolderPath } from "./paths";
-import { splitFrontmatter } from "./markdown";
+import { splitFrontmatter, extractStructure } from "./markdown";
 import { inspectCanonicalKnowledgeMetadata, type SchemaInspection } from "./investment-knowledge-schema";
 import { hubIdentityKey, indexedHubAliases, indexedTopLevelHubs } from "./investment-routing-v2";
-import { discoverCanonicalResearch, isCanonicalResearchPath, publicationWindow, type ContextBundle, type CanonicalResearchScan } from "./investment-research-context";
+import { receiptVersionAt, discoverCanonicalResearch, isCanonicalResearchPath, publicationWindow, type ContextBundle, type CanonicalResearchScan } from "./investment-research-context";
 
 export type Focus = "earnings" | "broker" | "tam" | "macro" | "thesis" | "general";
 export type Role = "rules" | "thesis" | "evidence_register" | "timeline" | "company" | "industry" | "source" | "research" | "archive";
-export interface Input { question: string; issuers?: string[]; intakeId?: string; industry?: string; focus?: Focus; maxNotes?: number; maxChars?: number }
+export interface Input { historyCutoff?:string; macroScope?:MacroHistoryScope; question: string; issuers?: string[]; intakeId?: string; industry?: string; focus?: Focus; maxNotes?: number; maxChars?: number }
 export interface IssuerResolution {
   requested:string;contextKey:string|null;hubPath:string|null;
   status:"exact_existing_title"|"indexed_alias"|"unresolved"|"ambiguous_hold"|"readback_hold"|"index_limit_hold"|"invalid_hold";
@@ -26,7 +27,7 @@ export interface ResearchCoverage {
   canonicalReview:Coverage;counterEvidence:Coverage;historicalComparator:Coverage;
   chronology:CanonicalResearchScan["chronology"];latestReviewPaths:string[];
 }
-interface Coverage {status:"FOUND"|"NOT_FOUND"|"SCAN_INCOMPLETE";paths:string[];scanComplete:boolean;reasons:string[]}
+interface Coverage {scopeDefinition?:CanonicalResearchScan["scopeDefinition"]|null;finding?:"FOUND"|"NOT_FOUND_WITHIN_VERIFIED_SCOPE"|"SCAN_INCOMPLETE";status:"FOUND"|"NOT_FOUND"|"SCAN_INCOMPLETE";paths:string[];scanComplete:boolean;reasons:string[]}
 export interface IdentityHoldDiscovery {
   requested:string;resolutionStatus:IssuerResolution["status"];mappingVerified:false;
   basis:"literal_historical_candidates_only";candidatePaths:string[];scanComplete:boolean;reasons:string[];
@@ -34,21 +35,99 @@ export interface IdentityHoldDiscovery {
 export interface MacroCoverage {scope:string;subjectEvidence:Coverage;counterEvidence:Coverage}
 type DeclaredDate={status:"DECLARED"|"UNKNOWN";value:string|null};
 export interface ResearchChronology {eventDate:DeclaredDate;publicationDate:DeclaredDate;analysisDate:DeclaredDate;importDate:DeclaredDate}
-export interface Item { sourceBinding?:StandaloneSourceBinding; researchTrust:SchemaInspection["researchTrust"]; contentSha256:string; path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
+export interface Item { citationSpans:{start:number;end:number;excerptStart:number;excerptEnd:number}[]; pointInTime?:ReturnType<typeof receiptVersionAt>&{cutoff:string}; sourceBinding?:StandaloneSourceBinding; researchTrust:SchemaInspection["researchTrust"]; contentSha256:string; path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
 export interface ResearchFallback {
  status:"bounded_discovery_not_selected_evidence";truncated:boolean;
- candidates:{path:string;intakeId:string;kind:"source_intake"|"canonical_review";sha256:string|null;
+  candidates:{path:string;intakeId:string|null;kind:"source_intake"|"canonical_review"|"historical_related";sha256:string|null;
   receiptId:string|null;bindingStatus:"receipt_bound"|"HOLD";researchTrust:Item["researchTrust"];
-  eventDate:string|null;publicationDate:string|null;reason:"outside_selected_context"}[];
+  eventDate:string|null;publicationDate:string|null;reason:"outside_selected_context"|"canonical_read_limit"|"declared_multi_issuer_relation"|"pit_not_selected_or_unverified";issuerAttribution?:"not_established";
+  accessStatus?:"AVAILABLE_NOT_RETRIEVED";metadataBasis?:"index_only_unverified"}[];
  instructions:string;
 }
-export interface Pack { researchFallback:ResearchFallback;standaloneSources:StandaloneSourceScan[]; retrieval:RetrievalCoverage; status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
+export interface Pack { discovery:ContextDiscovery; researchFallback:ResearchFallback;standaloneSources:StandaloneSourceScan[]; retrieval:RetrievalCoverage; status: "retrieval_only_not_verified"; question: string; issuers: string[]; issuerResolution:IssuerResolution[];issuerCoverage:IssuerCoverage[];identityHoldDiscovery:IdentityHoldDiscovery[];macroCoverage:MacroCoverage[];researchCoverage:ResearchCoverage[];contextBundles:ContextBundle[];focus: Focus; industry: string|null; items: Item[]; considered: number; selected: number; excerptChars: number; incomplete: string[]; omitted: string[]; warnings: string[] }
 
-function resolveIssuers(requested:string[],observer:RetrievalObserver):IssuerResolution[]{
+/** Diagnostic-only observed path ledger. Helpers also scan metadata internally;
+ * their unreturned exclusions are NOT reconstructed, counted or "rescued" here.
+ * Existing operational witness and Judge admission retain their own contracts. */
+type PitReason="pit_after_cutoff"|"pit_receipt_unverified"|"pit_publication_after_cutoff"|"pit_read_limit";
+type DiscoveryReason=PitReason|"industry_scope_excluded"|"issuer_scope_excluded"|"fts_window_truncated"|
+  "restricted_low_trust"|"receipt_binding_unverified"|"legacy_review_scope_unverified"|
+  "readback_failed"|"note_budget"|"excerpt_budget"|"role_quota"|"explicit_scope_exclusion"|
+  "no_candidate_in_completed_scope"|"scope_scan_incomplete"|"not_selected_in_bounded_context"|
+  "canonical_read_limit"|"canonical_not_admitted"|"issuer_identity_conflict"|"issuer_lexical_window_not_returned"|
+  "declared_multi_issuer_relation"|"historical_primary_subject"|"historical_joint_subject"|
+  "joint_subject_unconfirmed"|"declared_company_identity_unresolved"|"question_term_fts_window_truncated"|"historical_context_slot"|OptionalHistoryFailure;
+type OptionalHistoryFailure="optional_history_metadata_drift"|"optional_history_missing_file"|
+  "optional_history_permission_denied"|"optional_history_io_error"|"optional_history_read_error";
+function optionalHistoryReadError(e:unknown):OptionalHistoryFailure{
+  const code=(e as {code?:unknown})?.code;
+  return code==="ENOENT"?"optional_history_missing_file":code==="EACCES"||code==="EPERM"?"optional_history_permission_denied":
+    code==="EIO"?"optional_history_io_error":"optional_history_read_error";
+}
+type Terminal="PIT_HOLD"|"SELECTED"|"FALLBACK_EXPOSED"|"OMITTED_BUDGET"|"RESTRICTED"|"READBACK_HOLD"|"OTHER_EXCLUDED";
+export interface ContextDiscovery {
+  version:1;scope:"observed_bounded_context_paths";countsStatus:"COUNTS_UNRECONCILED";
+  coverage_incomplete:true;uniqueDiscoveredPaths:null;unobservedStages:string[];
+  questionTermTruncation:{limit:30;queries:string[];unobservedCandidatePaths:null;unobservedCandidateCount:null};
+  rawFtsHits:number;observedUniquePaths:number;observedPathsTruncated:boolean;
+  observedTerminalCounts:Record<Terminal,number>;detailsTruncated:boolean;reasons:DiscoveryReason[];
+  paths:{path:string;disposition:Terminal;reasons:DiscoveryReason[]}[];
+}
+class ContextObserver extends RetrievalObserver {
+  private observed=new Map<string,Set<DiscoveryReason>>();
+  private discoveryReasons=new Set<DiscoveryReason>(["scope_scan_incomplete"]);
+  private overflow=false;
+  private rawFtsHits=0;
+  private questionWindows=new Set<string>();
+  questionWindow(query:string,total:number,returned:number){
+    if(total>returned){this.questionWindows.add(query);this.discoveryReasons.add("question_term_fts_window_truncated");}
+  }
+  questionTruncation(){return {limit:30 as const,queries:[...this.questionWindows].sort(),unobservedCandidatePaths:null,unobservedCandidateCount:null};}
+  observePath(path:string,reason?:DiscoveryReason){
+    if(!this.observed.has(path)){
+      if(this.observed.size>=2048){this.overflow=true;return;}
+      this.observed.set(path,new Set());
+    }
+    if(reason){this.observed.get(path)!.add(reason);this.discoveryReasons.add(reason);}
+  }
+  override read<T>(stage:Parameters<RetrievalObserver["read"]>[0],path:string,run:()=>T):T{
+    this.observePath(path);
+    try{return super.read(stage,path,run);}catch(e){this.observePath(path,"readback_failed");throw e;}
+  }
+  override search<T>(stage:Parameters<RetrievalObserver["search"]>[0],query:string,folder:string|undefined,run:()=>T):T{
+    const result=super.search(stage,query,folder,run);
+    // Existing helper searches return path arrays; public FTS returns SearchPage.
+    const page=result as {hits?:{path:string}[];total?:number};
+    const rows:Array<{path?:unknown}>=Array.isArray(result)?result:page?.hits??[];
+    this.rawFtsHits+=rows.length;
+    for(const row of rows)if(typeof row.path==="string")this.observePath(row.path);
+    if(typeof page?.total==="number"&&page.total>rows.length)this.discoveryReasons.add("fts_window_truncated");
+    return result;
+  }
+  finish(items:Item[],fallback:ResearchFallback):ContextDiscovery{
+    const selected=new Set(items.map(x=>x.path)),exposed=new Set(fallback.candidates.map(x=>x.path));
+    for(const path of [...selected,...exposed])this.observePath(path);
+    const counts:Record<Terminal,number>={PIT_HOLD:0,SELECTED:0,FALLBACK_EXPOSED:0,OMITTED_BUDGET:0,RESTRICTED:0,READBACK_HOLD:0,OTHER_EXCLUDED:0};
+    const paths:ContextDiscovery["paths"]=[];
+    for(const [path,reasons] of this.observed){
+      const disposition:Terminal=reasons.has("readback_failed")?"READBACK_HOLD":[...reasons].some(r=>r.startsWith("pit_"))?"PIT_HOLD":selected.has(path)?"SELECTED":exposed.has(path)?"FALLBACK_EXPOSED":
+        ["note_budget","excerpt_budget","role_quota"].some(r=>reasons.has(r as DiscoveryReason))?"OMITTED_BUDGET":
+        ["receipt_binding_unverified","legacy_review_scope_unverified","restricted_low_trust"].some(r=>reasons.has(r as DiscoveryReason))?"RESTRICTED":"OTHER_EXCLUDED";
+      if(disposition==="OTHER_EXCLUDED"&&!reasons.size)reasons.add("not_selected_in_bounded_context");
+      counts[disposition]++;
+      if(paths.length<64)paths.push({path,disposition,reasons:[...reasons].sort()});
+    }
+    return {version:1,scope:"observed_bounded_context_paths",countsStatus:"COUNTS_UNRECONCILED",coverage_incomplete:true,
+      uniqueDiscoveredPaths:null,unobservedStages:["helper_metadata_discovery_and_exclusions","hub_index_discovery"],
+      questionTermTruncation:this.questionTruncation(),rawFtsHits:this.rawFtsHits,observedUniquePaths:this.observed.size,observedPathsTruncated:this.overflow,
+      observedTerminalCounts:counts,detailsTruncated:this.observed.size>paths.length||this.overflow,reasons:[...this.discoveryReasons].sort(),paths};
+  }
+}
+
+function resolveIssuers(requested:string[],observer:RetrievalObserver,hubs:ReturnType<typeof indexedTopLevelHubs>):IssuerResolution[]{
   if(!requested.length)return [];
   // Same indexed Company Hub/alias contract as M5.2. A sentinel prevents an
   // incomplete index scan from establishing a falsely unique mapping.
-  const hubs=indexedTopLevelHubs("01_Companies/");
   return requested.map(label=>{
     const result=(status:IssuerResolution["status"],contextKey:string|null=null,hubPath:string|null=null):IssuerResolution=>
       ({requested:label,status,contextKey,hubPath});
@@ -115,6 +194,7 @@ export function roleOf(path: string): Role {
   if (path.startsWith("07_Sources/ChatGPT/")) return "archive";
   return "research";
 }
+const genericTitleCode=(s:string)=>/^(?:P\d+|F\d+|Q\d+(?:FY\d+)?|FY\d+|USD|GDP|EPS|FCF|OCF|ROIC|BOM|TAM|GPU|CPU|CPO|NPO|ROI|CEO|CFO|IR|US|AI|DC|HBM|DRAM|CAPEX)$/.test(s);
 const base: Record<Role, number> = { rules: 40, thesis: 100, evidence_register: 95, timeline: 85, company: 65, industry: 65, source: 87, research: 35, archive: 8 };
 const quota: Partial<Record<Role, number>> = { rules: 1, thesis: 2, evidence_register: 2, timeline: 3, company: 3, industry: 3, source: 4, archive: 1 };
 function terms(s: string): string[] {
@@ -133,7 +213,8 @@ function namedIssuers(path: string): string[] {
   // Reject obvious generic metric acronyms and source/vintage IDs; this is a
   // conservative title heuristic, not proof of an issuer's legal identity.
   if(path.startsWith("10_Knowledge/Company Research/")){
-    // Archived company research declares its primary company in frontmatter.
+    // Archived company research declares company tags in frontmatter. Their
+    // order is not primary attribution; historicalScope checks title subjects.
     // A title like "CrowdStrike × CLEAR" otherwise returns CLEAR as the first
     // all-caps token and incorrectly excludes the CRWD research event.
     const indexed=db().prepare("SELECT frontmatter FROM notes WHERE path=?").get(path) as
@@ -148,10 +229,27 @@ function namedIssuers(path: string): string[] {
       }catch{/* Invalid legacy metadata falls back to conservative filename inference. */}
     }
     const codes=[...file.matchAll(/(?:^|[^A-Za-z0-9])([A-Z][A-Z0-9]{1,7})(?=[^A-Za-z0-9]|$)/g)]
-      .map(x=>x[1]).filter(x=>!/^(?:P\d+|F\d+|Q\d+|FY\d+|USD|GDP|EPS|FCF|OCF|ROIC|BOM|TAM|GPU|CPU|CPO|NPO|ROI|CEO|CFO|IR|US|AI|DC)$/.test(x));
+      .map(x=>x[1]).filter(x=>!genericTitleCode(x));
     return codes.slice(0,1);
   }
   return [];
+}
+function primaryTitleIssuer(path:string,knownHubLabels:Set<string>):string|null{
+  if(!path.startsWith("10_Knowledge/Company Research/"))return null;
+  const file=(path.split("/").at(-1)??"").replace(/^\d{4}-\d{2}-\d{2} - /,"");
+  const prefix=file.match(/^([A-Z][A-Z0-9.-]{0,11}) - (.*)$/);
+  if(!prefix)return null;
+  // AI etc can also be real ticker/alias labels. Use the SAME bounded Hub
+  // inventory; never erase a registered label with a global acronym stoplist.
+  if(!genericTitleCode(prefix[1])||knownHubLabels.has(hubIdentityKey(prefix[1])))return prefix[1];
+  const subject=prefix[2].match(/^([A-Z][A-Z0-9.-]{0,11})(?=\s|\.md$)/)?.[1];
+  return subject&&(!genericTitleCode(subject)||knownHubLabels.has(hubIdentityKey(subject)))?subject:null;
+}
+function jointTitleIssuers(path:string,knownHubLabels:Set<string>):string[]{
+  const file=(path.split("/").at(-1)??"").replace(/^\d{4}-\d{2}-\d{2} - /,"");
+  const joint=file.match(/^([A-Z][A-Z0-9.-]{0,11})\s+(?:×|x|X|&|\+|vs\.?|and)\s+([A-Z][A-Z0-9.-]{0,11})(?=\s|\.md$)/);
+  // Explicit title grammar only, not economic equivalence or an inferred alias.
+  return joint&&joint.slice(1).every(label=>!genericTitleCode(label)||knownHubLabels.has(hubIdentityKey(label)))?joint.slice(1):[];
 }
 const STOP_SCOPE = new Set(["AND","THE","WITH","FROM","FOR","MARKET","MARKETS","MACRO","ECONOMY","ECONOMIC","INDUSTRY","GLOBAL","FINANCIAL","COMPANY","RESEARCH","STOCK","EQUITY","WHAT","IS","ARE","HOW","LATEST","OFFICIAL","POLICY","OVERVIEW","HISTORICAL","ARCHIVE"]);
 function topicTerms(s: string): string[] { return terms(s).filter(t=>!STOP_SCOPE.has(t)); }
@@ -197,45 +295,102 @@ function folderExists(path:string):boolean{
 }
 // Section hints only, never a factual determination that a claim is adverse.
 const COUNTER_SECTION=/^\s*#{1,6}\s+.*(counter[- ]?evidence|contradict|invalidation|\brisk|\badverse|\bdownside|\bstress|ข้อขัดแย้ง|ข้อโต้แย้ง|ความเสี่ยง)/i;
-function selectedLines(raw: string, search: string[], max: number, role: Role) {
-  const lines = raw.split(/\r?\n/);
-  let index = 0, maxHits = 0;
-  for (let i = 0; i < Math.min(lines.length, 1200); i++) {
-    const lower = lines[i].toLowerCase();
-    const hits = search.filter(t => t.length > 1 && lower.includes(t.toLowerCase())).length;
-    if (hits > maxHits) { index = i; maxHits = hits; }
+function selectedLines(raw: string, search: string[], max: number, role: Role, reserveCounter=false,sourceOffset=0,lineOffset=0) {
+  const lines=raw.split(/\r?\n/),offsets:number[]=[];
+  let cursor=0;
+  for(const text of lines){offsets.push(cursor+sourceOffset);cursor+=text.length;if(raw[cursor]==="\r")cursor++;if(raw[cursor]==="\n")cursor++;}
+  let index=0,maxHits=0;
+  for(let i=0;i<Math.min(lines.length,1200);i++){
+    const lower=lines[i].toLowerCase(),hits=search.filter(t=>t.length>1&&lower.includes(t.toLowerCase())).length;
+    if(hits>maxHits){index=i;maxHits=hits;}
   }
-  const start = index > 15 ? Math.max(0,index-2) : 0;
-  const firstEnd = Math.min(lines.length,start+12);
-  let excerpt = `[Source lines ${start+1}-${firstEnd}]\n` + lines.slice(start,firstEnd).join("\n");
-  let counterEvidenceExcerptIncluded = false;
-  let counterHeading:string|null=null;
-  // Anchor contradictory evidence even when the highest lexical match is in
-  // a note's introduction. Source line labels prevent disjoint snippets from
-  // appearing to be one continuous quotation.
-  if ((role==="thesis" || role==="evidence_register" || role==="source" || role==="research") && max>=700) {
-    const counter = lines.findIndex((s,i) => i < 1200 && COUNTER_SECTION.test(s));
-    counterHeading=counter>=0?lines[counter]:null;
-    if (counter>=0 && (counter<start || counter>=firstEnd)) {
-      const secondEnd = Math.min(lines.length,counter+8);
-      const addition = `\n\n[Counter-evidence / risk section: source lines ${counter+1}-${secondEnd}]\n` +
-        lines.slice(counter,secondEnd).join("\n");
-      const space = max-excerpt.length;
-      if (space>100) {
-        excerpt += addition.slice(0,space);
-        counterEvidenceExcerptIncluded = true;
+  const start=index>15?Math.max(0,index-2):0,firstEnd=Math.min(lines.length,start+12);
+  // Reuse the existing Markdown heading parser (ATX, Setext, code/comment
+  // exclusion). Never treat the next Setext title as this section's evidence.
+  const parsed=splitFrontmatter(raw);
+  const headings=extractStructure(parsed.body).headings.map(h=>({...h,line:h.line+parsed.fmOffset-1}));
+  const headingLines=new Set<number>();
+  for(const h of headings){
+    headingLines.add(h.line);
+    if(!/^ {0,3}#{1,6}(?:\s|$)/.test(lines[h.line]))headingLines.add(h.line+1);
+  }
+  const counterHeading=["thesis","evidence_register","source","research"].includes(role)
+    ?headings.find(h=>h.line<1200&&COUNTER_SECTION.test("# "+h.text)):undefined;
+  const counter=counterHeading?.line??-1;
+  const boundary=counterHeading?headings.find(h=>h.line>counter&&h.level<=counterHeading.level)?.line:undefined;
+  const end=counter<0?0:Math.min(lines.length,counter+8,boundary??lines.length);
+  // Reference definitions (including continuation destinations/titles) are
+  // metadata, not rendered counter text. Conservative omission, never trust.
+  const hidden=new Set<number>();
+  let comment=false;
+  for(let i=Math.max(0,counter+1);i<end;i++){
+    if(comment||lines[i].includes("<!--")){
+      hidden.add(i);comment=!lines[i].includes("-->");continue;
+    }
+    const definition=/^ {0,3}\[(?:\\.|[^\]\\])+\]:\s*(.*)$/.exec(lines[i]);
+    if(!definition)continue;
+    hidden.add(i);
+    let tail=definition[1],next=i+1;
+    if(!tail.trim()&&next<end&&lines[next].trim()){hidden.add(next);tail=lines[next++].trim();}
+    const inlineTitle=/^(?:<[^>]*>|\S+)\s+(["'(])/.exec(tail);
+    const title=inlineTitle?tail.slice(inlineTitle.index+inlineTitle[0].length-1):
+      next<end&&/^\s*["'(]/.test(lines[next])?lines[next++].trim():null;
+    if(title){
+      if(!inlineTitle)hidden.add(next-1);
+      const close=title[0]==="("?")":title[0];
+      if(!title.slice(1).includes(close)){
+        while(next<end&&lines[next].trim()){hidden.add(next);if(lines[next++].includes(close))break;}
       }
-    } else if(counter>=start && counter<firstEnd) {
-      counterEvidenceExcerptIncluded = true;
+    }
+    i=next-1;
+  }
+  const body=counter<0?-1:lines.findIndex((s,i)=>i>counter&&i<end&&!headingLines.has(i)&&!hidden.has(i)&&
+    /[\p{L}\p{N}]/u.test(s)&&!/^\s*(?:\x60\x60\x60|~~~)/.test(s));
+  // Carry source offsets while constructing/clipping the visible excerpt.
+  // Synthetic labels and separators have no source offset and cannot be cited.
+  type Piece={text:string;start?:number};
+  const length=(p:Piece[])=>p.reduce((n,x)=>n+x.text.length,0);
+  const clip=(p:Piece[],budget:number):Piece[]=>{
+    const out:Piece[]=[];let remaining=Math.max(0,budget);
+    for(const piece of p){if(!remaining)break;const text=piece.text.slice(0,remaining);out.push({...piece,text});remaining-=text.length;}
+    return out;
+  };
+  const block=(from:number,to:number,label:string):Piece[]=>[{text:label},...lines.slice(from,to).flatMap((text,i)=>
+    [...(i?[{text:"\n"}]:[]),{text,start:offsets[from+i]}])];
+  const label="[Source lines "+(start+1+lineOffset)+"-"+(firstEnd+lineOffset)+"]\n";
+  let pieces=block(start,firstEnd,label),line=start+1,reallocated=false;
+  const evidenceEnd=counter>=start&&body>=0&&body<firstEnd?label.length+lines.slice(start,body+1).join("\n").length:Infinity;
+  const headingLast=counter<0?-1:counter+(headingLines.has(counter+1)&&!/^ {0,3}#{1,6}(?:\s|$)/.test(lines[counter])?1:0);
+  const headingEnd=counter>=start&&headingLast<firstEnd?label.length+lines.slice(start,headingLast+1).join("\n").length:Infinity;
+  if(counter>=0&&body>=0&&evidenceEnd>max&&max>=700&&(counter<start||counter>=firstEnd||headingEnd<=max)){
+    const section=(to:number)=>block(counter,to,"\n\n[Counter-evidence / risk section: source lines "+(counter+1+lineOffset)+"-"+(to+lineOffset)+"]\n");
+    const minimum=section(body+1);
+    const available=reserveCounter?Math.min(max,Math.max(length(minimum),Math.floor(max*0.4))):max-length(pieces);
+    if(length(minimum)<=available){
+      let to=body+1;while(to<end&&length(section(to+1))<=available)to++;
+      const addition=section(to),room=max-length(addition),marker="\n[excerpt clipped]\n";
+      if(length(pieces)>room){
+        pieces=room>=label.length+marker.length?[...clip(pieces,room-marker.length),{text:marker}]:[];
+        if(!pieces.length)line=counter+1;
+      }
+      pieces.push(...addition);reallocated=true;
     }
   }
-  const clipped=excerpt.slice(0,max);
-  return {
-    excerpt:clipped,line:start+1,
-    truncated:start>0 || firstEnd<lines.length || clipped.length<excerpt.length,
-    counterEvidenceExcerptIncluded:counterEvidenceExcerptIncluded&&counterHeading!==null&&clipped.includes(counterHeading),
-  };
+  const total=length(pieces),visible=clip(pieces,max);
+  const fullLine=(i:number)=>i>=0&&visible.some(p=>p.start===offsets[i]&&p.text===lines[i]);
+  const included=counter>=0&&body>=0&&fullLine(counter)&&fullLine(headingLast)&&fullLine(body);
+  const missing=counter>=0&&!included;
+  let excerptOffset=0;
+  const spans=visible.flatMap(p=>{
+    const excerptStart=excerptOffset;excerptOffset+=p.text.length;
+    return p.start===undefined||!p.text.trim()?[]:[{start:p.start,end:p.start+p.text.length,excerptStart,excerptEnd:excerptOffset}];
+  });
+  const citationSpans=[...new Map(spans.map(s=>[s.start+":"+s.end,s])).values()].slice(0,64);
+  return {excerpt:visible.map(p=>p.text).join(""),line:line+lineOffset,citationSpans,
+    truncated:reallocated||missing||start>0||firstEnd<lines.length||length(visible)<total,
+    counterEvidenceExcerptIncluded:included,counterEvidenceMissing:missing};
 }
+
 function declared(raw: string, notePath: string) {
   const f = splitFrontmatter(raw).data as Record<string,unknown>;
   const schema=inspectCanonicalKnowledgeMetadata(notePath,f);
@@ -248,15 +403,39 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   const exclusion=judgeExclusionSql(judgePolicy),excluded=judgePolicy?.excludedPaths??[];
   const question = req.question.trim().slice(0,1200);
   if (question.length<3) throw new Error("Question must contain at least 3 characters");
-  const requestedIssuers = [...new Set((req.issuers||[]).map(s=>s.trim().toUpperCase()))].slice(0,6);
+  const historyCutoff=req.historyCutoff===undefined?undefined:historyCutoffSchema.parse(req.historyCutoff);
+  const hubs=indexedTopLevelHubs("01_Companies/");
+  // Narrow, explicit attribution syntax only. Preserve the original question
+  // and count mentions outside this leading source clause as subjects; a firm
+  // mentioned in both roles still remains an issuer. No issuer-name rules.
+  const attribution=/^\s*according to\s+[^,\n!?;:]{1,160},\s*/i.exec(question);
+  const subjectQuestion=question.slice(attribution?.[0].length??0);
+  // Question text is unchanged. Only literal, indexed Hub titles/aliases may
+  // supply an omitted scope; the existing collision/readback gate still runs.
+  // Short ticker-like labels require exact case; ordinary words must not become
+  // a ticker by uppercasing the whole question. Explicit [] and macro opt out.
+  const inferred=req.issuers===undefined&&req.focus!=="macro"&&!req.macroScope?hubs.flatMap(h=>
+    [h.title,...indexedHubAliases(h.frontmatter)].filter(label=>{
+      if(label.length<2||label.length>120)return false;
+      // Existing ambiguous metric/acronym labels need a leading subject or
+      // explicit ticker notation, even when a real Hub has that same title.
+      if(genericTitleCode(label)&&!subjectQuestion.startsWith(label+" ")&&!subjectQuestion.includes("$"+label))return false;
+      const escaped=label.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+      return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`,/^[A-Z0-9.-]{1,5}$/.test(label)?"u":"iu").test(subjectQuestion);
+    })):[];
+  const allRequested=[...new Set((req.issuers??inferred).map(s=>s.trim().toUpperCase()))];
+  if(req.issuers===undefined&&allRequested.length>6)throw Error("question_issuer_scope_limit");
+  const requestedIssuers = allRequested.slice(0,6);
   if(req.intakeId&&(!/^IN-[A-F0-9]{16}$/.test(req.intakeId)||!requestedIssuers.length))throw Error("Intake scope requires a valid intake ID and issuer scope");
-  const observer=new RetrievalObserver();
-  const issuerResolution=resolveIssuers(requestedIssuers,observer);
+  const observer=new ContextObserver();
+  const issuerResolution=resolveIssuers(requestedIssuers,observer,hubs);
   const identityHoldDiscovery=discoverDuringIdentityHold(issuerResolution,observer,judgePolicy);
   const issuers=[...new Set(issuerResolution.flatMap(scopeKeys).map(x=>x.toUpperCase()))];
   const contextKeys=[...new Set(issuerResolution.flatMap(r=>r.contextKey?[r.contextKey]:scopeKeys(r)))];
   const issuerScoped=requestedIssuers.length>0;
   const focus = req.focus||"general";
+  const verifiedMacro=req.macroScope===undefined?undefined:macroHistoryScopeSchema.parse(req.macroScope);
+  if(verifiedMacro&&(issuerScoped||focus!=="macro"||req.intakeId))throw Error("macro_history_scope_contract_hold");
   const maxNotes = Math.min(16,Math.max(5,req.maxNotes??11));
   const budget = Math.min(18000,Math.max(4500,req.maxChars??12000));
   const pool = new Map<string,number>();
@@ -269,17 +448,19 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   });
   // Reuse the same collision/readback checks for filename aliases. A Hub's
   // declaration alone cannot authorize an alias also claimed by another Hub.
-  const aliasResolution=resolveIssuers([...new Set(subjectScopes.flatMap(scope=>scope.aliases.slice(0,12)))],observer);
+  const aliasResolution=resolveIssuers([...new Set(subjectScopes.flatMap(scope=>scope.aliases.slice(0,12)))],observer,hubs);
   const researchScans=subjectScopes.map(({key,resolved,aliases})=>{
     const checked=aliasResolution.filter(r=>aliases.slice(0,12).includes(r.requested));
     const subjects=resolved.length?[...resolved.flatMap(scopeKeys),...checked.filter(r=>r.contextKey===key).map(r=>r.requested)]:undefined;
-    const scan=discoverCanonicalResearch(key,req.intakeId,subjects,observer,judgePolicy);
+    const scan=discoverCanonicalResearch(key,req.intakeId,subjects,observer,judgePolicy,historyCutoff);
     if(aliases.length>12){scan.complete=false;scan.reasons.push("legacy_subject_alias_limit");}
     if(checked.some(r=>r.contextKey!==key)){scan.complete=false;scan.reasons.push("legacy_subject_alias_unresolved");}
     if(!scan.complete){scan.chronology="SCAN_INCOMPLETE";scan.latestReviewPaths=[];}
     return scan;
   });
   const canonicalReviews=new Map(researchScans.flatMap(scan=>scan.reviews.map(review=>[review.path,review] as const)));
+  const deferredReviews=new Map(researchScans.flatMap(scan=>scan.deferredReviews.map(review=>[review.path,review] as const)));
+  for(const path of deferredReviews.keys())observer.observePath(path,"canonical_read_limit");
   const boundSources=new Map(researchScans.flatMap(scan=>scan.reviews.flatMap(review=>review.bundle.status==="BOUND_SOURCE_REVIEW"&&review.bundle.sourcePath
     ?[[review.bundle.sourcePath,scan.contextKey] as const]:[])));
   for(const scan of researchScans){
@@ -288,11 +469,15 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
       // Discover canonical Reviews before broad lexical windows can hide them.
       // Ranking is publication-based context priority, never event equivalence.
       pool.set(review.path,195-i*3);
+      if(review.bundle.status==="HOLD"){
+        observer.observePath(review.path,review.legacy?"legacy_review_scope_unverified":"receipt_binding_unverified");
+        observer.observePath(review.path,"restricted_low_trust");
+      }
       if(review.bundle.status==="BOUND_SOURCE_REVIEW"&&review.bundle.sourcePath)pool.set(review.bundle.sourcePath,194-i*3);
     }
   }
-  const standalone=discoverStandaloneSources(subjectScopes.filter(s=>s.resolved.some(r=>["exact_existing_title","indexed_alias"].includes(r.status))).map(s=>({contextKey:s.key,
-    labels:[s.key,...s.resolved.map(r=>r.requested),...aliasResolution.filter(r=>r.contextKey===s.key).map(r=>r.requested)]})),[...new Set(researchScans.flatMap(scan=>scan.reviews.map(r=>`00_Inbox/ChatGPT/Investment Intake - ${r.intakeId}.md`)))],observer,judgePolicy,req.intakeId);
+  const standalone=discoverStandaloneSources([...(verifiedMacro?[{contextKey:verifiedMacro.key,labels:[verifiedMacro.label],macroScope:verifiedMacro}]:[]),...subjectScopes.filter(s=>s.resolved.some(r=>["exact_existing_title","indexed_alias"].includes(r.status))).map(s=>({contextKey:s.key,
+    labels:[s.key,...s.resolved.map(r=>r.requested),...aliasResolution.filter(r=>r.contextKey===s.key).map(r=>r.requested)]}))],[...new Set(researchScans.flatMap(scan=>scan.reviews.map(r=>`00_Inbox/ChatGPT/Investment Intake - ${r.intakeId}.md`)))],observer,judgePolicy,req.intakeId);
   for(const scan of standalone.scans)for(const reason of scan.reasons)limits.add(`${scan.contextKey}: ${reason}`);
   for(const path of standalone.bindings.keys())pool.set(path,120);
   const search=(query:string,opts:Parameters<typeof searchVault>[1])=>{
@@ -305,9 +490,17 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   // Prefer the explicitly supplied scope over incidental query terms.
   // Explicit separators split scopes; preserve multiword names and do not
   // guess country aliases or split "and" inside a country's proper name.
-  const requestedMacroScopes=macroScope?[...new Set((req.industry??topicTerms(question)[0]??"").split(/[/;|,]/)
+  const requestedMacroScopes=verifiedMacro?[verifiedMacro.key]:macroScope?[...new Set((req.industry??topicTerms(question)[0]??"").split(/[/;|,]/)
     .map(x=>topicTerms(x).join(" ")).filter(Boolean))]:[];
   const macroScopes=requestedMacroScopes.slice(0,4);
+  const generatedSource=(p:string)=>p.startsWith("00_Inbox/ChatGPT/Investment Intake - ");
+  const matchesMacroScope=(p:string,scope:string,current?:Record<string,unknown>)=>{
+    if(verifiedMacro&&generatedSource(p)){
+      const b=standalone.bindings.get(p);
+      return b?.macroScope?.key===scope&&(!current||JSON.stringify(current.macro_subject)===JSON.stringify(b.macroScope));
+    }
+    return explicitMacroScope(p,scope,current);
+  };
   if(requestedMacroScopes.length>4)limits.add("Macro scope limit: only the first four explicit scopes searched; remaining scopes were not assessed.");
   const needed = [
     "10_Knowledge/Research Methods/Investment OS - Evidence and Update Rules.md",
@@ -383,12 +576,12 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
       // Country-only discovery keeps differing risk vocabulary eligible.
       // Subject hits rank higher but never become a blanket admission filter.
       if(folderExists(folder))try{
-        for(const h of search(scope,{limit:100,folder}).hits)if(explicitMacroScope(h.path,scope))pool.set(h.path,22);
+        for(const h of search(scope,{limit:100,folder}).hits)if(matchesMacroScope(h.path,scope))pool.set(h.path,22);
       }catch{failed.push(scope);}
       for(const word of subject)try{
         const hits=[...search(scope+" "+word,{limit:100}).hits,
           ...(folderExists(folder)?search(scope+" "+word,{limit:100,folder}).hits:[])];
-        for(const h of hits)if(explicitMacroScope(h.path,scope)){
+        for(const h of hits)if(matchesMacroScope(h.path,scope)){
           macroSubjectPaths.add(h.path);macroSubjectByScope.get(scope)!.add(h.path);
           if(h.path.startsWith(folder+"/"))pool.set(h.path,60);
         }
@@ -397,7 +590,7 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
         .all(scope,...excluded) as {path:string}[];
       if(candidatePaths.length>150)limits.add("Macro filename window truncated: "+scope);
       for(const r of candidatePaths.slice(0,150))if((r.path.startsWith(folder+"/")||r.path.startsWith("02_Industries_Themes/"))&&
-        explicitMacroScope(r.path,scope)&&available(r.path))pool.set(r.path,Math.max(pool.get(r.path)||0,macroSubjectPaths.has(r.path)?60:22));
+        matchesMacroScope(r.path,scope)&&available(r.path))pool.set(r.path,Math.max(pool.get(r.path)||0,macroSubjectPaths.has(r.path)?60:22));
     }
   }
   const industryMatches = new Set<string>();
@@ -410,6 +603,39 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   // A generic term such as "earnings" must not quietly pull another issuer's
   // news into a company-specific pack. First discover exact issuer matches.
   const issuerPaths = new Set<string>();
+  const historicalIssuerPaths=new Set<string>();
+  const historicalSubjects=new Map<string,string[]>();
+  const titleSubjectPaths=new Set<string>();
+  const jointSubjects=new Map<string,string[]>();
+  const relatedHistory=new Map<string,string[]>();
+  // Alias equivalence is limited to existing caller-resolved, readback-checked
+  // contexts. Unresolved literal ticker discovery remains explicitly unverified.
+  const labelContexts=new Map<string,string>();
+  for(const r of [...issuerResolution,...aliasResolution])for(const label of scopeKeys(r))
+    labelContexts.set(hubIdentityKey(label),r.contextKey??label);
+  const knownHubLabels=new Set(hubs.flatMap(h=>[h.title,...indexedHubAliases(h.frontmatter)]).map(hubIdentityKey));
+  const identity=(label:string)=>labelContexts.get(hubIdentityKey(label))??hubIdentityKey(label);
+  const historicalScope=(path:string,names:string[])=>{
+    const fm=indexedMetadata(path),raw=Array.isArray(fm.company)?fm.company:typeof fm.company==="string"?[fm.company]:names;
+    const labels=raw.filter((x):x is string=>typeof x==="string");
+    const ids=[...new Set(labels.map(identity))];
+    const contexts=(labels:string[])=>[...new Set(labels.flatMap(x=>labelContexts.has(hubIdentityKey(x))?[labelContexts.get(hubIdentityKey(x))!]:[]))];
+    const declaredScopes=contexts(labels);
+    const title=primaryTitleIssuer(path,knownHubLabels),titleId=title?identity(title):null;
+    const joint=jointTitleIssuers(path,knownHubLabels),titleLabels=joint.length?joint:title?[title]:[];
+    const titleIds=titleLabels.map(identity);
+    const knownDeclared=labels.filter(label=>knownHubLabels.has(hubIdentityKey(label))||labelContexts.has(hubIdentityKey(label)));
+    // Unknown names are not proven aliases OR proven conflicts. Preserve an
+    // explicit title's low-trust history, without adding a name-to-Hub mapping.
+    const conflict=titleIds.length>0&&knownDeclared.length>0&&!titleIds.some(id=>ids.includes(id));
+    const jointSupported=joint.length>0&&titleIds.every(id=>ids.includes(id));
+    const kind=jointSupported?"joint":!joint.length&&titleId?"primary":null;
+    const scopes=kind?contexts(titleLabels):titleLabels.length?[]:ids.length<=1?declaredScopes:[];
+    return {scopes,kind,joint,conflict,jointUnconfirmed:joint.length>0&&!jointSupported,
+      unresolved:knownDeclared.length<labels.length,
+      related:!conflict&&!scopes.length&&declaredScopes.length>0&&(ids.length>1||titleLabels.length>0),declaredScopes};
+  };
+  const resolvedContexts=new Set(issuerResolution.filter(r=>r.contextKey&&["exact_existing_title","indexed_alias"].includes(r.status)).map(r=>r.contextKey));
   for (const ticker of issuers) {
     try {
       for (const h of search(ticker,{limit:100}).hits) issuerPaths.add(h.path);
@@ -417,20 +643,38 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   }
   for (const term of searchTerms) {
     try {
-      for (const [i,h] of search(term,{limit:30}).hits.entries()) {
+      const page=search(term,{limit:30});observer.questionWindow(term,page.total,page.hits.length);
+      for (const [i,h] of page.hits.entries()) {
         // FTS cannot bypass failed canonical readback, the scoped read bound,
         // or an explicitly requested intake. Source pairing is receipt-bound.
-        if(issuerScoped&&isCanonicalResearchPath(h.path)&&!canonicalReviews.has(h.path))continue;
-        if(issuerScoped&&h.path.startsWith("00_Inbox/ChatGPT/Investment Intake - ")&&!boundSources.has(h.path)&&!standalone.bindings.has(h.path))continue;
+        if(issuerScoped&&isCanonicalResearchPath(h.path)&&!canonicalReviews.has(h.path)){observer.observePath(h.path,deferredReviews.has(h.path)?"canonical_read_limit":"canonical_not_admitted");continue;}
+        if((issuerScoped||verifiedMacro)&&h.path.startsWith("00_Inbox/ChatGPT/Investment Intake - ")&&!boundSources.has(h.path)&&!standalone.bindings.has(h.path)){observer.observePath(h.path,"receipt_binding_unverified");continue;}
         const role=roleOf(h.path);
         const scopedIssuerNames=namedIssuers(h.path);
+        const hs=issuers.length&&h.path.startsWith("10_Knowledge/Company Research/")&&!canonicalReviews.has(h.path)?historicalScope(h.path,scopedIssuerNames):null;
+        if(hs?.conflict){observer.observePath(h.path,"issuer_identity_conflict");continue;}
+        if(hs?.unresolved)observer.observePath(h.path,"declared_company_identity_unresolved");
+        if(hs?.jointUnconfirmed)observer.observePath(h.path,"joint_subject_unconfirmed");
+        if(hs?.related){relatedHistory.set(h.path,hs.declaredScopes);observer.observePath(h.path,"declared_multi_issuer_relation");observer.observePath(h.path,"restricted_low_trust");continue;}
+        if(hs?.scopes.length)historicalSubjects.set(h.path,hs.scopes);
+        if(hs?.kind&&hs.scopes.length){
+          titleSubjectPaths.add(h.path);observer.observePath(h.path,hs.kind==="joint"?"historical_joint_subject":"historical_primary_subject");
+          if(hs.kind==="joint")jointSubjects.set(h.path,hs.joint);
+        }
         if(issuers.length && scopedIssuerNames.length &&
-          !scopedIssuerNames.some(t=>issuers.includes(t)))continue;
-        if(issuers.length && role==="research" && !pool.has(h.path) &&
-          (!h.path.startsWith("10_Knowledge/Company Research/") ||
-           (req.industry && !industryMatches.has(h.path))))continue;
+          !scopedIssuerNames.some(t=>issuers.includes(t))&&!historicalSubjects.has(h.path)){observer.observePath(h.path,"issuer_scope_excluded");continue;}
+        if(issuers.length && role==="research" && !pool.has(h.path)){
+          if(!h.path.startsWith("10_Knowledge/Company Research/")){observer.observePath(h.path,"explicit_scope_exclusion");continue;}
+          if(req.industry && !industryMatches.has(h.path)){
+            // Industry FTS is enrichment, not proof of absence of issuer history.
+            // Retain only a resolved issuer's declared historical candidate;
+            // do not bypass canonical receipt/read bounds or industry Hub rules.
+            if(!hs?.kind||!hs.scopes.some(scope=>resolvedContexts.has(scope))){observer.observePath(h.path,"industry_scope_excluded");continue;}
+            historicalIssuerPaths.add(h.path);observer.observePath(h.path,"restricted_low_trust");
+          }
+        }
         if(issuers.length && role==="industry" && req.industry &&
-          !industryMatches.has(h.path))continue;
+          !industryMatches.has(h.path)){observer.observePath(h.path,"industry_scope_excluded");continue;}
         // For generic company queries, a canonical Industry Hub merely
         // mentioning the issuer is NOT a business linkage. Require either
         // a resolved link from its own Company Timeline or clear title-topic
@@ -443,13 +687,13 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
           const titleWords=new Set(title.split(/[^\p{L}\p{N}]+/u));
           const explicitWords=question.toUpperCase().split(/[^\p{L}\p{N}]+/u)
             .filter(w=>w.length>=4&&!issuers.includes(w));
-          if(!explicitWords.some(w=>titleWords.has(w)))continue;
+          if(!explicitWords.some(w=>titleWords.has(w))){observer.observePath(h.path,"industry_scope_excluded");continue;}
         }
         if(issuers.length && !issuerPaths.has(h.path) &&
-          role!=="industry" && role!=="rules" && !pool.has(h.path)) continue;
+          role!=="industry" && role!=="rules" && !pool.has(h.path)){observer.observePath(h.path,"issuer_lexical_window_not_returned");continue;}
         if(macroScope){
           // One shared word (e.g. "revenue") must not pull an unrelated issuer.
-          if(!macroScopes.some(scope=>explicitMacroScope(h.path,scope)))continue;
+          if(!macroScopes.some(scope=>matchesMacroScope(h.path,scope)))continue;
           if(role==="company"||role==="thesis"||role==="evidence_register"||
             (role==="timeline" && scopedIssuerNames.length>0)||
             h.path.startsWith("10_Knowledge/Company Research/"))continue;
@@ -461,7 +705,7 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   }
   const macroRiskPaths=new Set<string>();
   const macroReadReasons=new Map(macroScopes.map(scope=>[scope,[] as string[]]));
-  const macroCandidates=new Map(macroScopes.map(scope=>[scope,[...pool.keys()].filter(p=>roleOf(p)!=="rules"&&explicitMacroScope(p,scope))]));
+  const macroCandidates=new Map(macroScopes.map(scope=>[scope,[...pool.keys()].filter(p=>roleOf(p)!=="rules"&&matchesMacroScope(p,scope))]));
   for(const [scope,paths] of macroCandidates){
     // A bounded section scan, not an inference about semantic risk. Admit all
     // country candidates to ranking, including unread/unmarked background.
@@ -472,7 +716,9 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
         const raw=readNote(p).content;
         if(Buffer.byteLength(raw)>100000)throw Error("read_limit");
         const parsed=splitFrontmatter(raw);
-        if(!explicitMacroScope(p,scope,parsed.data))throw Error("scope_readback");
+        const sourceBinding=standalone.bindings.get(p);
+        if(sourceBinding&&createHash("sha256").update(raw).digest("hex")!==sourceBinding.sourceSha256)throw Error("standalone_source_selection_changed");
+        if(!matchesMacroScope(p,scope,parsed.data))throw Error("scope_readback");
         const lines=parsed.body.split(/\r?\n/);
         if(lines.length>1200)reasons.push("counter_line_limit");
         if(lines.slice(0,1200).some(line=>COUNTER_SECTION.test(line)))macroRiskPaths.add(p);
@@ -484,6 +730,7 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   // The ranking is a discovery hint, never a deduplication or source verdict.
   const subjectTerms=topicTerms(question).filter(t=>t.length>=4 && !/^[0-9]/.test(t) &&
     !issuers.includes(t) && !/^(?:HISTORICAL|ARCHIVE|RE-INGEST|UPDATE|LATEST|NEW|EVENT|TEST|VERIFY|SOURCE|CLAIM|NEWS|RESEARCH)$/.test(t));
+  for(const path of pool.keys())observer.observePath(path);
   const rank = [...pool].map(([path,boost])=>{
     const role=roleOf(path);
     const historical=historicalOnly(path,indexedMetadata(path));
@@ -493,7 +740,7 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
     const specificEventBonus=issuers.length && role==="research"
       ? Math.min(3,eventTitleMatches)*35:0;
     const macroBonus=macroScope && macroScopes.length ?
-      (macroScopes.some(scope=>explicitMacroScope(path,scope))?25:0) +
+      (macroScopes.some(scope=>matchesMacroScope(path,scope))?25:0) +
       (path.startsWith("10_Knowledge/Macro and Markets/")?25:0) +
       (macroSubjectPaths.has(path)?32:0) +
       (macroRiskPaths.has(path)?85:0):0;
@@ -524,7 +771,21 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
     ...macroScopes.map(scope=>rank.find(r=>macroCandidates.get(scope)?.includes(r.path)&&macroRiskPaths.has(r.path)&&!macroSubjectPaths.has(r.path))?.path)];
   const priority=[...new Set(reserve.filter((p):p is string=>!!p))];
   if(macroScope)rank.sort((a,b)=>(priority.includes(a.path)?priority.indexOf(a.path):priority.length)-(priority.includes(b.path)?priority.indexOf(b.path):priority.length));
+  // Keep one issuer-grounded historical analysis in the bounded role mix.
+  // Heading relevance/chronology still rank within the role; no issuer, intake,
+  // target path or financial conclusion is special-cased. No extra reads.
+  if(issuerScoped&&(focus==="earnings"||focus==="general")){
+    const historical=rank.find(r=>r.path.startsWith("10_Knowledge/Company Research/")&&
+      (canonicalReviews.has(r.path)||historicalSubjects.has(r.path)));
+    if(historical){rank.splice(rank.indexOf(historical),1);rank.unshift(historical);observer.observePath(historical.path,"historical_context_slot");}
+  }
   const items: Item[] = [];
+  const counterExcerptMissing=new Set<string>();
+  const pitAccepted=new Map<string,ReturnType<typeof receiptVersionAt>&{cutoff:string}>();
+  const pitHolds=new Map<string,PitReason>();
+  let pitReads=0;
+  const pitHold=(path:string,reason:PitReason)=>{pitHolds.set(path,reason);observer.observePath(path,reason);};
+  for(const scan of researchScans)for(const excluded of scan.pitExcluded??[])pitHold(excluded.path,excluded.reason);
   // Archived chat excerpts are a last resort and may repeat one issuer event.
   // Prefer current Thesis, original-source review and company evolution unless
   // the question explicitly asks to inspect archival history.
@@ -536,35 +797,92 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   const omitted: string[]=[];
   let historicalCount=0;
   const macroBackgroundCounts=new Map<string,number>();
+  const optionalFailures=new Map<string,OptionalHistoryFailure>();
   for (const row of rank) {
     // Company history and protected drafts must remain discoverable even when
     // derived from AI. Only raw archives / macro recaps share this fallback cap.
     const archivalSelection=row.role==="archive"||macroScope&&row.historical&&row.role==="research";
-    if (archivalSelection && (!allowArchived || !archivalRequested&&historicalCount>=1)) {omitted.push(row.path);continue;}
-    if (items.length>=maxNotes||remaining<250) {omitted.push(row.path);continue;}
-    const matchedMacroScopes=macroScopes.filter(scope=>explicitMacroScope(row.path,scope));
+    if (archivalSelection && (!allowArchived || !archivalRequested&&historicalCount>=1)) {observer.observePath(row.path,"explicit_scope_exclusion");omitted.push(row.path);continue;}
+    if (items.length>=maxNotes||remaining<250) {observer.observePath(row.path,items.length>=maxNotes?"note_budget":"excerpt_budget");omitted.push(row.path);continue;}
+    const matchedMacroScopes=macroScopes.filter(scope=>matchesMacroScope(row.path,scope));
     const background=macroScope&&macroSubjectRequested&&row.role!=="rules"&&!macroSubjectPaths.has(row.path)&&!macroRiskPaths.has(row.path);
-    if(background&&matchedMacroScopes.every(scope=>(macroBackgroundCounts.get(scope)||0)>=1)){omitted.push(row.path);continue;}
+    if(background&&matchedMacroScopes.every(scope=>(macroBackgroundCounts.get(scope)||0)>=1)){observer.observePath(row.path,"explicit_scope_exclusion");omitted.push(row.path);continue;}
     const n=roleCounts.get(row.role)||0;
-    if(n>=(quota[row.role]??4)){omitted.push(row.path);continue;}
+    if(n>=(quota[row.role]??4)){observer.observePath(row.path,"role_quota");omitted.push(row.path);continue;}
+    // Optional, unreceipted historical enrichment must pass scope readback
+    // BEFORE selected-evidence admission. A rejected candidate is visible in
+    // discovery/coverage, not misreported as a required operational failure.
+    // Canonical/receipt-bound paths and all existing required reads stay strict.
+    if(historyCutoff){
+      if(!isCanonicalResearchPath(row.path)&&!/^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/.test(row.path)){
+        pitHold(row.path,"pit_receipt_unverified");continue;
+      }
+      if(pitReads>=16){pitHold(row.path,"pit_read_limit");continue;}
+      pitReads++;
+    }
+    let optionalRaw:string|undefined;
+    if((historicalIssuerPaths.has(row.path)||jointSubjects.has(row.path))&&!canonicalReviews.has(row.path)&&!standalone.bindings.has(row.path)){
+      let rejection:OptionalHistoryFailure|undefined;
+      try{
+        // existsSync in the generic reader may hide EACCES as "not found".
+        // This metadata-only stat retains the native error without another read.
+        fs.statSync(resolveNotePath(row.path));
+        optionalRaw=readNote(row.path).content;
+        if(JSON.stringify(splitFrontmatter(optionalRaw).data)!==JSON.stringify(indexedMetadata(row.path)))rejection="optional_history_metadata_drift";
+      }catch(e){rejection=optionalHistoryReadError(e);}
+      if(rejection){optionalFailures.set(row.path,rejection);observer.observePath(row.path,"readback_failed");observer.observePath(row.path,rejection);continue;}
+    }
     try {
       observer.read("selection",row.path,()=>{
-        const raw=readNote(row.path).content;
+        const raw=optionalRaw??readNote(row.path).content;
         const current=splitFrontmatter(raw).data;
-        if(macroScope&&row.role!=="rules"&&!matchedMacroScopes.some(scope=>explicitMacroScope(row.path,scope,current)))throw Error("macro_scope_readback");
+        if(historyCutoff){
+          // No physical reread. Current indexed metadata/body and the exact
+          // server-receipted version must agree before eligibility is asserted.
+          const indexed=db().prepare("SELECT f.body FROM notes n JOIN notes_fts f ON f.rowid=n.rowid AND f.path=n.path WHERE n.path=?").get(row.path) as {body:string}|undefined;
+          if(JSON.stringify(current)!==JSON.stringify(indexedMetadata(row.path))||indexed?.body!==splitFrontmatter(raw).body)throw Error("pit_index_readback_mismatch");
+          let version:ReturnType<typeof receiptVersionAt>;
+          try{version=receiptVersionAt(row.path,raw);}catch(e){
+            if(!(e instanceof Error)||!["pit_receipt_unverified","create_receipt_unverified","receipt_store_missing"].includes(e.message))throw e;
+            pitHold(row.path,"pit_receipt_unverified");return;
+          }
+          if(Date.parse(version.knownAt)>Date.parse(historyCutoff)){pitHold(row.path,"pit_after_cutoff");return;}
+          const publication=publicationWindow(inspectCanonicalKnowledgeMetadata(row.path,current).publishedAt);
+          if(publication&&publication[0]>Date.parse(historyCutoff)){pitHold(row.path,"pit_publication_after_cutoff");return;}
+          pitAccepted.set(row.path,{...version,cutoff:historyCutoff});
+        }
+        const joint=jointSubjects.get(row.path);
+        if(joint){
+          const body=splitFrontmatter(raw).body;
+          // Reuse the existing selected read: each declared joint subject must
+          // occur literally in the physical body. Optional bytes/metadata were
+          // validated together above, with or without industry enrichment.
+          // Required paths retain strict readback. This is not semantic proof.
+          if(optionalRaw===undefined&&JSON.stringify(current)!==JSON.stringify(indexedMetadata(row.path)))throw Error("joint_scope_readback");
+          if(!joint.every(label=>new RegExp(`(^|[^\\p{L}\\p{N}])${label.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}(?=$|[^\\p{L}\\p{N}])`,"iu").test(body))){
+            observer.observePath(row.path,"joint_subject_unconfirmed");return;
+          }
+        }
+        if(macroScope&&row.role!=="rules"&&!matchedMacroScopes.some(scope=>matchesMacroScope(row.path,scope,current)))throw Error("macro_scope_readback");
         const sourceBinding=standalone.bindings.get(row.path);
         if(sourceBinding&&createHash("sha256").update(raw).digest("hex")!==sourceBinding.sourceSha256)throw Error("standalone_source_selection_changed");
         const original=sourceBinding?preservedSubmittedText(raw):null;
-        const excerpt=selectedLines(original??raw,searchTerms,Math.min(2000,remaining,macroScope?Math.floor(budget/Math.max(2,macroScopes.length*2)):2000),row.role);
+        // Allocation depends only on the requested budget, never the number of
+        // unselected discoveries (which must not spuriously change a witness).
+        let sourceOffset=0,lineOffset=0;
         if(original!==null){
-          const start=raw.indexOf(original,raw.indexOf("\n## User-supplied original language text\n\n"));
-          const offset=raw.slice(0,start).split("\n").length-1;
-          excerpt.line+=offset;
-          excerpt.excerpt=excerpt.excerpt.replace(/([Ss]ource lines )(\d+)-(\d+)/g,(_,label,a,b)=>label+(Number(a)+offset)+"-"+(Number(b)+offset));
+          const marker="\n## User-supplied original language text\n\n",at=raw.indexOf(marker)+marker.length;
+          const open=/^(\x60{3,})text\n/.exec(raw.slice(at));
+          if(!open)throw Error("source_excerpt_offset_unavailable");
+          sourceOffset=at+open[0].length;
+          if(raw.slice(sourceOffset,sourceOffset+original.length)!==original)throw Error("source_excerpt_offset_unavailable");
+          lineOffset=raw.slice(0,sourceOffset).split("\n").length-1;
         }
-        if(!excerpt.excerpt.trim()){omitted.push(row.path);return;}
-        const historical=canonicalReviews.get(row.path)?.legacy||row.historical||historicalOnly(row.path,splitFrontmatter(raw).data);
-        items.push({...(standalone.bindings.has(row.path)?{sourceBinding:standalone.bindings.get(row.path)}:{}),contentSha256:createHash("sha256").update(raw).digest("hex"),path:row.path,role:row.role,matchedMacroScopes:matchedMacroScopes.filter(scope=>explicitMacroScope(row.path,scope,current)),evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
+        const {counterEvidenceMissing,...excerpt}=selectedLines(original??raw,searchTerms,Math.min(2000,remaining,macroScope?Math.floor(budget/Math.max(2,macroScopes.length*2)):issuerScoped?Math.max(700,Math.floor(budget/maxNotes)):2000),row.role,issuerScoped,sourceOffset,lineOffset);
+        if(counterEvidenceMissing)counterExcerptMissing.add(row.path);
+        if(!excerpt.excerpt.trim()){observer.observePath(row.path,"excerpt_budget");omitted.push(row.path);return;}
+        const historical=titleSubjectPaths.has(row.path)||historicalIssuerPaths.has(row.path)||canonicalReviews.get(row.path)?.legacy||row.historical||historicalOnly(row.path,splitFrontmatter(raw).data);
+        items.push({...(historyCutoff?{pointInTime:pitAccepted.get(row.path)}:{}),...(standalone.bindings.has(row.path)?{sourceBinding:standalone.bindings.get(row.path)}:{}),contentSha256:createHash("sha256").update(raw).digest("hex"),path:row.path,role:row.role,matchedMacroScopes:matchedMacroScopes.filter(scope=>matchesMacroScope(row.path,scope,current)),evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
         if(archivalSelection)historicalCount++;
         if(background)for(const scope of matchedMacroScopes)macroBackgroundCounts.set(scope,(macroBackgroundCounts.get(scope)||0)+1);
         roleCounts.set(row.role,n+1);remaining-=excerpt.excerpt.length;
@@ -572,8 +890,16 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
     } catch {/* Operational failure is retained in retrieval, never a quota omission. */}
   }
   const roles=new Set(items.map(x=>x.role));
-  const retrieval=observer.snapshot({question,issuers:requestedIssuers,intakeId:req.intakeId,industry:req.industry,focus,maxNotes,maxChars:budget},items.length,omitted.length);
+  const retrieval=observer.snapshot({...(historyCutoff?{historyCutoff}:{}),...(verifiedMacro?{macroScope:verifiedMacro}:{}),question,issuers:requestedIssuers,intakeId:req.intakeId,industry:req.industry,focus,maxNotes,maxChars:budget},items.length,omitted.length);
   const incomplete=[...absent,...limits];
+  if(counterExcerptMissing.size)incomplete.push("Counter-evidence section found but readable evidence is missing from the bounded excerpt: "+[...counterExcerptMissing].join(", "));
+  if(historyCutoff)incomplete.push("Point-in-time exact-current-version retrieval only; no older version reconstruction or complete historical corpus proven. Publication remains a declaration; server known-at receipt is not publisher or semantic verification.");
+  if(pitHolds.size)incomplete.push("Point-in-time eligibility HOLD: "+[...new Set(pitHolds.values())].join(", ")+"; excluded paths remain incomplete historical coverage.");
+  const questionTruncation=observer.questionTruncation();
+  const questionReasons=questionTruncation.queries.length?["question_term_fts_window_truncated","unobserved_candidates_unknown"]:[];
+  if(questionReasons.length)incomplete.push("Question-term FTS window truncated (limit 30): "+questionTruncation.queries.join(", ")+". Unobserved candidate paths/count are unknown; omitted history may include counter-evidence. No per-path absence or complete recall established.");
+  for(const reason of new Set(optionalFailures.values()))incomplete.push("Optional historical readback HOLD: "+reason+"; see discovery paths (bounded/truncation flagged). Required retrieval status is separate; affected historical coverage remains incomplete.");
+  if(relatedHistory.size)incomplete.push("Related multi-issuer history retained as bounded metadata-only pointers, not selected evidence or primary issuer attribution; inspect exact notes before analysis.");
   if(retrieval.status==="operational_hold")incomplete.push("Operational retrieval failure: see retrieval counts and bounded failure records.");
   for(const scan of researchScans)for(const review of scan.reviews)if(review.bundle.status==="HOLD")
     incomplete.push(`${review.intakeId}: Source/Review context binding HOLD (${review.bundle.reason}); no alternate Source inferred.`);
@@ -588,13 +914,18 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
     for(const role of missingRoles)incomplete.push(`${r.requested}: no ${role} selected for this issuer scope.`);
     return {requested:r.requested,contextKey:r.contextKey,selectedRoles,missingRoles};
   });
-  const coverage=(paths:string[],complete:boolean,reasons:string[]):Coverage=>({
-    status:paths.length?"FOUND":complete?"NOT_FOUND":"SCAN_INCOMPLETE",paths,scanComplete:complete,reasons:[...new Set(reasons)]
+  const coverage=(paths:string[],complete:boolean,reasons:string[],canonicalScope=false):Coverage=>({
+    // Only the completed exact canonical identity scan supports this explicit
+    // absence finding; never extend it to all historical/macro evidence.
+    ...(canonicalScope?{finding:paths.length?"FOUND" as const:complete?"NOT_FOUND_WITHIN_VERIFIED_SCOPE" as const:"SCAN_INCOMPLETE" as const}:{}),
+    status:paths.length?"FOUND":complete?"NOT_FOUND":"SCAN_INCOMPLETE",paths,scanComplete:complete,
+    reasons:[...new Set([...reasons,...(canonicalScope&&!paths.length&&complete?["no_candidate_in_completed_scope"]:[])])]
   });
   const macroCoverage:MacroCoverage[]=macroScopes.map(scope=>{
     const selected=items.filter(item=>item.matchedMacroScopes.includes(scope));
     const paths=macroCandidates.get(scope)??[];
-    const reasons=[...(macroReadReasons.get(scope)??[]),...(limits.size||failed.length?["retrieval_window_incomplete"]:[]),
+    const reasons=[...questionReasons,...(macroReadReasons.get(scope)??[]),...(limits.size||failed.length?["retrieval_window_incomplete"]:[]),
+      ...(selected.some(x=>counterExcerptMissing.has(x.path))?["counter_evidence_excerpt_missing"]:[]),
       ...(paths.some(p=>!selected.some(x=>x.path===p))||selected.some(x=>x.truncated)?["excerpt_or_selection_incomplete"]:[])];
     const complete=!reasons.length;
     return {scope,subjectEvidence:coverage(selected.filter(x=>macroSubjectByScope.get(scope)?.has(x.path)).map(x=>x.path),complete,reasons),
@@ -603,32 +934,41 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   const researchCoverage:ResearchCoverage[]=issuerResolution.map(r=>{
     const key=r.contextKey??scopeKeys(r)[0];
     const scan=researchScans.find(s=>s.contextKey===key);
-    const scopedItems=items.filter(x=>scan?.reviews.some(review=>review.path===x.path)||namedIssuers(x.path).some(t=>scopeKeys(r).map(k=>k.toUpperCase()).includes(t)));
-    const selectedReviews=scan?.reviews.filter(review=>!review.legacy&&items.some(item=>item.path===review.path))??[];
-    const omittedReviews=scan?.reviews.some(review=>!items.some(item=>item.path===review.path))??false;
-    const canonicalComplete=!!r.contextKey&&!!scan?.complete&&!omittedReviews;
-    const reasons=[...(scan?.reasons??[]),...(!r.contextKey?["issuer_scope_unresolved"]:[]),...(omittedReviews?["selection_budget"]:[])];
+    const scopedItems=items.filter(x=>scan?.reviews.some(review=>review.path===x.path)||historicalSubjects.get(x.path)?.includes(key)||namedIssuers(x.path).some(t=>scopeKeys(r).map(k=>k.toUpperCase()).includes(t)));
+    // PIT coverage must use the same exact-version admission as selected text.
+    // Unverified/unread/future discoveries remain unknown, never comparator
+    // anchors. The bounded PIT scan still cannot certify complete history.
+    const eligibleReviews=scan?.reviews.filter(review=>!historyCutoff||pitAccepted.has(review.path))??[];
+    const selectedReviews=eligibleReviews.filter(review=>!review.legacy&&items.some(item=>item.path===review.path));
+    const omittedReviews=eligibleReviews.some(review=>!items.some(item=>item.path===review.path));
+    const canonicalComplete=!!r.contextKey&&!!scan?.complete&&!omittedReviews&&!historyCutoff;
+    const reasons=[...(historyCutoff?["point_in_time_bounded_versions"]:[]),...(scan?.reasons??[]),...(!r.contextKey?["issuer_scope_unresolved"]:[]),...(omittedReviews?["selection_budget"]:[])];
     // Counter-evidence is an excerpt/heading witness, not a semantic claim
     // that no contrary evidence exists anywhere in the Vault or externally.
-    const candidatePaths=rank.filter(x=>namedIssuers(x.path).some(t=>scopeKeys(r).map(k=>k.toUpperCase()).includes(t))).map(x=>x.path);
+    const candidatePaths=rank.filter(x=>(!historyCutoff||pitAccepted.has(x.path))&&(historicalSubjects.get(x.path)?.includes(key)||namedIssuers(x.path).some(t=>scopeKeys(r).map(k=>k.toUpperCase()).includes(t)))).map(x=>x.path);
     const excerptIncomplete=candidatePaths.some(p=>!scopedItems.some(x=>x.path===p))||scopedItems.some(x=>x.truncated);
-    const contextComplete=canonicalComplete&&!limits.size&&!failed.length&&!excerptIncomplete;
-    const contextReasons=[...reasons,...(limits.size||failed.length?["retrieval_window_incomplete"]:[]),...(excerptIncomplete?["excerpt_or_selection_incomplete"]:[])];
-    const latest=scan?.reviews.find(review=>scan.latestReviewPaths.includes(review.path));
+    const optionalReasons=[...new Set([...optionalFailures].filter(([path])=>candidatePaths.includes(path)).map(([,reason])=>reason))];
+    const related=[...relatedHistory.values()].some(scopes=>scopes.includes(key));
+    const contextComplete=canonicalComplete&&!limits.size&&!failed.length&&!excerptIncomplete&&!optionalReasons.length&&!related;
+    const contextReasons=[...reasons,...questionReasons,...optionalReasons,...(related?["related_history_not_selected"]:[]),...(limits.size||failed.length?["retrieval_window_incomplete"]:[]),...(excerptIncomplete?["excerpt_or_selection_incomplete"]:[]),
+      ...(scopedItems.some(x=>counterExcerptMissing.has(x.path))?["counter_evidence_excerpt_missing"]:[])];
+    const windows=eligibleReviews.map(review=>publicationWindow(review.publishedAt));
+    const eligibleLatest=eligibleReviews.filter((_,i)=>windows[i]&&windows.every((w,j)=>i===j||w&&windows[i]![0]>w[1]));
+    const latest=historyCutoff?(eligibleLatest.length===1?eligibleLatest[0]:undefined):scan?.reviews.find(review=>scan.latestReviewPaths.includes(review.path));
     const latestWindow=publicationWindow(latest?.publishedAt??null);
     const earlier=scopedItems.filter(item=>{
       if(item.role!=="research"||item.path===latest?.path)return false;
       const window=publicationWindow(item.schemaCompatibility.publishedAt);
       return latestWindow&&window&&window[1]<latestWindow[0];
     }).map(x=>x.path);
-    const orderKnown=scan?.chronology==="LATEST_BY_DECLARED_PUBLICATION";
+    const orderKnown=historyCutoff?eligibleLatest.length===1:scan?.chronology==="LATEST_BY_DECLARED_PUBLICATION";
     const undatedComparator=scopedItems.some(item=>item.role==="research"&&item.path!==latest?.path&&!publicationWindow(item.schemaCompatibility.publishedAt));
     return {requested:r.requested,contextKey:r.contextKey,scope:"bounded_issuer_research_candidates",
-      canonicalReview:coverage(selectedReviews.map(x=>x.path),canonicalComplete,reasons),
+      canonicalReview:{...coverage(selectedReviews.map(x=>x.path),canonicalComplete,reasons,true),scopeDefinition:scan?.scopeDefinition??null},
       counterEvidence:coverage(scopedItems.filter(x=>x.counterEvidenceExcerptIncluded).map(x=>x.path),contextComplete,contextReasons),
       historicalComparator:coverage(earlier,contextComplete&&!!orderKnown&&!undatedComparator,
         [...contextReasons,...(!orderKnown||undatedComparator?["publication_order_unresolved"]:[])]),
-      chronology:scan?.chronology??"SCAN_INCOMPLETE",latestReviewPaths:scan?.latestReviewPaths??[]};
+      chronology:historyCutoff?"SCAN_INCOMPLETE":scan?.chronology??"SCAN_INCOMPLETE",latestReviewPaths:historyCutoff?[]:scan?.latestReviewPaths??[]};
   });
   if(issuerScoped){
     if(!roles.has("thesis"))incomplete.push("No Current Thesis selected; owner-endorsed thesis is unknown.");
@@ -649,8 +989,17 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   // insertion into the Judge's selected-history witness. Missing ≠ nonexistent.
   const fallback=new Map<string,ResearchFallback["candidates"][number]>();
   const remember=(candidate:ResearchFallback["candidates"][number])=>{
-    if(!items.some(i=>i.path===candidate.path))fallback.set(candidate.path,candidate);
+    if(!items.some(i=>i.path===candidate.path))fallback.set(candidate.path,historyCutoff?
+      {...candidate,sha256:null,receiptId:null,bindingStatus:"HOLD",reason:"pit_not_selected_or_unverified",accessStatus:"AVAILABLE_NOT_RETRIEVED",metadataBasis:"index_only_unverified"}:candidate);
   };
+  // Prioritize unread canonical diagnostics, then related historical pointers.
+  // Same 12-entry bound; overflow is explicit, never an admission/read bypass.
+  for(const c of deferredReviews.values())remember({path:c.path,intakeId:c.intakeId,kind:"canonical_review",
+    sha256:null,receiptId:null,bindingStatus:"HOLD",researchTrust:null,eventDate:null,publicationDate:c.publishedAt,
+    reason:c.reason,accessStatus:"AVAILABLE_NOT_RETRIEVED",metadataBasis:"index_only_unverified"});
+  for(const path of relatedHistory.keys())remember({path,intakeId:null,kind:"historical_related",
+    sha256:null,receiptId:null,bindingStatus:"HOLD",researchTrust:null,eventDate:null,publicationDate:null,
+    reason:"declared_multi_issuer_relation",issuerAttribution:"not_established",accessStatus:"AVAILABLE_NOT_RETRIEVED",metadataBasis:"index_only_unverified"});
   for(const scan of researchScans)for(const {bundle:b} of scan.reviews){
     remember({path:b.reviewPath,intakeId:b.intakeId,kind:"canonical_review",sha256:b.reviewSha256,receiptId:b.reviewReceiptId,
       bindingStatus:b.status==="BOUND_SOURCE_REVIEW"?"receipt_bound":"HOLD",researchTrust:b.researchTrust,
@@ -665,10 +1014,16 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
     eventDate:b.eventDate,publicationDate:b.publicationDate,reason:"outside_selected_context"});
   const researchFallback:ResearchFallback={status:"bounded_discovery_not_selected_evidence",truncated:fallback.size>12,
     candidates:[...fallback.values()].slice(0,12),instructions:"Read exact paths/intakeId before reasoning; these candidates were NOT selected or semantically assessed. Publication order may be unknown. Receipts prove persistence, not event equivalence, primary truth, independence or comparator eligibility. Any changed assessment requires a fresh packet."};
+  const discovery=observer.finish(items,researchFallback);
+  // Ledger observability limitations stay in discovery, not pack-wide gaps.
+  // Specific failed reads, missing roles and bounded evidence gaps remain above.
   return {
-    researchFallback,
-    standaloneSources:standalone.scans,retrieval,status:"retrieval_only_not_verified",question,issuers:requestedIssuers,issuerResolution,issuerCoverage,identityHoldDiscovery,macroCoverage,researchCoverage,
-    contextBundles:researchScans.flatMap(scan=>scan.reviews.map(review=>review.bundle)),focus,industry:req.industry?.slice(0,140)||null,
+    discovery,researchFallback,
+    standaloneSources:historyCutoff?standalone.scans.map(scan=>({...scan,paths:scan.paths.filter(p=>pitAccepted.has(p)),complete:false,reasons:[...scan.reasons,"point_in_time_bounded_versions"]})):standalone.scans,retrieval,status:"retrieval_only_not_verified",question,issuers:requestedIssuers,issuerResolution,issuerCoverage,identityHoldDiscovery,macroCoverage,researchCoverage,
+    contextBundles:researchScans.flatMap(scan=>scan.reviews.map(review=>{
+      const b=review.bundle;return historyCutoff&&(!pitAccepted.has(b.reviewPath)||!b.sourcePath||!pitAccepted.has(b.sourcePath))?
+        {...b,status:"HOLD" as const,reason:"pit_not_selected_or_unverified"}:b;
+    })),focus,industry:req.industry?.slice(0,140)||null,
     items,considered:rank.length,selected:items.length,excerptChars:budget-remaining,
     incomplete,omitted:omitted.slice(0,15),
     warnings:[

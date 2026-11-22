@@ -8,6 +8,7 @@ import {appearanceSchema,inspectIntakeAppearances} from "../vault/intake-appeara
 import { registerIntakeTools } from "./intake-tools";
 import { registerPriceTools } from "./price-tools";
 import { buildInvestmentContextPack, type Focus } from "../vault/investment-context";
+import {historyCutoffSchema} from "../vault/investment-retrieval-coverage";
 import { auditVaultKnowledgeIndex } from "../vault/investment-knowledge-inventory";
 import { reviewInvestmentClaim, type Domain } from "../vault/investment-claim-review";
 import { hybridClaimPreview, type HybridInput } from "../vault/investment-hybrid-readonly";
@@ -380,6 +381,7 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
       description: "Read-only bounded investment retrieval across Obsidian. Prioritizes Current Thesis, Evidence Register, Company Evolution, issuer evidence, industry TAM and counter-evidence over repeated ChatGPT archives. Returns short path/line excerpts, missing evidence and honest coverage limits. Lexical only, not a semantic/full-vault guarantee. Never edits the Vault.",
       inputSchema: {
         question: z.string().min(3).max(1200).describe("Investment question to retrieve bounded, dated historical evidence for"),
+        historyCutoff: historyCutoffSchema.optional().describe("Optional exact UTC as-of instant (YYYY-MM-DDTHH:mm:ss.sssZ). Only current versions verified against server receipts at/before this cutoff are evidence. Unknown or later versions are HOLD; no mtime substitution or reconstruction of older bytes."),
         issuers: z.array(z.string().min(1).max(12)).max(6).optional().describe("Up to six company tickers or issuer identifiers; omit for industry or macro questions"),
         intakeId: z.string().regex(/^IN-[A-F0-9]{16}$/).optional().describe("Optional exact intake ID within issuer scope; preserves separate Source/Review bundles without inferring a shared economic event"),
         industry: z.string().max(140).optional().describe("Industry or thematic context, such as optical networking or banking"),
@@ -388,10 +390,10 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         maxChars: z.number().int().min(4500).max(18000).optional().describe("Maximum excerpt characters returned, from 4500 to 18000"),
       },
     },
-    safe(({question,issuers,intakeId,industry,focus,maxNotes,maxChars}: {
-      question:string;issuers?:string[];intakeId?:string;industry?:string;focus?:Focus;maxNotes?:number;maxChars?:number
+    safe(({question,historyCutoff,issuers,intakeId,industry,focus,maxNotes,maxChars}: {
+      question:string;historyCutoff?:string;issuers?:string[];intakeId?:string;industry?:string;focus?:Focus;maxNotes?:number;maxChars?:number
     }) => {
-      const pack = buildInvestmentContextPack({question,issuers,intakeId,industry,focus,maxNotes,maxChars});
+      const pack = buildInvestmentContextPack({question,historyCutoff,issuers,intakeId,industry,focus,maxNotes,maxChars});
       return json(withBoundary({...pack,items:fenceEach(pack.items,"excerpt")}));
     }),
   );
@@ -506,13 +508,13 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
     {
       title:"Preview M5.6 source-event relation proposal (read-only)",
       annotations:READ,
-      description:"M5.6 read-only guarded proposal: compare two existing indexed Source Receipts and an existing non-protected Canonical Review, require same event/publication dates and publisher family plus caller-supplied comparison rationale. Returns only an append-section Safe Edit recipe for human diff review. Never declares semantic duplication independently, never writes or changes Thesis/Evidence/Timeline/Portfolio.",
+      description:"M5.6 read-only guarded proposal: compare two existing indexed Source Receipts and an existing non-protected Canonical Review, require same event/publication dates and publisher family plus caller-supplied comparison rationale. Returns only a partial recipe for the dedicated Canonical Review revision route (complete analyst assessment + sealed Source-event assessment, then prepare_canonical_review_revision, authenticated dashboard approval and apply_canonical_review_revision on the Safe Edit server); never a generic Safe Edit append. Company-IN Reviews get the V1 recipe; server-receipted Industry-IN/Macro-IN Draft Reviews get the M56-P1 V2 subject recipe (selectorVersion M56-REVIEW-SELECTOR-2: the analyst supplies the Industry Hub topic/period or the macro geography/topic/period/role/vintage from exact original-Source quotes; no issuer is created); historical non-IN and other scopes return HOLD. The extra Source is not independent confirmation. Never declares semantic duplication independently, never writes or changes Thesis/Evidence/Timeline/Portfolio.",
       inputSchema:{
         reviewPath:z.string().min(1).max(300).describe("Existing non-protected Canonical Research Review path; original Source must be linked already"),
         additionalSourcePath:z.string().min(1).max(300).describe("Existing second attributed Source Intake receipt that may cover the same dated event"),
         eventAnchor:z.string().regex(/^[a-z0-9][a-z0-9-]{7,119}$/).describe("Caller-declared semantic event slug, such as sk-hynix-solidigm-ipo-cancellation; not independent event verification"),
         comparisonBasis:z.string().min(40).max(1000).describe("Evidence-based human-readable passage/claim comparison supporting a candidate same-event relation, without inflating independent evidence"),
-        linkedOnDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Append receipt date YYYY-MM-DD; never substitute source event date"),
+        linkedOnDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Revision assessment date YYYY-MM-DD (reviewDate of the dedicated revision); never substitute source event date"),
       }
     },
     safe((args)=>json(withBoundary(planDuplicateSourceLinkM56(args)))),

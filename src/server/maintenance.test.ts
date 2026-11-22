@@ -166,7 +166,7 @@ describe("request lifecycle", () => {
 });
 
 describe("MCP tool calls outlive their HTTP stream", () => {
-  it("a disconnected client's tool is waited for, writes while draining, and nothing can write after quiescence", async () => {
+  it("a disconnected client's tool settles but cannot launch a late DRAINING business write", async () => {
     const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
     const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
     const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
@@ -177,13 +177,17 @@ describe("MCP tool calls outlive their HTTP stream", () => {
     db().prepare("INSERT INTO settings (key,value) VALUES ('seed','1')").run();
     let release = () => {};
     let started = () => {};
+    let denied = false, finished = false;
     const began = new Promise<void>((r) => (started = r));
     const server = trackToolExecution(new McpServer({ name: "t", version: "1" }));
     server.registerTool("slow_write", { inputSchema: { key: z.string() } }, async ({ key }) => {
       started();
       await new Promise<void>((r) => (release = r));
-      db().prepare("INSERT INTO settings (key,value) VALUES (?,'1')").run(key);
-      return { content: [{ type: "text" as const, text: "ok" }] };
+      try {
+        db().prepare("INSERT INTO settings (key,value) VALUES (?,'1')").run(key);
+        return { content: [{ type: "text" as const, text: "ok" }] };
+      } catch (error) { denied = /Maintenance/.test(String(error)); throw error; }
+      finally { finished = true; }
     });
     const client = new Client({ name: "c", version: "1" });
     const [a, b] = InMemoryTransport.createLinkedPair();
@@ -199,7 +203,15 @@ describe("MCP tool calls outlive their HTTP stream", () => {
     const outcome = await settled;
     expect(outcome.state).toBe("active");
     expect(outcome.drain).toMatchObject({ pendingTools: 0, dbConnections: 1, dbFenced: 1 });
-    expect(db().prepare("SELECT value FROM settings WHERE key='during-drain'").get()).toBeTruthy();
+    expect(denied).toBe(true);
+    expect(finished).toBe(true);
+    expect(() => db()).toThrow(/Maintenance/);
+    const { default: Database } = await import("better-sqlite3");
+    const reader = new Database(dbFile(), { readonly: true, fileMustExist: true });
+    try {
+      expect(reader.prepare("SELECT value FROM settings WHERE key='during-drain'").get()).toBeUndefined();
+      expect(reader.prepare("SELECT value FROM settings WHERE key='seed'").get()).toEqual({ value: "1" });
+    } finally { reader.close(); }
     const after = hash(dbFile());
     expect(() => db().prepare("INSERT INTO settings (key,value) VALUES ('late','1')").run()).toThrow();
     await expect((server as unknown as { executeToolHandler: (...a: unknown[]) => Promise<unknown> })
@@ -215,16 +227,25 @@ describe("MCP tool calls outlive their HTTP stream", () => {
 describe("drain", () => {
   it("fences every DB connection in the process, including another bundle's", async () => {
     const a = await import("./db");
-    a.db();
+    const first = a.db();
+    first.prepare("INSERT INTO settings (key,value) VALUES ('global-owner','1')").run();
     vi.resetModules();
     const b = await import("./db");
-    b.db();
+    const second = b.db();
+    expect(second).toBe(first);
     const d = await import("./maintenance-drain");
     await serving();
     const outcome = await d.enterMaintenanceAndDrain({ timeoutMs: 1_000 });
-    expect(outcome).toMatchObject({ state: "active", drain: { dbConnections: 2, dbFenced: 2 } });
-    expect(Number(a.db().pragma("query_only", { simple: true }))).toBe(1);
-    expect(Number(b.db().pragma("query_only", { simple: true }))).toBe(1);
+    expect(outcome).toMatchObject({ state: "active", drain: { dbConnections: 1, dbFenced: 1 } });
+    expect(() => a.db()).toThrow(/Maintenance/);
+    expect(() => b.db()).toThrow(/Maintenance/);
+    expect(() => first.prepare("INSERT INTO settings (key,value) VALUES ('late-global','1')").run()).toThrow();
+    const { default: Database } = await import("better-sqlite3");
+    const reader = new Database(dbFile(), { readonly: true, fileMustExist: true });
+    try {
+      expect(reader.prepare("SELECT value FROM settings WHERE key='global-owner'").get()).toEqual({ value: "1" });
+      expect(reader.prepare("SELECT value FROM settings WHERE key='late-global'").get()).toBeUndefined();
+    } finally { reader.close(); }
   });
   it("excludes the admin entry by identity and reports what it waited for", async () => {
     const d = await import("./maintenance-drain");

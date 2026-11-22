@@ -8,6 +8,7 @@ import {createHash} from "node:crypto";
 import crypto from "node:crypto";
 import type {WritebackInput} from "../vault/investment-writeback-router";
 import type {IntakeClaim} from "../vault/canonical-claims";
+import type {ResearchCoverage} from "../vault/investment-context";
 
 // Preserve the accepted mechanical authority fixtures; current RISK-1 policy
 // is exercised WITHOUT this oracle in risk-draft-admission.test.ts.
@@ -86,7 +87,7 @@ describe("RI001 general persistence convergence",()=>{
     try{retry=await prepare(data);}catch(e){error=e;}
     const written=[];
     if(retry)for(const t of retry.previews){
-      engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor);
+      engine.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor);
       if(t.kind!=="source_intake")written.push(t.kind);
     }
     expect(written).toEqual([]);expect(String(error)).toContain("research_judge_revoked_envelope_hold");
@@ -114,7 +115,24 @@ describe("RI001 general persistence convergence",()=>{
     const saved=await apply(held,await prepare(held)),sourceBytes=fs.readFileSync(path.join(vault,saved.steps[0].path)),sourceReceipt=(await import("../safe-edit/engine")).status(saved.steps[0].receiptKey,actor).receipt;
     expect(saved.receipts).toHaveLength(1);vi.setSystemTime(Date.now()+1000);
     const fresh=await judged({...input,appearance}),p=await prepare(fresh),gates=await import("../safe-edit/research-judge-gate"),gate=gates.currentJudgeGate(p.planId);
-    expect(fresh.researchJudge.packet.digest).toBe(data.researchJudge.packet.digest);
+    const judge=await import("../vault/research-judge");
+    const originalBody=judge.verifyResearchJudgePacket(data,data.researchJudge,actor),freshBody=judge.verifyResearchJudgePacket(fresh,fresh.researchJudge,actor);
+    const originalCoverage=originalBody.coverage.researchCoverage as ResearchCoverage[];
+    expect(originalCoverage).toHaveLength(1);
+    expect(originalCoverage[0].canonicalReview.scopeDefinition?.excludedPaths).toEqual([]);
+    // The receipted Source is now an exact self-write exclusion. This is the
+    // ONLY permitted body delta; never strip it from the authenticated packet.
+    const expectedBody=structuredClone(originalBody);
+    (expectedBody.coverage.researchCoverage as ResearchCoverage[])[0].canonicalReview.scopeDefinition!.excludedPaths=[saved.steps[0].path];
+    expect(freshBody).toEqual(expectedBody);
+    for(const packet of [data.researchJudge.packet,fresh.researchJudge.packet]){
+      expect(packet.digest).toBe(sha(packet.body));
+      expect(packet.packetId).toBe("RJP-"+packet.digest.slice(0,32).toUpperCase());
+      expect(packet.actorLabelSha256).toBe(sha(actor));
+    }
+    expect(fresh.researchJudge.packet.digest).not.toBe(data.researchJudge.packet.digest);
+    expect(fresh.researchJudge.packet.issuedAt).toBeGreaterThan(data.researchJudge.packet.issuedAt);
+    expect(gate).toMatchObject({actor,packetDigest:fresh.researchJudge.packet.digest,scopeWitness:freshBody.scopeWitness});
     expect(fresh.researchJudge.result.packetEnvelopeDigest).not.toBe(data.researchJudge.result.packetEnvelopeDigest);
     expect(p.researchJudge).toMatchObject({decision:"PASS",semanticTruthVerified:false,primaryAuthority:false});
     await prepare(held);expect(gates.currentJudgeGate(p.planId)).toEqual(gate);
@@ -215,13 +233,13 @@ describe("RI001 general persistence convergence",()=>{
   it("F-1 matching HOLD expires PASS before unrecorded appearance rejection and generic writes",async()=>{
     const data=await judged({...input,appearance}),p=await prepare(data),engine=await import("../safe-edit/engine");
     const source=p.previews.find(x=>x.kind==="source_intake")!;
-    engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    engine.applyCanonicalStep({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
     const held=structuredClone(data);held.researchJudge.result.claims[1].verdict="HOLD";
     held.appearance={...appearance,key:"unrecorded-occurrence"};
     await expect(apply(held,{...p,previews:[]})).rejects.toThrow();
     const written=[];
     for(const token of p.previews.filter(x=>x.kind!=="source_intake"))try{
-      engine.apply({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor);written.push(token.kind);
+      engine.applyCanonicalStep({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor);written.push(token.kind);
     }catch{/* Expected denial; assert both gate and physical state below. */}
     expect(written).toEqual([]);
     expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)).toMatchObject({decision:"HOLD",expiresAt:0});
@@ -286,7 +304,7 @@ describe("RI001 general persistence convergence",()=>{
   it.each(withdrawalCases)("F-1 $verdict/$fault, Source written=$sourceWritten: revoke before rejection; zero non-Source writes",async({fault,sourceWritten,verdict})=>{
     const data=await judged({...input,appearance}),p=await prepare(data),engine=await import("../safe-edit/engine"),gates=await import("../safe-edit/research-judge-gate");
     const source=p.previews.find(x=>x.kind==="source_intake")!,authorization=(t:typeof source)=>({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash});
-    if(sourceWritten)engine.apply(authorization(source),actor);
+    if(sourceWritten)engine.applyCanonicalStep(authorization(source),actor);
     const sourceReceipt=sourceWritten?engine.status(source.operationId,actor).receipt:null,originalGate=gates.currentJudgeGate(p.planId)!;
     const held=structuredClone(data);held.researchJudge.result.review.verdict=verdict;
     if(fault==="unrecorded")held.appearance={...appearance,key:"unrecorded"};
@@ -309,12 +327,12 @@ describe("RI001 general persistence convergence",()=>{
       expect(rejected).toBe(fault!=="matching");
       expect(gates.currentJudgeGate(p.planId)).toMatchObject({actor,decision:verdict,expiresAt:0,packetDigest:originalGate.packetDigest,targets:originalGate.targets});
       for(const token of p.previews.filter(x=>x.kind!=="source_intake")){
-        expect(()=>engine.apply(authorization(token),actor)).toThrow(/research_judge/);
+        expect(()=>engine.applyCanonicalStep(authorization(token),actor)).toThrow(/research_judge/);
         const row=sql.prepare("SELECT payload FROM safe_edit_operations WHERE id=?").get(token.operationId) as {payload:string};
-        expect(()=>engine.preview(JSON.parse(row.payload),actor)).toThrow(/research_judge/);
+        expect(()=>engine.preview(JSON.parse(row.payload),actor)).toThrow(/canonical_operation_namespace_reserved/);
         expect(fs.existsSync(path.join(vault,token.path))).toBe(false);
       }
-      if(!fs.existsSync(path.join(vault,source.path)))engine.apply(authorization(source),actor);
+      if(!fs.existsSync(path.join(vault,source.path)))engine.applyCanonicalStep(authorization(source),actor);
       expect(fs.readFileSync(path.join(vault,source.path),"utf8")).toContain(excerpt);
       expect((await rows()).filter((r:any)=>r.status==="written")).toHaveLength(1);
       if(sourceReceipt)expect(engine.status(source.operationId,actor).receipt).toEqual(sourceReceipt);
@@ -363,12 +381,19 @@ describe("RI001 general persistence convergence",()=>{
         arguments:entry==="prepare"?held:{input:held,planId:p.planId,authorizations:[]}});
       expect(result.isError).toBe(true);
       expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)).toMatchObject({decision:"FAIL",expiresAt:0});
+      // WP2 A02: the public generic route refuses every canonical token; the dedicated
+      // kernel route keeps the FAIL withdrawal for non-Source and preserves the Source.
+      const engine=await import("../safe-edit/engine");
       for(const t of p.previews.filter(x=>x.kind!=="source_intake")){
-        expect((await client.callTool({name:"apply_edit",arguments:{operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash}})).isError).toBe(true);
+        const generic=await client.callTool({name:"apply_edit",arguments:{operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash}});
+        expect(generic.isError).toBe(true);expect(JSON.stringify(generic)).toContain("canonical_route_required");
+        expect(()=>engine.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
         expect(fs.existsSync(path.join(vault,t.path))).toBe(false);
       }
       const source=p.previews.find(x=>x.kind==="source_intake")!;
-      expect((await client.callTool({name:"apply_edit",arguments:{operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash}})).isError).not.toBe(true);
+      const generic=await client.callTool({name:"apply_edit",arguments:{operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash}});
+      expect(generic.isError).toBe(true);expect(JSON.stringify(generic)).toContain("canonical_route_required");
+      expect(engine.applyCanonicalStep({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor).status).toBe("written");
       expect((await rows()).filter((r:any)=>r.status==="written")).toHaveLength(1);
       expect((await import("../maintenance")).pendingWork().count).toBe(0);
     }finally{await client.close();await server.close();}
@@ -399,7 +424,7 @@ describe("RI001 general persistence convergence",()=>{
       return statement;
     });
     const token=p.previews.find(s=>s.kind==="structured_claim")!;
-    expect(()=>(importedEngine.apply({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor))).toThrow(/admission_binding/);
+    expect(()=>(importedEngine.applyCanonicalStep({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor))).toThrow(/admission_binding/);
     spy.mockRestore();
   });
   it.each(["appearance","planner"])("F-1 late %s verification failure returns actual receipts and explicit HOLD",async fault=>{

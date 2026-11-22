@@ -5,6 +5,7 @@ import path from "node:path";
 import {createHash} from "node:crypto";
 import type {WritebackInput,WritebackPlan} from "./investment-writeback-router";
 import type {DocumentArchiveInput,DocumentSnapshot} from "../research-source-archive";
+import {kernelCanonicalCreate} from "../../../tests/source-event-fixture";
 
 vi.mock("../safe-edit/sync",()=>({withPausedSync:async<T>(run:()=>T)=>run()}));
 
@@ -57,16 +58,16 @@ async function capture(delta:Partial<DocumentArchiveInput>={}){
 const blob=(s:DocumentSnapshot)=>path.join(root,"source-archive","blobs",s.sha256.slice(0,2),s.sha256+".bin");
 async function route(data:WritebackInput=input){return (await import("./investment-writeback-router")).planInvestmentWriteback(data);}
 async function applyRecipe(plan:WritebackPlan){
-  const {preview,apply}=await import("../safe-edit/engine");
-  const receipts=[];
-  for(const step of plan.safeEditWorkflow!.steps){
-    if(!step.safeEditRequest)continue;
-    const p=preview(step.safeEditRequest,"oauth:p0-provenance-fixture");
-    const r=apply({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},"oauth:p0-provenance-fixture");
-    expect(r).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified"}});
-    receipts.push(r);
-  }
-  return receipts;
+  // WP2 (OD-04+OD-06): recipes persist through the kernel route; generic canonical writes are refused.
+  const steps=plan.safeEditWorkflow!.steps.filter(step=>step.safeEditRequest);
+  if(!steps.length)return [];
+  // Exact server recipe (same reason as the planner) so a pending identical preview is token-rotated, not forked.
+  const reason=steps[0].safeEditRequest!.reason;expect(steps.every(step=>step.safeEditRequest!.reason===reason)).toBe(true);
+  const created=await kernelCanonicalCreate(steps.map(step=>({kind:step.kind,path:step.path,content:step.safeEditRequest!.change.content})),"oauth:p0-provenance-fixture",{reason});
+  const {status}=await import("../safe-edit/engine");
+  return created.map((c,i)=>{expect(c.operationId).toBe(steps[i].safeEditRequest!.operationId);
+    const r=status(c.operationId,"oauth:p0-provenance-fixture");
+    expect(r).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified"}});return r;});
 }
 const content=(p:WritebackPlan,kind:"source_intake"|"canonical_review")=>
   p.safeEditWorkflow!.steps.find(x=>x.kind===kind)!.safeEditRequest?.change.content??"";

@@ -132,11 +132,11 @@ export function applyGitTimes(map: Map<string, number>): number {
 }
 
 export function applyGitHistory(history: GitHistory): number {
+  const staged = new Map(times);
   for (const [p, t] of history.modified) {
-    const have = times.get(p);
-    if (have === undefined || have < t) times.set(p, t);
+    const have = staged.get(p);
+    if (have === undefined || have < t) staged.set(p, t);
   }
-  for (const [p, t] of history.created) born.set(p, t);
   const d = db();
   const notes = d.prepare("UPDATE notes SET modified = ? WHERE path = ? AND modified IS NOT ?");
   const atts = d.prepare("UPDATE attachments SET modified = ? WHERE path = ? AND modified IS NOT ?");
@@ -145,13 +145,15 @@ export function applyGitHistory(history: GitHistory): number {
   let n = 0;
   d.transaction(() => {
     for (const p of history.modified.keys()) {
-      const t = times.get(p)!;
+      const t = staged.get(p)!;
       n += notes.run(t, p, t).changes + atts.run(t, p, t).changes;
     }
     for (const [p, t] of history.created) {
       n += notesBorn.run(t, p, t).changes + attsBorn.run(t, p, t).changes;
     }
   })();
+  for (const p of history.modified.keys()) times.set(p, staged.get(p)!);
+  for (const [p, t] of history.created) born.set(p, t);
   return n;
 }
 

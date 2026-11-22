@@ -7,6 +7,7 @@ import {InMemoryTransport} from "@modelcontextprotocol/sdk/inMemory.js";
 import {createHash,createHmac} from "node:crypto";
 import type {WritebackInput} from "../vault/investment-writeback-router";
 import type {IntakeClaim} from "../vault/canonical-claims";
+import {kernelCanonicalCreate} from "../../../tests/source-event-fixture";
 
 // Preserve the accepted mechanical authority fixtures; current RISK-1 policy
 // is exercised WITHOUT this oracle in risk-draft-admission.test.ts.
@@ -99,9 +100,9 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     expect(held.steps.filter(x=>x.kind!=="source_intake").every(x=>x.state==="hold_research_judge")).toBe(true);
     await expect(apply(pass,old)).rejects.toThrow(/prepare_required_or_superseded/);
     const saved=await apply(data,held);expect(saved.receipts).toHaveLength(1);expect(saved.readyForNextNews).toBe(false);
-    expect(()=>engine.preview(recipe,actor)).toThrow(/research_judge/);
+    expect(()=>engine.preview(recipe,actor)).toThrow(/canonical_operation_namespace_reserved/);
     for(const token of old.previews.filter(x=>x.kind!=="source_intake")){
-      expect(()=>engine.apply({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
+      expect(()=>engine.applyCanonicalStep({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
       expect(fs.existsSync(path.join(vault,token.path))).toBe(false);
     }
     expect((await journal()).filter(x=>x.status==="written")).toHaveLength(1);assertProtected();
@@ -119,7 +120,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const saved=await apply(changed,held);expect(saved.receipts).toHaveLength(1);
     const engine=await import("../safe-edit/engine");
     for(const token of old.previews.filter(x=>x.kind!=="source_intake")){
-      expect(()=>engine.apply({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
+      expect(()=>engine.applyCanonicalStep({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
       expect(fs.existsSync(path.join(vault,token.path))).toBe(false);
     }
     expect(fs.readFileSync(path.join(vault,saved.steps[0].path),"utf8")).toContain(excerpt);assertProtected();
@@ -179,7 +180,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
   ] as const)("C1 All-or-Hold: %s submitted directly at apply revokes old generic PASS authority (Source saved=%s)",async(verdict,sourceSaved)=>{
     const data=await judged(),old=await prepare(data),source=old.previews.find(x=>x.kind==="source_intake")!;
     const engine=await import("../safe-edit/engine");
-    if(sourceSaved)engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    if(sourceSaved)engine.applyCanonicalStep({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
     const historicalSource=sourceSaved?(await journal()).find(x=>x.id===source.operationId):null;
     data.researchJudge.result.claims[1].verdict=verdict;
     const saved=await (await import("./canonical-writeback")).applyCanonicalWriteback({input:data,planId:old.planId,
@@ -187,7 +188,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     expect(saved.researchJudge?.decision).toBe(verdict);expect(saved.receipts).toHaveLength(sourceSaved?0:1);
     expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(old.planId)).toMatchObject({decision:verdict,expiresAt:0});
     for(const token of old.previews.filter(x=>x.kind!=="source_intake")){
-      expect(()=>engine.apply({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
+      expect(()=>engine.applyCanonicalStep({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
       expect(fs.existsSync(path.join(vault,token.path))).toBe(false);
     }
     expect((await journal()).filter(x=>x.status==="written")).toHaveLength(1);
@@ -203,7 +204,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
     expect(gate).toMatchObject({decision:"FAIL",expiresAt:0});
     const token=p.previews.find(x=>x.kind==="structured_claim")!,engine=await import("../safe-edit/engine");
-    expect(()=>engine.apply({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
+    expect(()=>engine.applyCanonicalStep({operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash},actor)).toThrow(/research_judge/);
     expect((await journal()).some(x=>x.status==="written")).toBe(false);assertProtected();
   });
   it.each(["other actor","wrong intake"])("C1 All-or-Hold: %s cannot revoke an unrelated admitted authority",async mismatch=>{
@@ -242,9 +243,22 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
       expect(snapshot()).toEqual(before);expect(maintenance.pendingWork().count).toBe(0);assertProtected();
     }finally{await client.close();await server.close();}
   });
-  it.each(["complete","scope drift"])("C1 integration: disconnected canonical %s remains tracked until terminal persistence",async mode=>{
+  it.each(["complete","scope drift"])("C1 integration: disconnected canonical %s settles with zero writes after pre-write DRAINING",async mode=>{
     const data=await judged(),p=await prepare(data),maintenance=await import("../maintenance");
     expect(maintenance.registerServer()).toBe(true);
+    // Capture the real handler's terminal evidence before the tracker releases
+    // the tool. Do not open a raw connection or bypass ordinary db() at ACTIVE.
+    const canonical=await import("./canonical-writeback"),execute=canonical.applyCanonicalWriteback;
+    let terminal:Awaited<ReturnType<typeof execute>>|undefined,terminalFailure:unknown,terminalSettled=false;
+    vi.spyOn(canonical,"applyCanonicalWriteback").mockImplementation(async(...args)=>{
+      try{terminal=await execute(...args);return terminal;}
+      catch(error){terminalFailure=error;throw error;}
+      finally{terminalSettled=true;}
+    });
+    const snapshot=()=>{
+      const walk=(dir:string):string[]=>fs.readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(dir,e.name)):[path.join(dir,e.name)]);
+      return Object.fromEntries(walk(vault).sort().map(file=>[path.relative(vault,file),sha(fs.readFileSync(file))]));
+    };
     let release=()=>{},started=()=>{};
     const began=new Promise<void>(r=>{started=r;}),wait=new Promise<void>(r=>{release=r;});
     vi.spyOn(await import("../safe-edit/sync"),"withPausedSync").mockImplementation(async run=>{started();await wait;return run();});
@@ -257,19 +271,112 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
         authorizations:p.previews.map(x=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}))}}).catch(()=>null);
       await began;await client.close();
       if(mode==="scope drift")await addHistory("10_Knowledge/Company Research/NVDA C1 adverse.md","# NVDA earnings\n## Counter-evidence\nNew external evidence during admitted tool.\n");
+      const beforeBarrier=snapshot();
       const settled=(await import("../maintenance-drain")).enterMaintenanceAndDrain({timeoutMs:3000});
       await new Promise(r=>setTimeout(r,100));
       expect(maintenance.pendingWork().kinds).toContain("mcp-tool");
       expect(JSON.parse(fs.readFileSync(path.join(root,"maintenance.json"),"utf8")).state).toBe("draining");
       release();const outcome=await settled;await pending;
       expect(outcome.state).toBe("active");expect(outcome.drain).toMatchObject({pendingTools:0,safeEditWritingRows:0,dbFenced:1});
-      const rows=(await journal()).filter(x=>p.previews.some(t=>t.operationId===x.id));
-      expect(rows.filter(x=>x.status==="written")).toHaveLength(mode==="complete"?4:1);
-      for(const row of rows.filter(x=>x.status==="written")){
-        const receipt=(await import("../safe-edit/engine")).status(row.id,actor).receipt;
-        expect(receipt).toMatchObject({write:"written",readback:"verified",reindex:"verified"});
+      const currentDrain=(await import("../maintenance-drain")).drainReport();
+      const afterBarrier=snapshot();
+      console.info("C1_MAINTENANCE_TERMINAL_EVIDENCE",JSON.stringify({mode,state:outcome.state,
+        terminalSettled,terminalFailure:terminalFailure instanceof Error?terminalFailure.message:terminalFailure??null,
+        terminal:terminal?{status:terminal.status,interrupted:terminal.interrupted,writesPerformed:terminal.writesPerformed,
+          writeAttempts:terminal.writeAttempts,completedWriteReceipts:terminal.completedWriteReceipts,
+          unverifiedWriteAttempts:terminal.unverifiedWriteAttempts,receipts:terminal.receipts}:null,
+        drain:currentDrain,unchangedVault:JSON.stringify(afterBarrier)===JSON.stringify(beforeBarrier),
+        targets:p.previews.map(t=>({operationId:t.operationId,path:t.path,exists:fs.existsSync(path.join(vault,t.path))}))}));
+      expect(terminalSettled).toBe(true);expect(terminalFailure).toBeUndefined();expect(terminal).toBeDefined();
+      expect(currentDrain.quiescent).toBe(true);
+      expect(currentDrain.report).toMatchObject({pendingTools:0,safeEditWritingRows:0,d1OwnerSettled:true,d1OpenTransactions:0,
+        d1QuarantineClear:true,safeEditLockAbsent:true,gitMutationLockAbsent:true,crossProcessWriters:0,staleWriterLocks:0,writerInventoryIntact:true});
+      expect(currentDrain.inventoryUncertain).toBeNull();
+      expect(afterBarrier).toEqual(beforeBarrier);assertProtected();
+      // This callback had not started a write when durable DRAINING won.
+      // 4/1 receipts belong only to the separate no-maintenance controls below.
+      expect(terminal).toMatchObject({status:"hold_post_write_verification",readyForNextNews:false,
+        interrupted:"Maintenance: d1_maintenance_admission_denied",writesPerformed:false,
+        writeAttempts:0,completedWriteReceipts:0,unverifiedWriteAttempts:0,receipts:[],
+        workflowVerification:"HOLD",protectedNotesTouched:false});
+      expect(p.previews).toHaveLength(4);
+      for(const target of p.previews)expect(fs.existsSync(path.join(vault,target.path))).toBe(false);
+      if(mode==="scope drift")expect(fs.readFileSync(path.join(vault,"10_Knowledge/Company Research/NVDA C1 adverse.md"),"utf8"))
+        .toContain("New external evidence during admitted tool.");
+    }finally{release();await client.close();await server.close();}
+  });
+  it.each(["complete","scope drift"])("C1 integration: no-maintenance canonical %s preserves authorized receipts",async mode=>{
+    // Reuse the existing mechanical Judge fixture; no human/critic authority
+    // or new semantic approval is supplied by this control.
+    const data=await judged(),p=await prepare(data),maintenance=await import("../maintenance");
+    expect(p.researchJudge?.decision).toBe("PASS");expect(p.previews).toHaveLength(4);
+    expect(maintenance.registerServer()).toBe(true);
+    let release=()=>{},started=()=>{};
+    const began=new Promise<void>(r=>{started=r;}),wait=new Promise<void>(r=>{release=r;});
+    vi.spyOn(await import("../safe-edit/sync"),"withPausedSync").mockImplementation(async run=>{started();await wait;return run();});
+    const {trackToolExecution}=await import("./maintenance-tools");
+    const server=trackToolExecution((await import("./safe-edit-server")).createSafeEditMcpServer({read:true,write:false,label:actor,scopes:["vault:read","vault:edit"]}));
+    const [a,b]=InMemoryTransport.createLinkedPair(),client=new Client({name:"c1-no-maintenance-canonical",version:"1"});
+    await server.connect(b);await client.connect(a);
+    try{
+      const pending=client.callTool({name:"apply_canonical_writeback",arguments:{input:data,planId:p.planId,
+        authorizations:p.previews.map(x=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}))}});
+      await began;
+      if(mode==="scope drift")await addHistory("10_Knowledge/Company Research/NVDA C1 adverse.md","# NVDA earnings\n## Counter-evidence\nNew external evidence during admitted tool.\n");
+      expect(maintenance.pendingWork().kinds).toContain("mcp-tool");
+      expect(fs.existsSync(path.join(root,"maintenance.json"))).toBe(false);
+      release();const response=await pending;
+      expect(response.isError,JSON.stringify(response.content)).not.toBe(true);
+      const outer=JSON.parse((response.content as {text:string}[])[0].text);
+      expect(outer.result).toMatch(/^%[a-f0-9]{8}%\n/);
+      const saved=JSON.parse(outer.result.split("\n").slice(1,-1).join("\n")) as Awaited<ReturnType<typeof apply>>;
+      console.info("C1_NO_MAINTENANCE_TERMINAL_EVIDENCE",JSON.stringify({mode,status:saved.status,interrupted:saved.interrupted,
+        writesPerformed:saved.writesPerformed,writeAttempts:saved.writeAttempts,completedWriteReceipts:saved.completedWriteReceipts,
+        unverifiedWriteAttempts:saved.unverifiedWriteAttempts,receipts:saved.receipts,steps:saved.steps}));
+      expect(maintenance.pendingWork().count).toBe(0);
+      expect(fs.existsSync(path.join(root,"maintenance.json"))).toBe(false);
+      for(const lock of ["safe-edit.lock","git-mutation.lock"])expect(fs.existsSync(path.join(root,lock))).toBe(false);
+      const expectedCount=mode==="complete"?4:1;
+      expect(saved).toMatchObject({writesPerformed:true,writeAttempts:expectedCount,completedWriteReceipts:expectedCount,
+        unverifiedWriteAttempts:0,workflowVerification:"readback_completed",protectedNotesTouched:false});
+      expect(saved.receipts).toHaveLength(expectedCount);
+      const engine=await import("../safe-edit/engine"),{indexedRead,createReceipt}=await import("../vault/investment-research-context");
+      const {searchVault,outgoingLinks}=await import("../vault/queries"),source=p.previews.find(t=>t.kind==="source_intake")!;
+      const hits=searchVault("InvestmentIntake"+p.planId.slice(3),{limit:20}).hits;
+      const rows=saved.receipts as {operationId:string;status:string;receipt:unknown}[];
+      for(const row of rows){
+        const target=p.previews.find(t=>t.operationId===row.operationId)!;
+        expect(target).toBeDefined();expect(row.status).toBe("written");
+        const bytes=fs.readFileSync(path.join(vault,target.path),"utf8"),persisted=engine.status(row.operationId,actor);
+        expect(persisted).toMatchObject({status:"written",afterHash:sha(bytes),receipt:row.receipt});
+        expect(row.receipt).toMatchObject({operationId:target.operationId,path:target.path,afterHash:sha(bytes),
+          write:"written",readback:"verified",reindex:"verified"});
+        expect(indexedRead(target.path).raw).toBe(bytes);
+        if(target.kind!=="source_intake"&&target.kind!=="structured_claim"&&target.kind!=="canonical_review")throw Error("Unexpected canonical target kind");
+        expect(createReceipt(target.kind,target.path,bytes)).toBe(target.operationId);
+        expect(hits.some(h=>h.path===target.path)).toBe(true);
+        expect(saved.steps.find(t=>t.path===target.path)).toMatchObject({readbackVerified:true,indexed:true,searchable:true});
+        if(target.kind!=="source_intake")expect(outgoingLinks(target.path)).toContainEqual(expect.objectContaining({resolved:source.path}));
       }
-      const source=p.previews[0];expect(fs.readFileSync(path.join(vault,source.path),"utf8")).toContain(excerpt);assertProtected();
+      expect(fs.readFileSync(path.join(vault,source.path),"utf8")).toContain(excerpt);
+      if(mode==="complete"){
+        expect(saved.status).toBe("saved_verified");expect(saved.interrupted).toBeNull();
+        expect(rows.map(r=>r.operationId).sort()).toEqual(p.previews.map(t=>t.operationId).sort());
+        expect(saved.steps.find(s=>s.kind==="canonical_review")?.researchTrust).toMatchObject({research_status:"draft",
+          usage_tier:"historical_analysis_only",comparator_eligible:false,independent_evidence_increment:0,critic_independence:"not_verified"});
+      }else{
+        expect(saved.status).toBe("hold_research_judge");expect(saved.readyForNextNews).toBe(false);
+        expect(saved.interrupted).toBe("Canonical state or archive provenance changed; prepare again");
+        expect(rows.map(r=>r.operationId)).toEqual([source.operationId]);
+        for(const t of p.previews.filter(t=>t.kind!=="source_intake")){
+          expect(fs.existsSync(path.join(vault,t.path))).toBe(false);
+          expect(engine.status(t.operationId,actor).receipt).toBeNull();
+          expect(hits.some(h=>h.path===t.path)).toBe(false);
+        }
+        const fresh=await prepare(data);expect(fresh.researchJudge?.decision).toBe("HOLD");
+        expect(fresh.previews.some(t=>t.kind!=="source_intake")).toBe(false);
+      }
+      assertProtected();
     }finally{release();await client.close();await server.close();}
   });
   it.each(["issuer/generic","history/generic","history/canonical"])("F1 current-scope drift %s invalidates PASS after preview",async probe=>{
@@ -278,7 +385,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const sealed=JSON.parse(data.researchJudge.packet.body);
     expect(sealed.history).toHaveLength(4);
     const source=p.previews.find(x=>x.kind==="source_intake")!;
-    engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    engine.applyCanonicalStep({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
     const file=probe.startsWith("issuer")?"01_Companies/Other.md":"10_Knowledge/Company Research/NVDA adverse earnings.md";
     const content=probe.startsWith("issuer")?"---\naliases: [NVDA]\n---\n# Other issuer\n":
       "# NVDA earnings\n## Counter-evidence\nNVDA demand may decline despite revenue guidance.\n";
@@ -294,7 +401,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     }
     else{
       const claim=p.previews.find(x=>x.kind==="structured_claim")!;
-      expect(()=>engine.apply({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge/);
+      expect(()=>engine.applyCanonicalStep({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge/);
     }
     expect((await journal()).filter(x=>x.status==="written"&&/type: investment_claim/.test(x.after_text))).toHaveLength(0);
     assertProtected();
@@ -305,7 +412,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
     expect(p.researchJudge?.decision).toBe("PASS");
     const source=p.previews.find(x=>x.kind==="source_intake")!;
-    engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    engine.applyCanonicalStep({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
     if(change==="hub context"||change==="hub mapping"||change==="hub readback"){
       const hub="01_Companies/NVDA.md";
       if(change==="hub mapping"){
@@ -334,9 +441,9 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
       });
     }
     const before=await journal(),claim=p.previews.find(x=>x.kind==="structured_claim")!;
-    expect(()=>engine.apply({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge/);
+    expect(()=>engine.applyCanonicalStep({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge/);
     const recipe=(await plan(data)).safeEditWorkflow!.steps.find(x=>x.kind==="structured_claim")!;
-    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/research_judge/);
+    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/canonical_operation_namespace_reserved/);
     await expect(apply(data,{...p,previews:p.previews.filter(x=>x.kind!=="source_intake")})).rejects.toThrow();
     expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");
     for(const row of before)expect(await journal()).toContainEqual(row);
@@ -345,10 +452,10 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
   it("F1 v4 revalidates under the write lock before EACH non-Source write",async()=>{
     const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
     const source=p.previews[0],first=p.previews[1];
-    for(const x of [source,first])engine.apply({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor);
+    for(const x of [source,first])engine.applyCanonicalStep({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor);
     await addHistory("10_Knowledge/Company Research/NVDA late adverse.md","# NVDA earnings\n## Counter-evidence\nNew adverse evidence after first Claim.\n");
     const before=await journal();
-    for(const x of p.previews.slice(2))expect(()=>engine.apply({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor)).toThrow(/research_judge/);
+    for(const x of p.previews.slice(2))expect(()=>engine.applyCanonicalStep({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor)).toThrow(/research_judge/);
     expect(await journal()).toEqual(before);
     const current=await prepare(data);expect(current.researchJudge?.decision).toBe("HOLD");expect(current.previews).toEqual([]);
     expect(fs.readFileSync(path.join(vault,source.path),"utf8")).toContain(excerpt);assertProtected();
@@ -359,7 +466,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const check=vi.spyOn(scope,"judgeScopeCurrent").mockImplementation((...args)=>{
       expect(fs.existsSync(path.join(root,"safe-edit.lock"))).toBe(true);return original(...args);
     });
-    for(const x of p.previews)engine.apply({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor);
+    for(const x of p.previews)engine.applyCanonicalStep({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor);
     expect(check).toHaveBeenCalledTimes(3);expect(fs.existsSync(path.join(root,"safe-edit.lock"))).toBe(false);assertProtected();
   });
   it("F1 v4 canonical apply detects drift across the asynchronous sync-pause boundary; Source survives",async()=>{
@@ -394,7 +501,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const scope=await import("../vault/research-judge-scope"),gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(p.planId)!;
     for(const x of p.previews){
       expect(scope.judgeScopeCurrent(body.scopeWitness,body.coverage.retrieval,gate.targets,p.planId,actor)).toBe(true);
-      engine.apply({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor);
+      engine.applyCanonicalStep({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor);
     }
     expect(scope.judgeOwnWrites(gate.targets,p.planId,actor)).toHaveLength(4);
     expect(()=>scope.judgeOwnWrites(gate.targets,p.planId,"another actor")).toThrow(/receipt_hold/);
@@ -416,7 +523,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     };
     // Emulate malformed historical internal events; never fabricate a receipt.
     engine.recordResearchJudgeGate(p.previews[0].operationId,actor,{...gate,scopeWitness:corrupt(structuredClone(gate.scopeWitness!))} as typeof gate);
-    for(const x of p.previews.slice(1))expect(()=>engine.apply({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor)).toThrow(/research_judge/);
+    for(const x of p.previews.slice(1))expect(()=>engine.applyCanonicalStep({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash},actor)).toThrow(/research_judge/);
     const body=JSON.parse(data.researchJudge.packet.body);body.scopeWitness=corrupt(body.scopeWitness);
     data.researchJudge.packet.body=JSON.stringify(body);
     expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");assertProtected();
@@ -454,7 +561,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     expect(p.researchJudge?.decision).toBe("HOLD");
     expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
     const recipe=(await plan(data)).safeEditWorkflow!.steps.find(s=>s.kind==="structured_claim")!;
-    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/research_judge/);
+    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/canonical_operation_namespace_reserved/);
     const saved=await apply(data,p);expect(saved.status).toBe("hold_research_judge");expect(saved.receipts).toHaveLength(1);
     for(const row of before.filter(x=>x.status==="written"))expect(await journal()).toContainEqual(row);
     expect(data.researchJudge.packet.body).not.toMatch(/private (outside|upstream|search)/);assertProtected();
@@ -494,10 +601,10 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const recipe=(await plan(data)).safeEditWorkflow!.steps.find(s=>s.kind==="structured_claim")!;
     vi.spyOn(await import("../vault/queries"),"searchVault").mockImplementation(()=>{throw Error("private search error");});
     await expect(apply(data,p)).rejects.toThrow(/Authorization/);
-    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/research_judge/);
+    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/canonical_operation_namespace_reserved/);
     const source=p.previews.find(x=>x.kind==="source_intake")!;
-    engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
-    for(const old of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge/);
+    engine.applyCanonicalStep({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    for(const old of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.applyCanonicalStep({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge/);
     const current=await prepare(data);expect(current.researchJudge?.decision).toBe("HOLD");expect(current.previews).toEqual([]);assertProtected();
   });
   it.each(["missing metadata","forged status","truncated failures","inconsistent counts"])("F1 residual %s cannot become server admission authority",async attack=>{
@@ -511,7 +618,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
       return coverage;
     };
     engine.recordResearchJudgeGate(p.previews[0].operationId,actor,{...gate,retrieval:corrupt(structuredClone(gate.retrieval!))} as typeof gate);
-    for(const old of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge/);
+    for(const old of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.applyCanonicalStep({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge/);
     const body=JSON.parse(data.researchJudge.packet.body);body.coverage.retrieval=corrupt(body.coverage.retrieval);
     // Test a malformed even-server-sealed coverage contract; HMAC tampering is
     // separately covered below. No receipt/DB fabrication or live key is used.
@@ -562,7 +669,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const p=await prepare(data);expect(p.researchJudge?.reasons).toContain("selected_history_readback_unavailable");
     const recipe=(await plan(data)).safeEditWorkflow!.steps.find(s=>s.kind==="structured_claim")!;
     const engine=await import("../safe-edit/engine");
-    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/research_judge/);
+    expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/canonical_operation_namespace_reserved/);
     const saved=await apply(data,p);expect(saved.status).toBe("hold_research_judge");expect(saved.receipts).toHaveLength(1);
     expect(saved.steps.filter(s=>s.kind!=="source_intake").every(s=>!fs.existsSync(path.join(vault,s.path)))).toBe(true);
     const receipt=await journal(),source=fs.readFileSync(path.join(vault,saved.steps[0].path));
@@ -588,9 +695,9 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     vi.spyOn(deps,"readIndexed").mockImplementation(path=>path==="01_Companies/NVDA.md"?null:read(path));
     await expect(apply(data,p)).rejects.toThrow(/Authorization/);
     const engine=await import("../safe-edit/engine"),source=p.previews.find(x=>x.kind==="source_intake")!;
-    engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    engine.applyCanonicalStep({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
     for(const old of p.previews.filter(x=>x.kind!=="source_intake")){
-      expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge_semantic_or_stale_hold/);
+      expect(()=>engine.applyCanonicalStep({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge_semantic_or_stale_hold/);
       expect(fs.existsSync(path.join(vault,old.path))).toBe(false);
     }
     expect((await prepare(data)).researchJudge?.reasons).toContain("historical_readback_changed_hold");assertProtected();
@@ -614,13 +721,13 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
   it("F2 invalid re-attestation revokes old generic preview eligibility without changing saved Source receipt",async()=>{
     const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
     const source=p.previews.find(x=>x.kind==="source_intake")!;
-    engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+    engine.applyCanonicalStep({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
     const sourceBytes=fs.readFileSync(path.join(vault,source.path)),sourceReceipt=(await journal()).find(r=>r.id===source.operationId);
     data.researchJudge.result.review.references[0].locator="page 999999";
     const held=await prepare(data);expect(held.researchJudge?.decision).toBe("HOLD");expect(held.previews).toEqual([]);
     await expect(apply(data,p)).rejects.toThrow(/Authorization/);
     for(const old of p.previews.filter(x=>x.kind!=="source_intake")){
-      expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge/);
+      expect(()=>engine.applyCanonicalStep({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge/);
       expect(fs.existsSync(path.join(vault,old.path))).toBe(false);
     }
     expect(fs.readFileSync(path.join(vault,source.path))).toEqual(sourceBytes);expect(await journal()).toContainEqual(sourceReceipt);assertProtected();
@@ -649,7 +756,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const {version:_,...legacy}=gate;void _;
     engine.recordResearchJudgeGate(p.previews[0].operationId,actor,{...legacy,version} as typeof gate);
     await expect(apply(data,p)).rejects.toThrow(/prepare_required_or_superseded/);
-    for(const old of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow("research_judge_contract_version_hold");
+    for(const old of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.applyCanonicalStep({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow("research_judge_contract_version_hold");
     const {stableJudgeJson,verifyResearchJudgePacket}=await import("../vault/research-judge"),{seal:__,...envelope}=data.researchJudge.packet;void __;
     const body=JSON.parse(envelope.body);body.version=version;delete body.scopeWitness;
     envelope.body=stableJudgeJson(body);envelope.digest=sha(envelope.body);envelope.packetId="RJP-"+envelope.digest.slice(0,32).toUpperCase();
@@ -668,6 +775,92 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     expect(body.dates.analysisAsOf).toBe(input.researchLineage!.knowledgeCutoffAsOf);expect(body.dates.analysisCreatedAt).toBeNull();
     expect(body.history.length).toBeLessThanOrEqual(8);expect(body.coverage.status).toBe("bounded_not_exhaustive");
     expect(await journal()).toEqual(before);assertProtected();
+  });
+  it("PIT opt-in binds exact historical cutoff through canonical schema, Judge context and immutable packet; current flow stays unchanged",async()=>{
+    const {canonicalInputSchema}=await import("./canonical-writeback");
+    const {buildResearchJudgePacket,verifyResearchJudgePacket}=await import("../vault/research-judge");
+    const previous=canonicalInputSchema.parse(input);
+    const oldPacket=buildResearchJudgePacket(previous,actor).packet;
+    const oldBody=JSON.parse(oldPacket.body);
+    expect(oldBody.coverage.retrieval.scope).not.toHaveProperty("historyCutoff");
+    expect(oldBody.dates).not.toHaveProperty("historyCutoff");
+    expect(oldBody.dates.analysisAsOf).toBe(input.researchLineage!.knowledgeCutoffAsOf);
+
+    const cutoff="2026-08-26T20:00:00.000Z";
+    const selected=canonicalInputSchema.parse({...input,historyCutoff:cutoff});
+    const {packet}=buildResearchJudgePacket(selected,actor),body=JSON.parse(packet.body);
+    expect(body.coverage.retrieval.scope.historyCutoff).toBe(cutoff);
+    expect(body.dates.historyCutoff).toBe(cutoff);
+    expect(body.constraints).toContain("pit_non_source_admission_requires_full_source_event_cutoff_binding");
+    expect(body.dates.analysisAsOf).toBe(input.researchLineage!.knowledgeCutoffAsOf);
+    // The scope witness is server-derived; do not manufacture it when PIT source receipts are missing.
+    if(body.scopeWitness)expect(body.scopeWitness.scope.historyCutoff).toBe(cutoff);
+    expect(packet.digest).not.toBe(oldPacket.digest);
+    expect(verifyResearchJudgePacket(selected,{packet},actor).inputDigest).toBe(body.inputDigest);
+    expect(()=>verifyResearchJudgePacket({...selected,historyCutoff:"2026-08-26T19:59:59.999Z"},{packet},actor))
+      .toThrow("research_judge_input_changed_hold");
+    for(const invalid of ["2026-08-26","2026-08-26T20:00:00Z","2026-08-26T20:00:00.000+00:00","2026-99-99T20:00:00.000Z"])
+      expect(()=>canonicalInputSchema.parse({...input,historyCutoff:invalid})).toThrow();
+    assertProtected();
+  });
+  it("PIT cannot bypass the missing Judge through legacy canonical prepare or apply; Source remains safely preservable",async()=>{
+    const cutoff="2026-08-26T20:00:00.000Z";
+    const data={...input,historyCutoff:cutoff};
+    // No researchJudge or sourceEvent: the old non-pilot legacy route must
+    // not interpret an absent assessment as permission for PIT Review.
+    const p=await prepare(data);
+    expect(p.historyAdmission).toEqual({decision:"HOLD",reason:"pit_non_source_admission_requires_full_source_event_cutoff_binding"});
+    expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
+    expect(p.steps.filter(s=>s.kind!=="source_intake").every(s=>s.state==="hold_research_judge")).toBe(true);
+    const saved=await apply(data,p);
+    expect(saved.historyAdmission?.decision).toBe("HOLD");
+    expect(saved.receipts).toHaveLength(1);
+    expect(saved.steps.filter(s=>s.kind!=="source_intake").every(s=>s.state!=="saved_verified")).toBe(true);
+    const before=await journal(),source=saved.steps.find(s=>s.kind==="source_intake")!;
+    expect(before.filter(s=>s.status==="written")).toHaveLength(1);
+    expect(fs.existsSync(path.join(vault,source.path))).toBe(true);
+    expect(fs.existsSync(path.join(vault,"10_Knowledge/Company Research/Investment Review - NVDA - "+p.planId+".md"))).toBe(false);
+    assertProtected();
+  });
+  it("L1-05 PIT prepare withdraws pending current-time non-Source authority across canonical and generic adapters",async()=>{
+    const old=await prepare(input),data={...input,historyCutoff:"2026-08-26T20:00:00.000Z"};
+    const held=await prepare(data);expect(held.historyAdmission?.decision).toBe("HOLD");
+    const e=await import("../safe-edit/engine");
+    for(const token of old.previews.filter(t=>t.kind!=="source_intake")){
+      const auth={operationId:token.operationId,previewToken:token.previewToken,expectedHash:token.beforeHash};
+      expect(()=>e.apply(auth,actor)).toThrow();
+      expect(()=>e.applyCanonicalStep(auth,actor)).toThrow();
+      expect(fs.existsSync(path.join(vault,token.path))).toBe(false);
+    }
+    await expect(apply(input,old)).rejects.toThrow();
+    expect((await journal()).filter(r=>r.status==="written")).toHaveLength(0);assertProtected();
+  });
+  it.each(["apply without prepare","pause","capture only"])("L1-05 PIT restriction survives %s and preserves Source rights",async route=>{
+    const old=await prepare(input),data={...input,historyCutoff:"2026-08-26T20:00:00.000Z"};
+    if(route==="apply without prepare")await expect(apply(data,old)).rejects.toThrow();
+    else if(route==="pause"){
+      const sync=await import("../safe-edit/sync");
+      vi.spyOn(sync,"withPausedSync").mockImplementationOnce(async run=>{await prepare(data);return run();});
+      const blocked=await apply(input,old);expect(blocked.interrupted).toBeTruthy();
+    }else await prepare({...data,captureOnly:true,researchReview:undefined,claims:undefined});
+    const gate=(await import("../safe-edit/research-judge-gate")).currentJudgeGate(old.planId);
+    expect(gate?.decision).toBe("HOLD");
+    const held=await prepare(data),saved=await apply(data,held);
+    expect(saved.receipts).toHaveLength(1);
+    expect(saved.steps.filter(s=>s.kind!=="source_intake").every(s=>s.state!=="saved_verified")).toBe(true);
+    const source=saved.steps.find(s=>s.kind==="source_intake")!;
+    expect(source).toMatchObject({readbackVerified:true,indexed:true,searchable:true});
+    expect((await journal()).filter(r=>r.status==="written")).toHaveLength(1);assertProtected();
+  });
+  it("Current-time canonical preview remains eligible without opt-in PIT or forced Judge changes",async()=>{
+    const before=await journal();
+    const p=await prepare(input);
+    expect(p.historyAdmission).toBeNull();
+    expect(p.previews.map(x=>x.kind)).toEqual(["source_intake","structured_claim","structured_claim","canonical_review"]);
+    expect(p.workflowStatus).not.toBe("hold_research_judge");
+    expect(await journal()).not.toContainEqual(expect.objectContaining({status:"written"}));
+    expect((await journal()).length).toBeGreaterThanOrEqual(before.length);
+    assertProtected();
   });
   it("J1 simulated PASS preserves Actual/Guidance, Thai Review, receipts/cold retrieval and exact retry",async()=>{
     const data=await judged(),p=await prepare(data);
@@ -713,16 +906,16 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const p=await prepare(data);await apply(data,p);
     const legacy=await prepare(input);expect(legacy.previews).toEqual([]);expect(legacy.workflowStatus).toBe("hold_research_judge");
     const recipe=(await plan()).safeEditWorkflow!.steps.find(s=>s.kind==="structured_claim")!;
-    const engine=await import("../safe-edit/engine");expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/research_judge/);
+    const engine=await import("../safe-edit/engine");expect(()=>engine.preview(recipe.safeEditRequest,actor)).toThrow(/canonical_operation_namespace_reserved/);
     const stripped={...recipe.safeEditRequest!,change:{kind:"create",content:recipe.safeEditRequest!.change.content.replace(/intake_id:.*\n/,"")}};
-    expect(()=>engine.preview(stripped,actor)).toThrow(/research_judge/);assertProtected();
+    expect(()=>engine.preview(stripped,actor)).toThrow(/canonical_operation_namespace_reserved/);assertProtected();
   });
   it("new HOLD supersedes old PASS tokens, including direct generic apply",async()=>{
     const data=await judged(),p=await prepare(data),engine=await import("../safe-edit/engine");
     const old=p.previews.find(x=>x.kind==="structured_claim")!;
     data.researchJudge.result.review.verdict="HOLD";
     await prepare(data);
-    expect(()=>engine.apply({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge/);
+    expect(()=>engine.applyCanonicalStep({operationId:old.operationId,previewToken:old.previewToken,expectedHash:old.beforeHash},actor)).toThrow(/research_judge/);
     expect(fs.existsSync(path.join(vault,old.path))).toBe(false);assertProtected();
   });
   it("HOLD recovery and delayed Owner authorization preserve the saved Source/receipt",async()=>{
@@ -761,7 +954,9 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
   it("generic apply cannot reorder Review before Source/Claims, even with a PASS token",async()=>{
     const data=await judged(),p=await prepare(data),r=p.previews.at(-1)!;
     const engine=await import("../safe-edit/engine");
-    expect(()=>engine.apply({operationId:r.operationId,previewToken:r.previewToken,expectedHash:r.beforeHash},actor)).toThrow("research_judge_prerequisite_readback_hold");
+    // WP2 A02: the generic route never applies a kernel token; the dedicated kernel route keeps the ordering gate.
+    expect(()=>engine.apply({operationId:r.operationId,previewToken:r.previewToken,expectedHash:r.beforeHash},actor)).toThrow(/canonical_route_required/);
+    expect(()=>engine.applyCanonicalStep({operationId:r.operationId,previewToken:r.previewToken,expectedHash:r.beforeHash},actor)).toThrow("research_judge_prerequisite_readback_hold");
     expect((await apply(data,p)).status).toBe("saved_verified");assertProtected();
   });
   it("generic apply requires all durable prerequisite receipt stages, not only written/hash/index existence",async()=>{
@@ -773,10 +968,10 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     const fault=vi.spyOn(indexer,"reindexPath").mockImplementation(file=>{
       reindex(file);if(file===source.path){const later=new Date(Date.now()+10000);fs.utimesSync(path.join(vault,file),later,later);}
     });
-    let saved;try{saved=engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);}finally{fault.mockRestore();}
+    let saved;try{saved=engine.applyCanonicalStep({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);}finally{fault.mockRestore();}
     expect(saved.receipt).toMatchObject({write:"written",readback:"verified",reindex:"unverified"});
     const before=await journal();
-    expect(()=>engine.apply({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge_(prerequisite|semantic_or_stale)/);
+    expect(()=>engine.applyCanonicalStep({operationId:claim.operationId,previewToken:claim.previewToken,expectedHash:claim.beforeHash},actor)).toThrow(/research_judge_(prerequisite|semantic_or_stale)/);
     expect(await journal()).toEqual(before);expect(fs.existsSync(path.join(vault,claim.path))).toBe(false);assertProtected();
   });
   it("Judge PASS never overrides D1 or Thai quality HOLD, including reconstructed generic recipes",async()=>{
@@ -787,7 +982,7 @@ describe("RI-001 opt-in Research Judge binding/enforcement, not semantic evaluat
     expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
     const {planClaimNotes}=await import("../vault/canonical-claims"),engine=await import("../safe-edit/engine");
     const claim=planClaimNotes(data,p.planId,p.steps[0].path)[0],step=p.steps.find(s=>s.kind==="structured_claim")!;
-    expect(()=>engine.preview({operationId:step.receiptKey,path:claim.path,reason:"Attempt to override deterministic HOLD",change:{kind:"create",content:claim.content}},actor)).toThrow(/research_judge/);
+    expect(()=>engine.preview({operationId:step.receiptKey,path:claim.path,reason:"Attempt to override deterministic HOLD",change:{kind:"create",content:claim.content}},actor)).toThrow(/canonical_operation_namespace_reserved/);
     assertProtected();
   });
   it.each(["digest","claim coverage","locator","review digest","input unit","review drift","forged packet","actor"])("deterministic binding mismatch: %s",async attack=>{
@@ -920,15 +1115,15 @@ describe("C1 Draft trust integration (simulated assessment; no semantic acceptan
   });
   it("pre-policy historical Review retains exact real receipt/bytes and is not retroactively marked Draft",async()=>{
     const legacyInput={...input,claims:undefined,researchLineage:undefined};
-    const recipe=await plan(legacyInput),engine=await import("../safe-edit/engine");
+    const recipe=await plan(legacyInput);
     const source=recipe.safeEditWorkflow!.steps[0],reviewStep=recipe.safeEditWorkflow!.steps[1];
-    const sp=engine.preview(source.safeEditRequest,actor);engine.apply({operationId:sp.operationId,previewToken:sp.previewToken,expectedHash:sp.beforeHash},actor);
+    // WP2: pre-policy history is a synthetic pre-WP2 journal (generic canonical writes are refused now).
+    await kernelCanonicalCreate([{kind:"source_intake",path:source.path,content:(source.safeEditRequest!.change as {content:string}).content}],actor,{legacy:true});
     const {draftMetadata}=await import("../vault/research-state");
     let old=reviewStep.safeEditRequest!.change.content;
     for(const [k,v] of Object.entries(draftMetadata))old=old.replace(`${k}: ${JSON.stringify(v)}\n`,"");
     const oldId="ICW-"+sha(["canonical_review",reviewStep.path,sha(old)].join("\n")).slice(0,32);
-    const op=engine.preview({...reviewStep.safeEditRequest!,operationId:oldId,change:{kind:"create",content:old}},actor);
-    engine.apply({operationId:op.operationId,previewToken:op.previewToken,expectedHash:op.beforeHash},actor);
+    expect((await kernelCanonicalCreate([{kind:"canonical_review",path:reviewStep.path,content:old}],actor,{legacy:true}))[0].operationId).toBe(oldId);
     const before=await journal(),retry=await apply(legacyInput,await prepare(legacyInput));
     expect(retry.status).toBe("saved_verified");expect(retry.receipts).toEqual([]);
     expect(retry.steps.find(x=>x.kind==="canonical_review")).toMatchObject({receiptKey:oldId,researchTrust:{research_status:"unclassified",metadata_status:"legacy_unclassified",comparator_eligible:false}});
@@ -940,7 +1135,7 @@ describe("C1 Draft trust integration (simulated assessment; no semantic acceptan
     const p=await prepare(data);expect(p.researchJudge?.decision).toBe("HOLD");expect(p.previews.map(x=>x.kind)).toEqual(["source_intake"]);
     const saved=await apply(data,p);expect(saved.receipts).toHaveLength(1);
     const engine=await import("../safe-edit/engine");
-    for(const s of (await plan()).safeEditWorkflow!.steps.filter(s=>s.kind!=="source_intake"))expect(()=>engine.preview(s.safeEditRequest,actor)).toThrow(/research_judge/);
+    for(const s of (await plan()).safeEditWorkflow!.steps.filter(s=>s.kind!=="source_intake"))expect(()=>engine.preview(s.safeEditRequest,actor)).toThrow(/canonical_operation_namespace_reserved/);
     assertProtected();
   });
   it.each([undefined,"RI001-DRAFT-1"])("same-version packet/gate with obsolete Draft policy %s cannot authorize non-Source; fresh assessment restores eligibility",async legacyPolicy=>{
@@ -949,7 +1144,7 @@ describe("C1 Draft trust integration (simulated assessment; no semantic acceptan
     const {researchStatePolicy:_,...legacy}=gate;void _;
     engine.recordResearchJudgeGate(p.previews[0].operationId,actor,{...legacy,...(legacyPolicy?{researchStatePolicy:legacyPolicy}:{})} as typeof gate);
     await expect(apply(data,p)).rejects.toThrow(/prepare_required_or_superseded/);
-    for(const t of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/contract_version/);
+    for(const t of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/contract_version/);
     const {stableJudgeJson}=await import("../vault/research-judge"),{seal:__,...envelope}=data.researchJudge.packet;void __;
     const body=JSON.parse(envelope.body);delete body.researchStatePolicy;if(legacyPolicy)body.researchStatePolicy=legacyPolicy;
     envelope.body=stableJudgeJson(body);envelope.digest=sha(envelope.body);envelope.packetId="RJP-"+envelope.digest.slice(0,32).toUpperCase();

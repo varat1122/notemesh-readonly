@@ -75,9 +75,9 @@ it("preview receipt reference is pending; generic Claim apply cannot precede dur
  const rows=await journal();expect(rows.every(r=>r.status==="preview")).toBe(true);expect(engine.status(p.previews[0].operationId,actor).receipt).toBeNull();
  const fm=(await import("../vault/markdown")).splitFrontmatter(rows.find(r=>r.id===cs[0].operationId)!.after_text).data;
  expect((fm.claims as {source_binding:unknown}[])[0].source_binding).toMatchObject({receiptRequirement:"durable_source_receipt_before_claim_write",originalPublisherUrl:null});
- expect(()=>engine.apply(auth(cs[0]),actor)).toThrow();expect(fs.existsSync(path.join(vault,cs[0].path))).toBe(false);
- engine.apply(auth(p.previews[0]),actor);for(const c of cs)engine.apply(auth(c),actor);
- engine.apply(auth(p.previews.at(-1)!),actor);expect((await apply(received,await prepare(received))).status).toBe("saved_verified");
+ expect(()=>engine.applyCanonicalStep(auth(cs[0]),actor)).toThrow();expect(fs.existsSync(path.join(vault,cs[0].path))).toBe(false);
+ engine.applyCanonicalStep(auth(p.previews[0]),actor);for(const c of cs)engine.applyCanonicalStep(auth(c),actor);
+ engine.applyCanonicalStep(auth(p.previews.at(-1)!),actor);expect((await apply(received,await prepare(received))).status).toBe("saved_verified");
 });
 it("Feed Only → later Claims/Draft preserves Source bytes/receipt; repost creates appearance only",async()=>{
  const appearance={key:"line-1",channel:"line",locator:"fixture:message/1",receivedAt:"2026-11-08T00:00:00Z"};
@@ -112,13 +112,13 @@ it.each(["wrong_path","forged_receipt","wrong_hash","wrong_span","wrong_quote","
  expect(fs.existsSync(path.join(vault,p.previews[1].path))).toBe(false);
 });
 it.each(["altered","missing","receipt","index"])("apply/cold read fail closed for %s Source",async mode=>{
- const p=await prepare(received),engine=await import("../safe-edit/engine"),source=p.previews[0];engine.apply(auth(source),actor);
+ const p=await prepare(received),engine=await import("../safe-edit/engine"),source=p.previews[0];engine.applyCanonicalStep(auth(source),actor);
  const d=(await import("../db")).db();
  if(mode==="altered")fs.appendFileSync(path.join(vault,source.path),"\nchanged");
  if(mode==="missing")fs.unlinkSync(path.join(vault,source.path));
  if(mode==="receipt")d.prepare("UPDATE safe_edit_operations SET receipt='{}' WHERE id=?").run(source.operationId);
  if(mode==="index")d.prepare("DELETE FROM notes_fts WHERE path=?").run(source.path);
- for(const c of p.previews.filter(x=>x.kind==="structured_claim")){expect(()=>engine.apply(auth(c),actor)).toThrow();expect(fs.existsSync(path.join(vault,c.path))).toBe(false);}
+ for(const c of p.previews.filter(x=>x.kind==="structured_claim")){expect(()=>engine.applyCanonicalStep(auth(c),actor)).toThrow();expect(fs.existsSync(path.join(vault,c.path))).toBe(false);}
 });
 it("quote mismatch holds Claims/Review while Source-only preservation remains eligible",async()=>{
  const bad={...received,claims:[{...claims[0],sourceExcerpt:"Fabricated value 96.2"}]};const p=await prepare(bad);
@@ -129,7 +129,7 @@ it("wrong actor and rotated stale token cannot apply; partial failure retains So
  const p=await prepare(received),engine=await import("../safe-edit/engine");
  expect(()=>engine.apply(auth(p.previews[0]),"oauth:other")).toThrow(/another OAuth/);
  expect(()=>engine.apply(auth(p.previews[1]),"oauth:other")).toThrow(/another OAuth/);
- const newer=await prepare(received);expect(()=>engine.apply(auth(p.previews[0]),actor)).toThrow(/Invalid preview/);
+ const newer=await prepare(received);expect(()=>engine.applyCanonicalStep(auth(p.previews[0]),actor)).toThrow(/Invalid preview/);
  const api=await import("./canonical-writeback");const r=await api.applyCanonicalWriteback({input:received,planId:newer.planId,authorizations:newer.previews.map((x,i)=>({...auth(x),...(i===1?{previewToken:"0".repeat(64)}:{})}))},actor);
  expect(r.completedWriteReceipts).toBe(1);expect(r.steps[0].state).toBe("verified_existing");
  expect((await apply(received,await prepare(received))).status).toBe("saved_verified");
@@ -171,7 +171,7 @@ it.each(["HOLD","FAIL"] as const)("assessed %s cannot fall back to unjudged Draf
  const data=await judged(),p=await prepare(data);expect(p.researchJudge?.decision).toBe("PASS");
  data.researchJudge.result.claims[0].verdict=verdict;
  const held=await prepare(data);expect(held.researchJudge?.decision).toBe(verdict);expect(held.previews.every(x=>x.kind==="source_intake")).toBe(true);
- const engine=await import("../safe-edit/engine");for(const c of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.apply(auth(c),actor)).toThrow();
+ const engine=await import("../safe-edit/engine");for(const c of p.previews.filter(x=>x.kind!=="source_intake"))expect(()=>engine.applyCanonicalStep(auth(c),actor)).toThrow();
  const fallback=await prepare(received);expect(fallback.previews.every(x=>x.kind==="source_intake")).toBe(true);expect(fallback.workflowStatus).toBe("hold_research_judge");
  const source=await apply(received,fallback);expect(source.receipts).toHaveLength(1);expect((await journal()).filter(x=>x.status==="written")).toHaveLength(1);
 });

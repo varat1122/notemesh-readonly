@@ -6,26 +6,33 @@ import {db} from "../db";
 import {env} from "../env";
 import {assertNoMaintenance} from "../maintenance";
 import {revisionPilotRequired,withPilotAdmissionLock} from "../c1-pilot";
-import {assertRevisionPilot,verifyRevisionCandidate,type CanonicalRevisionInput} from "./canonical-review-revision-pilot";
+import {assertRevisionPilot,verifyRevisionCandidate,verifySubjectRevisionCandidate,subjectSourceEventSubmissionSchema,SUBJECT_SOURCE_EVENT_POLICY,
+ type CanonicalRevisionInput,type SubjectRevisionInput,type SubjectSourceEventSubmission} from "./canonical-review-revision-pilot";
 import {assertJudgeAdmissionOrder,currentJudgeGate} from "./research-judge-gate";
 import {SOURCE_EVENT_POLICY,sourceEventEnvelopeSchema,sourceEventSubmissionSchema,type SourceEventSubmission} from "../vault/source-event-contract";
 import {judgeHash as sha,stableJudgeJson as stable,exactTextReference} from "../vault/research-judge-contract";
 import {judgeContext,judgeScopeWitness,judgeScopeCurrent,type JudgeScope,type JudgeTarget} from "../vault/research-judge-scope";
 import {retrievalOperationallyComplete,type RetrievalCoverage} from "../vault/investment-retrieval-coverage";
-import {indexedRead,createReceipt} from "../vault/investment-research-context";
+import {indexedRead,createReceipt,discoverSubjectReviews} from "../vault/investment-research-context";
 import {preservedSubmittedText,m2VaultReadDeps} from "../vault/research-decision-v2";
 import {planInvestmentWriteback,type WritebackInput} from "../vault/investment-writeback-router";
 import {isGeneratedClaimPath,readPersistedClaim} from "../vault/canonical-claims";
 import {splitFrontmatter} from "../vault/markdown";
 import {isResearchReviewType,researchTrust} from "../vault/research-state";
 import type {PreviewInput} from "./schema";
+import {bumpAuthorityEpoch} from "./admission";
 
 type Target={path:string;beforeHash:string;afterHash:string|null;operationId:string|null;change:PreviewInput["change"]};
 export interface EventProposal {kind:"create"|"revise";entity:string;intakeId:string;inputDigest:string;
- reviewPath:string;sources:string[];targets:Target[];ownWrites:JudgeTarget[];scope:RetrievalCoverage["scope"];knowledgeCutoff:string|null}
+ reviewPath:string;sources:string[];targets:Target[];ownWrites:JudgeTarget[];scope:RetrievalCoverage["scope"];knowledgeCutoff:string|null;
+ /** M56-P1 V2 only (absent on every Company V1 proposal): typed Industry/Macro subject. */
+ subject?:{domain:"industry"|"macro";key:string;label:string;hubPath:string|null;geography:string|null}}
+type AnySubmission=SourceEventSubmission|SubjectSourceEventSubmission;
+type Policy=typeof SOURCE_EVENT_POLICY|typeof SUBJECT_SOURCE_EVENT_POLICY;
+const envelopeKind=(policy:Policy)=>policy===SUBJECT_SOURCE_EVENT_POLICY?"subject-source-event-envelope-v2":"source-event-envelope-v1";
 const event="source_event_gate",empty=sha("");
 const hashObject=(v:unknown)=>sha(stable(v));
-const envelopeHash=(p:SourceEventSubmission["packet"])=>hashObject(p);
+const envelopeHash=(p:AnySubmission["packet"])=>hashObject(p);
 const mac=(kind:string,v:unknown)=>createHmac("sha256",env.encryptionKey).update(kind+"\0"+stable(v)).digest("hex");
 const validMac=(kind:string,v:unknown,s:unknown)=>typeof s==="string"&&/^[a-f0-9]{64}$/.test(s)&&timingSafeEqual(Buffer.from(mac(kind,v),"hex"),Buffer.from(s,"hex"));
 function withoutAssessment<T extends object>(input:T){const clean={...input} as T&{sourceEvent?:unknown;researchJudge?:unknown};delete clean.sourceEvent;delete clean.researchJudge;return clean;}
@@ -50,6 +57,19 @@ export function revisionEventProposal(input:CanonicalRevisionInput):EventProposa
    sources:c.sourcePaths,targets:[{path:input.existingReview.path,beforeHash:input.existingReview.expectedSha256,afterHash:null,operationId:null,
      change:{kind:"append",heading:c.review.raw.includes("## บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)")?"บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)":"Research analysis (AI interpretation; not approved Thesis)",content:c.body,date:input.reviewDate}}],
    ownWrites:[],scope:{question:input.entity+": "+input.existingReview.comparisonBasis,issuers:[input.entity],focus:"general",maxNotes:8,maxChars:12000},knowledgeCutoff:null};
+}
+/** M56-P1: Industry-IN / Macro-IN revise proposal. No issuer scope: history comes from
+ * the bounded Hub/macro-scope pack plus same-subject IN Reviews (discoverSubjectReviews). */
+export function subjectRevisionEventProposal(input:SubjectRevisionInput):EventProposal{
+ const c=verifySubjectRevisionCandidate(input),clean=withoutAssessment(input),s=input.subject,basis=input.existingReview.comparisonBasis;
+ const scope:RetrievalCoverage["scope"]=s.domain==="industry"
+   ?{question:(c.subjectLabel+": "+basis).slice(0,1200),industry:s.hubPath.slice("02_Industries_Themes/".length,-3),focus:"general",maxNotes:8,maxChars:12000}
+   :{question:(s.geography+" "+s.topic+" "+s.period+": "+basis).slice(0,1200),industry:s.geography,focus:"macro",maxNotes:8,maxChars:12000};
+ return {kind:"revise",entity:c.subjectLabel.slice(0,120),intakeId:c.review.fm.intake_id as string,inputDigest:hashObject(clean),reviewPath:input.existingReview.path,
+   sources:c.sourcePaths,targets:[{path:input.existingReview.path,beforeHash:input.existingReview.expectedSha256,afterHash:null,operationId:null,
+     change:{kind:"append",heading:c.review.raw.includes("## บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)")?"บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)":"Research analysis (AI interpretation; not approved Thesis)",content:c.body,date:input.reviewDate}}],
+   ownWrites:[],scope,knowledgeCutoff:null,
+   subject:{domain:s.domain,key:c.subjectKey,label:c.subjectLabel,hubPath:s.domain==="industry"?s.hubPath:null,geography:s.domain==="macro"?s.geography:null}};
 }
 /** Semantic assessment precedes Preview. Its server-created analysis clock is
  * intentionally pending, like Research Judge's analysisCreatedAt=null. Only
@@ -81,14 +101,15 @@ function sourceRead(path:string){
      originalDocumentAccess:n.fm.original_document_access??null,attachmentStatus:n.fm.attachment_status??null,receivedAt:n.fm.received_at??null},
    eventDate:n.fm.event_date??null,publicationDate:n.fm.published_at??null,provenance:"received_source_not_publisher_authentication"};
 }
-function historicalRead(path:string){
+function historicalRead(path:string,subjectMode=false){
  const read=m2VaultReadDeps.readIndexed(path);
  if(!read?.indexed||!read.searchable||Buffer.byteLength(read.content)>100000)throw Error("source_event_history_readback_hold");
  const parsed=splitFrontmatter(read.content),row=db().prepare("SELECT frontmatter FROM notes WHERE path=?").get(path) as {frontmatter:string|null};
  const fts=db().prepare("SELECT body FROM notes_fts WHERE path=?").get(path) as {body:string}|undefined;
  // Untyped historical notes legitimately index no frontmatter as SQL NULL.
  if(stable(JSON.parse(row.frontmatter??"null")??{})!==stable(parsed.data)||fts?.body!==parsed.body)throw Error("source_event_history_index_drift_hold");
- const n={raw:read.content,fm:parsed.data},isSource=/^00_Inbox\/ChatGPT\/Investment Intake - IN-/.test(path),isReview=/^10_Knowledge\/Company Research\/Investment Review - .+ - IN-/.test(path);
+ const n={raw:read.content,fm:parsed.data},isSource=/^00_Inbox\/ChatGPT\/Investment Intake - IN-/.test(path),isReview=/^10_Knowledge\/Company Research\/Investment Review - .+ - IN-/.test(path)||
+   subjectMode&&/^10_Knowledge\/(?:Industry and Concepts|Macro and Markets)\/Investment Review - .+ - IN-[A-F0-9]{16}\.md$/.test(path);
  let receiptId:string|null=null,source:null|ReturnType<typeof sourceRead>=null,receiptBinding="historical_unverified";
  if(isSource){receiptId=sourceRead(path).receiptId;receiptBinding="received_source_receipt";}
  if(isGeneratedClaimPath(path)){
@@ -104,48 +125,64 @@ function historicalRead(path:string){
  }
  return {path,sha256:sha(n.raw),text:n.raw,receiptId,source,receiptBinding,researchTrust:researchTrust(path,n.fm)};
 }
+function subjectScan(subject:NonNullable<EventProposal["subject"]>,reviewPath:string){
+ return discoverSubjectReviews(subject.domain,subject.hubPath?{hubPath:subject.hubPath}:{geography:subject.geography!},[reviewPath]);
+}
 function context(proposal:EventProposal,actor:string){
- const pack=judgeContext(proposal.scope,proposal.ownWrites,proposal.intakeId,actor),constraints:string[]=[];
+ const pack=judgeContext(proposal.scope,proposal.ownWrites,proposal.intakeId,actor),constraints:string[]=[],v2=proposal.subject;
  let witness:JudgeScope|null=null;
  try{witness=judgeScopeWitness(pack);}catch{constraints.push("source_event_history_operational_hold");}
  if(!retrievalOperationallyComplete(pack.retrieval))constraints.push("source_event_history_operational_hold");
- if(pack.issuerResolution.length!==1||pack.issuerResolution.some(r=>!["exact_existing_title","indexed_alias"].includes(r.status)))constraints.push("source_event_issuer_resolution_hold");
+ if(v2){if(pack.issuerResolution.length)constraints.push("source_event_subject_issuer_scope_hold");}
+ else if(pack.issuerResolution.length!==1||pack.issuerResolution.some(r=>!["exact_existing_title","indexed_alias"].includes(r.status)))constraints.push("source_event_issuer_resolution_hold");
  const history:ReturnType<typeof historicalRead>[]=[];
- for(const item of pack.items)try{const h=historicalRead(item.path);if(h.sha256!==item.contentSha256)throw Error();history.push(h);}catch{constraints.push("source_event_selected_history_readback_hold");}
- return {witness,retrieval:pack.retrieval,history,constraints,omitted:pack.omitted.slice(0,30),incomplete:pack.incomplete.slice(0,30),
+ for(const item of pack.items)try{const h=historicalRead(item.path,!!v2);if(h.sha256!==item.contentSha256)throw Error();history.push(h);}catch{constraints.push("source_event_selected_history_readback_hold");}
+ const base={witness,retrieval:pack.retrieval,history,constraints,omitted:pack.omitted.slice(0,30),incomplete:pack.incomplete.slice(0,30),
    candidateReviews:pack.contextBundles.slice(0,12),candidatesTruncated:pack.contextBundles.length>12,
-   effectiveIssuerId:pack.issuerResolution[0]?.hubPath??null};
+   effectiveIssuerId:v2?null:pack.issuerResolution[0]?.hubPath??null};
+ if(!v2)return base;
+ // V2: same-subject IN Reviews are mandatory bounded history; incomplete scan HOLDs.
+ const scan=subjectScan(v2,proposal.reviewPath);
+ if(!scan.complete)constraints.push("source_event_subject_scan_incomplete_hold");
+ for(const p of scan.paths)if(!history.some(h=>h.path===p))try{history.push(historicalRead(p,true));}catch{constraints.push("source_event_selected_history_readback_hold");}
+ return {...base,effectiveSubjectId:v2.key,subjectScan:scan};
 }
-type PacketBody={policy:typeof SOURCE_EVENT_POLICY;nonce:string;proposal:EventProposal;sources:ReturnType<typeof sourceRead>[];context:ReturnType<typeof context>;
+type PacketBody={policy:Policy;nonce:string;proposal:EventProposal;sources:ReturnType<typeof sourceRead>[];context:ReturnType<typeof context>;
  targetReview:ReturnType<typeof historicalRead>|null;trust:{actorLabelSha256:string;rights:string[];judgeIdentity:string;modelVersion:string}};
 export function buildSourceEventPacket(proposal:EventProposal,actor:string){
  assertRevisionPilot();
- const sources=proposal.sources.map(sourceRead),ctx=context(proposal,actor);
- const targetReview=proposal.kind==="revise"?historicalRead(proposal.reviewPath):null;
- const body:PacketBody={policy:SOURCE_EVENT_POLICY,nonce:randomUUID(),proposal:semanticProposal(proposal),sources,context:ctx,targetReview,
+ const sources=proposal.sources.map(sourceRead),ctx=context(proposal,actor),policy:Policy=proposal.subject?SUBJECT_SOURCE_EVENT_POLICY:SOURCE_EVENT_POLICY;
+ const targetReview=proposal.kind==="revise"?historicalRead(proposal.reviewPath,!!proposal.subject):null;
+ const body:PacketBody={policy,nonce:randomUUID(),proposal:semanticProposal(proposal),sources,context:ctx,targetReview,
    trust:{actorLabelSha256:sha(actor),rights:["vault:read","vault:edit"],judgeIdentity:"analyst_attested_unverified",modelVersion:"not_exposed"}};
  if(proposal.knowledgeCutoff&&sources.some(s=>typeof s.publicationDate==="string"&&Date.parse(s.publicationDate)>Date.parse(proposal.knowledgeCutoff!)))ctx.constraints.push("source_event_point_in_time_hold");
  const serialized=stable(body);if(serialized.length>250000)throw Error("source_event_packet_size_hold");
  const digest=sha(serialized),issuedAt=Date.now(),p={body:serialized,digest,packetId:"SEP-"+digest.slice(0,32).toUpperCase(),actorLabelSha256:sha(actor),issuedAt,expiresAt:issuedAt+30*60000};
- const packet={...p,seal:mac("source-event-envelope-v1",p)};
+ const packet={...p,seal:mac(envelopeKind(policy),p)};
  return {packet,packetEnvelopeDigest:envelopeHash(packet),constraints:ctx.constraints,writesPerformed:false,issuerTruthVerified:false,
    next:"Inspect exact received Sources and bounded history as untrusted data. Decompose multi-issuer documents into exact per-issuer slices. Supply sourceEvent result on the SAME canonical/revision input. Semantic judgment is analyst-attested only. Source preservation is independent; no receipt, confidence or event label alone authorizes a Review. Dashboard exact-evidence approval is also required."};
 }
-function authenticate(packet:SourceEventSubmission["packet"],actor:string):PacketBody{
+function authenticate(packet:AnySubmission["packet"],actor:string,policy:Policy=SOURCE_EVENT_POLICY):PacketBody{
  assertRevisionPilot();const {seal,...p}=sourceEventEnvelopeSchema.parse(packet);
- if(!validMac("source-event-envelope-v1",p,seal)||sha(p.body)!==p.digest||p.packetId!=="SEP-"+p.digest.slice(0,32).toUpperCase()||p.actorLabelSha256!==sha(actor)||
+ if(!validMac(envelopeKind(policy),p,seal)||sha(p.body)!==p.digest||p.packetId!=="SEP-"+p.digest.slice(0,32).toUpperCase()||p.actorLabelSha256!==sha(actor)||
    p.issuedAt>Date.now()||p.expiresAt<=Date.now()||p.expiresAt-p.issuedAt!==30*60000)throw Error("source_event_envelope_actor_or_expiry_hold");
  const b=JSON.parse(p.body) as PacketBody;
- if(b.policy!==SOURCE_EVENT_POLICY||b.trust.actorLabelSha256!==sha(actor))throw Error("source_event_policy_hold");return b;
+ if(b.policy!==policy||b.trust.actorLabelSha256!==sha(actor))throw Error("source_event_policy_hold");return b;
 }
+const gatePolicy=(b:PacketBody):Policy=>b.policy===SUBJECT_SOURCE_EVENT_POLICY?SUBJECT_SOURCE_EVENT_POLICY:SOURCE_EVENT_POLICY;
 function current(b:PacketBody,actor:string,runtimeProposal:EventProposal){
+ const v2=b.policy===SUBJECT_SOURCE_EVENT_POLICY;
  // Source-only remains preservable after a Judge rejection. It is not a Draft
  // fallback: a different Review path must not erase prior enrolled restrictions.
  if(b.sources.some(s=>{const g=currentJudgeGate(s.intakeId);return g&&g.decision!=="PASS";}))throw Error("source_event_existing_judge_restriction_hold");
  if(b.context.constraints.length||!b.context.witness||!judgeScopeCurrent(b.context.witness,b.context.retrieval,runtimeProposal.ownWrites,b.proposal.intakeId,actor))throw Error("source_event_scope_changed_or_unavailable_hold");
  if(stable(b.sources)!==stable(b.proposal.sources.map(sourceRead)))throw Error("source_event_source_drift_hold");
- if(b.targetReview&&stable(b.targetReview)!==stable(historicalRead(b.targetReview.path)))throw Error("source_event_target_drift_hold");
- if(b.context.history.some(h=>stable(h)!==stable(historicalRead(h.path))))throw Error("source_event_history_binding_hold");
+ if(b.targetReview&&stable(b.targetReview)!==stable(historicalRead(b.targetReview.path,v2)))throw Error("source_event_target_drift_hold");
+ if(b.context.history.some(h=>stable(h)!==stable(historicalRead(h.path,v2))))throw Error("source_event_history_binding_hold");
+ if(v2){
+   const subject=b.proposal.subject,ctx=b.context as ReturnType<typeof context>&{subjectScan?:unknown};
+   if(!subject||stable(ctx.subjectScan)!==stable(subjectScan(subject,b.proposal.reviewPath)))throw Error("source_event_subject_scan_drift_hold");
+ }
 }
 function semanticEligibility(b:PacketBody,s:SourceEventSubmission){
  const r=s.result,reasons:string[]=[];
@@ -172,11 +209,57 @@ function semanticEligibility(b:PacketBody,s:SourceEventSubmission){
  if(b.context.history.length&&!r.event.references.some(ref=>ref.key.startsWith("history_")))reasons.push("source_event_history_evidence_required");
  if(!r.event.references.some(ref=>ref.key.startsWith("source_")))reasons.push("source_event_source_evidence_required");
  if(b.proposal.kind==="create"&&(r.event.relation!=="new_event"||r.event.action!=="create_new_review"||r.event.targetReviewPath!==null))reasons.push("source_event_create_requires_new_event");
- if(b.proposal.kind==="revise"&&(r.event.relation!=="added_detail"||r.event.action!=="append_revision"||r.event.materiality!=="low"||r.event.targetReviewPath!==b.proposal.reviewPath||!r.event.references.some(ref=>ref.key==="target_review")))reasons.push("source_event_revision_requires_low_risk_added_detail");
+ // A revise is a routine added-detail append OR (WP2 A1 M56-A) a link-only duplicate:
+ // the contract's own relation/action pairs, never mixed, always low materiality.
+ const revisePair=(r.event.relation==="added_detail"&&r.event.action==="append_revision")||
+   (r.event.relation==="duplicate"&&r.event.action==="duplicate_link_only");
+ if(b.proposal.kind==="revise"&&(!revisePair||r.event.materiality!=="low"||r.event.targetReviewPath!==b.proposal.reviewPath||!r.event.references.some(ref=>ref.key==="target_review")))reasons.push("source_event_revision_requires_low_risk_added_detail");
  return [...new Set(reasons)];
 }
-export type EventAdmission={runtimeProposal:EventProposal;submission:SourceEventSubmission;body:PacketBody;decision:"PASS"|"HOLD"|"FAIL";reasons:string[]};
+/** M56-P1 V2: the analyst-attested assessment must bind every Source and the event to
+ * the server-derived subject, cite exact Source/history/target text, and keep the
+ * revision a same-subject, same-period/role/vintage/unit/metric/geography low-risk
+ * duplicate link or added detail. Anything else HOLDs; nothing is inferred here. */
+function subjectSemanticEligibility(b:PacketBody,s:SubjectSourceEventSubmission){
+ const r=s.result,reasons:string[]=[],subject=b.proposal.subject;
+ if(r.packetDigest!==s.packet.digest||r.packetEnvelopeDigest!==envelopeHash(s.packet))throw Error("source_event_result_binding_hold");
+ if(!subject||b.proposal.kind!=="revise")return ["source_event_subject_scope_hold"];
+ const evidence=new Map<string,{text:string;sha256:string}>(b.sources.map((x,i)=>["source_"+i,{text:x.text,sha256:x.textSha256}]));
+ b.context.history.forEach((h,i)=>evidence.set("history_"+i,h));
+ if(b.targetReview)evidence.set("target_review",b.targetReview);
+ const validRef=(ref:SubjectSourceEventSubmission["result"]["event"]["references"][number])=>{const e=evidence.get(ref.key);return exactTextReference(ref,e?.text,e?.sha256);};
+ if(r.disposition!=="PASS"||Object.values(r.checks).some(v=>v!=="PASS"))reasons.push("source_event_semantic_hold");
+ if(r.event.effectiveSubjectId!==subject.key)reasons.push("source_event_subject_mismatch");
+ for(const [i] of b.sources.entries())if(!r.sourceBindings.some(x=>x.sourceKey==="source_"+i))reasons.push("source_event_missing_source_assessment");
+ for(const binding of r.sourceBindings)
+   if(!/^source_\d+$/.test(binding.sourceKey)||!evidence.has(binding.sourceKey)||binding.domain!==subject.domain||binding.effectiveSubjectId!==subject.key||
+      !["primary_subject","related_subject"].includes(binding.relation)||binding.coverage==="not_obtained"||
+      binding.references.some(ref=>ref.key!==binding.sourceKey||!validRef(ref)))reasons.push("source_event_subject_slice_hold");
+ if(new Set(r.sourceBindings.map(x=>x.sliceId)).size!==r.sourceBindings.length)reasons.push("source_event_slice_identity_hold");
+ const expected=b.context.history.map((_,i)=>"history_"+i);
+ if(stable([...r.event.consideredHistoryKeys].sort())!==stable(expected.sort())||r.event.references.some(ref=>!validRef(ref))||r.event.counterEvidenceRefs.some(ref=>!validRef(ref)))reasons.push("source_event_history_or_reference_hold");
+ const c=r.event.comparison;
+ if(!["complete_for_bounded_scope","bounded_omission"].includes(r.event.coverage)||r.event.materiality==="unknown"||Object.values(c).includes("ambiguous"))reasons.push("source_event_uncertainty_hold");
+ // A changed geography, metric, unit, period, role or vintage is a different event, never a routine revision.
+ if(c.economicSubject!=="same"||[c.geography,c.metric,c.unit,c.period,c.role,c.vintage].includes("different"))reasons.push("source_event_subject_dimension_changed_hold");
+ if(b.context.history.length&&!r.event.references.some(ref=>ref.key.startsWith("history_")))reasons.push("source_event_history_evidence_required");
+ if(!r.event.references.some(ref=>ref.key.startsWith("source_")))reasons.push("source_event_source_evidence_required");
+ const revisePair=(r.event.relation==="added_detail"&&r.event.action==="append_revision")||(r.event.relation==="duplicate"&&r.event.action==="duplicate_link_only");
+ if(!revisePair||r.event.materiality!=="low"||r.event.targetReviewPath!==b.proposal.reviewPath||!r.event.references.some(ref=>ref.key==="target_review"))reasons.push("source_event_revision_requires_low_risk_added_detail");
+ return [...new Set(reasons)];
+}
+export type EventAdmission={runtimeProposal:EventProposal;submission:AnySubmission;body:PacketBody;decision:"PASS"|"HOLD"|"FAIL";reasons:string[]};
+/** M56-P1 V2 counterpart of evaluateSourceEvent (Industry-IN / Macro-IN only). */
+export function evaluateSubjectSourceEvent(proposal:EventProposal,s:unknown,actor:string):EventAdmission{
+ if(!proposal.subject)throw Error("source_event_subject_scope_hold");
+ const submission=subjectSourceEventSubmissionSchema.parse(s),body=authenticate(submission.packet,actor,SUBJECT_SOURCE_EVENT_POLICY);
+ if(stable(body.proposal)!==stable(semanticProposal(proposal)))throw Error("source_event_exact_proposal_hold");
+ const reasons=subjectSemanticEligibility(body,submission);
+ try{current(body,actor,proposal);}catch(e){reasons.push(e instanceof Error?e.message:"source_event_freshness_hold");}
+ return {runtimeProposal:proposal,submission,body,decision:submission.result.disposition==="FAIL"?"FAIL":reasons.length?"HOLD":"PASS",reasons};
+}
 export function evaluateSourceEvent(proposal:EventProposal,s:unknown,actor:string):EventAdmission{
+ if(proposal.subject)throw Error("source_event_subject_contract_required");
  const submission=sourceEventSubmissionSchema.parse(s),body=authenticate(submission.packet,actor);
  if(stable(body.proposal)!==stable(semanticProposal(proposal)))throw Error("source_event_exact_proposal_hold");
  const reasons=semanticEligibility(body,submission);
@@ -216,16 +299,20 @@ function enrollLocked(a:EventAdmission,actor:string){
    // Quota never suppresses withdrawal of already granted authority.
    if((quota.n>=128||quota.bytes+stable(g).length>32000000)&&!(prev?.decision==="PASS"&&g.decision!=="PASS"))throw Error("source_event_journal_quota_hold");
    db().prepare("INSERT INTO safe_edit_events VALUES(?,?,?,?,?)").run(new Date().toISOString(),g.targets[0].operationId,actor,event,JSON.stringify({body:g,seal:mac("source-event-gate-v1",g)}));
+   // WP2: HOLD/FAIL/withdrawal advances this intake's authority epoch in the
+   // same transaction. Pending non-Source witnesses go stale; Source does not.
+   if(g.decision!=="PASS")bumpAuthorityEpoch("intake",a.runtimeProposal.intakeId);
  }).immediate();
  return g;
 }
 /** Authenticate an exact matching restrictive assessment before outer schema,
  * appearance/token/planner failures. Unrelated/obsolete callers cannot revoke. */
 export function withdrawSourceEvent(raw:unknown,actor:string){
- let submission:SourceEventSubmission,body:PacketBody,reasons:string[];
+ let submission:AnySubmission,body:PacketBody,reasons:string[];
  try{
-   submission=sourceEventSubmissionSchema.parse(raw);body=authenticate(submission.packet,actor);
-   reasons=semanticEligibility(body,submission);
+   const v1=sourceEventSubmissionSchema.safeParse(raw);
+   if(v1.success){submission=v1.data;body=authenticate(v1.data.packet,actor);reasons=semanticEligibility(body,v1.data);}
+   else{const v2=subjectSourceEventSubmissionSchema.parse(raw);submission=v2;body=authenticate(v2.packet,actor,SUBJECT_SOURCE_EVENT_POLICY);reasons=subjectSemanticEligibility(body,v2);}
  }catch{return;} // Unauthenticated input has no revocation authority.
  if(!reasons.length)return;
  const prev=gateFor(body.proposal.reviewPath);
@@ -242,15 +329,18 @@ export function assertSourceEventWrite(operationId:string,path:string,before:str
  const g=gateFor(path),required=revisionPilotRequired()&&isCompanyReviewWrite(path,before,after);
  if(!g&&!required)return;
  if(!g||stage==="preview"&&!dedicated)throw Error("source_event_dedicated_assessment_required");
- authenticate(g.submission.packet,actor);
+ authenticate(g.submission.packet,actor,gatePolicy(g.body));
  const target=g.targets.find(t=>t.path===path&&t.operationId===operationId);
  if(g.actor!==actor||g.decision!=="PASS"||!target||target.beforeHash!==sha(before)||target.afterHash!==null&&target.afterHash!==sha(after)||stable(target.change)!==stable(change))throw Error("source_event_exact_action_or_assessment_hold");
  current(g.body,actor,g.runtimeProposal);
 }
 export function sourceEventReviewEvidence(path:string){
  const g=gateFor(path);if(!g)return null;
- authenticate(g.submission.packet,g.actor);current(g.body,g.actor,g.runtimeProposal);
+ authenticate(g.submission.packet,g.actor,gatePolicy(g.body));current(g.body,g.actor,g.runtimeProposal);
  if(g.decision!=="PASS")throw Error("source_event_assessment_hold");
+ if(gatePolicy(g.body)===SUBJECT_SOURCE_EVENT_POLICY)
+   return {contractVersion:SUBJECT_SOURCE_EVENT_POLICY,assessment:g.submission.result,packet:g.body,packetEnvelopeDigest:g.packetEnvelopeDigest,
+     subjectAssociation:"analyst_attested_not_independently_verified",independentEvidenceIncrement:0,comparatorEligible:false};
  return {contractVersion:SOURCE_EVENT_POLICY,assessment:g.submission.result,packet:g.body,packetEnvelopeDigest:g.packetEnvelopeDigest,
    issuerAssociation:"analyst_attested_not_independently_verified",independentEvidenceIncrement:0,comparatorEligible:false};
 }

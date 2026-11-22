@@ -16,7 +16,8 @@ import { resolveNotePath, assertDescriptorInVault, openNoFollow } from "./vault/
 import { recordLocalModification } from "./vault/modified";
 import { reindexPath } from "./vault/indexer";
 import { assertEnabled } from "./safe-edit/engine";
-import { assertMutationAllowed } from "./maintenance";
+import { assertMutationAllowed, beginMaintenance, maintenanceActive, registry, withD1NativeInterlock } from "./maintenance";
+import { assertResearchEntry } from "./db";
 
 export type AttachmentType="image/jpeg"|"image/png"|"image/webp"|"application/pdf";
 const ext:Record<AttachmentType,string>={
@@ -49,12 +50,16 @@ function checkedPath(digest:string,mime:AttachmentType){
   const abs=resolveNotePath(rel,{allowMissingExt:true});
   return {rel,abs,dir:path.dirname(abs)};
 }
-function ensureDirectory(){
+function effect<T>(run:()=>T):T {
+  assertResearchEntry();
+  return withD1NativeInterlock("business",run);
+}
+function ensureDirectory(onEffect:()=>void){
   // Folder names are constant and no user-controlled path component exists.
   // Reject symlinked parents at every level. Never write under a redirected path.
   for(const rel of ["07_Sources","07_Sources/ChatGPT",base]){
     const dir=resolveNotePath(rel,{allowMissingExt:true});
-    if(!fs.existsSync(dir))fs.mkdirSync(dir,{mode:0o700});
+    if(!fs.existsSync(dir))effect(()=>{onEffect();fs.mkdirSync(dir,{mode:0o700});});
     const st=fs.lstatSync(dir);
     if(!st.isDirectory()||st.isSymbolicLink())throw Error("unsafe_attachment_directory");
     const real=fs.realpathSync(dir),vault=fs.realpathSync(env.vaultDir);
@@ -88,11 +93,18 @@ export function storeUserAttachment({base64,contentType}:{
 }){
   assertEnabled();
   assertMutationAllowed("attachment write");
+  assertResearchEntry();
   if(!allowed.has(contentType))throw Error("unsupported_attachment_content_type");
   const bytes=decode(base64);
   verifyFileType(bytes,contentType);
   const digest=sha(bytes);
-  ensureDirectory();
+  let effectsStarted=false;
+  let publication:"not_attempted"|"attempted"|"linked"="not_attempted";
+  let indexed=false;
+  // Any error after a native effect is a partial/unknown result, never zero.
+  // No orphan unlink is performed after DRAINING. Recovery is operator-gated.
+  try {
+  ensureDirectory(()=>{effectsStarted=true;});
   const {rel,abs,dir}=checkedPath(digest,contentType);
   const check=readAndVerify(abs,digest);
   if(check.byteLength){
@@ -101,29 +113,39 @@ export function storeUserAttachment({base64,contentType}:{
   }
   assertHeadroom(bytes.length*2+64_000);
   const tmp=path.join(dir,digest+"."+crypto.randomBytes(12).toString("hex")+".tmp");
-  let created=false;
-  try{
-    const fd=fs.openSync(tmp,fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_WRONLY|fs.constants.O_NOFOLLOW,0o600);
-    created=true;
+    const fd=effect(()=>{effectsStarted=true;return fs.openSync(tmp,fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_WRONLY|fs.constants.O_NOFOLLOW,0o600);});
     try{
       assertDescriptorInVault(fd);
-      fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);
+      effect(()=>fs.writeFileSync(fd,bytes));effect(()=>fs.fsyncSync(fd));
     }finally{fs.closeSync(fd);}
-    try{fs.linkSync(tmp,abs);}catch(e){
+    try{effect(()=>{publication="attempted";fs.linkSync(tmp,abs);publication="linked";});}catch(e){
       if((e as NodeJS.ErrnoException).code!=="EEXIST")throw e;
       const already=readAndVerify(abs,digest);
       if(!already.verified)throw Error("attachment_existing_path_hash_conflict");
     }
     // A temporary hardlink gives the target inode nlink=2 until unlinked.
     // Release the temporary name before enforcing the final nlink=1 invariant.
-    fs.unlinkSync(tmp);created=false;
+    effect(()=>fs.unlinkSync(tmp));
     // Immutable add-only blob is in the Vault; recompute from stored bytes.
     const verified=readAndVerify(abs,digest);
     if(!verified.verified||verified.byteLength!==bytes.length)
       throw Error("attachment_readback_failed");
-    const dirFd=fs.openSync(dir,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);
-    try{fs.fsyncSync(dirFd);}finally{fs.closeSync(dirFd);}
-    recordLocalModification(rel);reindexPath(rel);
+    const dirFd=effect(()=>fs.openSync(dir,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW));
+    try{effect(()=>fs.fsyncSync(dirFd));}finally{fs.closeSync(dirFd);}
+    // Each SQLite statement is independently fenced by the shared DB facade.
+    assertResearchEntry();recordLocalModification(rel);reindexPath(rel);indexed=true;
     return {...inspectUserAttachment({sha256:digest,contentType}),duplicate:false};
-  }finally{if(created)try{fs.unlinkSync(tmp);}catch{/* Temp may already have been removed. */}}
+  }catch(error){
+    if(effectsStarted){
+      registry().heldClosed="attachment_partial_recovery_required";
+      let quarantineVerified=false;
+      try{if(!maintenanceActive() || !fs.existsSync(path.join(env.dataDir,"maintenance.json")))beginMaintenance();
+        quarantineVerified=fs.existsSync(path.join(env.dataDir,"maintenance.json"))&&!registry().persistUncertain;
+      }catch{/* Primary outcome retained; persistence uncertainty is explicit. */}
+      const hold=new Error("attachment_partial_or_unknown_recovery_hold",{cause:error});
+      Object.defineProperty(hold,"attachmentOutcome",{value:{status:"HOLD",effectsStarted,publication,indexed,quarantineVerified}});
+      throw hold;
+    }
+    throw error;
+  }
 }

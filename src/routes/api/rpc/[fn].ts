@@ -90,6 +90,7 @@ const HANDLERS: Record<string, () => Promise<Handler>> = {
   getSetupStage: async () => (await import("~/server/setup")).getSetupStage,
   getSetupProgress: async () => (await import("~/server/setup")).getSetupProgress,
   getClaimState: async () => (await import("~/server/setup")).getClaimState,
+  setupLocalPilotVault: async () => (await import("~/server/setup")).setupLocalPilotVault,
   relinkVault: async () => (await import("~/server/setup")).relinkVault,
   setupChooseBackend: async () => (await import("~/server/setup")).setupChooseBackend,
   setupGitRepo: async () => (await import("~/server/setup")).setupGitRepo,

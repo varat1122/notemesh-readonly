@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {createHash} from "node:crypto";
+import {kernelCanonicalCreate} from "../../../tests/source-event-fixture";
 
 let root:string,vault:string;
 const actor="oauth:m53-synthetic";
@@ -52,18 +53,17 @@ const news={domain:"industry" as const,entities:["SK hynix","Samsung Electronics
   completedAnalysis:"## Investment takeaway\nASP growth deceleration can affect EPS revisions. HBM4 yield risks are unresolved; no verified thesis change."
 };
 async function applyRecipe(plan:Awaited<ReturnType<typeof route>>){
-  const {preview,apply}=await import("../safe-edit/engine");
-  const written=[];
-  for(const step of plan.safeEditWorkflow?.steps??[]){
-    if(!step.safeEditRequest)continue;
-    const p=preview(step.safeEditRequest,actor);
-    expect(fs.existsSync(path.join(vault,step.path))).toBe(false);
-    const receipt=apply({operationId:p.operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor);
-    expect(receipt).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified",
-      mobileSync:"unverified",remoteSync:"unverified"}});
-    written.push(step.path);
-  }
-  return written;
+  // WP2 (OD-04+OD-06): server recipes persist through the kernel route; the
+  // generic Safe Edit route refuses canonical IDs/namespaces in every mode.
+  const steps=(plan.safeEditWorkflow?.steps??[]).filter(step=>step.safeEditRequest);
+  for(const step of steps)expect(fs.existsSync(path.join(vault,step.path))).toBe(false);
+  if(!steps.length)return [];
+  const results=await kernelCanonicalCreate(steps.map(step=>({kind:step.kind,path:step.path,content:(step.safeEditRequest!.change as {content:string}).content})),actor);
+  const {status}=await import("../safe-edit/engine");
+  results.forEach((r,i)=>{expect(r.operationId).toBe(steps[i].safeEditRequest!.operationId);
+    expect(status(r.operationId,actor)).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified",
+      mobileSync:"unverified",remoteSync:"unverified"}});});
+  return steps.map(step=>step.path);
 }
 async function route(input:typeof news|Record<string,unknown>){
   const {planInvestmentWriteback}=await import("./investment-writeback-router");
@@ -216,31 +216,38 @@ describe("M5.6.2 Solidigm Thai/English same-event Source Receipt relation (synth
   eventAnchor:"sk-hynix-solidigm-ipo-cancellation",
   comparisonBasis:"Both user-supplied Investing.com language editions describe the Oct. 23 Solidigm IPO decision and the same LYNX NAND-capacity scenario; not a second economic event.",
   linkedOnDate:"2026-10-26"};
- it("previews an append-only related Source receipt, CAS-applies once and never edits protected notes",async()=>{
+ it("M56-A/M56-P1: an unreceipted (historical) Industry Review stays read-only — truthful HOLD, no generic append recipe, zero writes",async()=>{
+  // Canonical Reviews change only through the dedicated revision route. Since M56-P1 the
+  // route also serves server-receipted Industry-IN/Macro-IN Draft Reviews (positive: the
+  // "M56-P1" describe below); this seeded note has no server receipt or Draft metadata.
+  // The Company-Review M56 positive is in src/server/mcp/wp2-review-revision-legacy.test.ts.
   await seed(thai,source("IN-4AF8FD0215D3A798","https://th.investing.com/news/stock-market-news/article-810087","th"));
   await seed(english,source("IN-B637DC6926EBA011","https://www.investing.com/news/stock-market-news/micron-sandisk-gain-as-sk-hynix-scraps-solidigm-ipo-lynx-says-4970053","en"));
   await seed(review,["---","type: investment_research_review",`intake_id: "IN-4AF8FD0215D3A798"`,
    `original_source_path: "${thai}"`,"---","# Solidigm annotated historical review", "## Source provenance",
    `- Exact Source: [[${thai.slice(0,-3)}]]`,"","## Research analysis","Unchanged synthetic review content.",""] .join("\n"));
   await seed("05_Thesis/NVDA - Current Thesis.md","# Protected thesis fixture\n");
+  const before=fs.readFileSync(path.join(vault,review),"utf8");
   const {planDuplicateSourceLinkM56}=await import("./event-review-relation-m56");
   const plan=planDuplicateSourceLinkM56(request);
-  expect(plan).toMatchObject({status:"requires_safe_edit_preview",writePerformed:false});
-  expect(plan.safeEditRequest?.change.kind).toBe("append");
-  expect(plan.safeEditRequest?.change.content).toContain("not independent confirmation");
-  const {preview,apply}=await import("../safe-edit/engine");
-  const prepared=preview(plan.safeEditRequest!,actor);
-  expect(prepared.beforeHash).toBe(plan.reviewVersionSha256);
-  const applied=apply({operationId:prepared.operationId,previewToken:prepared.previewToken,
-   expectedHash:prepared.beforeHash},actor);
-  expect(applied.receipt).toMatchObject({write:"written",readback:"verified",reindex:"verified"});
-  const later=planDuplicateSourceLinkM56(request);
-  expect(later.status).toBe("already_linked");
-  expect(later.safeEditRequest).toBeNull();
-  const content=fs.readFileSync(path.join(vault,review),"utf8");
-  expect(content).toContain(`[[${english.slice(0,-3)}]]`);
-  expect(content).toContain("Unchanged synthetic review content.");
+  expect(plan).toMatchObject({status:"hold_draft_review_required",writePerformed:false,safeEditRequest:null,canonicalReviewRevision:null});
+  const engine=await import("../safe-edit/engine");
+  expect(()=>engine.preview({operationId:"ILK-former-generic-append-1",path:review,reason:"former M56 generic append",
+   change:{kind:"append",heading:"Source provenance",date:"2026-10-26",content:"probe"}},actor)).toThrow(/dedicated_route_required|canonical_route_required/);
+  expect(fs.readFileSync(path.join(vault,review),"utf8")).toBe(before);
   expect(fs.readFileSync(path.join(vault,"05_Thesis/NVDA - Current Thesis.md"),"utf8")).toBe("# Protected thesis fixture\n");
+ });
+ it("OD-10 F-4: an Industry Review that already text-references the Source still HOLDs (unreceipted historical Draft check); no already_linked before the domain/receipt checks",async()=>{
+  await seed(thai,source("IN-4AF8FD0215D3A798","https://th.investing.com/news/stock-market-news/article-810087","th"));
+  await seed(english,source("IN-B637DC6926EBA011","https://www.investing.com/news/stock-market-news/micron-sandisk-gain-as-sk-hynix-scraps-solidigm-ipo-lynx-says-4970053","en"));
+  await seed(review,["---","type: investment_research_review",`intake_id: "IN-4AF8FD0215D3A798"`,
+   `original_source_path: "${thai}"`,"---","## Source provenance",`- [[${thai.slice(0,-3)}]]`,`- [[${english.slice(0,-3)}]] (text reference only)`,""] .join("\n"));
+  const before=fs.readFileSync(path.join(vault,review),"utf8");
+  const {planDuplicateSourceLinkM56}=await import("./event-review-relation-m56");
+  const plan=planDuplicateSourceLinkM56(request);
+  expect(plan).toMatchObject({status:"hold_draft_review_required",writePerformed:false,safeEditRequest:null,canonicalReviewRevision:null});
+  expect(plan).not.toHaveProperty("linkEvidence");
+  expect(fs.readFileSync(path.join(vault,review),"utf8")).toBe(before);
  });
  it("rejects a date mismatch or unrelated publisher without inventing event equivalence",async()=>{
   await seed(thai,source("IN-4AF8FD0215D3A798","https://th.investing.com/news/stock-market-news/article-810087","th"));
@@ -491,5 +498,338 @@ describe("M5.3 canonical Safe Edit recipes and verified ChatGPT readiness",()=>{
   expect(repeated.sourceEventReview.candidatePaths).toContain(original.safeEditWorkflow?.steps[0].path);
   expect(repeated.safeEditWorkflow?.steps[0].state).toBe("needs_create");
   expect(repeated.safeEditWorkflow?.steps[1].state).toBe("hold_event_review");
+ });
+});
+
+/** M56-P1 (Owner-approved Phase 1): dedicated revision of existing server-receipted
+ * Industry-IN / Macro-IN Draft Reviews under the versioned V2 subject contract.
+ * Synthetic Sources + ephemeral Vault/SQLite; dashboard approval is simulated through
+ * engine.approve (SYNTHETIC: not human presence). Every refusal compares a full ledger. */
+describe("M56-P1 Industry-IN / Macro-IN dedicated revision (V2 subject contract)",()=>{
+ // SYNC_DOUBLE_NOT_PERSISTENCE_PROOF for the dedicated apply (as in wp2-review-revision-legacy).
+ beforeEach(()=>{vi.doMock("../safe-edit/sync",()=>({withPausedSync:async<T>(run:()=>T)=>run()}));});
+ afterEach(()=>{vi.doUnmock("../safe-edit/sync");});
+ const sha=(s:string)=>createHash("sha256").update(s).digest("hex");
+ const hub="02_Industries_Themes/Memory Semiconductors.md";
+ const researchReview={headlineTh:"ราคาหน่วยความจำสมมติปรับขึ้นในตุลาคม 2026",translationTh:"ข่าวสมมติระบุว่าราคาชิปหน่วยความจำปรับขึ้นในเดือนตุลาคม 2026",
+  whatChangedTh:"เป็นข้อกล่าวอ้างด้านราคาที่ยังไม่ได้ตรวจสอบกับต้นฉบับ",mechanismTh:"ยังไม่มีหลักฐานว่าราคาที่ปรับขึ้นส่งผลต่อกำไรของผู้ผลิต",
+  thesisImplicationTh:"ไม่เปลี่ยน Thesis หรือ Portfolio จากข่าวนี้",counterEvidenceTh:"ข้อมูลอาจเป็นการคาดการณ์ของสื่อ ไม่ใช่ราคาที่ตกลงจริง",
+  requiredEvidenceTh:"ตรวจข้อมูลราคาจากต้นฉบับก่อนยกระดับข้อกล่าวอ้าง"};
+ const industryText="SYNTHETIC: Memory Semiconductors contract prices rose in October 2026, a synthetic tracker reported for DRAM.";
+ const macroText="SYNTHETIC: The Bank of Thailand held the policy rate at 2.50% in October 2026, the synthetic notice said.";
+ const writeback=(domain:"industry"|"macro",entity:string,text:string,url:string,capture=false)=>({domain,entities:[entity],topic:"Synthetic "+domain+" event",inputFormat:"text" as const,
+  sourceKind:"news_media" as const,sourceLanguage:"en",sourceChannel:"synthetic",contentTypes:["other" as const],sourceChat:"M56-P1 synthetic",sourceUrl:url,
+  eventDate:"2026-10-20",publicationDate:"2026-10-20",originalDocumentAccess:"not_obtained" as const,extractedText:text,
+  ...(capture?{captureOnly:true as const}:{researchReview})});
+ async function save(input:ReturnType<typeof writeback>){
+  // Server recipe persisted through the kernel route (same helper as M53 tests above).
+  const plan=await route(input as never),written=await applyRecipe(plan);
+  const steps=plan.safeEditWorkflow!.steps;
+  expect(written).toEqual(steps.map(x=>x.path));
+  return {steps:steps.map(x=>({kind:x.kind,path:x.path,receiptKey:x.receiptKey}))};
+ }
+ function files(dir=vault,b=""):string[]{return fs.readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?[b+e.name+"/",...files(path.join(dir,e.name),b+e.name+"/")]:[b+e.name+":"+sha(fs.readFileSync(path.join(dir,e.name),"utf8"))]).sort();}
+ /** Files+directories+full bytes, notes/notes_fts/links, plan/witness/consumption, operations/receipts, journal and modification ledger. */
+ async function ledger(){
+  const d=(await import("../db")).db(),m=await import("./modified"),has=(t:string)=>Boolean(d.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(t));
+  const all=(t:string,cols="*")=>has(t)?d.prepare(`SELECT ${cols} FROM ${t} ORDER BY 1`).all():[];
+  const md=files().filter(f=>f.includes(".md:")).map(f=>f.slice(0,f.lastIndexOf(":")));
+  return {files:files(),notes:all("notes"),fts:all("notes_fts","path,body"),links:all("links","source_path,target,resolved_path"),
+   plan:all("canonical_plan"),witness:all("canonical_witness"),consumption:all("witness_consumption"),ops:all("safe_edit_operations"),
+   events:all("safe_edit_events"),modified:md.map(f=>[f,m.modifiedFor(f,-1)])};
+ }
+ const raw=(p:string)=>fs.readFileSync(path.join(vault,p),"utf8");
+ async function quote(sourcePath:string,q:string){
+  const {preservedSubmittedText}=await import("./research-decision-v2"),{splitFrontmatter}=await import("./markdown");
+  const r=raw(sourcePath),part=preservedSubmittedText(r)!,fm=splitFrontmatter(r).data;
+  const text=[part,part+"\n"].find(t=>sha(t)===fm.source_text_sha256)!,at=text.indexOf(q);
+  expect(at,q).toBeGreaterThanOrEqual(0);
+  return {key:"original_source",quote:q,locator:`utf16:${at}:${at+q.length}`,sourceSha256:sha(text)};
+ }
+ /** SYNTHETIC analyst attestation (mechanical; not semantic verification). */
+ async function sealed(input:unknown,relation:"duplicate"|"added_detail",action:"duplicate_link_only"|"append_revision",tweak?:(r:Record<string,any>)=>void){
+  const sea=await import("../safe-edit/source-event-admission"),pilot=await import("../safe-edit/canonical-review-revision-pilot");
+  const proposal=sea.subjectRevisionEventProposal(pilot.subjectRevisionInputSchema.parse(input));
+  const built=sea.buildSourceEventPacket(proposal,actor),body=JSON.parse(built.packet.body);
+  expect(built.constraints,JSON.stringify(built.constraints)).toEqual([]);
+  const ref=(key:string,text:string,s256:string)=>({key,quote:text.slice(0,100),locator:`utf16:0:${Math.min(text.length,100)}`,sourceSha256:s256});
+  const sourceRefs=body.sources.map((s:{text:string;textSha256:string},i:number)=>ref("source_"+i,s.text,s.textSha256));
+  const historyRefs=body.context.history.map((h:{text:string;sha256:string},i:number)=>ref("history_"+i,h.text,h.sha256));
+  const subject=body.proposal.subject;
+  const result:Record<string,any>={contractVersion:pilot.SUBJECT_SOURCE_EVENT_POLICY,packetDigest:built.packet.digest,packetEnvelopeDigest:built.packetEnvelopeDigest,
+   disposition:"PASS",methodVersion:"SYNTHETIC-MECHANICAL-SUBJECT-1",criticIndependence:"not_verified",
+   sourceBindings:sourceRefs.map((r:{key:string},i:number)=>({bindingVersion:pilot.SUBJECT_BIND_POLICY,sourceKey:r.key,sliceId:"slice_"+i,domain:subject.domain,
+    effectiveSubjectId:subject.key,relation:"primary_subject",semanticRationale:"Synthetic fixture subject association for deterministic binding tests only.",
+    references:[r],coverage:"excerpt_only",limitations:["Fixture only; publisher not independently verified"]})),
+   event:{decisionVersion:pilot.SUBJECT_EVENT_ID_POLICY,effectiveSubjectId:subject.key,relation,action,targetReviewPath:body.targetReview.path,materiality:"low",
+    semanticRationale:"Synthetic exact-source comparison, not economic verification or LLM evaluation.",
+    materialityRationale:"Synthetic same-event coverage; no asserted financial or investment authority.",
+    comparison:{economicSubject:"same",geography:"same",metric:"same",unit:"same",period:"same",role:"same",vintage:"not_applicable",sourceFamily:"same_family",
+     materialDelta:"Synthetic same-event text only; no asserted change of value, unit, period or role."},
+    consideredHistoryKeys:historyRefs.map((r:{key:string})=>r.key),
+    references:[sourceRefs[0],...(historyRefs.length?[historyRefs[0]]:[]),ref("target_review",body.targetReview.text,body.targetReview.sha256)],counterEvidenceRefs:[],
+    coverage:"bounded_omission",coverageRationale:"Only the bounded server-selected evidence was supplied and reviewed in this simulated fixture."},
+   checks:{sourceEntailment:"PASS",subjectAssociation:"PASS",eventIdentity:"PASS",periodRoleVintage:"PASS",unitMetricGeography:"PASS",
+    coverageCounterEvidence:"PASS",pointInTime:"PASS",injectionIsolation:"PASS",protectedAuthority:"PASS"}};
+  tweak?.(result);
+  return {packet:built.packet,result};
+ }
+ const assessment=(relation:"duplicate"|"added_detail")=>({disposition:"PASS" as const,eventRelation:relation,materiality:"low" as const,
+  assessment:"Synthetic analyst view: the second Source repeats or details the same dated event; it is not new evidence or guidance.",
+  counterEvidence:"Same-event identity is an analyst proposal; the publisher's original page was not independently compared.",
+  requiredEvidence:"Read the real original publications before relying on any detail in an investment decision.",
+  criticIndependence:"not_verified" as const,independentEvidenceIncrement:0 as const});
+ async function revise(input:Record<string,unknown>){
+  const bridge=await import("../mcp/canonical-review-revision"),engine=await import("../safe-edit/engine");
+  const p=bridge.prepareReviewRevision(input,actor) as {operationId:string;preview:{previewToken:string|null;beforeHash:string}};
+  const view=engine.adminPreview(p.operationId) as {afterHash:string;reviewedEvidenceDigest?:string};
+  engine.approve(p.operationId,"synthetic-dashboard-reviewer",view.afterHash,view.reviewedEvidenceDigest);
+  const authorization={operationId:p.operationId,previewToken:p.preview.previewToken!,expectedHash:p.preview.beforeHash};
+  return {prepared:p as Record<string,any>,view,authorization,result:await bridge.applyReviewRevision({input,operationId:p.operationId,authorization},actor) as Record<string,any>};
+ }
+ async function industrySetup(){
+  await seed(hub,"# Memory Semiconductors\n");
+  const first=await save(writeback("industry","Memory Semiconductors",industryText,"https://example.org/memory/tracker-a"));
+  const rev=first.steps.find(s=>s.kind==="canonical_review")!,src=first.steps.find(s=>s.kind==="source_intake")!;
+  const dup=await save(writeback("industry","Memory Semiconductors","SYNTHETIC (second edition): Memory Semiconductors contract prices rose in October 2026 for DRAM, the synthetic tracker repeated.","https://www.example.org/memory/tracker-b",true));
+  return {rev,src,dupPath:dup.steps[0].path};
+ }
+ const planRequest=(reviewPath:string,additional:string)=>({reviewPath,additionalSourcePath:additional,eventAnchor:"synthetic-memory-price-2026-10",
+  comparisonBasis:"Both synthetic editions report the same October 2026 memory contract price rise from one publisher family; not a second event.",linkedOnDate:"2026-11-14"});
+ async function industryInput(rev:{path:string},dupPath:string,src:{path:string}){
+  const {planDuplicateSourceLinkM56}=await import("./event-review-relation-m56");
+  const plan=planDuplicateSourceLinkM56(planRequest(rev.path,dupPath));
+  expect(plan).toMatchObject({status:"requires_dedicated_review_revision_v2",writePerformed:false,safeEditRequest:null});
+  if(plan.status!=="requires_dedicated_review_revision_v2")throw Error("unreachable");
+  expect(plan.requiredCompletion.subject).toEqual({domain:"industry",hubPath:hub,topic:null,period:null,evidence:[]});
+  expect(plan.requiredCompletion.analystAssessment.disposition).toMatch(/^<analyst-selected: /);
+  return {plan,input:{...plan.canonicalReviewRevision,subject:{domain:"industry" as const,hubPath:hub,topic:"DRAM contract pricing",period:"October 2026",
+    evidence:[await quote(src.path,"Memory Semiconductors contract prices rose in October 2026")]},analystAssessment:assessment("duplicate")} as Record<string,any>};
+ }
+
+ it("M56-P1-02 Industry-IN: receipted planner recipe → sealed V2 subject event → dashboard approval → apply (duplicate link, then added detail); Draft trust and receipts kept",async()=>{
+  const {rev,src,dupPath}=await industrySetup();
+  const before0=await ledger();
+  const {input}=await industryInput(rev,dupPath,src);
+  expect(await ledger()).toEqual(before0); // planner is read-only
+  input.sourceEvent=await sealed(input,"duplicate","duplicate_link_only");
+  const original=raw(rev.path);
+  const {prepared,result}=await revise(input);
+  expect(prepared).toMatchObject({selectorVersion:"M56-REVIEW-SELECTOR-2",subject:{domain:"industry",subjectKey:"industry:"+hub},issuerBinding:"not_applicable_no_issuer",
+   subjectBinding:"not_verified",independentEvidenceIncrement:0,writesPerformed:false});
+  expect(result).toMatchObject({status:"revision_saved_verified",reviewAppendChainVerified:true,sourceReceiptsVerified:true,researchStatus:"draft",
+   independentEvidenceIncrement:0,subjectBinding:"analyst_attested_not_independently_verified",issuerBinding:"not_applicable_no_issuer"});
+  const after=raw(rev.path);
+  expect(after.startsWith(original.split("\n## ")[0])).toBe(true);
+  expect(after).toContain(`[[${dupPath.slice(0,-3)}]]`);expect(after).toContain("### Duplicate Source link (link only;");
+  expect(after).toContain("Subject (M56-REVIEW-SELECTOR-2, server-bound to the receipted Review and Source text, not an issuer): Industry Hub Memory Semiconductors");
+  expect(after).toContain("independent_evidence_increment=0");expect(after).toMatch(/research_status: "draft"/);expect(after).toMatch(/usage_tier: "historical_analysis_only"/);
+  const reader=await import("./investment-research-context");
+  expect(reader.receiptProvenance("canonical_review",rev.path,after).tier).toBe("server_witnessed");
+  // Idempotent planner after the write; text reference only, not receipt truth.
+  const {planDuplicateSourceLinkM56}=await import("./event-review-relation-m56");
+  expect(planDuplicateSourceLinkM56(planRequest(rev.path,dupPath))).toMatchObject({status:"already_linked",linkEvidence:"text_reference_only"});
+  // Added detail on the revised Review (depth 2) through the same V2 route.
+  const third=await save(writeback("industry","Memory Semiconductors","SYNTHETIC (detail edition): Memory Semiconductors contract prices rose in October 2026; the tracker added that the rise applied to DDR5 modules.","https://news.example.org/memory/tracker-c",true));
+  const detail:Record<string,any>={...input,existingReview:{...input.existingReview,expectedSha256:sha(after),relationship:"added_detail",
+   comparisonBasis:"The synthetic detail edition adds a DDR5 scope note to the same October 2026 price rise; same publisher family."},
+   additionalSources:[{path:third.steps[0].path,sha256:sha(raw(third.steps[0].path)),receiptId:third.steps[0].receiptKey}],analystAssessment:assessment("added_detail")};
+  delete detail.sourceEvent;detail.sourceEvent=await sealed(detail,"added_detail","append_revision");
+  const second=await revise(detail);
+  expect(second.result.status).toBe("revision_saved_verified");
+  expect(raw(rev.path)).toContain("### Source-linked evidence addendum (Draft, not endorsed)");
+  expect(reader.receiptProvenance("canonical_review",rev.path,raw(rev.path)).tier).toBe("server_witnessed");
+ },60_000);
+
+ it("M56-P1-03 Macro-IN: explicit geography/topic/period/role quoted from the Source, no issuer; duplicate link positive and inspect labels",async()=>{
+  const first=await save(writeback("macro","Thailand Policy Rate",macroText,"https://example.org/bot/notice-a"));
+  const rev=first.steps.find(s=>s.kind==="canonical_review")!,src=first.steps.find(s=>s.kind==="source_intake")!;
+  expect(rev.path.startsWith("10_Knowledge/Macro and Markets/")).toBe(true);
+  const dup=await save(writeback("macro","Thailand Policy Rate","SYNTHETIC (repost): The Bank of Thailand held the policy rate at 2.50% in October 2026, the synthetic notice was repeated.","https://www.example.org/bot/notice-b",true));
+  const {planDuplicateSourceLinkM56}=await import("./event-review-relation-m56");
+  const plan=planDuplicateSourceLinkM56({...planRequest(rev.path,dup.steps[0].path),eventAnchor:"synthetic-bot-rate-hold-2026-10",
+   comparisonBasis:"Both synthetic notices report the same October 2026 Bank of Thailand policy-rate hold; same publisher family, not a new decision."});
+  if(plan.status!=="requires_dedicated_review_revision_v2")throw Error(JSON.stringify(plan));
+  expect(plan.requiredCompletion.subject).toEqual({domain:"macro",geography:null,topic:null,period:null,role:null,vintage:null,evidence:[]});
+  const input:Record<string,any>={...plan.canonicalReviewRevision,analystAssessment:assessment("duplicate"),
+   subject:{domain:"macro",geography:"Thailand",topic:"policy rate",period:"October 2026",role:"policy_decision",vintage:null,
+    evidence:[await quote(src.path,"The Bank of Thailand held the policy rate at 2.50% in October 2026")]}};
+  input.sourceEvent=await sealed(input,"duplicate","duplicate_link_only");
+  const {prepared,result}=await revise(input);
+  expect(prepared.subject.subjectKey).toMatch(/^macro:[a-f0-9]{32}$/);expect(prepared.subject.label).toContain("Macro Thailand — policy rate — October 2026 (policy_decision)");
+  expect(result).toMatchObject({status:"revision_saved_verified",issuerBinding:"not_applicable_no_issuer"});
+  expect(raw(rev.path)).toContain(`[[${dup.steps[0].path.slice(0,-3)}]]`);
+  const bridge=await import("../mcp/canonical-review-revision");
+  expect(bridge.inspectCanonicalReviewRevision(prepared.operationId,actor).gate).toMatchObject({version:"IOS-REVIEW-REVISION-PILOT-3-SUBJECT",domain:"macro",
+   subjectKey:prepared.subject.subjectKey,subjectBinding:"not_verified",independentEvidenceIncrement:0});
+ },60_000);
+
+ it("M56-P1-04/05/06/07/09 negatives: cross-domain, unsupported/changed subject, stale hash, wrong IN-ID/actor, relation drift, mixed pair, legacy/Company V1 paths — no Review/plan/witness/receipt/index/link effect",async()=>{
+  const {rev,src,dupPath}=await industrySetup();
+  const {input}=await industryInput(rev,dupPath,src);
+  const bridge=await import("../mcp/canonical-review-revision");
+  const refuse=async(name:string,payload:unknown,code:RegExp,who=actor)=>{
+   const before=await ledger();
+   expect(()=>bridge.prepareReviewRevision(payload,who),name).toThrow(code);
+   expect(await ledger(),name).toEqual(before);
+  };
+  const withEvent=async(i:Record<string,any>):Promise<Record<string,any>>=>({...i,sourceEvent:await sealed(i,"duplicate","duplicate_link_only")});
+  const good=await withEvent(input);
+  // M56-P1-04 cross-domain: Industry Review addressed as Macro, a Company path in V2, an Industry path in V1.
+  await refuse("industry review as macro",{...good,existingReview:{...good.existingReview,reviewScope:"macro"},
+   subject:{domain:"macro",geography:"Korea",topic:"memory",period:"October 2026",role:"market_event",vintage:null,evidence:good.subject.evidence}},/revision_subject_domain_scope_hold/);
+  await refuse("company path in V2",{...good,existingReview:{...good.existingReview,path:"10_Knowledge/Company Research/Investment Review - TESTA - "+good.existingReview.intakeId+".md"}},/revision_subject_domain_scope_hold/);
+  await refuse("industry path in V1",{existingReview:{path:rev.path,expectedSha256:good.existingReview.expectedSha256,receiptId:good.existingReview.receiptId,
+   relationship:"duplicate",comparisonBasis:good.existingReview.comparisonBasis},entity:"MEMORY",additionalSources:good.additionalSources,reviewDate:good.reviewDate,
+   methodVersion:good.methodVersion,analystAssessment:good.analystAssessment,revisionText:good.revisionText},/Company Research|invalid|regex|path/i);
+  // Subject binding: another Hub, macro geography/period not stated by the Source, forecast detail.
+  await seed("02_Industries_Themes/Foundry.md","# Foundry\n");
+  await refuse("other hub",{...good,subject:{...good.subject,hubPath:"02_Industries_Themes/Foundry.md"}},/revision_subject_binding_hold/);
+  await refuse("evidence not exact",{...good,subject:{...good.subject,evidence:[{...good.subject.evidence[0],quote:"Memory Semiconductors contract prices FELL"}]}},/revision_subject_evidence_hold/);
+  // M56-P1-07: stale hash / forged receipt / mismatched IN-ID / wrong actor.
+  await refuse("stale hash",{...good,existingReview:{...good.existingReview,expectedSha256:"0".repeat(64)}},/revision_review_receipt_hash_hold/);
+  await refuse("forged receipt",{...good,existingReview:{...good.existingReview,receiptId:"ICW-"+"a".repeat(32)}},/revision_review_receipt_hash_hold/);
+  await refuse("wrong IN-ID",{...good,existingReview:{...good.existingReview,intakeId:"IN-0000000000000000"}},/revision_draft_review_required/);
+  await refuse("wrong actor",good,/source_event_envelope_actor_or_expiry_hold/,"oauth:someone-else");
+  // M56-P1-09: tampered packet/result binding (V2 packet drift) is refused before enrollment.
+  const tampered=await withEvent(input);tampered.sourceEvent.result.packetDigest="f".repeat(64);
+  await refuse("result binding drift",tampered,/source_event_result_binding_hold/);
+  // M56-P1-07: stale index/readback — Review metadata (and bytes) changed on disk without reindex.
+  {const bytes=raw(rev.path),before=await ledger();
+   fs.writeFileSync(path.join(vault,rev.path),bytes.replace("---\n","---\nstale_probe: true\n"));
+   expect(()=>bridge.prepareReviewRevision(good,actor)).toThrow(/index_readback_mismatch/);
+   fs.writeFileSync(path.join(vault,rev.path),bytes+"\nunindexed body drift\n");
+   expect(()=>bridge.prepareReviewRevision(good,actor)).toThrow(/revision_review_receipt_hash_hold/);
+   fs.writeFileSync(path.join(vault,rev.path),bytes);
+   expect(await ledger()).toEqual(before);}
+  // M56-P1-09: relation drift (sealed added_detail for a duplicate request) refused before enrollment.
+  await refuse("relation drift",{...input,sourceEvent:await sealed(input,"added_detail","append_revision")},/revision_event_relation_binding_hold/);
+  // Analyst disposition/materiality cannot be downgraded into a routine revision.
+  await refuse("material",{...good,analystAssessment:{...good.analystAssessment,materiality:"material"}},/revision_material_or_unresolved_hold/);
+  // M56-P1-05: changed period / mixed pair are semantic HOLDs: by design (as V1) only a restrictive
+  // non-PASS journal row is enrolled — no Review/plan/witness/receipt/index/link/op change.
+  for(const [name,tweak,relation,action] of [
+    ["changed period",(r:Record<string,any>)=>{r.event.comparison.period="different";},"duplicate","duplicate_link_only"],
+    ["changed unit",(r:Record<string,any>)=>{r.event.comparison.unit="different";},"duplicate","duplicate_link_only"],
+    ["mixed pair",undefined,"duplicate","append_revision"]] as const){
+   const before=await ledger();
+   const payload={...input,sourceEvent:await sealed(input,relation,action,tweak)};
+   expect(()=>bridge.prepareReviewRevision(payload,actor),name).toThrow(/source_event_revision_hold/);
+   const after=await ledger();
+   expect({...after,events:[]},name).toEqual({...before,events:[]});
+   expect(after.events.length-before.events.length,name).toBe(1);
+   expect(JSON.parse((after.events.at(-1) as {detail:string}).detail).body.decision,name).toBe("HOLD");
+  }
+ },90_000);
+
+ it("M56-P1-05 Macro-IN negatives: geography/period not stated by the Source, forecast/guidance added detail, underspecified scope — no side effect",async()=>{
+  const first=await save(writeback("macro","Thailand Policy Rate",macroText,"https://example.org/bot/notice-a"));
+  const rev=first.steps.find(s=>s.kind==="canonical_review")!,src=first.steps.find(s=>s.kind==="source_intake")!;
+  const dup=await save(writeback("macro","Thailand Policy Rate","SYNTHETIC (repost): The Bank of Thailand held the policy rate at 2.50% in October 2026, the synthetic notice was repeated.","https://www.example.org/bot/notice-b",true));
+  const {planDuplicateSourceLinkM56}=await import("./event-review-relation-m56");
+  const plan=planDuplicateSourceLinkM56({...planRequest(rev.path,dup.steps[0].path),eventAnchor:"synthetic-bot-rate-hold-2026-10",
+   comparisonBasis:"Both synthetic notices report the same October 2026 Bank of Thailand policy-rate hold; same publisher family, not a new decision."});
+  if(plan.status!=="requires_dedicated_review_revision_v2")throw Error(JSON.stringify(plan));
+  const evidence=[await quote(src.path,"The Bank of Thailand held the policy rate at 2.50% in October 2026")];
+  const base:Record<string,any>={...plan.canonicalReviewRevision,analystAssessment:assessment("duplicate"),
+   subject:{domain:"macro",geography:"Thailand",topic:"policy rate",period:"October 2026",role:"policy_decision",vintage:null,evidence}};
+  const bridge=await import("../mcp/canonical-review-revision");
+  for(const [name,payload,code] of [
+    ["inferred geography",{...base,subject:{...base.subject,geography:"ASEAN"}},/revision_macro_subject_unsupported_hold/],
+    ["inferred period",{...base,subject:{...base.subject,period:"Q4 2026"}},/revision_macro_subject_unsupported_hold/],
+    ["forecast detail",{...base,existingReview:{...base.existingReview,relationship:"added_detail"},analystAssessment:assessment("added_detail"),
+      subject:{...base.subject,role:"forecast_or_guidance"}},/revision_material_or_unresolved_hold/],
+    ["underspecified",{...base,subject:{...base.subject,topic:""}},/too_small|>=1|at least/i],
+    ["no Source quote",{...base,subject:{...base.subject,evidence:[]}},/too_small|>=1|at least/i]] as const){
+   const before=await ledger();
+   expect(()=>bridge.prepareReviewRevision(payload,actor),name).toThrow(code);
+   expect(await ledger(),name).toEqual(before);
+  }
+ },60_000);
+
+ it("M56-P1 subject ambiguity: an Industry-IN Review declaring two Hubs is HOLD_SUBJECT_AMBIGUOUS in the planner and the V2 route — no side effect",async()=>{
+  await seed(hub,"# Memory Semiconductors\n");await seed("02_Industries_Themes/Foundry.md","# Foundry\n");
+  const first=await save({...writeback("industry","Memory Semiconductors",industryText,"https://example.org/memory/tracker-a"),entities:["Memory Semiconductors","Foundry"]});
+  const rev=first.steps.find(s=>s.kind==="canonical_review")!,src=first.steps.find(s=>s.kind==="source_intake")!;
+  expect(raw(rev.path)).toContain(`industry_hubs: ["${hub}","02_Industries_Themes/Foundry.md"]`);
+  const dup=await save(writeback("industry","Memory Semiconductors","SYNTHETIC (second edition): Memory Semiconductors contract prices rose in October 2026 for DRAM, the synthetic tracker repeated.","https://www.example.org/memory/tracker-b",true));
+  const {planDuplicateSourceLinkM56}=await import("./event-review-relation-m56");
+  const before=await ledger();
+  expect(planDuplicateSourceLinkM56(planRequest(rev.path,dup.steps[0].path))).toMatchObject({status:"hold_subject_ambiguous",canonicalReviewRevision:null,writePerformed:false});
+  const bridge=await import("../mcp/canonical-review-revision"),reader=await import("./investment-research-context");
+  const evidence=[await quote(src.path,"Memory Semiconductors contract prices rose in October 2026")];
+  expect(()=>bridge.prepareReviewRevision({selectorVersion:"M56-REVIEW-SELECTOR-2",entity:"industry",
+   existingReview:{path:rev.path,intakeId:rev.path.match(/IN-[A-F0-9]{16}/)![0],expectedSha256:sha(raw(rev.path)),receiptId:reader.createReceipt("canonical_review",rev.path,raw(rev.path)),
+    reviewScope:"industry",originalSourcePath:src.path,relationship:"duplicate",comparisonBasis:"Both synthetic editions report the same October 2026 memory contract price rise."},
+   subject:{domain:"industry",hubPath:hub,topic:"DRAM contract pricing",period:"October 2026",evidence},
+   additionalSources:[{path:dup.steps[0].path,sha256:sha(raw(dup.steps[0].path)),receiptId:dup.steps[0].receiptKey}],reviewDate:"2026-11-14",methodVersion:"T",
+   analystAssessment:assessment("duplicate"),revisionText:"Synthetic probe."},actor)).toThrow(/revision_subject_ambiguous_hold/);
+  expect(await ledger()).toEqual(before);
+ },60_000);
+
+ it("M56-P1-07/10: apply-time Source drift refuses with no write; replay after success is idempotent with no duplicate append",async()=>{
+  const {rev,src,dupPath}=await industrySetup();
+  const {input}=await industryInput(rev,dupPath,src);
+  input.sourceEvent=await sealed(input,"duplicate","duplicate_link_only");
+  const bridge=await import("../mcp/canonical-review-revision"),engine=await import("../safe-edit/engine");
+  const p=bridge.prepareReviewRevision(input,actor) as {operationId:string;preview:{previewToken:string;beforeHash:string}};
+  const view=engine.adminPreview(p.operationId) as {afterHash:string;reviewedEvidenceDigest?:string};
+  engine.approve(p.operationId,"synthetic-dashboard-reviewer",view.afterHash,view.reviewedEvidenceDigest);
+  const authorization={operationId:p.operationId,previewToken:p.preview.previewToken,expectedHash:p.preview.beforeHash};
+  const reviewBefore=raw(rev.path);
+  // Timeout: the approved preview expired (synthetic clock) → refused, Review untouched.
+  vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(Date.now()+31*60_000);
+  await expect(bridge.applyReviewRevision({input,operationId:p.operationId,authorization},actor)).rejects.toThrow(/expir|Approval|revision_/i);
+  vi.useRealTimers();expect(raw(rev.path)).toBe(reviewBefore);
+  // Drift: the added Source changes on disk after approval (synthetic) → refused, Review untouched.
+  const dupBytes=raw(dupPath);
+  fs.writeFileSync(path.join(vault,dupPath),dupBytes.replace("repeated","re-edited"));(await import("./indexer")).reindexPath(dupPath);
+  await expect(bridge.applyReviewRevision({input,operationId:p.operationId,authorization},actor)).rejects.toThrow(/revision_source|source_event/);
+  expect(raw(rev.path)).toBe(reviewBefore);
+  fs.writeFileSync(path.join(vault,dupPath),dupBytes);(await import("./indexer")).reindexPath(dupPath);
+  const done=await bridge.applyReviewRevision({input,operationId:p.operationId,authorization},actor);
+  expect(done).toMatchObject({status:"revision_saved_verified"});
+  const once=raw(rev.path);
+  const again=await bridge.applyReviewRevision({input,operationId:p.operationId,authorization},actor);
+  expect(again).toMatchObject({status:"revision_saved_verified"});expect(raw(rev.path)).toBe(once);
+  expect(once.split("### Duplicate Source link").length-1).toBe(1);
+  // Re-preparing the same input after success is refused (Review hash moved on): no second append.
+  const before=await ledger();
+  expect(()=>bridge.prepareReviewRevision(input,actor)).toThrow(/revision_review_receipt_hash_hold/);
+  expect(await ledger()).toEqual(before);
+ },60_000);
+});
+
+describe("Macro declared-subject capture contract",()=>{
+ const text="Macro subject: Fictionland\nSynthetic documentation only; no economic assertions.";
+ const sha=(s:string)=>createHash("sha256").update(s).digest("hex");
+ const data=()=>({domain:"macro" as const,entities:["Fictionland"],topic:"Documentation",inputFormat:"text" as const,sourceKind:"user_commentary" as const,
+  sourceChat:"New synthetic scope fixture",extractedText:text,captureOnly:true,
+  macroSubject:{version:"RI001-MACRO-SOURCE-SCOPE-1" as const,kind:"country" as const,label:"Fictionland",
+   anchor:{quote:"Macro subject: Fictionland",locator:`utf16:0:${"Macro subject: Fictionland".length}`,sourceSha256:sha(text)}}});
+ it("renders new validated scope but never an issued receipt in preview bytes",async()=>{
+  const p=await route(data()),step=p.safeEditWorkflow!.steps[0],content=(step.safeEditRequest!.change as {content:string}).content;
+  const fm=(await import("./markdown")).splitFrontmatter(content).data;
+  expect(fm.macro_subject).toMatchObject({key:"FICTIONLAND",authority:"source_declared_not_geographic_verification"});
+  expect(content).toContain(text);expect(content).not.toContain(step.receiptKey);
+  expect(step.readbackVerified).toBe(false);expect(fs.existsSync(path.join(vault,step.path))).toBe(false);
+ });
+ it.each(["absent","alias","conjunction","substring","duplicate","unicode-digit"])("does not infer a scope from %s",async fault=>{
+  const d=data();
+  if(fault==="absent")d.extractedText="Fictionland mentioned by another document";
+  if(fault==="alias")d.macroSubject.label="FI";
+  if(fault==="conjunction")d.extractedText="Macro subject: Fictionland and Otherland\nSynthetic";
+  if(fault==="substring")d.macroSubject.anchor.locator="utf16:15:25";
+  if(fault==="duplicate")d.extractedText+="\nMacro subject: Otherland";
+  if(fault==="unicode-digit")d.macroSubject.label="Fictionland๒";
+  const p=await route(d);expect(p.macroScope?.binding).toBeNull();expect(p.macroScope?.reason).toMatch(/hold/);
+  const step=p.safeEditWorkflow!.steps[0];expect(step.state).toBe("needs_create");expect((step.safeEditRequest!.change as {content:string}).content).not.toContain("macro_subject:");
+ });
+ it("validates the whole exact CRLF/NFC source and restores only a hash-proven terminal newline",async()=>{
+  const m=await import("./macro-source-scope"),text="Macro subject: Île\r\nSynthetic document\n",line="Macro subject: Île";
+  const value={version:m.MACRO_SOURCE_POLICY,kind:"country",label:"Île",anchor:{quote:line,locator:`utf16:0:${line.length}`,sourceSha256:sha(text)}};
+  const r=m.validateMacroSubject(value,text,"macro",["Île"]);expect(r.binding?.key).toBe("ÎLE");
+  expect(m.readMacroSourceScope(r.binding,text.slice(0,-1),sha(text))).toEqual(r.binding);
+  expect(()=>m.readMacroSourceScope(r.binding,text.slice(0,-1),sha(text+" "))).toThrow();
  });
 });

@@ -6,6 +6,7 @@ import {createHash} from "node:crypto";
 import {Client} from "@modelcontextprotocol/sdk/client/index.js";
 import {InMemoryTransport} from "@modelcontextprotocol/sdk/inMemory.js";
 import type {WritebackInput} from "../vault/investment-writeback-router";
+import {kernelCanonicalCreate} from "../../../tests/source-event-fixture";
 
 vi.mock("../safe-edit/sync",()=>({withPausedSync:async<T>(run:()=>T)=>run()}));
 const sha=(s:string)=>createHash("sha256").update(s).digest("hex");
@@ -113,14 +114,15 @@ describe("RI-001 Thai persistence quality boundary",()=>{
     }finally{await Promise.allSettled(clients.map(c=>c.close()));await read.close();await safe.close();}
   });
   it("preserves independently receipted historical English headings and receipt identities on an identical retry",async()=>{
-    const p=await plan(),{preview,apply:write}=await import("../safe-edit/engine");
+    const p=await plan();
     const translations=[['# บทวิเคราะห์การลงทุน —','# Investment Review —'],['## ที่มาของต้นฉบับ','## Source provenance'],['## บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)','## Research analysis (AI interpretation; not approved Thesis)'],['## การเชื่อมโยงความรู้','## Canonical knowledge links'],['## ขอบเขตความปลอดภัยในการบันทึก','## Ingestion safety'],['## สิ่งที่เปลี่ยนแปลงและข้อมูลใหม่เทียบกับข้อมูลเดิม','## What Changed / New vs Known'],['## กลไกพื้นฐานและเศรษฐกิจมหภาค','## Fundamental / Macro Mechanism'],['## ผลต่อสมมติฐานการลงทุนและมูลค่า','## Thesis & Valuation Implication'],['## หลักฐานโต้แย้งและความเสี่ยง','## Counter-evidence'],['## หลักฐานที่ต้องตรวจสอบและประเด็นติดตาม','## Required Evidence / What to Watch']];
     const ids:string[]=[],bytes:string[]=[];
     for(const step of p.safeEditWorkflow!.steps){const request=step.safeEditRequest!;let content=request.change.content;
       if(step.kind==="canonical_review")for(const [current,old] of translations)content=content.replace(current,old);
       const operationId="ICW-"+sha([step.kind,step.path,sha(content)].join("\n")).slice(0,32);
-      const pre=preview({...request,operationId,change:{kind:"create",content}},actor);
-      write({operationId,previewToken:pre.previewToken,expectedHash:pre.beforeHash},actor);ids.push(operationId);bytes.push(content);
+      // WP2: historical pre-calibration create through the kernel route (synthetic pre-WP2 history).
+      expect((await kernelCanonicalCreate([{kind:step.kind,path:step.path,content}],actor,{legacy:true}))[0].operationId).toBe(operationId);
+      ids.push(operationId);bytes.push(content);
     }
     const {db}=await import("../db");const receipts=db().prepare("SELECT * FROM safe_edit_operations ORDER BY id").all();
     const repeat=await prepare();expect(repeat.workflowStatus).toBe("saved_verified");expect(repeat.previews).toEqual([]);
@@ -179,7 +181,7 @@ describe("RI-001 calibrated language gate across persistence modes",()=>{
   });
   it("revalidation holds an old quote bypass without rewriting its accepted bytes or receipts",async()=>{
     const data={...input,researchReview:{...review,translationTh:attacks[0]}};
-    const w=(await plan()).safeEditWorkflow!,{preview,apply:write}=await import("../safe-edit/engine");
+    const w=(await plan()).safeEditWorkflow!;
     const accepted:string[]=[];
     // Reconstruct a previously accepted pre-calibration create through the real
     // Safe Edit engine, never by inserting a fabricated DB receipt.
@@ -187,8 +189,9 @@ describe("RI-001 calibrated language gate across persistence modes",()=>{
       const req=step.safeEditRequest!;let content=req.change.content;
       if(step.kind==="canonical_review")content=content.replace(review.translationTh,attacks[0]);
       const operationId="ICW-"+sha([step.kind,step.path,sha(content)].join("\n")).slice(0,32);
-      const p=preview({...req,operationId,change:{kind:"create",content}},actor);
-      write({operationId,previewToken:p.previewToken,expectedHash:p.beforeHash},actor);accepted.push(content);
+      // WP2: historical pre-calibration create through the kernel route (synthetic pre-WP2 history).
+      expect((await kernelCanonicalCreate([{kind:step.kind,path:step.path,content}],actor,{legacy:true}))[0].operationId).toBe(operationId);
+      accepted.push(content);
     }
     const {db}=await import("../db"),before=db().prepare("SELECT * FROM safe_edit_operations ORDER BY id").all();
     const repeat=await prepare(data);expect(repeat.qualityIssues).toContain("translation_not_thai");expect(repeat.previews).toEqual([]);expect(repeat.readyForNextNews).toBe(false);

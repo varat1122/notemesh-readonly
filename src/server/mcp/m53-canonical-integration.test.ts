@@ -85,18 +85,24 @@ it("M5.3 Web tool contract: research MCP recipe → scoped Safe Edit preview/app
       protectedNotesTouched:false,sourcePreservation:"text_only_binary_not_verified"});
     const expected=first.safeEditWorkflow.steps;
     expect(expected).toHaveLength(2);
+    // WP2 (OD-04+OD-06): the read-only recipe is applied through the dedicated canonical
+    // MCP writer; the generic preview_edit route refuses canonical IDs/namespaces.
     for(const step of expected){
       expect(step.state).toBe("needs_create");
-      const prev=parseSafe(await safe.client.callTool({name:"preview_edit",arguments:step.safeEditRequest}));
-      expect(prev.status).toBe("preview");
+      const refused=await safe.client.callTool({name:"preview_edit",arguments:step.safeEditRequest});
+      expect(refused.isError).toBe(true);expect(JSON.stringify(refused)).toContain("canonical_operation_namespace_reserved");
       expect(fs.existsSync(path.join(vault,step.path))).toBe(false);
-      const written=parseSafe(await safe.client.callTool({name:"apply_edit",arguments:{
-        operationId:prev.operationId,previewToken:prev.previewToken,expectedHash:prev.beforeHash
-      }}));
-      expect(written).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified",
-        mobileSync:"unverified",remoteSync:"unverified"}});
+    }
+    const prepared=parseSafe(await safe.client.callTool({name:"prepare_canonical_writeback",arguments:news}));
+    expect(prepared.previews.map((x:any)=>x.path)).toEqual(expected.map((x:any)=>x.path));
+    expect(prepared.previews.map((x:any)=>x.operationId)).toEqual(expected.map((x:any)=>x.safeEditRequest.operationId));
+    const saved=parseSafe(await safe.client.callTool({name:"apply_canonical_writeback",arguments:{input:news,planId:prepared.planId,
+      authorizations:prepared.previews.map((x:any)=>({operationId:x.operationId,previewToken:x.previewToken,expectedHash:x.beforeHash}))}}));
+    expect(saved.status).toBe("saved_verified");
+    for(const prev of prepared.previews){
       const status=parseSafe(await safe.client.callTool({name:"get_edit_status",arguments:{operationId:prev.operationId}}));
-      expect(status.status).toBe("written");
+      expect(status).toMatchObject({status:"written",receipt:{write:"written",readback:"verified",reindex:"verified",
+        mobileSync:"unverified",remoteSync:"unverified"}});
     }
     const again=parseResearch(await research.client.callTool({name:"plan_investment_writeback",arguments:news}));
     expect(again.safeEditWorkflow).toMatchObject({status:"saved_verified",readyForNextNews:true,

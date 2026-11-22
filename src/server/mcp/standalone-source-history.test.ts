@@ -91,7 +91,7 @@ async function corrupt(prior:Awaited<ReturnType<typeof save>>,fault:string){
 it.each(["missing","changed","symlink","receipt","fts","metadata"])("selected Source %s after PASS denies canonical AND generic non-Source admission",async fault=>{
  const prior=await save(oldInput),data=await judged(),p=await prepare(data);expect(p.researchJudge?.decision).toBe("PASS");await corrupt(prior,fault);
  const engine=await import("../safe-edit/engine"),t=p.previews.find(s=>s.kind==="canonical_review")!;
- expect(()=>engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
+ expect(()=>engine.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
  const held=await prepare(data);expect(held.researchJudge?.decision).toBe("HOLD");expect(held.previews.every(x=>x.kind==="source_intake")).toBe(true);
  await expect(apply(data,p)).rejects.toThrow();expect(fs.existsSync(path.join(vault,t.path))).toBe(false);
 });
@@ -103,13 +103,13 @@ it.each(["missing","changed","receipt","fts"])("unavailable prospective Source %
 it("newly relevant receipted Source changes the sealed selection and invalidates prior PASS",async()=>{
  const data=await judged(),p=await prepare(data);expect(p.researchJudge?.decision).toBe("PASS");const prior=await save(oldInput);
  const fresh=JSON.parse((await packet()).packet.body);expect(fresh.history.some((h:{path:string})=>h.path===prior.steps[0].path)).toBe(true);
- const engine=await import("../safe-edit/engine"),t=p.previews.find(s=>s.kind==="canonical_review")!;expect(()=>engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
+ const engine=await import("../safe-edit/engine"),t=p.previews.find(s=>s.kind==="canonical_review")!;expect(()=>engine.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
  expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");expect(fs.existsSync(path.join(vault,t.path))).toBe(false);
 });
 it("own exact Source write and unrelated external evidence do not cause false HOLD; normal Draft remains eligible",async()=>{
  const prior=await save(oldInput),bytes=fs.readFileSync(path.join(vault,prior.steps[0].path));const data=await judged(),p=await prepare(data);expect(p.researchJudge?.decision).toBe("PASS");
  await save({...oldInput,appearance:undefined,entities:["TESTB"],extractedText:"TESTB received orders for 50 units.",sourceUrl:"https://example.org/unrelated"});
- const engine=await import("../safe-edit/engine"),source=p.previews[0];engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+ const engine=await import("../safe-edit/engine"),source=p.previews[0];engine.applyCanonicalStep({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
  const retry=await prepare(data);expect(retry.researchJudge?.decision).toBe("PASS");const saved=await apply(data,retry);expect(saved.status).toBe("saved_verified");expect(saved.receipts).toHaveLength(1);await unchangedSource(prior,bytes);
  const normal=await save({...base,sourceUrl:"https://example.org/ungated-n3",appearance:undefined});expect(normal.status).toBe("saved_verified");expect(normal.researchJudge).toBeNull();
 });
@@ -156,7 +156,7 @@ it("deterministic bounded omissions and unselected changes do not invalidate unc
 it("same-intake Source and Claims can finish through generic admission without history self-write drift",async()=>{
  await save(oldInput);const data=await judged({...nextInput,claims:[{entity:"TESTA",metric:"pilot shipment",value:"20",unit:"units",period:"unspecified",evidenceClass:"unverified_claim",statement:"Attributed fixture statement, not verified",sourceExcerpt:nextInput.extractedText,sourceLocator:"fixture sentence",verification:"unverified"}]});const p=await prepare(data);
  expect(p.researchJudge?.decision).toBe("PASS");expect(p.previews.map(x=>x.kind)).toEqual(["source_intake","structured_claim","canonical_review"]);
- const engine=await import("../safe-edit/engine");for(const t of p.previews)engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor);
+ const engine=await import("../safe-edit/engine");for(const t of p.previews)engine.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor);
  expect((await prepare(data)).workflowStatus).toBe("saved_verified");expect((await apply(data,await prepare(data))).receipts).toHaveLength(0);
 });
 it("fresh historical Source citation uses exact full-note SHA/UTF-16 offsets, never a fabricated locator",async()=>{

@@ -90,7 +90,7 @@ it("fresh unreviewed intake permits only canonical Source; generic source/type s
  expect(()=>e.preview({path:"10_Knowledge/Company Research/Unreviewed.md",change:{kind:"create",content:"---\nintake_id: IN-0000000000000000\ntype: investment_source_intake\n---\nUnreviewed"}},actor)).toThrow();
  const data=await judged(),j=await prepare(data),t=j.previews.find(s=>s.kind==="canonical_review")!;
  expect(()=>e.approve(t.operationId,"SIMULATED",t.afterHash)).toThrow(/explicit_bundle_review/);
- expect(()=>e.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow();
+ expect(()=>e.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow();
 });
 it.each(["wrong actor","history drift","expired review","changed diff","forged approval"])("%s cannot use a reviewed token",async fault=>{
  const data=await judged(),p=await prepare(data),t=p.previews.find(t=>t.kind==="canonical_review")!;
@@ -106,7 +106,7 @@ it.each(["wrong actor","history drift","expired review","changed diff","forged a
   expect(()=>e.apply({operationId:newToken.operationId,previewToken:newToken.previewToken,expectedHash:newToken.beforeHash,approval:true},actor)).toThrow();
   expect(fs.existsSync(path.join(vault,newToken.path))).toBe(false);return;
  }
- expect(()=>e.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},fault==="wrong actor"?"oauth:intruder":actor)).toThrow();
+ expect(()=>e.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},fault==="wrong actor"?"oauth:intruder":actor)).toThrow();
  expect(fs.existsSync(path.join(vault,t.path))).toBe(false);
 });
 it.each(["HOLD","FAIL"] as const)("backend %s overrides existing review approval, with Source still eligible",async verdict=>{
@@ -114,7 +114,7 @@ it.each(["HOLD","FAIL"] as const)("backend %s overrides existing review approval
  data.researchJudge.result.review.verdict=verdict;const restricted=await prepare(data);expect(restricted.researchJudge?.decision).toBe(verdict);
  expect(restricted.previews.every(t=>t.kind==="source_intake")).toBe(true);expect((await save(data,restricted)).receipts).toHaveLength(1);
  const t=p.previews.find(t=>t.kind==="canonical_review")!,e=await import("../safe-edit/engine");
- expect(()=>e.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow();
+ expect(()=>e.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow();
  expect(fs.existsSync(path.join(vault,t.path))).toBe(false);
 });
 it.each([
@@ -152,7 +152,7 @@ it("F1 rejects a generic alias operation ID even for the exact reviewed path and
  const {db}=await import("../db");
  const original=db().prepare("SELECT payload FROM safe_edit_operations WHERE id=?").get(t.operationId) as {payload:string};
  const alias={...JSON.parse(original.payload),operationId:"C1-UNREVIEWED-ALIAS"};
- expect(()=>engine.preview(alias,actor)).toThrow(/c1_pilot/);
+ expect(()=>engine.preview(alias,actor)).toThrow(/canonical_route_required/);
  expect(fs.existsSync(path.join(vault,t.path))).toBe(false);
 });
 
@@ -233,7 +233,7 @@ it.each(scenarios)("NEW synthetic $name: server enforces preflight and backend r
  if(s.semantic==="HOLD"){
   await expect(save(data,p)).rejects.toThrow();
   const t=p.previews.find(t=>t.kind==="canonical_review")!;
-  expect(()=>engine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow();
+  expect(()=>engine.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow();
   const payload=(await import("../db")).db().prepare("SELECT payload FROM safe_edit_operations WHERE id=?").get(t.operationId) as {payload:string};
   expect(()=>engine.preview(JSON.parse(payload.payload),actor)).toThrow();
   const held=await prepare(data);expect(held.previews.map(t=>t.kind)).toEqual(["source_intake"]);expect((await save(data,held)).receipts).toHaveLength(1);
@@ -255,7 +255,7 @@ it("a fresh sealed assessment and explicit new review may recover a pilot HOLD; 
 it.each(["source drift","draft drift","expired assessment","seal mismatch"])("%s cannot publish an approved non-Source bundle",async fault=>{
  const data=await judged(),p=await prepare(data);expect((await reviewDecision(p)).status).toBe(200);
  const source=p.previews[0],r=p.previews.find(t=>t.kind==="canonical_review")!;
- engine.apply({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
+ engine.applyCanonicalStep({operationId:source.operationId,previewToken:source.previewToken,expectedHash:source.beforeHash},actor);
  if(fault==="source drift"){fs.appendFileSync(path.join(vault,source.path),"\nTampered disposable Source\n");(await import("../vault/indexer")).reindexPath(source.path);}
  if(fault==="draft drift")fs.writeFileSync(path.join(vault,r.path),"External disposable CAS conflict");
  if(fault==="expired assessment"){vi.useFakeTimers();vi.setSystemTime(data.researchJudge.packet.expiresAt+1);}
@@ -265,7 +265,7 @@ it.each(["source drift","draft drift","expired assessment","seal mismatch"])("%s
   // canonical apply is refused; no attacker packet grants new authority.
   await expect(save(data,p)).rejects.toThrow();return;
  }
- expect(()=>engine.apply({operationId:r.operationId,previewToken:r.previewToken,expectedHash:r.beforeHash},actor)).toThrow();
+ expect(()=>engine.applyCanonicalStep({operationId:r.operationId,previewToken:r.previewToken,expectedHash:r.beforeHash},actor)).toThrow();
  const writes=(await import("../db")).db().prepare("SELECT count(*) n FROM safe_edit_events WHERE event='written' AND operation_id=?").get(r.operationId) as {n:number};expect(writes.n).toBe(0);
 });
 it("one review binds Source, both Claims and Draft; same-intake writes preserve current scope and retry",async()=>{

@@ -155,9 +155,14 @@ async function startServerOnce(env: Record<string, string>, opts: StartOptions):
     pid: child.pid!,
     log: () => output,
     async stop() {
-      child.kill("SIGTERM");
-      await new Promise((r) => setTimeout(r, 300));
-      if (child.exitCode === null) child.kill("SIGKILL");
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise<void>((resolve, reject) => {
+          const hard = setTimeout(() => child.kill("SIGKILL"), 300);
+          const deadline = setTimeout(() => reject(Error("HTTP fixture process did not settle")), 5000);
+          child.once("exit", () => { clearTimeout(hard); clearTimeout(deadline); resolve(); });
+          child.kill("SIGTERM");
+        });
+      }
       if (!opts.keepDataDir) fs.rmSync(dataDir, { recursive: true, force: true });
     },
   };

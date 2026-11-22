@@ -128,7 +128,8 @@ export function buildCanonicalSafeEditWorkflow(
     `source_url: ${yaml(input.sourceUrl)}`,`event_date: ${yaml(event)}`,
     `published_at: ${yaml(published)}`,`attachment_status: ${yaml(attachment)}`,
     `attachment_path: ${yaml(plan.sourceCapture.rawAttachmentPath)}`,
-    `source_text_sha256: ${sha(input.extractedText)}`,"---","",
+    `source_text_sha256: ${sha(input.extractedText)}`,
+    ...(plan.macroScope?.binding?[`macro_subject: ${JSON.stringify(plan.macroScope.binding)}`]:[]),"---","",
     `# Attributed User Source — ${plan.planId}`,"",
     `Source token: ${tag}`,"",
     "## User-supplied original language text","",
@@ -150,7 +151,8 @@ export function buildCanonicalSafeEditWorkflow(
   const themeLinks=plan.routingV2.industryHubs.map(x=>`- ${wiki(x.path)} — existing industry context`);
   const claimNotes=planClaimNotes(input,plan.planId,rawPath,sourceContent);
   const {metadata:researchLineage,issues:lineageIssues}=captureOnly?{metadata:{},issues:[]}:lineageMetadata(input,reviewPath,rawPath,claimNotes);
-  const claimIssues=[...new Set(claimNotes.flatMap(c=>c.issues))];
+  const scopeIssues=plan.macroScope?.reason?[plan.macroScope.reason]:[];
+  const claimIssues=[...new Set([...claimNotes.flatMap(c=>c.issues),...scopeIssues])];
   const qualityIssues=input.researchReview?validateResearchM55({
     domain:plan.domain,subject,contentTypes:input.contentTypes??[],
     resolvedSubjectPath:plan.routingV2.reviewScope==="industry"?plan.routingV2.industryHubs[0]?.path:
@@ -162,6 +164,7 @@ export function buildCanonicalSafeEditWorkflow(
     originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage,
     sourceKind:plan.sourceKind,entityScope:plan.entityScope
   },input.researchReview,input.extractedText):captureOnly?[]:["typed_research_review_required"];
+  qualityIssues.push(...scopeIssues);
   const sourceArchiveLines=sourceArchiveReviewLines(plan.sourceCapture.originalSourceArchive);
   const broker=input.brokerUpdate;
   const brokerLines=broker?[
@@ -288,7 +291,7 @@ export function buildCanonicalSafeEditWorkflow(
       step.state="hold_event_review";step.safeEditRequest=null;
       claimIssues.push("claim_source_event_reconciliation_required");
     }
-    if((c.issues.length||!["needs_create","verified_existing"].includes(sourceStep.state))&&(step.state==="needs_create"||step.state==="verified_existing")){step.state="hold_claim_gate";step.safeEditRequest=null;}
+    if((c.issues.length||scopeIssues.length||!["needs_create","verified_existing"].includes(sourceStep.state))&&(step.state==="needs_create"||step.state==="verified_existing")){step.state="hold_claim_gate";step.safeEditRequest=null;}
     if(step.state==="verified_existing")try{readPersistedClaim(c.path);}catch{step.state="hold_index_repair";step.safeEditRequest=null;claimIssues.push("claim_receipt_readback_index_link_unverified");}
     return step;
   });

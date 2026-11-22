@@ -21,10 +21,15 @@ import {inspectSourceArchiveProvenance,type SourceArchiveProvenance} from "./sou
 import type {AppearanceInput} from "./intake-appearances";
 import {planReviewReuse,type ReviewReuse,type ExistingReviewSelection} from "./canonical-review-reuse";
 
+import {validateMacroSubject,readMacroSourceScope,macroHistoryScope,type MacroSubject,type MacroScopeResolution} from "./macro-source-scope";
+import {indexedRead,receiptProvenance} from "./investment-research-context";
+import {preservedSubmittedText} from "./research-decision-v2";
+
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
 export interface WritebackInput {
   appearance?:AppearanceInput;
+  macroSubject?:MacroSubject;
   domain:Domain;
   entities:string[];
   topic:string;
@@ -41,6 +46,9 @@ export interface WritebackInput {
   rawAttachmentContentType?:AttachmentType|null;
   claims?:IntakeClaim[];
   researchLineage?:ResearchLineage;
+  /** Explicit, opt-in *historical retrieval* cutoff, not analysisAsOf or file mtime.
+   * Server receipt-bound PIT selection still determines evidence eligibility. */
+  historyCutoff?:string;
   claim?:{metric:string;period:string;statement:string;value?:string;unit?:string};
   focus?:Focus;
   /** Optional M5.2 caller-declared labels; never silently treat them as verified facts. */
@@ -65,6 +73,7 @@ type Route={kind:"raw_input"|"research_review"|"company_timeline_candidate"|"ind
   action:"candidate_create"|"candidate_append_after_review"|"link_existing_or_hold";
   path:string|null;reason:string;requiresReview:boolean};
 export interface WritebackPlan {
+  macroScope?:MacroScopeResolution;
   reviewReuse:ReviewReuse;
   status:"read_only_plan_not_written";
   planId:string;
@@ -221,6 +230,31 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     rawAttachmentSha256:input.rawAttachmentSha256,eventDate,publicationDate,
     verifiedAttachmentPath:verifiedAttachment?actualAttachmentPath:null,
     existingIntakeId:input.existingIntakeId});
+  let macroScope:MacroScopeResolution|undefined=input.macroSubject===undefined?undefined:
+    validateMacroSubject(input.macroSubject,input.extractedText,input.domain,entities);
+  if(sourceIdentity.existingSourcePath&&(input.domain==="macro"||macroScope)){
+    const note=indexedRead(sourceIdentity.existingSourcePath);
+    if(note.fm.macro_subject!==undefined||macroScope){
+      try{
+        const text=preservedSubmittedText(note.raw);
+        if(text===null)throw Error("macro_source_text_hold");
+        const binding=readMacroSourceScope(note.fm.macro_subject,text,note.fm.source_text_sha256);
+        if(input.domain!=="macro"||entities.length!==1||entities[0].trim().normalize("NFC").toUpperCase()!==binding.key||
+          (macroScope&&(!macroScope.binding||JSON.stringify(macroScope.binding)!==JSON.stringify(binding)))||
+          receiptProvenance("source_intake",sourceIdentity.existingSourcePath,note.raw).tier!=="server_witnessed")
+          throw Error("macro_source_existing_scope_hold");
+        macroScope={binding,reason:null};
+      }catch{macroScope={binding:null,reason:"macro_source_existing_scope_hold"};}
+    }
+  }
+  // A valid text declaration is not permission to change the effective
+  // research scope or a broker's origin. Preserve Source-only capture while
+  // the existing workflow/Judge scope-issue gates hold all non-Source steps.
+  const focus=input.focus??(input.sourceKind==="broker_research"?"broker":input.domain==="macro"?"macro":"general");
+  if(macroScope?.binding){
+    if(input.sourceKind==="broker_research")macroScope={binding:null,reason:"macro_source_kind_scope_hold"};
+    else if(focus!=="macro")macroScope={binding:null,reason:"macro_history_scope_contract_hold"};
+  }
   const archiveWitness=inspectSourceArchiveProvenance(input.sourceUrl,eventDate,publicationDate);
   const originalSourceArchive=archiveWitness.snapshot;
   const planId=sourceIdentity.planId;
@@ -240,16 +274,16 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
   // a second Timeline event even when a new research note already exists.
   const timelineRecorded=Boolean(timelinePath && timelineExists &&
     readNote(timelinePath).content.includes("<!-- investment-intake:"+planId+" -->"));
-  const focus=input.focus??(input.sourceKind==="broker_research"?"broker":input.domain==="macro"?"macro":"general");
   const pack=buildInvestmentContextPack({
     question:(T(input.topic)+" "+entities.join(" ")+" "+text.slice(0,450)).slice(0,1150),
-    issuers:[...new Set([
+    issuers:macroScope?.binding?undefined:[...new Set([
       ...routingV2.companyHubs.map(x=>x.path.slice("01_Companies/".length,-3)),
       ...(input.domain==="company"?entities.map(x=>safeTicker(x)).filter((x):x is string=>!!x):[])
     ])].filter(x=>/^[A-Z][A-Z0-9.-]{0,11}$/.test(x)).slice(0,6),
     industry:routingV2.industryHubs.length?
       routingV2.industryHubs.map(x=>x.label).join(" / ").slice(0,140):
       input.domain==="company"?undefined:entities.join(" / ").slice(0,140),
+    ...(macroScope?.binding?{macroScope:macroHistoryScope(macroScope.binding)}:{}),
     focus,maxNotes:10,maxChars:8500
   });
   // Preserve literal historical hints when identity resolution HOLDs, without
@@ -351,7 +385,7 @@ export function planInvestmentWriteback(input:WritebackInput):WritebackPlan{
     status:"read_only_plan_not_written",planId,entityScope:entities,domain:input.domain,
     inputFormat:input.inputFormat,sourceKind:input.sourceKind,
     sourceLanguage:input.sourceLanguage?T(input.sourceLanguage):null,
-    sourceIdentity,
+    sourceIdentity,...(macroScope?{macroScope}:{}),
     sourceCapture:{
       textDigest:sourceIdentity.textSha256,extractedTextIsOriginalBinary:false,
       rawAttachmentPath:actualAttachmentPath,

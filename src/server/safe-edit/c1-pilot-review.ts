@@ -9,6 +9,7 @@ import {c1Pilot,C1_PILOT_POLICY,withPilotAdmissionLock} from "../c1-pilot";
 import {splitFrontmatter} from "../vault/markdown";
 import {judgeHash,stableJudgeJson,judgeEnvelopeDigest,verifyResearchJudgeEnvelope,judgeSubmissionSchema,type JudgeSubmission} from "../vault/research-judge";
 import {currentJudgeGate,assertResearchJudgeWrite,type JudgeGate} from "./research-judge-gate";
+import {assertProtectedRecord,canonicalNamespaceKind,isInsideCanonicalOrProtectedRoot} from "./protected-records";
 
 type Row={id:string;actor:string;payload:string;before_text:string;after_text:string;before_hash:string;after_hash:string;token_hash:string;expires:number;status:string};
 const digest=z.string().regex(/^[a-f0-9]{64}$/);
@@ -43,8 +44,19 @@ function sourceAdmitted(id:string,path:string,content:string,actor:string){
  if(!e||e.operationId!==id||e.actor!==actor||e.path!==path||e.sha256!==judgeHash(content))throw Error("c1_pilot_source_not_prepared");
  const r=row(e.operationId);if(r.actor!==actor||r.after_text!==content||JSON.parse(r.payload).change.kind!=="create")throw Error("c1_pilot_source_binding_hold");
 }
+/** A04-B (Owner Scope Amendment A1): in C1 an authenticated generic Safe Edit may
+ * write an ORDINARY note only — never a canonical record (PD-11), a protected
+ * root/record, or anything inside a canonical intake/research root (the Judge-
+ * scoped corpus stays pilot-gated). Actor binding, CAS, reserved-ID refusal and
+ * all engine guards still apply; raw writers stay denied in C1. */
+export function isC1OrdinaryGenericTarget(path:string):boolean{
+ if(canonicalNamespaceKind(path)||isInsideCanonicalOrProtectedRoot(path))return false;
+ try{assertProtectedRecord(path);}catch{return false;}
+ return true;
+}
 export function assertPilotPreview(id:string,path:string,before:string,after:string,actor:string,canonicalSource=false){
  if(!c1Pilot())return;
+ if(!canonicalSource&&isC1OrdinaryGenericTarget(path))return;
  if(before!=="")throw Error("c1_pilot_add_only_required");
  if(canonicalSource){sourceIdentity(path,after);return;}
  const g=currentJudgeGate(intake(after)),target=g?.targets.find(t=>t.operationId===id&&t.path===path&&t.sha256===judgeHash(after));
@@ -132,6 +144,7 @@ export function recordPilotReview(raw:unknown,authenticatedUserId:string){
 }
 export function assertPilotApply(id:string,path:string,before:string,after:string,actor:string){
  if(!c1Pilot())return null;
+ if(isC1OrdinaryGenericTarget(path))return null;
  if(before!=="")throw Error("c1_pilot_add_only_required");
  if(/^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/.test(path)){sourceAdmitted(id,path,after,actor);return null;}
  assertPilotPreview(id,path,before,after,actor);

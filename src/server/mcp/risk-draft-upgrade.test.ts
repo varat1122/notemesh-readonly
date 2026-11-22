@@ -51,10 +51,10 @@ it.each(["numeric","rating","kind","routine"])("D1 actual RISK-1 %s pending auth
  const originalJournal=sql.prepare("SELECT * FROM safe_edit_events ORDER BY rowid").all();
  const source=manifest.prepared.previews.find(t=>t.kind==="source_intake")!,review=manifest.prepared.previews.find(t=>t.kind==="canonical_review")!;
  const authorization=(t:typeof source)=>({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash});
- engine.apply(authorization(source),actor); // Source remains independently eligible.
+ engine.applyCanonicalStep(authorization(source),actor); // Source remains independently eligible.
  const sourceBytes=fs.readFileSync(path.join(dataRoot,"vault",source.path));
  const sourceReceipt=engine.status(source.operationId,actor).receipt;
- expect(()=>engine.apply(authorization(review),actor)).toThrow("research_judge_risk_policy_hold");
+ expect(()=>engine.applyCanonicalStep(authorization(review),actor)).toThrow("research_judge_risk_policy_hold");
  expect(()=>api.prepareCanonicalWriteback(manifest.input,actor)).toThrow("RI001-DRAFT-RISK-1.1");
  await expect(api.applyCanonicalWriteback({input:manifest.input,planId:manifest.prepared.planId,authorizations:[]},actor)).rejects.toThrow("RI001-DRAFT-RISK-1.1");
  expect((await import("../safe-edit/research-judge-gate")).currentJudgeGate(manifest.prepared.planId)?.decision).toBe("HOLD");

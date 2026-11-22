@@ -101,7 +101,7 @@ beforeEach(async()=>{importEngine=await import("../safe-edit/engine");});
 it.each(["HOLD","FAIL"] as const)("prior %s cannot downgrade into a low-risk retry or unjudged Draft",async verdict=>{
  const data=await judged(),pass=structuredClone(data),p=await prepare(data);data.researchJudge.result.review.verdict=verdict;const held=await prepare(data);expect(held.researchJudge?.decision).toBe(verdict);
  expect(()=>prepareSync(pass,actor)).toThrow(/revoked_envelope/);expect((await prepare(base)).previews.every(t=>t.kind==="source_intake")).toBe(true);
- for(const t of p.previews.filter(t=>t.kind!=="source_intake"))expect(()=>importEngine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
+ for(const t of p.previews.filter(t=>t.kind!=="source_intake"))expect(()=>importEngine.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
 });
 let prepareSync:typeof import("./canonical-writeback").prepareCanonicalWriteback;
 beforeEach(async()=>{const m=await import("./canonical-writeback");prepareSync=(raw)=>m.prepareCanonicalWriteback(raw,actor);});
@@ -163,7 +163,7 @@ it.each(["HOLD","FAIL"] as const)("one required qualitative Claim %s blocks the 
  const data=await qualitativeClaims(),p=await prepare(data);expect(p.previews).toHaveLength(4);data.researchJudge.result.claims[1].verdict=verdict;
  const held=await prepare(data);expect(held.researchJudge?.decision).toBe(verdict);expect(held.previews.every(t=>t.kind==="source_intake")).toBe(true);
  for(const t of p.previews.filter(t=>t.kind!=="source_intake")){
-  expect(()=>importEngine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
+  expect(()=>importEngine.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
   expect(fs.existsSync(path.join(vault,t.path))).toBe(false);
  }
  const saved=await save(data,held);expect(saved.receipts).toHaveLength(1);
@@ -171,7 +171,7 @@ it.each(["HOLD","FAIL"] as const)("one required qualitative Claim %s blocks the 
 it("removing a required Claim cannot retain a risk assessment or generic authority",async()=>{
  const data=await qualitativeClaims(),p=await prepare(data);data.claims!.pop();
  expect((await prepare(data)).researchJudge?.decision).toBe("HOLD");
- for(const t of p.previews.filter(t=>t.kind!=="source_intake"))expect(()=>importEngine.apply({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
+ for(const t of p.previews.filter(t=>t.kind!=="source_intake"))expect(()=>importEngine.applyCanonicalStep({operationId:t.operationId,previewToken:t.previewToken,expectedHash:t.beforeHash},actor)).toThrow(/research_judge/);
 });
 it("a receipt-bound Source already paired with a Review also supplies the historical basis",async()=>{
  const priorReview={...base,sourceUrl:"https://example.org/routine/prior",extractedText:prior};
@@ -200,7 +200,7 @@ it.each([
  const reviewStep=p.steps.find(s=>s.kind==="canonical_review")!;
  const workflow=(await import("../vault/investment-writeback-router")).planInvestmentWriteback(data).safeEditWorkflow;
  const request=workflow!.steps.find(s=>s.kind==="canonical_review")!.safeEditRequest!;
- expect(()=>importEngine.preview(request,actor)).toThrow(/research_judge/);
+ expect(()=>importEngine.preview(request,actor)).toThrow(/canonical_operation_namespace_reserved/);
  expect(fs.existsSync(path.join(vault,reviewStep.path))).toBe(false);
 });
 

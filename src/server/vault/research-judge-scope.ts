@@ -1,3 +1,5 @@
+import {MACRO_HISTORY_POLICY} from "./macro-source-scope";
+import {stableJudgeJson} from "./research-judge-contract";
 /** Scope freshness, not exhaustive recall or semantic truth. Server-only policy:
  * own writes are excluded BEFORE discovery bounds, and only with exact durable
  * create receipts plus actor/journal/byte identity. No intake-metadata exemption.
@@ -22,8 +24,12 @@ const identity=z.object({requested:z.string().max(120),contextKey:z.string().nul
   status:z.enum(["exact_existing_title","indexed_alias","unresolved","ambiguous_hold","readback_hold","index_limit_hold","invalid_hold"]),hubSha256:hash.nullable()}).strict();
 const selected=z.object({path,sha256:hash,role:z.string().max(40),evidenceUse:z.enum(["historical_context_only","unverified_candidate"]),
   excerptSha256:hash,counterEvidence:z.boolean(),line:z.number().int(),truncated:z.boolean(),matchedMacroScopes:z.array(z.string()).max(4)}).strict();
-export const judgeScopeSchema=z.object({version:z.literal(1),policy:z.literal("bounded_path_discovery_role_chronology_v1"),
-  scope:retrievalScopeSchema,issuerResolution:z.array(identity).max(6),selection:z.array(selected).max(8)}).strict();
+const legacyScope=z.object({version:z.literal(1),policy:z.literal("bounded_path_discovery_role_chronology_v1"),
+  scope:retrievalScopeSchema.refine(s=>!s.macroScope),issuerResolution:z.array(identity).max(6),selection:z.array(selected).max(8)}).strict();
+const macroScope=z.object({version:z.literal(2),policy:z.literal(MACRO_HISTORY_POLICY),
+  scope:retrievalScopeSchema.refine(s=>!!s.macroScope),issuerResolution:z.array(identity).max(6),
+  selection:z.array(selected.extend({sourceBindingSha256:hash.nullable()})).max(8)}).strict();
+export const judgeScopeSchema=z.union([legacyScope,macroScope]);
 export type JudgeScope=z.infer<typeof judgeScopeSchema>;
 export interface JudgeTarget {path:string;sha256:string;operationId:string;kind:"source_intake"|"structured_claim"|"canonical_review"}
 export function judgeTargets(plan:{safeEditWorkflow?:{steps:{path:string;expectedSha256:string;receiptKey:string;kind:JudgeTarget["kind"]}[]}|null}):JudgeTarget[]{
@@ -63,10 +69,10 @@ export function judgeScopeWitness(context:Pack):JudgeScope{
   const selection=context.items.map(item=>{
     const note=m2VaultReadDeps.readIndexed(item.path);
     if(!note?.indexed||!note.searchable||Buffer.byteLength(note.content)>100000||sha(note.content)!==item.contentSha256)throw Error("research_judge_selection_readback_hold");
-    return {path:item.path,sha256:item.contentSha256,role:item.role,evidenceUse:item.evidenceUse,
+    return {...(context.retrieval.scope.macroScope?{sourceBindingSha256:item.sourceBinding?sha(stableJudgeJson(item.sourceBinding)):null}:{}),path:item.path,sha256:item.contentSha256,role:item.role,evidenceUse:item.evidenceUse,
       excerptSha256:sha(item.excerpt),counterEvidence:item.counterEvidenceExcerptIncluded,line:item.line,truncated:item.truncated,matchedMacroScopes:item.matchedMacroScopes};
   });
-  return judgeScopeSchema.parse({version:1,policy:"bounded_path_discovery_role_chronology_v1",scope:context.retrieval.scope,issuerResolution,selection});
+  return judgeScopeSchema.parse({...(context.retrieval.scope.macroScope?{version:2,policy:MACRO_HISTORY_POLICY}:{version:1,policy:"bounded_path_discovery_role_chronology_v1"}),scope:context.retrieval.scope,issuerResolution,selection});
 }
 export function judgeScopeCurrent(witness:unknown,retrieval:unknown,targets:JudgeTarget[],intakeId:string,actor:string):boolean{
   const parsed=judgeScopeSchema.safeParse(witness);

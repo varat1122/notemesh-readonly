@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { kernelCanonicalCreate } from "../../../tests/source-event-fixture";
 
 // Only the real Obsidian Sync daemon pause is simulated. MCP protocol,
 // actor/authorization, Safe Edit CAS, actual temp-Vault writes, receipts,
@@ -260,9 +261,9 @@ describe("RI-011 E2E Research + Safe Edit real MCP on isolated temporary Vault",
         ["## การเชื่อมโยงความรู้","## Canonical knowledge links"],["## ขอบเขตความปลอดภัยในการบันทึก","## Ingestion safety"]])content=content.replace(current,old);
       const hash=createHash("sha256").update(content).digest("hex");
       const operationId="ICW-"+createHash("sha256").update(["canonical_review",reviewPath,hash].join("\n")).digest("hex").slice(0,32);
-      const engine=await import("../safe-edit/engine");
-      const pre=engine.preview({operationId,path:reviewPath,reason:"Historical fixture only",change:{kind:"create",content}},"oauth:ri011-synthetic-actor");
-      engine.apply({operationId,previewToken:pre.previewToken,expectedHash:pre.beforeHash},"oauth:ri011-synthetic-actor");
+      // WP2: historical (pre-WP2) Review fixture; generic canonical writes are refused now.
+      expect((await kernelCanonicalCreate([{kind:"canonical_review",path:reviewPath,content}],"oauth:ri011-synthetic-actor",
+        {legacy:true,reason:"Historical fixture only"}))[0].operationId).toBe(operationId);
       if(fault==="missing_backlink"){
         const {db}=await import("../db");
         db().prepare("DELETE FROM links WHERE source_path=? AND resolved_path=?").run(reviewPath,sourcePath);
@@ -374,4 +375,266 @@ describe("RI-011 E2E Research + Safe Edit real MCP on isolated temporary Vault",
     }finally{await close();}
   });
 
+});
+
+/** M56-P1 V2 closed loop through the REAL Safe Edit + Research MCP servers (in-memory
+ * transport, isolated temp Vault/SQLite): canonical Industry-IN / Macro-IN Source+Review
+ * receipts → public planner (truthful P10 descriptor) → sealed V2 subject packet → dedicated
+ * prepare → dashboard approval (synthetic engine.approve; HTTP route is covered in
+ * tests/http/wp2-authority-boundary) → apply → fresh read_note / planner / inspect readback,
+ * plus a stale-index negative with an unchanged ledger. No issuer, no verified identity. */
+describe("M56-P1 V2 Industry-IN / Macro-IN closed loop on real MCP",()=>{
+  const sha=(s:string)=>createHash("sha256").update(s).digest("hex");
+  const raw=(p:string)=>fs.readFileSync(path.join(vault,p),"utf8");
+  const thai={...review,headlineTh:"ข่าวสมมติระบุการเปลี่ยนแปลงในเดือนตุลาคม 2026",translationTh:"ข่าวสมมติระบุเหตุการณ์ในเดือนตุลาคม 2026 และยังไม่ได้ตรวจกับต้นฉบับ"};
+  const cases=[
+    {domain:"industry" as const,entity:"Memory Semiconductors",hub:"02_Industries_Themes/Memory Semiconductors.md",folder:"10_Knowledge/Industry and Concepts",
+      text:"SYNTHETIC: Memory Semiconductors contract prices rose in October 2026, a synthetic tracker reported for DRAM.",
+      dup:"SYNTHETIC (second edition): Memory Semiconductors contract prices rose in October 2026 for DRAM, the tracker repeated.",
+      quote:"Memory Semiconductors contract prices rose in October 2026",
+      subject:(evidence:unknown[],hub:string)=>({domain:"industry",hubPath:hub,topic:"DRAM contract pricing",period:"October 2026",evidence})},
+    {domain:"macro" as const,entity:"Thailand Policy Rate",hub:null,folder:"10_Knowledge/Macro and Markets",
+      text:"SYNTHETIC: The Bank of Thailand held the policy rate at 2.50% in October 2026, the synthetic notice said.",
+      dup:"SYNTHETIC (repost): The Bank of Thailand held the policy rate at 2.50% in October 2026, the notice was repeated.",
+      quote:"The Bank of Thailand held the policy rate at 2.50% in October 2026",
+      subject:(evidence:unknown[])=>({domain:"macro",geography:"Thailand",topic:"policy rate",period:"October 2026",role:"policy_decision",vintage:null,evidence})}];
+  const writeback=(c:typeof cases[number],text:string,url:string,capture=false)=>({domain:c.domain,entities:[c.entity],topic:"Synthetic "+c.domain+" event",
+    inputFormat:"text",sourceKind:"news_media",sourceLanguage:"en",sourceChat:"M56-P1-T04-SYNTHETIC",publisher:"Synthetic publisher",sourceUrl:url,
+    eventDate:"2026-10-20",publicationDate:"2026-10-20",extractedText:text,sourceChannel:"news_media",attributedOrigin:"synthetic",
+    originalDocumentAccess:"excerpt_only",contentTypes:["market_commentary"],...(capture?{captureOnly:true}:{researchReview:thai})});
+  async function ledger(){
+    const d=(await import("../db")).db(),has=(t:string)=>Boolean(d.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(t));
+    const all=(t:string,cols="*")=>has(t)?d.prepare(`SELECT ${cols} FROM ${t} ORDER BY 1`).all():[];
+    const walk=(dir:string,b=""):string[]=>fs.readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?[b+e.name+"/",...walk(path.join(dir,e.name),b+e.name+"/")]:[b+e.name+":"+sha(fs.readFileSync(path.join(dir,e.name),"utf8"))]);
+    return {files:walk(vault).sort(),notes:all("notes"),fts:all("notes_fts","path,body"),links:all("links","source_path,target,resolved_path"),
+      plan:all("canonical_plan"),witness:all("canonical_witness"),consumption:all("witness_consumption"),ops:all("safe_edit_operations"),events:all("safe_edit_events")};
+  }
+  /** SYNTHETIC analyst attestation built from the MCP packet (mechanical; not semantic verification). */
+  async function sealed(packetResult:Record<string,any>){
+    const pilot=await import("../safe-edit/canonical-review-revision-pilot");
+    const body=JSON.parse(packetResult.packet.body),ref=(key:string,text:string,s256:string)=>({key,quote:text.slice(0,100),locator:`utf16:0:${Math.min(text.length,100)}`,sourceSha256:s256});
+    expect(packetResult.constraints).toEqual([]);
+    const sources=body.sources.map((s:{text:string;textSha256:string},i:number)=>ref("source_"+i,s.text,s.textSha256));
+    const history=body.context.history.map((h:{text:string;sha256:string},i:number)=>ref("history_"+i,h.text,h.sha256)),subject=body.proposal.subject;
+    return {packet:packetResult.packet,result:{contractVersion:pilot.SUBJECT_SOURCE_EVENT_POLICY,packetDigest:packetResult.packet.digest,packetEnvelopeDigest:packetResult.packetEnvelopeDigest,
+      disposition:"PASS",methodVersion:"SYNTHETIC-MECHANICAL-SUBJECT-1",criticIndependence:"not_verified",
+      sourceBindings:sources.map((r:{key:string},i:number)=>({bindingVersion:pilot.SUBJECT_BIND_POLICY,sourceKey:r.key,sliceId:"slice_"+i,domain:subject.domain,effectiveSubjectId:subject.key,
+        relation:"primary_subject",semanticRationale:"Synthetic fixture subject association for deterministic binding tests only.",references:[r],coverage:"excerpt_only",limitations:["Fixture only"]})),
+      event:{decisionVersion:pilot.SUBJECT_EVENT_ID_POLICY,effectiveSubjectId:subject.key,relation:"duplicate",action:"duplicate_link_only",targetReviewPath:body.targetReview.path,materiality:"low",
+        semanticRationale:"Synthetic exact-source comparison, not economic verification or LLM evaluation.",materialityRationale:"Synthetic same-event coverage; no financial authority asserted.",
+        comparison:{economicSubject:"same",geography:"same",metric:"same",unit:"same",period:"same",role:"same",vintage:"not_applicable",sourceFamily:"same_family",materialDelta:"Synthetic same-event text only; no asserted change."},
+        consideredHistoryKeys:history.map((r:{key:string})=>r.key),references:[sources[0],...(history.length?[history[0]]:[]),ref("target_review",body.targetReview.text,body.targetReview.sha256)],
+        counterEvidenceRefs:[],coverage:"bounded_omission",coverageRationale:"Only the bounded server-selected evidence was supplied and reviewed in this simulated fixture."},
+      checks:{sourceEntailment:"PASS",subjectAssociation:"PASS",eventIdentity:"PASS",periodRoleVintage:"PASS",unitMetricGeography:"PASS",coverageCounterEvidence:"PASS",pointInTime:"PASS",injectionIsolation:"PASS",protectedAuthority:"PASS"}}};
+  }
+  for(const c of cases)it(`${c.domain}: receipts → public V2 planner → sealed packet → prepare → approval → apply → fresh MCP readback; stale index refused with no effect`,async()=>{
+    if(c.hub)await seed(c.hub,"# "+c.entity+"\n");
+    fs.mkdirSync(path.join(vault,c.folder),{recursive:true});
+    await seed("05_Thesis/Protected - Current Thesis.md","# Owner-protected Thesis\n");
+    const {safeClient,readClient,close}=await connect();
+    try{
+      const orig=writeback(c,c.text,"https://example.org/m56/"+c.domain+"-a"),first=await prepare(safeClient,orig),saved=await apply(safeClient,orig,first);
+      expect(saved.status).toBe("saved_verified");
+      const src=saved.steps.find(s=>s.kind==="source_intake")!.path,rev=saved.steps.find(s=>s.kind==="canonical_review")!.path;
+      expect(rev.startsWith(c.folder+"/")).toBe(true);
+      const dupIn=writeback(c,c.dup,"https://www.example.org/m56/"+c.domain+"-b",true),dupPrep=await prepare(safeClient,dupIn),dupSaved=await apply(safeClient,dupIn,dupPrep);
+      const dup=dupSaved.steps[0].path;
+      // Public planner on the Research MCP (P10 descriptor is now truthful for V2).
+      const planner=(await readClient.listTools()).tools.find(t=>t.name==="plan_duplicate_source_link")!;
+      expect(planner.description).toContain("Industry-IN/Macro-IN Draft Reviews get the M56-P1 V2 subject recipe");
+      expect(planner.description).not.toContain("Company Research Reviews only");
+      expect(planner.annotations?.readOnlyHint).toBe(true);
+      const request={reviewPath:rev,additionalSourcePath:dup,eventAnchor:"synthetic-"+c.domain+"-event-2026-10",
+        comparisonBasis:"Both synthetic editions report the same October 2026 event from one publisher family; not a second event.",linkedOnDate:"2026-11-14"};
+      const before=await ledger();
+      const plan=unwrapRead(await readClient.callTool({name:"plan_duplicate_source_link",arguments:request}));
+      expect(plan).toMatchObject({status:"requires_dedicated_review_revision_v2",writePerformed:false,safeEditRequest:null});
+      expect(await ledger()).toEqual(before); // read-only planner
+      const r=raw(src),{preservedSubmittedText}=await import("../vault/research-decision-v2"),{splitFrontmatter}=await import("../vault/markdown");
+      const part=preservedSubmittedText(r)!,text=[part,part+"\n"].find(t=>sha(t)===splitFrontmatter(r).data.source_text_sha256)!,at=text.indexOf(c.quote);
+      const evidence=[{key:"original_source",quote:c.quote,locator:`utf16:${at}:${at+c.quote.length}`,sourceSha256:sha(text)}];
+      const recipe=plan.canonicalReviewRevision as Record<string,unknown>;
+      expect(recipe.entity).toBe(c.domain);
+      const input:Record<string,unknown>={...recipe,subject:c.subject(evidence,c.hub!),
+        analystAssessment:{disposition:"PASS",eventRelation:"duplicate",materiality:"low",assessment:"Synthetic repeat of the same dated event; not new evidence.",
+          counterEvidence:"Same-event identity is an analyst proposal only.",requiredEvidence:"Read the original publications before any decision.",criticIndependence:"not_verified",independentEvidenceIncrement:0}};
+      input.sourceEvent=await sealed(unwrapSafe(await safeClient.callTool({name:"prepare_source_event_packet",arguments:{kind:"revise",input}})));
+      const prepared=unwrapSafe(await safeClient.callTool({name:"prepare_canonical_review_revision",arguments:input})) as Record<string,any>;
+      expect(prepared).toMatchObject({phase:"revision_preview_only",issuerBinding:"not_applicable_no_issuer",subject:{domain:c.domain}});
+      const engine=await import("../safe-edit/engine"),view=engine.adminPreview(prepared.operationId) as {afterHash:string;reviewedEvidenceDigest?:string};
+      engine.approve(prepared.operationId,"synthetic-dashboard-reviewer",view.afterHash,view.reviewedEvidenceDigest);
+      const applied=unwrapSafe(await safeClient.callTool({name:"apply_canonical_review_revision",arguments:{input,operationId:prepared.operationId,
+        authorization:{operationId:prepared.operationId,previewToken:prepared.preview.previewToken,expectedHash:prepared.preview.beforeHash}}}));
+      expect(applied).toMatchObject({status:"revision_saved_verified",reviewAppendChainVerified:true,sourceReceiptsVerified:true,researchStatus:"draft",independentEvidenceIncrement:0});
+      // Fresh readback through the tool/server context, not internal functions.
+      const note=JSON.stringify(unwrapRead(await readClient.callTool({name:"read_note",arguments:{path:rev}})));
+      expect(note).toContain(`[[${dup.slice(0,-3)}]]`);expect(note).toContain("Subject (M56-REVIEW-SELECTOR-2");
+      expect(note).toContain("research_status");expect(note).not.toContain("verified_against_primary");
+      expect(unwrapRead(await readClient.callTool({name:"plan_duplicate_source_link",arguments:request}))).toMatchObject({status:"already_linked",linkEvidence:"text_reference_only"});
+      expect(unwrapSafe(await safeClient.callTool({name:"inspect_canonical_review_revision",arguments:{operationId:prepared.operationId}}))).toMatchObject({
+        gate:{version:"IOS-REVIEW-REVISION-PILOT-3-SUBJECT",domain:c.domain,subjectBinding:"not_verified",independentEvidenceIncrement:0},receipt:{status:"written"}});
+      // Stale index: Review metadata changed on disk without reindex → planner HOLD and dedicated prepare refused; nothing else changes.
+      const bytes=raw(rev);fs.writeFileSync(path.join(vault,rev),bytes.replace("---\n","---\nstale_probe: true\n"));
+      const stale=await ledger();
+      expect(unwrapRead(await readClient.callTool({name:"plan_duplicate_source_link",arguments:request}))).toMatchObject({status:"hold_receipt_unverified",writePerformed:false});
+      const refused=await safeClient.callTool({name:"prepare_canonical_review_revision",arguments:{...input,existingReview:{...(input.existingReview as object),expectedSha256:sha(raw(rev))}}}) as {isError?:boolean};
+      expect(refused.isError).toBe(true);expect(JSON.stringify(refused)).toMatch(/index_readback_mismatch/);
+      expect(await ledger()).toEqual(stale);
+      fs.writeFileSync(path.join(vault,rev),bytes);
+    }finally{await close();}
+    expect(raw("05_Thesis/Protected - Current Thesis.md")).toBe("# Owner-protected Thesis\n");
+  },60_000);
+  /** OD-10 client-plan parity: a caller that knows ONLY the planner's public guidance
+   * (requiredCompletion.sourceEvent + next) and the live Safe Edit registry of its client. Every
+   * snake_case identifier there must be a registered tool ID, or a literal value served by those
+   * registered tools' own input schemas (e.g. subject_v2, duplicate_link_only) and never itself a
+   * tool. Registered tools outside the "is refused" sentence form the executable sequence, in order. */
+  type SafeClient=Awaited<ReturnType<typeof connect>>["safeClient"];
+  async function guidance(plan:Record<string,any>,safeClient:SafeClient){
+    const text=[plan.requiredCompletion.sourceEvent,plan.next].join(" ");
+    const {tools}=await safeClient.listTools(),registry=new Set(tools.map(t=>t.name)),served=new Set<string>();
+    const walk=(v:unknown):void=>{if(Array.isArray(v))v.forEach(walk);else if(v&&typeof v==="object")for(const [k,x] of Object.entries(v)){
+      if(k==="enum"&&Array.isArray(x))x.forEach(e=>{if(typeof e==="string")served.add(e);});else if(k==="const"&&typeof x==="string")served.add(x);else walk(x);}};
+    walk(tools.map(t=>t.inputSchema));
+    const ids=(s:string)=>[...new Set(s.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g)??[])];
+    const all=ids(text),refused=ids(text.split(/\.\s+/).filter(s=>/\bis refused\b/.test(s)).join(" "));
+    expect(all.filter(id=>!registry.has(id)&&!served.has(id)),"guidance identifiers that are neither registered tool IDs nor served values").toEqual([]);
+    expect(all.filter(id=>served.has(id)&&registry.has(id))).toEqual([]);
+    expect(text).not.toMatch(/\bPASS\b/); // no pre-filled judgement in the client instructions
+    return {text,registry,tools,steps:all.filter(id=>registry.has(id)&&!refused.includes(id)),refused:refused.filter(id=>registry.has(id)),
+      literals:all.filter(id=>served.has(id)),relation:/event\.relation=([a-z_]+)/.exec(text)?.[1],action:/event\.action=([a-z_]+)/.exec(text)?.[1]};
+  }
+  /** Executes the emitted steps in order. Each step's arguments come from the guidance text and the
+   * named tool's own descriptor (kind / contract / authorization), never from a hard-coded name. */
+  async function follow(g:Awaited<ReturnType<typeof guidance>>,safeClient:SafeClient,input:Record<string,unknown>,
+    seal:(packet:Record<string,any>,contract:Record<string,any>|null)=>Promise<Record<string,any>>){
+    const schema=(n:string)=>g.tools.find(t=>t.name===n)!.inputSchema as {properties:Record<string,any>;required?:string[]};
+    let packet:Record<string,any>|null=null,contract:Record<string,any>|null=null,prepared:Record<string,any>|null=null,applied:Record<string,any>|null=null;
+    const order:string[]=[];
+    for(const name of g.steps){
+      const s=schema(name);
+      if("kind" in s.properties){
+        const kind=/\bkind[:=]"?([a-z]+)/.exec(g.text)![1];expect(s.properties.kind.enum).toContain(kind);
+        packet=unwrapSafe(await safeClient.callTool({name,arguments:{kind,input}}));order.push("packet");
+      }else if("contract" in s.properties){
+        const arg=new RegExp(name+'\\s*\\{contract:"([a-z0-9_]+)"\\}').exec(g.text)![1];expect(s.properties.contract.enum).toContain(arg);
+        contract=unwrapSafe(await safeClient.callTool({name,arguments:{contract:arg}}));order.push("contract");
+      }else if(s.required?.includes("authorization")){
+        expect(prepared,"apply emitted before prepare").not.toBeNull();
+        expect(g.text).toMatch(/authenticated dashboard approval of the exact/); // human step (synthetic engine.approve)
+        const engine=await import("../safe-edit/engine"),view=engine.adminPreview(prepared!.operationId) as {afterHash:string;reviewedEvidenceDigest?:string};
+        engine.approve(prepared!.operationId,"synthetic-dashboard-reviewer",view.afterHash,view.reviewedEvidenceDigest);
+        applied=unwrapSafe(await safeClient.callTool({name,arguments:{input,operationId:prepared!.operationId,
+          authorization:{operationId:prepared!.operationId,previewToken:prepared!.preview.previewToken,expectedHash:prepared!.preview.beforeHash}}}));order.push("apply");
+      }else{
+        expect(packet,"prepare emitted before the sealed packet").not.toBeNull();
+        const sourceEvent=await seal(packet!,contract);input.sourceEvent=sourceEvent;
+        expect(sourceEvent.result.event).toMatchObject({relation:g.relation,action:g.action});
+        prepared=unwrapSafe(await safeClient.callTool({name,arguments:input}));order.push("prepare");
+      }
+    }
+    return {order,prepared:prepared!,applied:applied!};
+  }
+  /** SYNTHETIC Company V1 analyst attestation from the MCP packet (mechanical; not semantic verification). */
+  async function sealedV1(p:Record<string,any>,relation:string,action:string){
+    const c=await import("../vault/source-event-contract"),body=JSON.parse(p.packet.body),issuer=body.context.effectiveIssuerId??"unresolved";
+    const ref=(key:string,text:string,s256:string)=>({key,quote:text.slice(0,100),locator:`utf16:0:${Math.min(text.length,100)}`,sourceSha256:s256});
+    const sources=body.sources.map((s:{text:string;textSha256:string},i:number)=>ref("source_"+i,s.text,s.textSha256));
+    const history=body.context.history.map((h:{text:string;sha256:string},i:number)=>ref("history_"+i,h.text,h.sha256));
+    return {packet:p.packet,result:{contractVersion:c.SOURCE_EVENT_POLICY,packetDigest:p.packet.digest,packetEnvelopeDigest:p.packetEnvelopeDigest,
+      disposition:"PASS",methodVersion:"SYNTHETIC-MECHANICAL-1",criticIndependence:"not_verified",
+      sourceBindings:sources.map((r:{key:string},i:number)=>({bindingVersion:c.ISSUER_BIND_POLICY,sourceKey:r.key,sliceId:"slice_"+i,effectiveIssuerId:issuer,
+        documentRelation:"single_issuer",relation:"primary_subject",semanticRationale:"Synthetic fixture association supplied for deterministic binding tests only.",
+        references:[r],supportedRelationship:null,coverage:"excerpt_only",limitations:["Fixture only; original publisher not independently verified"]})),
+      event:{decisionVersion:c.EVENT_ID_POLICY,effectiveIssuerId:issuer,relation,action,targetReviewPath:body.targetReview.path,materiality:"low",
+        semanticRationale:"Synthetic exact-source comparison, not financial verification or LLM evaluation.",materialityRationale:"Synthetic same-event coverage; no financial authority asserted.",
+        comparison:{economicSubject:"same",period:"not_applicable",role:"same",vintage:"not_applicable",sourceFamily:"unknown",materialDelta:"Synthetic same-event text only; no asserted change."},
+        consideredHistoryKeys:history.map((r:{key:string})=>r.key),references:[sources[0],...(history.length?[history[0]]:[]),ref("target_review",body.targetReview.text,body.targetReview.sha256)],
+        counterEvidenceRefs:[],coverage:"bounded_omission",coverageRationale:"Only the bounded server-selected evidence was supplied and reviewed in this simulated fixture."},
+      checks:{sourceEntailment:"PASS",issuerAssociation:"PASS",eventIdentity:"PASS",periodRoleVintage:"PASS",coverageCounterEvidence:"PASS",pointInTime:"PASS",injectionIsolation:"PASS",protectedAuthority:"PASS"}}};
+  }
+  for(const c of cases)it(`OD-10 client plan ${c.domain}: V2 guidance names only registered tool IDs + served values; a caller follows the emitted sequence to a verified save`,async()=>{
+    if(c.hub)await seed(c.hub,"# "+c.entity+"\n");
+    fs.mkdirSync(path.join(vault,c.folder),{recursive:true});
+    const {safeClient,readClient,close}=await connect();
+    try{
+      const orig=writeback(c,c.text,"https://example.org/m56/"+c.domain+"-a"),saved=await apply(safeClient,orig,await prepare(safeClient,orig));
+      expect(saved.status).toBe("saved_verified");
+      const src=saved.steps.find(s=>s.kind==="source_intake")!.path,rev=saved.steps.find(s=>s.kind==="canonical_review")!.path;
+      const dupIn=writeback(c,c.dup,"https://www.example.org/m56/"+c.domain+"-b",true),dup=(await apply(safeClient,dupIn,await prepare(safeClient,dupIn))).steps[0].path;
+      const request={reviewPath:rev,additionalSourcePath:dup,eventAnchor:"synthetic-"+c.domain+"-event-2026-10",
+        comparisonBasis:"Both synthetic editions report the same October 2026 event from one publisher family; not a second event.",linkedOnDate:"2026-11-14"};
+      const before=await ledger();
+      const plan=unwrapRead(await readClient.callTool({name:"plan_duplicate_source_link",arguments:request})) as Record<string,any>;
+      expect(plan).toMatchObject({status:"requires_dedicated_review_revision_v2",writePerformed:false,safeEditRequest:null});
+      expect(await ledger()).toEqual(before);
+      const g=await guidance(plan,safeClient),recipe=plan.canonicalReviewRevision as Record<string,any>;
+      expect(g.steps.length).toBeGreaterThanOrEqual(4);expect(g.refused.length).toBeGreaterThan(0);
+      expect(g.literals).toEqual(expect.arrayContaining([g.action]));
+      // selectorVersion is the V2 input selector in the instructions, never a tool ID.
+      expect(recipe.selectorVersion).toBe("M56-REVIEW-SELECTOR-2");expect(g.text).toContain(recipe.selectorVersion);expect(g.registry.has(recipe.selectorVersion)).toBe(false);
+      for(const k of ["disposition","eventRelation","materiality"])expect(plan.requiredCompletion.analystAssessment[k]).toMatch(/^<analyst-selected: /);
+      const r=raw(src),{preservedSubmittedText}=await import("../vault/research-decision-v2"),{splitFrontmatter}=await import("../vault/markdown");
+      const part=preservedSubmittedText(r)!,text=[part,part+"\n"].find(t=>sha(t)===splitFrontmatter(r).data.source_text_sha256)!,at=text.indexOf(c.quote);
+      const input:Record<string,any>={...recipe,subject:c.subject([{key:"original_source",quote:c.quote,locator:`utf16:${at}:${at+c.quote.length}`,sourceSha256:sha(text)}],c.hub!),
+        analystAssessment:{disposition:"PASS",eventRelation:"duplicate",materiality:"low",assessment:"Synthetic repeat of the same dated event; not new evidence.",
+          counterEvidence:"Same-event identity is an analyst proposal only.",requiredEvidence:"Read the original publications before any decision.",criticIndependence:"not_verified",independentEvidenceIncrement:0}};
+      const run=await follow(g,safeClient,input,async(packet,contract)=>{
+        expect(contract,"V2 guidance names the result contract").not.toBeNull();
+        const sub=await sealed(packet);
+        expect(contract!.properties.contractVersion.const).toBe(sub.result.contractVersion); // the attested result matches the served contract
+        return sub;});
+      expect(run.order).toEqual(["packet","contract","prepare","apply"]);
+      expect(input.selectorVersion).toBe(recipe.selectorVersion);
+      expect(run.prepared).toMatchObject({phase:"revision_preview_only",issuerBinding:"not_applicable_no_issuer",subject:{domain:c.domain}});
+      expect(run.applied).toMatchObject({status:"revision_saved_verified",reviewAppendChainVerified:true,sourceReceiptsVerified:true,researchStatus:"draft",independentEvidenceIncrement:0});
+      expect(JSON.stringify(unwrapRead(await readClient.callTool({name:"read_note",arguments:{path:rev}})))).toContain(`[[${dup.slice(0,-3)}]]`);
+      expect(unwrapRead(await readClient.callTool({name:"plan_duplicate_source_link",arguments:request}))).toMatchObject({status:"already_linked",linkEvidence:"text_reference_only"});
+      // The IDs advertised before this fix are not registered: a client following them is refused with no effect.
+      for(const ghost of ["prepare_subject_source_event_packet","prepare_canonical_review_revision_v2","apply_canonical_review_revision_v2"]){
+        expect(g.registry.has(ghost)).toBe(false);
+        const l0=await ledger();
+        expect(await safeClient.callTool({name:ghost,arguments:{input}}).then(x=>JSON.stringify(x),e=>String(e))).toMatch(/not found/i);
+        expect(await ledger()).toEqual(l0);
+      }
+    }finally{await close();}
+  },60_000);
+  it("OD-10 client plan Company V1: unchanged V1 guidance names only registered tool IDs; a caller follows it to a verified duplicate link",async()=>{
+    const {planInvestmentWriteback}=await import("../vault/investment-writeback-router");
+    await seed("01_Companies/MU.md","# MU synthetic company hub\n");
+    // Historical English-format Company Review (+ its Source) as synthetic pre-WP2 history (V1 route).
+    const steps=planInvestmentWriteback(input as never).safeEditWorkflow!.steps;
+    const srcStep=steps.find(s=>s.kind==="source_intake")!,revStep=steps.find(s=>s.kind==="canonical_review")!;
+    let reviewText=(revStep.safeEditRequest!.change as {content:string}).content;
+    for(const [th,en] of [["## ที่มาของต้นฉบับ","## Source provenance"],["## บทวิเคราะห์ (การตีความของ AI ไม่ใช่ Thesis ที่อนุมัติแล้ว)","## Research analysis (AI interpretation; not approved Thesis)"]])reviewText=reviewText.replace(th,en);
+    await kernelCanonicalCreate([{kind:"source_intake",path:srcStep.path,content:(srcStep.safeEditRequest!.change as {content:string}).content},
+      {kind:"canonical_review",path:revStep.path,content:reviewText}],"oauth:ri011-synthetic-actor",{legacy:true});
+    const {safeClient,readClient,close}=await connect();
+    try{
+      const dupIn={...input,captureOnly:true,researchReview:undefined,sourceLanguage:"th",sourceUrl:"https://th.example.org/ri011/issuer-claim-excerpt-th",
+        extractedText:"SYNTHETIC (Thai edition): MU FY2027Q1 hypothetical backlog example: 12 USD billions, not verified from a primary issuer release."};
+      const dup=(await apply(safeClient,dupIn,await prepare(safeClient,dupIn))).steps[0].path;
+      const request={reviewPath:revStep.path,additionalSourcePath:dup,eventAnchor:"mu-fy2027q1-backlog-excerpt-2026",
+        comparisonBasis:"Both synthetic editions carry the same FY2027Q1 backlog excerpt from one publisher family; not a second economic event.",linkedOnDate:"2026-11-14"};
+      const before=await ledger();
+      const plan=unwrapRead(await readClient.callTool({name:"plan_duplicate_source_link",arguments:request})) as Record<string,any>;
+      expect(plan).toMatchObject({status:"requires_dedicated_review_revision",writePerformed:false,safeEditRequest:null});
+      expect(plan).not.toHaveProperty("routeVersion");expect(plan.canonicalReviewRevision).not.toHaveProperty("selectorVersion");
+      expect(await ledger()).toEqual(before);
+      const g=await guidance(plan,safeClient);
+      expect(g.steps.length).toBeGreaterThanOrEqual(3);expect(g.refused.length).toBeGreaterThan(0);
+      const input1:Record<string,any>={...plan.canonicalReviewRevision,analystAssessment:{disposition:"PASS",eventRelation:"duplicate",materiality:"low",
+        assessment:"The Thai edition repeats the same backlog excerpt; it adds a language edition only, not new evidence.",
+        counterEvidence:"Edition equivalence is an analyst proposal; the publisher pages were not compared byte-for-byte.",
+        requiredEvidence:"Compare both editions with the original before relying on any detail.",criticIndependence:"not_verified",independentEvidenceIncrement:0}};
+      const run=await follow(g,safeClient,input1,async packet=>sealedV1(packet,g.relation!,g.action!));
+      expect(run.order).toEqual(["packet","prepare","apply"]);
+      expect(run.prepared).toMatchObject({phase:"revision_preview_only",issuerBinding:"not_verified",independentEvidenceIncrement:0});
+      expect(run.applied).toMatchObject({status:"revision_saved_verified",issuerBinding:"analyst_attested_not_independently_verified",independentEvidenceIncrement:0});
+      expect(run.applied).not.toHaveProperty("subjectBinding");
+      const note=JSON.stringify(unwrapRead(await readClient.callTool({name:"read_note",arguments:{path:revStep.path}})));
+      expect(note).toContain(`[[${dup.slice(0,-3)}]]`);expect(note).toContain("Duplicate Source link (link only");
+      expect(unwrapRead(await readClient.callTool({name:"plan_duplicate_source_link",arguments:request}))).toMatchObject({status:"already_linked",linkEvidence:"text_reference_only"});
+    }finally{await close();}
+  },60_000);
 });

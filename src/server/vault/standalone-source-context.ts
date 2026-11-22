@@ -6,19 +6,23 @@
 import {createHash} from "node:crypto";
 import {db} from "../db";
 import {canonicalSourceUrl} from "../source-url";
-import {createReceipt,indexedRead} from "./investment-research-context";
+import {createReceipt,receiptProvenance,indexedRead} from "./investment-research-context";
 import {preservedSubmittedText} from "./research-decision-v2";
 import {RetrievalObserver} from "./investment-retrieval-coverage";
 import {inspectCanonicalKnowledgeMetadata} from "./investment-knowledge-schema";
 import {judgeExclusionSql,type JudgeSelectionPolicy} from "./queries";
 
+import {readMacroSourceScope,type MacroHistoryScope,type MacroSourceScope} from "./macro-source-scope";
+import {stableJudgeJson} from "./research-judge-contract";
+
 const sha=(s:string)=>createHash("sha256").update(s).digest("hex");
 const prefix="00_Inbox/ChatGPT/Investment Intake - ";
 const sourcePath=/^00_Inbox\/ChatGPT\/Investment Intake - (IN-[A-F0-9]{16})\.md$/;
-export interface SourceMentionScope {contextKey:string;labels:string[]}
+export interface SourceMentionScope {contextKey:string;labels:string[];macroScope?:MacroHistoryScope}
 export interface StandaloneSourceBinding {
   status:"receipted_source_only";intakeId:string;sourceReceiptId:string;sourceSha256:string;receivedTextSha256:string;
-  contextKeys:string[];matchedLabels:string[];scopeBasis:"literal_received_text_mention_of_resolved_hub";
+  contextKeys:string[];matchedLabels:string[];scopeBasis:"literal_received_text_mention_of_resolved_hub"|"receipted_source_declared_macro_subject";
+  macroScope?:MacroSourceScope;indexBindingSha256?:string;sourceRecordedAt?:string;sourceActor?:string;
   subjectRole:"not_established";sourceFamily:{canonicalUrl:string|null;economicEventEquivalence:"not_established"};
   provenance:{sourceKind:string|null;publisher:string|null;authority:"receipt_preserves_attribution_not_source_authenticity"};
   eventDate:string|null;publicationDate:string|null;independentEvidenceIncrement:0;primaryVerification:"not_performed";
@@ -59,8 +63,11 @@ export function discoverStandaloneSources(scopes:SourceMentionScope[],reviewSour
         const note=indexedRead(c.path),text=preservedSubmittedText(note.raw);
         // Receipt-bound original text only. No frontmatter issuer, publisher,
         // caller intake label, URL token or filename is an issuer assertion.
-        const matched=text?labels.filter(label=>mentions(text,label)):[];
-        if(text!==null&&!matched.length)return null;
+        const macro=scope.macroScope;
+        if(macro&&note.fm.macro_subject===undefined)return null; // Legacy stays unscoped, never backfilled.
+        const declared=macro&&text!==null?readMacroSourceScope(note.fm.macro_subject,text,note.fm.source_text_sha256):null;
+        const matched=macro&&declared?[declared.label]:text?labels.filter(label=>mentions(text,label)):[];
+        if(!macro&&text!==null&&!matched.length)return null;
         if(!text||note.fm.type!=="investment_source_intake"||note.fm.intake_id!==id||
           ![sha(text),sha(text+"\n")].includes(String(note.fm.source_text_sha256)))throw Error("source_text_binding_hold");
         const row=db().prepare(`SELECT notes_fts.body FROM notes JOIN notes_fts ON notes.rowid=notes_fts.rowid
@@ -68,8 +75,22 @@ export function discoverStandaloneSources(scopes:SourceMentionScope[],reviewSour
         if(!row||row.body!==note.body)throw Error("source_index_binding_hold");
         const receipt=createReceipt("source_intake",c.path,note.raw),metadata=inspectCanonicalKnowledgeMetadata(c.path,note.fm);
         if(metadata.warnings.some(w=>w==="invalid_event_date"||w==="invalid_published_at"))throw Error("source_chronology_hold");
-        return {status:"receipted_source_only",intakeId:id,sourceReceiptId:receipt,sourceSha256:sha(note.raw),receivedTextSha256:String(note.fm.source_text_sha256),
-          contextKeys:[scope.contextKey],matchedLabels:matched,scopeBasis:"literal_received_text_mention_of_resolved_hub",subjectRole:"not_established",
+        let macroBinding:{macroScope:MacroSourceScope;indexBindingSha256:string;sourceRecordedAt:string;sourceActor:string}|undefined;
+        if(macro){
+          if(!declared||receiptProvenance("source_intake",c.path,note.raw).tier!=="server_witnessed")throw Error("macro_source_witness_hold");
+          const operation=db().prepare("SELECT actor,receipt FROM safe_edit_operations WHERE id=? AND status='written'").get(receipt) as {actor:string;receipt:string}|undefined;
+          const recordedAt=operation?JSON.parse(operation.receipt).writtenAt:undefined;
+          if(!operation||typeof recordedAt!=="string"||!Number.isFinite(Date.parse(recordedAt))||Date.parse(recordedAt)>Date.now())throw Error("macro_source_recorded_time_hold");
+          // Older receipts may contain a declared Macro label on broker
+          // research. Verify their original receipt first; do not promote that
+          // origin into Macro history or rewrite the preserved Source.
+          if(note.fm.source_kind==="broker_research")return null;
+          if(declared.key!==macro.key)return null; // Proven other scope, not an operational failure.
+          macroBinding={macroScope:declared,sourceRecordedAt:recordedAt,sourceActor:operation.actor,
+            indexBindingSha256:sha(stableJudgeJson({path:c.path,frontmatter:note.fm,bodySha256:sha(row.body),token:"InvestmentIntake"+id.slice(3)}))};
+        }
+        return {...macroBinding,status:"receipted_source_only",intakeId:id,sourceReceiptId:receipt,sourceSha256:sha(note.raw),receivedTextSha256:String(note.fm.source_text_sha256),
+          contextKeys:[scope.contextKey],matchedLabels:matched,scopeBasis:macro?"receipted_source_declared_macro_subject":"literal_received_text_mention_of_resolved_hub",subjectRole:"not_established",
           sourceFamily:{canonicalUrl:canonicalSourceUrl(boundedText(note.fm.source_url,1000)),economicEventEquivalence:"not_established"},
           provenance:{sourceKind:boundedText(note.fm.source_kind,80),publisher:boundedText(note.fm.attributed_publisher,160),authority:"receipt_preserves_attribution_not_source_authenticity"},
           eventDate:metadata.eventDate,publicationDate:metadata.publishedAt,independentEvidenceIncrement:0,primaryVerification:"not_performed"} satisfies StandaloneSourceBinding;

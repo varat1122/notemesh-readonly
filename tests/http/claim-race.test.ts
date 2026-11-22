@@ -48,11 +48,13 @@ describe("ten simultaneous first claims", () => {
     const { default: Database } = await import("better-sqlite3");
     const db = new Database(path.join(server.dataDir, "app.sqlite"), { readonly: true });
     const { n } = db.prepare('SELECT COUNT(*) AS n FROM "user"').get() as { n: number };
+    const sessions = db.prepare('SELECT userId FROM "session"').all() as { userId: string }[];
     db.close();
     expect(n).toBe(1);
 
     // The winner is a working admin: it can sign in.
     const winner = results.find((r) => r.status === 200)!;
+    expect(sessions).toEqual([{ userId: JSON.parse(winner.body).user.id }]);
     const email = JSON.parse(winner.body).user.email as string;
     const signIn = await fetch(`${server.url}/api/auth/sign-in/email`, {
       method: "POST",

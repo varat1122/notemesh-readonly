@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -75,6 +75,11 @@ function filesWithMarkers(dir: string): string[] {
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "notemesh-conflict-"));
+  // Each actual Git fixture owns a distinct, pre-created instance directory.
+  // Reset only this test process's registry; never clear live maintenance.
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("notemesh.maintenance.registry.v1")];
+  vi.stubEnv("DATA_DIR", path.join(root, "data"));
+  fs.mkdirSync(path.join(root, "data"));
   remote = path.join(root, "remote.git");
   server = path.join(root, "server");
   device = path.join(root, "device");
@@ -89,6 +94,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -320,5 +326,91 @@ describe("a conflict where one side deleted", () => {
     expect(out.message).toContain("Daily/2026-08-03.md (nothing of ours to save)");
     expect(out.message).toContain("Projects/Alpha.md (the assistant's version saved as Projects/Alpha (Conflicted copy");
     expect(filesWithMarkers(server)).toEqual([]);
+  });
+});
+
+describe("D1 command-specific merge-tree outcome", () => {
+  async function conflict() {
+    write(server, "Daily/2026-08-03.md", "# Today\n\n- [ ] ASSISTANT\n");
+    commitAll(server, "assistant fixture");
+    devicePushes("Daily/2026-08-03.md", "# Today\n\n- [ ] DEVICE\n", "device fixture");
+    return (await import("./git-exec")).runGit;
+  }
+  function wrapper(body: string) {
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const bin = path.join(root, "fault-bin"); fs.mkdirSync(bin);
+    const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+    fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh\nif [ "$1" = merge-tree ]; then\n${body.replaceAll("REAL_GIT", quote(realGit))}\nfi\nexec ${quote(realGit)} "$@"\n`, { mode: 0o755 });
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+  }
+  const args = ["merge-tree", "--write-tree", "--name-only", "HEAD", "origin/main"];
+
+  it("returns conflict status1 and exact paths without quarantining normal reconciliation", async () => {
+    const runGit = await conflict();
+    const head = git(server, "rev-parse", "HEAD"), index = fs.readFileSync(path.join(server, ".git/index"));
+    const before = read(server, "Daily/2026-08-03.md");
+    const result = await runGit(args, { cwd: server });
+    expect(result).toMatchObject({ ok: false, code: 1, outcome: "merge_conflict_observed" });
+    expect(result.stdout.split("\n\n")[0].split("\n").slice(1)).toEqual(["Daily/2026-08-03.md"]);
+    expect(git(server, "rev-parse", "HEAD")).toBe(head);
+    expect(fs.readFileSync(path.join(server, ".git/index"))).toEqual(index);
+    expect(read(server, "Daily/2026-08-03.md")).toBe(before);
+    expect((await import("../maintenance")).maintenanceActive()).toBe(false);
+    expect((await runGit(["rev-parse", "--verify", "HEAD"], { cwd: server })).ok).toBe(true);
+  });
+
+  it("malformed status1 output cannot masquerade as an observed conflict", async () => {
+    const runGit = await conflict(); wrapper("printf 'not-a-tree\\nDaily/fake.md\\n'; exit 1");
+    const result = await runGit(args, { cwd: server });
+    expect(result).toMatchObject({ ok: false, outcome: "partial_or_unknown", stdout: "" });
+    expect((await import("../maintenance")).maintenanceActive()).toBe(true);
+  });
+
+  it("a syntactically valid OID must resolve to an actual tree object", async () => {
+    const runGit = await conflict(), blob = git(server, "rev-parse", "HEAD:Daily/2026-08-03.md").trim();
+    wrapper(`printf '${blob}\\nDaily/2026-08-03.md\\n'; exit 1`);
+    expect(await runGit(args, { cwd: server })).toMatchObject({ ok: false, outcome: "partial_or_unknown" });
+    expect((await import("../maintenance")).maintenanceActive()).toBe(true);
+  });
+
+  it.each(["Daily/2026-08-03.md", ".git/index", ".git/HEAD", ".git/config"])("retains unknown outcome when %s changes during a real merge probe", async rel => {
+    const runGit = await conflict();
+    // Synchronous disposable fault after real Git; no child-lifetime experiment.
+    wrapper(`REAL_GIT "$@"; code=$?; printf '\\nfault' >> '${rel}'; exit "$code"`);
+    const result = await runGit(args, { cwd: server });
+    expect(result).toMatchObject({ ok: false, outcome: "partial_or_unknown", stdout: "" });
+    expect(read(server, rel)).toContain("fault");
+    expect((await import("../maintenance")).maintenanceActive()).toBe(true);
+    expect(fs.readdirSync(path.join(root, "data/maintenance-writers")).some(n => n.startsWith("writer."))).toBe(true);
+  });
+
+  it("does not launch a configured external merge driver without containment", async () => {
+    const runGit = await conflict();
+    git(server, "config", "merge.fixture.driver", "touch driver-must-not-run");
+    write(server, ".gitattributes", "*.md merge=fixture\n");
+    const before = read(server, "Daily/2026-08-03.md");
+    expect(await runGit(args, { cwd: server })).toMatchObject({ ok: false, outcome: "not_launched", stderr: "git_merge_probe_external_driver_hold" });
+    expect(fs.existsSync(path.join(server, "driver-must-not-run"))).toBe(false);
+    expect(read(server, "Daily/2026-08-03.md")).toBe(before);
+  });
+
+  it("bounds snapshot bytes before reading a large sparse fixture", async () => {
+    const runGit = await conflict();
+    write(server, "sparse-fixture", ""); fs.truncateSync(path.join(server, "sparse-fixture"), 128 * 1024 * 1024 + 1);
+    expect(await runGit(args, { cwd: server })).toMatchObject({ ok: false, outcome: "not_launched", stderr: "git_merge_probe_snapshot_budget_hold" });
+  });
+
+  it("keeps non-conflict merge errors restrictive rather than treating every nonzero as conflict", async () => {
+    const runGit = await conflict();
+    expect(await runGit([...args.slice(0, 4), "missing-ref"], { cwd: server })).toMatchObject({ ok: false, outcome: "partial_or_unknown" });
+    expect((await import("../maintenance")).maintenanceActive()).toBe(true);
+  });
+
+  it("cannot use conflict classification to bypass an existing DRAINING barrier", async () => {
+    const runGit = await conflict();
+    (await import("../maintenance")).beginMaintenance();
+    const before = read(server, "Daily/2026-08-03.md");
+    expect((await runGit(args, { cwd: server })).ok).toBe(false);
+    expect(read(server, "Daily/2026-08-03.md")).toBe(before);
   });
 });

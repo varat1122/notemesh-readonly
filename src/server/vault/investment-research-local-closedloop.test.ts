@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {createHash} from "node:crypto";
+import {kernelCanonicalCreate} from "../../../tests/source-event-fixture";
 
 /**
  * RI-011 x M5.3: executable *local* closed-loop research integration.
@@ -62,21 +63,20 @@ async function plan(override:Partial<typeof input>={}){
  return planInvestmentWriteback({...input,...override});
 }
 async function replay(steps:NonNullable<Awaited<ReturnType<typeof plan>>["safeEditWorkflow"]>["steps"]){
- const {preview,apply}=await import("../safe-edit/engine");
- const paths:string[]=[];
- for(const step of steps){
-  if(!step.safeEditRequest)continue;
-  const pending=preview(step.safeEditRequest,actor);
-  const receipt=apply({operationId:pending.operationId,previewToken:pending.previewToken,
-    expectedHash:pending.beforeHash},actor);
-  expect(receipt).toMatchObject({status:"written",
+ // WP2 (OD-04+OD-06): replay through the kernel route; generic canonical writes are refused.
+ const live=steps.filter(step=>step.safeEditRequest);
+ if(!live.length)return [];
+ const results=await kernelCanonicalCreate(live.map(step=>({kind:step.kind,path:step.path,content:(step.safeEditRequest!.change as {content:string}).content})),actor);
+ const {status}=await import("../safe-edit/engine");
+ return live.map((step,i)=>{
+  expect(results[i].operationId).toBe(step.safeEditRequest!.operationId);
+  expect(status(results[i].operationId,actor)).toMatchObject({status:"written",
     receipt:{write:"written",readback:"verified",reindex:"verified",
       mobileSync:"unverified",remoteSync:"unverified"}});
   const actual=fs.readFileSync(path.join(vault,step.path),"utf8");
   expect(createHash("sha256").update(actual,"utf8").digest("hex")).toBe(step.expectedSha256);
-  paths.push(step.path);
- }
- return paths;
+  return step.path;
+ });
 }
 
 describe("RI-011 evidence discovery -> M5.3 safe edit -> readback",()=>{

@@ -1,5 +1,13 @@
 import { getRequestEvent } from "solid-js/web";
-import { deleteSetting, getSetting, setSetting } from "./db";
+import { db, assertResearchEntry, deleteSetting, getSetting, setSetting } from "./db";
+import fs from "node:fs";
+import path from "node:path";
+import { z } from "zod";
+import { c1Pilot } from "./c1-pilot";
+import { assertEnabled } from "./safe-edit/engine";
+import { assertNoMaintenance, maintenanceActive, withD1NativeInterlock, worker } from "./maintenance";
+import { supervisor } from "./ob/supervisor";
+import { PublicError } from "./public-error";
 import { env, detectOriginMismatch, type OriginMismatch } from "./env";
 import { runAuthMigrations } from "./auth";
 import { validateRemoteUrl } from "./sync/remote";
@@ -19,12 +27,13 @@ import { storeObsidianAccount, storeVaultPassword } from "./ob/credentials";
 import { syncBackend } from "./sync";
 import { SETTINGS_SYNC_CATEGORIES } from "./ob/settings-sync";
 import { requireAdmin } from "./session";
-import { probeRemote, cloneVault, repoDisplayName } from "./sync/git";
+import { probeRemote, cloneVault, repoDisplayName, gitBackend } from "./sync/git";
 import { storeGitCredentials, clearGitCredentials } from "./sync/git-credentials";
 
 export type SetupStage =
   | "admin" // no admin account yet — wizard step 1
   | "backend" // admin exists, hasn't chosen how the vault syncs
+  | "local-vault" // verified disposable C1 instance, never a sync backend
   | "obsidian-login" // Obsidian backend: account not linked
   | "vault" // Obsidian backend: logged in, vault not chosen
   | "git" // git backend: repo not linked
@@ -35,13 +44,17 @@ export type SetupStage =
 async function computeStage(): Promise<SetupStage> {
   await runAuthMigrations();
   if (!(await isSetupComplete())) return "admin";
-  const backend = getSetting("sync_backend");
-  if (!backend) return "backend";
-  if (backend === "git") {
-    if (getSetting("vault_configured") !== "true") return "git";
+  if (c1Pilot()) {
+    if (getSetting("vault_configured") !== "true") return "local-vault";
   } else {
-    if (getSetting("obsidian_logged_in") !== "true") return "obsidian-login";
-    if (getSetting("vault_configured") !== "true") return "vault";
+    const backend = getSetting("sync_backend");
+    if (!backend) return "backend";
+    if (backend === "git") {
+      if (getSetting("vault_configured") !== "true") return "git";
+    } else {
+      if (getSetting("obsidian_logged_in") !== "true") return "obsidian-login";
+      if (getSetting("vault_configured") !== "true") return "vault";
+    }
   }
   // Asked last, because it is the only step that needs nothing else to work and
   // the only one a deployer can skip without the vault breaking. The container
@@ -86,11 +99,181 @@ export async function acknowledgeNotifications(): Promise<{ ok: boolean }> {
 export async function getSetupProgress(): Promise<{
   stage: SetupStage;
   backend: "obsidian" | "git" | null;
+  localOnly: boolean;
 }> {
   "use server";
   const stage = await getSetupStage();
   const backend = getSetting("sync_backend");
-  return { stage, backend: backend === "git" ? "git" : backend ? "obsidian" : null };
+  const localOnly = c1Pilot();
+  return { stage, backend: localOnly ? null : backend === "git" ? "git" : backend ? "obsidian" : null, localOnly };
+}
+
+const LOCAL_VAULT_NAME = "C1 Local Research Lab";
+const LOCAL_DIRECTORIES = ["00_Inbox", "00_Inbox/ChatGPT", "10_Knowledge",
+  "10_Knowledge/Company Research", "10_Knowledge/Industry and Concepts", "10_Knowledge/Macro and Markets"] as const;
+const localConfirmation = z.object({ confirmLocalOnly: z.literal(true) }).strict();
+function denyRemotePilotSetup() {
+  if (c1Pilot()) throw new PublicError("c1_local_only_remote_setup_denied", 409);
+}
+function entryExists(file: string): boolean {
+  try { fs.lstatSync(file); return true; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+}
+function cleanLocalSettings() {
+  for (const key of ["sync_backend", "git_remote", "git_branch", "git_username", "git_token",
+    "obsidian_logged_in", "obsidian_email", "obsidian_password", "vault_password"])
+    if (getSetting(key) !== undefined) throw new PublicError("c1_local_setup_remote_state_hold", 409);
+  const configured = getSetting("vault_configured"), name = getSetting("vault_name");
+  if ((configured !== undefined && configured !== "false" && configured !== "true") ||
+    (name !== undefined && name !== LOCAL_VAULT_NAME) || (configured === "true" && name !== LOCAL_VAULT_NAME))
+    throw new PublicError("c1_local_setup_existing_state_hold", 409);
+  // Refuse ambiguous on-disk remote configuration without invoking either CLI.
+  if (entryExists(path.join(env.vaultDir, ".git")) || entryExists(path.join(env.vaultDir, ".obsidian")))
+    throw new PublicError("c1_local_setup_remote_state_hold", 409);
+  if (entryExists(env.obHomeDir)) {
+    const stat = fs.lstatSync(env.obHomeDir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new PublicError("c1_local_setup_remote_state_hold", 409);
+    const directory = fs.opendirSync(env.obHomeDir);
+    try { if (directory.readSync()) throw new PublicError("c1_local_setup_remote_state_hold", 409); }
+    finally { directory.closeSync(); }
+  }
+}
+function localAdmission() {
+  if (!c1Pilot()) throw new PublicError("c1_local_setup_requires_disposable_pilot", 403);
+  assertEnabled();
+  assertResearchEntry();
+  assertNoMaintenance("C1 local setup");
+  const intake = worker("cloudIntake");
+  if (intake.busy || intake.timer || !supervisor().isQuiescent() || !gitBackend().isQuiescent())
+    throw new PublicError("c1_pilot_external_writer_hold", 409);
+}
+
+/** Configuration only: no notes, receipts, reviewer decisions or new backend.
+ * Auth awaits finish BEFORE the synchronous lock/native/transaction section. */
+export async function setupLocalPilotVault(input: { confirmLocalOnly: true }) {
+  "use server";
+  await requireAdmin();
+  if (!localConfirmation.safeParse(input).success) throw new PublicError("c1_local_setup_confirmation_required", 400);
+  localAdmission();
+  const connection = db();
+  cleanLocalSettings();
+  const opened = new Map<string, { fd: number; dev: number; ino: number }>();
+  const outcome = { createdDirectories: [] as string[], settings: "not_attempted" as "not_attempted" | "acknowledged" | "unchanged" | "unknown",
+    lock: "not_acquired" as "not_acquired" | "held" | "release_unverified" | "released" };
+  let lockIdentity: fs.Stats | undefined;
+  let lockPath = "";
+  const openDirectory = (absolute: string, anchored = absolute) => {
+    const fd = fs.openSync(anchored, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+    try {
+      const stat = fs.fstatSync(fd), named = fs.lstatSync(absolute);
+      if (!named.isDirectory() || named.isSymbolicLink() || named.dev !== stat.dev || named.ino !== stat.ino ||
+        fs.readlinkSync(`/proc/self/fd/${fd}`) !== absolute) throw Error("c1_local_setup_directory_identity_hold");
+      opened.set(absolute, { fd, dev: stat.dev, ino: stat.ino });
+      return fd;
+    } catch (error) {
+      try { fs.closeSync(fd); }
+      catch (closeError) { if (error instanceof Error && Object.isExtensible(error)) Object.assign(error, { setupCloseErrors: [closeError] }); }
+      throw error;
+    }
+  };
+  const verifyDirectories = () => {
+    for (const [absolute, open] of opened) {
+      const stat = fs.lstatSync(absolute);
+      if (stat.isSymbolicLink() || !stat.isDirectory() || stat.dev !== open.dev || stat.ino !== open.ino ||
+        fs.readlinkSync(`/proc/self/fd/${open.fd}`) !== absolute) throw Error("c1_local_setup_directory_identity_hold");
+    }
+    if (outcome.lock === "held") {
+      const stat = fs.lstatSync(lockPath);
+      if (!lockIdentity || stat.isSymbolicLink() || !stat.isDirectory() || stat.dev !== lockIdentity.dev || stat.ino !== lockIdentity.ino)
+        throw Error("c1_local_setup_lock_identity_hold");
+    }
+  };
+  const effect = <T>(operation: string, run: () => T): T => {
+    localAdmission();
+    // One native mutation per interlock. No DB call, await or nested interlock
+    // inside this callback; descriptor/identity checks are read-only.
+    return withD1NativeInterlock("business", () => { verifyDirectories(); return run(); }, { operation });
+  };
+  const closeOpened = () => {
+    const descriptors = [...opened.values()]; opened.clear();
+    const errors: unknown[] = [];
+    for (const { fd } of descriptors) {
+      try { fs.closeSync(fd); } catch (error) { errors.push(error); }
+    }
+    return errors;
+  };
+  let primaryError: unknown;
+  let dataFd = -1;
+  const release = () => {
+    effect("c1_setup.lock_remove", () => { fs.rmdirSync(lockPath); outcome.lock = "release_unverified"; });
+    effect("c1_setup.lock_sync", () => fs.fsyncSync(dataFd));
+    outcome.lock = "released";
+  };
+  try {
+    dataFd = openDirectory(env.dataDir);
+    const vaultFd = openDirectory(env.vaultDir, `/proc/self/fd/${dataFd}/vault`);
+    lockPath = `/proc/self/fd/${dataFd}/safe-edit.lock`;
+    if (entryExists(lockPath)) throw new PublicError("c1_local_setup_writer_lock_hold", 409);
+    effect("c1_setup.lock_create", () => {
+      fs.mkdirSync(lockPath, { mode: 0o700 });
+      outcome.lock = "held";
+      lockIdentity = fs.lstatSync(lockPath);
+    });
+    effect("c1_setup.lock_sync", () => fs.fsyncSync(dataFd));
+    cleanLocalSettings();
+    const alreadyConfigured = getSetting("vault_configured") === "true";
+    for (const relative of LOCAL_DIRECTORIES) {
+      const absolute = path.join(env.vaultDir, relative), parent = path.dirname(absolute);
+      const parentFd = parent === env.vaultDir ? vaultFd : opened.get(parent)!.fd;
+      const anchored = `/proc/self/fd/${parentFd}/${path.basename(relative)}`;
+      verifyDirectories();
+      if (!entryExists(anchored)) {
+        // A configured instance losing a directory requires reconciliation,
+        // not an idempotent call silently repairing its filesystem.
+        if (alreadyConfigured) throw new PublicError("c1_local_setup_directory_missing_hold", 409);
+        effect("c1_setup.directory_create", () => { fs.mkdirSync(anchored, { mode: 0o700 }); outcome.createdDirectories.push(relative); });
+      }
+      const fd = openDirectory(absolute, anchored);
+      effect("c1_setup.directory_sync", () => fs.fsyncSync(fd));
+      effect("c1_setup.parent_sync", () => fs.fsyncSync(parentFd));
+    }
+    localAdmission(); verifyDirectories(); cleanLocalSettings();
+    if (alreadyConfigured) outcome.settings = "unchanged";
+    else {
+      // Even a thrown COMMIT can have written. Preserve the original D1 error
+      // and keep unknown distinct from "not attempted" and acknowledged.
+      outcome.settings = "unknown";
+      connection.transaction(() => {
+        verifyDirectories(); cleanLocalSettings();
+        setSetting("vault_name", LOCAL_VAULT_NAME);
+        setSetting("vault_configured", "true");
+      })();
+      outcome.settings = "acknowledged";
+    }
+    if (getSetting("vault_configured") !== "true" || getSetting("vault_name") !== LOCAL_VAULT_NAME)
+      throw Error("c1_local_setup_readback_hold");
+    verifyDirectories();
+    release();
+    const closeErrors = closeOpened();
+    if (closeErrors.length) throw Error("c1_local_setup_descriptor_close_hold", { cause: closeErrors[0] });
+    return { ok: true as const, localOnly: true as const, configured: true as const,
+      externalSync: false as const, remoteBackup: false as const, ...outcome };
+  } catch (error) {
+    primaryError = error;
+    // Release only our known lock after a determinate refusal. D1 uncertainty,
+    // changed ownership or maintenance leaves recovery evidence in place.
+    if (outcome.lock === "held" && !maintenanceActive() && outcome.settings !== "unknown") {
+      try { release(); }
+      catch (releaseError) { if (error instanceof Error && Object.isExtensible(error)) Object.assign(error, { setupReleaseError: releaseError }); }
+    }
+    if (error instanceof Error && Object.isExtensible(error)) Object.assign(error, { c1SetupOutcome: outcome });
+    console.error("[c1-local-setup] HOLD", outcome);
+    throw error;
+  } finally {
+    const closeErrors = closeOpened();
+    if (closeErrors.length && primaryError instanceof Error && Object.isExtensible(primaryError))
+      Object.assign(primaryError, { setupCloseErrors: closeErrors });
+  }
 }
 
 /**
@@ -110,13 +293,14 @@ export async function relinkVault(): Promise<{ ok: boolean }> {
   "use server";
   await requireAdmin();
   deleteSetting("vault_configured");
-  syncBackend().note("[admin] Vault unlinked — finish the wizard to link it again.");
+  if (!c1Pilot()) syncBackend().note("[admin] Vault unlinked — finish the wizard to link it again.");
   return { ok: true };
 }
 
 export async function setupChooseBackend(kind: "obsidian" | "git"): Promise<{ ok: boolean }> {
   "use server";
   await requireAdmin();
+  denyRemotePilotSetup();
   setSetting("sync_backend", kind === "git" ? "git" : "obsidian");
   return { ok: true };
 }
@@ -137,6 +321,7 @@ export async function setupGitRepo(
 ): Promise<GitSetupResult> {
   "use server";
   await requireAdmin();
+  denyRemotePilotSetup();
   const ref = branch.trim() || "main";
   // HTTPS only, and never with credentials in it — see sync/remote.ts.
   // OB_ALLOW_LOCAL_GIT exists so the project's own tests can point at a bare
@@ -234,6 +419,7 @@ export async function setupObsidianLogin(
 ): Promise<ObsidianLoginResult> {
   "use server";
   await requireAdmin();
+  denyRemotePilotSetup();
   const res = await obLogin(email, password, mfa || undefined);
   if (!res.ok) {
     if (looksLikeMfaRequired(res.combined)) {
@@ -286,6 +472,7 @@ export interface VaultListResult {
 export async function setupListVaults(): Promise<VaultListResult> {
   "use server";
   await requireAdmin();
+  denyRemotePilotSetup();
   const { result, vaults } = await obListRemoteVaults();
   if (!result.ok || (!vaults.length && looksLikeAuthFailure(result.combined))) {
     // Losing the session here means the wizard would otherwise sit on a vault
@@ -311,6 +498,7 @@ export async function setupConfigureVault(
 ): Promise<{ ok: boolean; message?: string }> {
   "use server";
   await requireAdmin();
+  denyRemotePilotSetup();
   const res = await obSyncSetup(vault, encryptionPassword || undefined);
   if (!res.ok) {
     return { ok: false, message: lastLines(res.combined) || "sync-setup failed." };

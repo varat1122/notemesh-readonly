@@ -10,11 +10,13 @@ import {existingReviewSelectionSchema} from "../vault/canonical-review-reuse";
 import { z } from "zod";
 import {intakeClaimsSchema,researchLineageSchema} from "../vault/canonical-claims";
 import {researchReviewSchema} from "./research-review-schema";
+import {historyCutoffSchema} from "../vault/investment-retrieval-coverage";
 import { planInvestmentWriteback } from "../vault/investment-writeback-router";
-import { apply, applyCanonicalAssessed, preview, previewCanonicalAssessedClaim, previewCanonicalSource, previewCanonicalReview, recordResearchJudgeGate, recordCanonicalAppearance, status } from "../safe-edit/engine";
+import { applyCanonicalStep, applyCanonicalAssessed, previewCanonicalClaim, previewCanonicalAssessedClaim, previewCanonicalSource, previewCanonicalReview, recordResearchJudgeGate, recordCanonicalAppearance, status } from "../safe-edit/engine";
+import { claimCanonicalPlanCapability, type PlanHandle } from "../safe-edit/admission";
 import {appearanceSchema,canonicalAppearance,requireAppearance,checkAppearanceRetry,appearanceReadback} from "../vault/intake-appearances";
 import { withPausedSync } from "../safe-edit/sync";
-import {JUDGE_VERSION,DRAFT_RISK_POLICY,draftRiskAssessmentSchema,judgeSubmissionSchema,evaluateResearchJudge,verifyResearchJudgeEnvelope,judgeEnvelopeDigest,judgeHash,stableJudgeJson} from "../vault/research-judge";
+import {JUDGE_VERSION,DRAFT_RISK_POLICY,draftRiskAssessmentSchema,judgeSubmissionSchema,buildResearchJudgePacket,evaluateResearchJudge,verifyResearchJudgeEnvelope,judgeEnvelopeDigest,judgeHash,stableJudgeJson} from "../vault/research-judge";
 import {RESEARCH_STATE_POLICY} from "../vault/research-state";
 import {currentJudgeGate,assertJudgeAdmissionOrder} from "../safe-edit/research-judge-gate";
 import {c1Pilot} from "../c1-pilot";
@@ -22,6 +24,7 @@ import {sourceEventSubmissionSchema} from "../vault/source-event-contract";
 import {sourceEventRequired,canonicalEventProposal,evaluateSourceEvent,enrollSourceEvent,assertEnrolledSourceEvent,withdrawSourceEvent,type EventAdmission} from "../safe-edit/source-event-admission";
 import {recordPilotAssessment,pilotRestriction,pilotAdmissionSummary} from "../safe-edit/c1-pilot-review";
 
+import {macroSubjectSchema} from "../vault/macro-source-scope";
 const nonempty = z.string().min(1);
 const canonicalBaseSchema = z.object({
   domain: z.enum(["company", "industry", "macro", "asset"]),
@@ -33,6 +36,7 @@ const canonicalBaseSchema = z.object({
   extractedText: nonempty.max(12000),
   sourceChat: nonempty.max(120),
   appearance:appearanceSchema.optional(),
+  macroSubject:macroSubjectSchema.optional().describe("Opt-in declared Macro subject only. Exact unique first-line Macro subject: LABEL and received-text SHA/span required; not geographic truth or a receipt."),
   existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional(),
   existingReview:existingReviewSelectionSchema.optional(),
   completedAnalysis: nonempty.max(30000).optional(),
@@ -52,6 +56,7 @@ const canonicalBaseSchema = z.object({
   focus: z.enum(["earnings", "broker", "tam", "macro", "thesis", "general"]).optional(),
   claims:intakeClaimsSchema,
   researchLineage:researchLineageSchema,
+  historyCutoff:historyCutoffSchema.optional().describe("Opt-in server receipt-bound historical retrieval cutoff. Exact UTC millisecond instant. This is NOT researchLineage.knowledgeCutoffAsOf, file mtime, original-history reconstruction, or proof of complete PIT coverage."),
   researchJudge:judgeSubmissionSchema.optional().describe("Opt-in Chat-first semantic gate. Supply the exact server-sealed packet and typed analyst-attested result. HOLD/FAIL preserves Source only. Once admitted, this intake cannot silently return to a legacy ungated writer. PASS never grants primary authority."),
   sourceEvent:sourceEventSubmissionSchema.optional().describe("Required for company Review admission in the isolated revision/Event pilot. Exact server packet plus evidence-grounded issuer/event assessment; omission never means new_event. Source-only remains eligible."),
   claim: z.object({metric: nonempty.max(140), period: nonempty.max(120), statement: z.string().min(8).max(2500),
@@ -195,26 +200,65 @@ function planned(input: z.infer<typeof canonicalInputSchema>,actor:string) {
   let eventAdmission:EventAdmission|null=null;
   const eventReasons:string[]=[];
   const eventRequired=sourceEventRequired()&&clean.domain==="company"&&!clean.captureOnly;
+  // PIT retrieval is opt-in and useful for analysis, but the canonical
+  // Source→Event/Review authority has not been cutoff-bound end-to-end.
+  // Never let an absent Judge or a legacy ungated route write PIT non-Source.
+  const pitNonSourceHold=clean.historyCutoff!==undefined&&clean.captureOnly!==true;
   if(eventRequired){
     try{eventAdmission=evaluateSourceEvent(canonicalEventProposal(clean,plan),sourceEvent,actor);eventReasons.push(...eventAdmission.reasons);}
     catch(e){eventReasons.push(e instanceof Error&&e.message.startsWith("source_event_")?e.message:"source_event_packet_or_assessment_required");}
   }
-  if((judge&&judge.decision!=="PASS")||(!researchJudge&&(enrolled||c1Pilot()))||
+  if(pitNonSourceHold||(judge&&judge.decision!=="PASS")||(!researchJudge&&(enrolled||c1Pilot()))||
     pilotRestriction(plan.planId,judge?.packetEnvelopeDigest,judge?.packetIssuedAt)||eventRequired&&eventAdmission?.decision!=="PASS"){
     for(const step of workflow.steps)if(step.kind!=="source_intake"&&step.state==="needs_create"){
       step.state="hold_research_judge";step.safeEditRequest=null;
     }
     workflow.status="hold_research_judge";workflow.readyForNextNews=false;
   }
-  return {plan,workflow,judge,enrolled,eventAdmission,eventReasons,eventRequired};
+  return {plan,workflow,judge,enrolled,eventAdmission,eventReasons,eventRequired,pitNonSourceHold};
 }
 
+/** WP2: the only minter of canonical writeback plans. Members are the
+ * server planner's own pending steps (path/operation/bytes never caller-chosen). */
+const openWritebackPlan=claimCanonicalPlanCapability("writeback");
+export const CANONICAL_WRITEBACK_RECIPE_VERSION="IOS-CANONICAL-WRITEBACK-RECIPE-1";
+type PlannedStep={kind:"source_intake"|"canonical_review"|"structured_claim";state:string;path:string;
+  safeEditRequest?:{operationId:string;path:string;change:unknown}|null};
+function writebackPlan(intakeId:string,actor:string,steps:PlannedStep[]):PlanHandle{
+  return openWritebackPlan({intakeId,actor,recipeVersion:CANONICAL_WRITEBACK_RECIPE_VERSION,
+    members:steps.filter(s=>s.state==="needs_create"&&s.safeEditRequest).map(s=>({kind:s.kind,operationId:s.safeEditRequest!.operationId,
+      path:s.safeEditRequest!.path,change:s.safeEditRequest!.change}))});
+}
+/** A PIT HOLD is durable withdrawal, not merely a filtered preview list.
+ * Reuse the existing source-owned Judge journal and intake epoch so pending
+ * canonical tokens cannot survive a route change or an asynchronous pause.
+ * This records server policy restriction only: no analyst/human PASS is made. */
+function restrictPIT(input:z.infer<typeof canonicalInputSchema>,actor:string,plannedResult:ReturnType<typeof planned>){
+  if(input.historyCutoff===undefined)return;
+  const {plan,workflow}=plannedResult,source=workflow.steps.find(s=>s.kind==="source_intake")!;
+  const current=currentJudgeGate(plan.planId);
+  if(current){
+    if(current.actor!==actor)throw Error("research_judge_exact_bytes_or_actor_hold");
+    if(current.decision!=="PASS")return; // never replace or dilute an existing HOLD/FAIL
+    recordResearchJudgeGate(source.receiptKey,actor,{...current,decision:"HOLD",expiresAt:0}, {current});
+    return;
+  }
+  const {packet}=buildResearchJudgePacket(input,actor);
+  const held=evaluateResearchJudge(input,{packet},actor);
+  recordResearchJudgeGate(source.receiptKey,actor,{version:JUDGE_VERSION,researchStatePolicy:RESEARCH_STATE_POLICY,
+    riskPolicy:held.riskPolicy,intakeId:plan.planId,actor,decision:"HOLD",expiresAt:0,
+    packetEnvelopeDigest:held.packetEnvelopeDigest,packetIssuedAt:held.packetIssuedAt,resultEnvelopeDigest:null,
+    packetDigest:held.packetDigest,resultDigest:null,history:held.history,retrieval:held.retrieval,scopeWitness:held.scopeWitness,
+    targets:workflow.steps.map(step=>({path:step.path,sha256:step.expectedSha256,operationId:step.receiptKey,kind:step.kind,
+      eligible:step.kind==="source_intake"}))});
+}
 export function prepareCanonicalWriteback(raw:unknown,actor:string) {
   withdrawCanonicalJudge("prepare_canonical_writeback",raw,actor);
   const input=canonicalInputSchema.parse(raw);
-  const {plan,workflow,judge,enrolled,eventAdmission,eventReasons,eventRequired}=planned(input,actor);
+  const prepared=planned(input,actor);
+  const {plan,workflow,judge,enrolled,eventAdmission,eventReasons,eventRequired,pitNonSourceHold}=prepared;
   if(judge&&judge.decision!=="PASS")revokeMatchingJudge(input,actor,plan.planId,judge.decision);
-  const previews=[];
+  const previews:(ReturnType<typeof previewCanonicalSource>&{kind:string;expectedSha256:string})[]=[];
   // Admit the exact Source first, then record semantic eligibility in the
   // existing event journal before ANY Claim/Review preview can be issued.
   const source=workflow.steps.find(s=>s.kind==="source_intake")!;
@@ -231,7 +275,7 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
     !(enrolled&&judge.decision!=="PASS"&&judge.packetEnvelopeDigest===enrolled.packetEnvelopeDigest)&&
     (source.state==="needs_create"||source.state==="verified_existing")){
     if(source.state==="needs_create"){
-      const p=previewCanonicalSource(source.safeEditRequest,actor);
+      const p=previewCanonicalSource(writebackPlan(plan.planId,actor,[source]),source.safeEditRequest,actor);
       previews.push({kind:source.kind,expectedSha256:source.expectedSha256,...p});
     }
     recordResearchJudgeGate(source.receiptKey,actor,{version:JUDGE_VERSION,researchStatePolicy:RESEARCH_STATE_POLICY,riskPolicy:judge.riskPolicy,intakeId:plan.planId,actor,decision:judge.decision,
@@ -240,31 +284,41 @@ export function prepareCanonicalWriteback(raw:unknown,actor:string) {
       targets:workflow.steps.map(s=>({path:s.path,sha256:s.expectedSha256,operationId:s.receiptKey,kind:s.kind,
         eligible:s.state==="needs_create"||s.state==="verified_existing"}))});
   }
+  if(input.historyCutoff!==undefined){
+    if(source.state==="needs_create"&&!previews.some(p=>p.operationId===source.receiptKey)){
+      const p=previewCanonicalSource(writebackPlan(plan.planId,actor,[source]),source.safeEditRequest,actor);
+      previews.push({kind:source.kind,expectedSha256:source.expectedSha256,...p});
+    }
+    restrictPIT(input,actor,prepared);
+  }
   if(c1Pilot()&&input.researchJudge){const current=currentJudgeGate(plan.planId);if(current?.decision==="PASS"&&current.packetEnvelopeDigest===judge?.packetEnvelopeDigest&&current.resultDigest===judge?.resultDigest)recordPilotAssessment(current,input.researchJudge);}
   if(eventAdmission)enrollSourceEvent(eventAdmission,actor);
-  for(const step of workflow.steps) {
-    if(step.state!=="needs_create")continue;
-    if(previews.some(p=>p.kind===step.kind&&p.path===step.path))continue;
+  const remaining=workflow.steps.filter(step=>step.state==="needs_create"&&!previews.some(p=>p.kind===step.kind&&p.path===step.path));
+  const handle=remaining.length?writebackPlan(plan.planId,actor,remaining):null;
+  for(const step of remaining) {
     if(!step.safeEditRequest) throw Error("Missing add-only recipe");
-    const p=(step.kind==="source_intake"?previewCanonicalSource:step.kind==="canonical_review"?previewCanonicalReview:eventRequired?previewCanonicalAssessedClaim:preview)(step.safeEditRequest,actor);
+    const p=(step.kind==="source_intake"?previewCanonicalSource:step.kind==="canonical_review"?previewCanonicalReview:eventRequired?previewCanonicalAssessedClaim:previewCanonicalClaim)(handle!,step.safeEditRequest,actor);
     if(!p.previewToken) throw Error("Safe Edit did not issue a fresh preview token");
     previews.push({kind:step.kind,expectedSha256:step.expectedSha256,...p});
   }
   const appearance=appearancePayload?recordCanonicalAppearance(appearancePayload,actor):null;
-  return {phase:"preview_only",appearance,planId:plan.planId,reviewReuse:plan.reviewReuse,workflowStatus:workflow.status,sourceEvent:eventRequired?{decision:eventAdmission?.decision??"HOLD",reasons:eventReasons}:null,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
+  return {phase:"preview_only",appearance,planId:plan.planId,reviewReuse:plan.reviewReuse,workflowStatus:workflow.status,sourceEvent:eventRequired?{decision:eventAdmission?.decision??"HOLD",reasons:eventReasons}:null,
+    historyAdmission:pitNonSourceHold?{decision:"HOLD" as const,reason:"pit_non_source_admission_requires_full_source_event_cutoff_binding"}:null,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     ...(c1Pilot()?{pilotAdmission:pilotAdmissionSummary(plan.planId,judge?.packetEnvelopeDigest,judge?.packetIssuedAt)}:{}),
     qualityIssues:workflow.qualityIssues,claimIssues:workflow.claimIssues,lineageIssues:workflow.lineageIssues,claimInterpretationBoundary:workflow.claimInterpretationBoundary,readyForNextNews:workflow.readyForNextNews,
     archiveProvenanceStatus:workflow.archiveProvenanceStatus,archiveProvenanceReason:workflow.archiveProvenanceReason,
     steps:workflow.steps.map(({kind,path,state,expectedSha256,receiptKey,researchTrust})=>({kind,path,state,expectedSha256,receiptKey,researchTrust})),
     previews,protectedNotesTouched:false,perDeviceSync:"unverified",writesPerformed:false,
-    next:eventRequired?"Preserve Source first; read prepare_source_event_packet and supply exact sourceEvent assessment. PASS still requires authenticated dashboard approval of every non-Source diff before canonical apply. No semantic truth, human presence or independent critic is established.":c1Pilot()?"Restricted disposable C1: Source may persist. Non-Source requires the authenticated dashboard's explicit bundle/semantic review at approvalUrl, backend Judge PASS and fresh exact tokens. No human presence or independent critic is established.":"Review exact diffs and authorize apply_canonical_writeback with these tokens; no Vault notes have been written."};
+    next:pitNonSourceHold?"PIT read/diagnostic only: save Source if eligible, but do not save Claims/Review until Source/Event/Review/reviewer authority binds the exact historyCutoff.":eventRequired?"Preserve Source first; read prepare_source_event_packet and supply exact sourceEvent assessment. PASS still requires authenticated dashboard approval of every non-Source diff before canonical apply. No semantic truth, human presence or independent critic is established.":c1Pilot()?"Restricted disposable C1: Source may persist. Non-Source requires the authenticated dashboard's explicit bundle/semantic review at approvalUrl, backend Judge PASS and fresh exact tokens. No human presence or independent critic is established.":"Review exact diffs and authorize apply_canonical_writeback with these tokens; no Vault notes have been written."};
 }
 
 export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   withdrawCanonicalJudge("apply_canonical_writeback",raw,actor);
   const args=canonicalApplySchema.parse(raw);
-  const {plan,workflow,judge,enrolled,eventAdmission,eventReasons,eventRequired}=planned(args.input,actor);
+  const prepared=planned(args.input,actor);
+  const {plan,workflow,judge,enrolled,eventAdmission,eventReasons,eventRequired,pitNonSourceHold}=prepared;
   if(plan.planId!==args.planId) throw Error("Plan identity mismatch; original source or chronology changed");
+  restrictPIT(args.input,actor,prepared);
   if(enrolled&&judge&&enrolled.actor!==actor)throw Error("Operation belongs to another OAuth client");
   if(judge&&judge.decision!=="PASS")revokeMatchingJudge(args.input,actor,plan.planId,judge.decision);
   const appearancePayload=canonicalAppearance(args.input,workflow.steps.find(s=>s.kind==="source_intake")!,plan.planId,actor);
@@ -302,7 +356,7 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
               current.expectedSha256!==step.expectedSha256)
               throw Error("Canonical state or archive provenance changed; prepare again");
             if(step.kind!=="source_intake"&&eventRequired){if(!eventAdmission)throw Error("source_event_exact_enrollment_required");assertEnrolledSourceEvent(eventAdmission,actor);}
-            writeAttempts++;receipts.push((step.kind!=="source_intake"&&eventRequired?applyCanonicalAssessed:apply)(a,actor));
+            writeAttempts++;receipts.push((step.kind!=="source_intake"&&eventRequired?applyCanonicalAssessed:applyCanonicalStep)(a,actor));
           }
           catch(e) {interrupted=e instanceof Error?e.message:"Safe Edit operation failed";break;}
         }
@@ -317,7 +371,8 @@ export async function applyCanonicalWriteback(raw:unknown,actor:string) {
   const verificationHold=workflowVerificationHold||appearance?.disposition==="binding_hold";
   return {phase:"apply_verified_or_pending",appearance,planId:plan.planId,reviewReuse:afterReuse,
     ...(c1Pilot()?{pilotAdmission:pilotAdmissionSummary(plan.planId,judge?.packetEnvelopeDigest,judge?.packetIssuedAt)}:{}),
-    status:verificationHold?"hold_post_write_verification":after.status,readyForNextNews:!verificationHold&&after.readyForNextNews,sourceEvent:eventRequired?{decision:eventAdmission?.decision??"HOLD",reasons:eventReasons}:null,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
+    status:verificationHold?"hold_post_write_verification":after.status,readyForNextNews:!verificationHold&&after.readyForNextNews,sourceEvent:eventRequired?{decision:eventAdmission?.decision??"HOLD",reasons:eventReasons}:null,
+    historyAdmission:pitNonSourceHold?{decision:"HOLD" as const,reason:"pit_non_source_admission_requires_full_source_event_cutoff_binding"}:null,researchJudge:judge??(enrolled?{decision:"HOLD",reasons:["enrolled_intake_requires_judge_contract"]}:null),
     qualityIssues:after.qualityIssues,claimIssues:after.claimIssues,lineageIssues:after.lineageIssues,claimInterpretationBoundary:after.claimInterpretationBoundary,
     archiveProvenanceStatus:after.archiveProvenanceStatus,archiveProvenanceReason:after.archiveProvenanceReason,
     steps:after.steps.map(({kind,path,state,receiptKey,readbackVerified,indexed,searchable,researchTrust})=>

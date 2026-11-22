@@ -45,6 +45,7 @@ const PUBLIC_RPC = [
 ];
 
 const PROTECTED_RPC = [
+  "setupLocalPilotVault",
   "getSetupPage",
   "getKeysPage",
   "getStatusPage",

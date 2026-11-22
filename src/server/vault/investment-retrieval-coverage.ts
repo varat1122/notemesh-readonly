@@ -3,10 +3,15 @@
  * (including search results). Counts survive detail truncation. Never copy
  * filesystem/search exceptions. Bounds/quotas are intentional omissions. */
 import {z} from "zod";
+import {macroHistoryScopeSchema} from "./macro-source-scope";
 
 const count=z.number().int().nonnegative();
 const tally=z.object({attempted:count,read:count,failed:count}).strict();
-export const retrievalScopeSchema=z.object({question:z.string().min(3).max(1200),
+// Explicit UTC instant; never infer an as-of boundary from prose or file time.
+export const historyCutoffSchema=z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+  .refine(s=>Number.isFinite(Date.parse(s))&&new Date(s).toISOString()===s);
+export const retrievalScopeSchema=z.object({macroScope:macroHistoryScopeSchema.optional(),question:z.string().min(3).max(1200),
+  historyCutoff:historyCutoffSchema.optional(),
   issuers:z.array(z.string().max(120)).max(6).optional(),intakeId:z.string().optional(),
   industry:z.string().max(1200).optional(),focus:z.enum(["earnings","broker","tam","macro","thesis","general"]),
   maxNotes:z.number().int().min(5).max(16),maxChars:z.number().int().min(4500).max(18000)}).strict();
