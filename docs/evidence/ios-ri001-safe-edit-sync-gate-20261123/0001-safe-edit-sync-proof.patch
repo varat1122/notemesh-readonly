@@ -1,0 +1,311 @@
+From f3da535429f31bb6de80db197c23bf2735c242ec Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 23 Nov 2026 11:18:19 +0000
+Subject: [PATCH] fix(safe-edit): bind verified bidirectional sync proof to the
+ daemon child
+
+The Safe Edit gate re-derived its proof from the 500-line in-memory log on
+every apply, so a healthy, verified, idle daemon was held once the wrapper's
+one-time "[sync-policy] Verified bidirectional sync." line rotated out. It
+also accepted that line from anywhere in the log (note(), stdout, later ob
+output), so it could be forged.
+
+The supervisor now records proof only when the head of the current child's
+own stderr is that exact line (after at most Node runtime warnings), which
+the wrapper prints before it spawns ob. Proof lives as long as that child:
+it is dropped on stop, resetAndStart (re-auth/relink), exit, backoff and
+any new spawn. withPausedForEdit, single writer, CAS and permissions are
+unchanged.
+
+IOS-ORCH-RI-001
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_018ZXBtdGpup8VA9XnLeBAut
+---
+ src/server/ob/supervisor-sync-proof.test.ts | 155 ++++++++++++++++++++
+ src/server/ob/supervisor.ts                 |  40 ++++-
+ src/server/safe-edit/sync.test.ts           |   7 +-
+ src/server/safe-edit/sync.ts                |   2 +-
+ 4 files changed, 199 insertions(+), 5 deletions(-)
+ create mode 100644 src/server/ob/supervisor-sync-proof.test.ts
+
+diff --git a/src/server/ob/supervisor-sync-proof.test.ts b/src/server/ob/supervisor-sync-proof.test.ts
+new file mode 100644
+index 0000000..3461d8a
+--- /dev/null
++++ b/src/server/ob/supervisor-sync-proof.test.ts
+@@ -0,0 +1,155 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++
++// Safe Edit's sync proof, driven through the real start() against a fake ob
++// child, the way supervisor-settings-sync.test.ts drives it. The proof must
++// survive the bounded log rotating, and must not survive the child.
++
++const auth = vi.hoisted(() => ({ ok: true }));
++vi.mock("./settings-sync", () => ({ enableSettingsSync: async () => ({ ok: true, message: "" }) }));
++vi.mock("./cli", () => ({
++  obIsAuthenticated: async () => auth.ok,
++  obSyncConfigured: async () => true,
++  obSyncOnce: async () => ({ ok: true, combined: "" }),
++}));
++vi.mock("../sync", () => ({ syncKind: () => "obsidian" }));
++
++const { SyncSupervisor, MAX_LOG_LINES, bidirectionalProofOf } = await import("./supervisor");
++const { withPausedSync } = await import("../safe-edit/sync");
++
++const MARKER = "[sync-policy] Verified bidirectional sync.";
++const FAKE_OB = `#!/usr/bin/env node
++const M = ${JSON.stringify(MARKER)};
++const err = (s) => process.stderr.write(s + "\\n"), out = (s) => process.stdout.write(s + "\\n");
++const noise = () => { for (let i = 0; i < ${MAX_LOG_LINES + 100}; i++) out("noise " + i); };
++const mode = process.env.FAKE_PROOF;
++if (mode === "verified") { err(M); noise(); }
++if (mode === "warned") { err("(node:42) ExperimentalWarning: SQLite is an experimental feature"); err("(Use \`node --trace-warnings ...\` to show where the warning was created)"); err(M); noise(); }
++if (mode === "split") { process.stderr.write(M.slice(0, 9)); setTimeout(() => { err(M.slice(9)); noise(); }, 50); }
++if (mode === "none") noise();
++if (mode === "pull") { err("[readonly] Verified pull-only sync."); noise(); }
++if (mode === "stdout") { out(M); noise(); }
++if (mode === "late") { err("Fully synced"); err(M); noise(); }
++if (mode === "padded") { err(M + " "); noise(); }
++if (mode === "active") { err(M); setInterval(() => out("Downloaded a.md"), 300); }
++if (mode === "exit") { err(M); setTimeout(() => process.exit(1), 100); }
++setInterval(() => {}, 1000);
++`;
++
++let root: string;
++let sup: InstanceType<typeof SyncSupervisor>;
++
++beforeEach(() => {
++  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "notemesh-sync-proof-")));
++  for (const d of ["vault", "home"]) fs.mkdirSync(path.join(root, d), { recursive: true });
++  process.env.DATA_DIR = root;
++  const script = path.join(root, "fake-ob");
++  fs.writeFileSync(script, FAKE_OB);
++  fs.chmodSync(script, 0o755);
++  process.env.OB_BIN = script;
++  Object.assign(process.env, { SAFE_EDIT_ENABLED: "1", SAFE_EDIT_SINGLE_WRITER: "1", CLOUD_INTAKE: "1" });
++  auth.ok = true;
++  sup = new SyncSupervisor();
++  (globalThis as Record<string, unknown>).__notemeshSupervisor = sup;
++});
++
++afterEach(async () => {
++  sup.stop();
++  await vi.waitFor(() => expect(sup.status().state).not.toBe("running"), { timeout: 5_000 });
++  for (const k of ["OB_BIN", "DATA_DIR", "FAKE_PROOF", "SAFE_EDIT_ENABLED", "SAFE_EDIT_SINGLE_WRITER", "CLOUD_INTAKE"]) delete process.env[k];
++  delete (globalThis as Record<string, unknown>).__notemeshSupervisor;
++  fs.rmSync(root, { recursive: true, force: true });
++});
++
++async function launch(mode: string) {
++  process.env.FAKE_PROOF = mode;
++  sup.start();
++  // Settle on the last line ob prints, so the head of stderr has been read.
++  await vi.waitFor(() => expect(sup.getLogs().some((l) => l.line === `noise ${MAX_LOG_LINES + 99}`)).toBe(true), { timeout: 5_000 });
++}
++
++describe("bidirectionalProofOf", () => {
++  it("accepts only the wrapper's exact first line, after at most Node's own warnings", () => {
++    expect(bidirectionalProofOf(`${MARKER}\n`)).toBe(true);
++    expect(bidirectionalProofOf(`(node:7) ExperimentalWarning: x\n(Use \`node --trace-warnings ...\` to show where the warning was created)\n${MARKER}\n`)).toBe(true);
++    expect(bidirectionalProofOf(MARKER)).toBeUndefined();
++    for (const head of [`${MARKER} \n`, `x${MARKER}\n`, `Downloaded a.md\n${MARKER}\n`, "[readonly] Verified pull-only sync.\n", `${MARKER}X\n`, "x".repeat(5000)]) {
++      expect(bidirectionalProofOf(head), head.slice(0, 60)).toBe(false);
++    }
++  });
++});
++
++describe("the supervisor's sync proof", () => {
++  it("survives the log rotating past its bound for the same verified idle daemon, and Safe Edit applies", async () => {
++    await launch("verified");
++    expect(sup.getLogs().some((l) => l.line === MARKER)).toBe(false);
++    expect(sup.getLogs()).toHaveLength(MAX_LOG_LINES);
++    expect(sup.bidirectionalVerified()).toBe(true);
++    const run = vi.fn(() => "written");
++    expect(await withPausedSync(run)).toBe("written");
++    expect(run).toHaveBeenCalledOnce();
++  });
++
++  it.each(["warned", "split"])("accepts the proof when the head arrives as %s", async (mode) => {
++    await launch(mode);
++    expect(sup.bidirectionalVerified()).toBe(true);
++  });
++
++  it.each(["none", "pull", "stdout", "late", "padded"])("holds when the daemon's evidence is %s", async (mode) => {
++    await launch(mode);
++    sup.note(MARKER);
++    expect(sup.getLogs().some((l) => l.line === MARKER)).toBe(true);
++    expect(sup.bidirectionalVerified()).toBe(false);
++    const run = vi.fn();
++    await expect(withPausedSync(run)).rejects.toThrow(/verified, idle bidirectional/);
++    expect(run).not.toHaveBeenCalled();
++  });
++
++  it("does not carry proof to a new daemon until it proves itself", async () => {
++    await launch("verified");
++    expect(sup.bidirectionalVerified()).toBe(true);
++    sup.stop();
++    expect(sup.bidirectionalVerified()).toBe(false);
++    await vi.waitFor(() => expect(sup.status().state).toBe("stopped"), { timeout: 5_000 });
++    await launch("none");
++    expect(sup.status().state).toBe("running");
++    expect(sup.bidirectionalVerified()).toBe(false);
++    await expect(withPausedSync(vi.fn())).rejects.toThrow();
++  });
++
++  it("drops proof on re-authentication even while the same child runs", async () => {
++    await launch("verified");
++    sup.resetAndStart();
++    expect(sup.status().state).toBe("running");
++    expect(sup.bidirectionalVerified()).toBe(false);
++    await expect(withPausedSync(vi.fn())).rejects.toThrow();
++  });
++
++  it("holds an active daemon even when proven", async () => {
++    process.env.FAKE_PROOF = "active";
++    sup.start();
++    await vi.waitFor(() => expect(sup.status().activity.active).toBe(true), { timeout: 5_000 });
++    expect(sup.bidirectionalVerified()).toBe(true);
++    const run = vi.fn();
++    await expect(withPausedSync(run)).rejects.toThrow();
++    expect(run).not.toHaveBeenCalled();
++  });
++
++  it.each([[true, "backoff"], [false, "needs-reauth"]] as const)("holds after the proven child exits (authenticated=%s → %s)", async (authed, state) => {
++    auth.ok = authed;
++    process.env.FAKE_PROOF = "exit";
++    sup.start();
++    await vi.waitFor(() => expect(sup.status().state).toBe(state), { timeout: 5_000 });
++    expect(sup.bidirectionalVerified()).toBe(false);
++    await expect(withPausedSync(vi.fn())).rejects.toThrow();
++  });
++
++  it("re-proves the restarted daemon after an edit", async () => {
++    await launch("verified");
++    await withPausedSync(() => 0);
++    await vi.waitFor(() => expect(sup.bidirectionalVerified()).toBe(true), { timeout: 5_000 });
++    expect(await withPausedSync(() => "again")).toBe("again");
++  });
++});
+diff --git a/src/server/ob/supervisor.ts b/src/server/ob/supervisor.ts
+index 9506e97..3efebd2 100644
+--- a/src/server/ob/supervisor.ts
++++ b/src/server/ob/supervisor.ts
+@@ -43,6 +43,23 @@ export function looksLikeAuthFailure(line: string): boolean {
+ // Activity counts as "in progress" if an event landed this recently.
+ const ACTIVE_WINDOW_MS = 5_000;
+ 
++// scripts/ob-readonly.mjs prints this on stderr after it has verified the
++// bidirectional mode and before it spawns ob. Everything ob prints, synced
++// filenames included, comes after it on the same stream, so only the head of a
++// child's stderr can prove it. Node may print a warning first.
++const BIDIRECTIONAL_PROOF = "[sync-policy] Verified bidirectional sync.";
++const NODE_WARNING = /^\((node:\d+\) |Use `node --trace-)/;
++
++/** true: the head proves it; false: it never will; undefined: need more output. */
++export function bidirectionalProofOf(head: string): boolean | undefined {
++  const lines = head.split("\n");
++  for (const line of lines.slice(0, -1)) {
++    if (line === BIDIRECTIONAL_PROOF) return true;
++    if (!NODE_WARNING.test(line)) return false;
++  }
++  return head.length > 4096 ? false : undefined;
++}
++
+ // Fold one line of daemon output into the running activity tally. Pulled out of
+ // the class so it can be tested directly — the parsing is the part that breaks
+ // when ob changes its wording, and it is otherwise only reachable by spawning a
+@@ -118,6 +135,9 @@ export class SyncSupervisor implements SyncBackend {
+   private settingsSyncTried = false;
+   private editPaused = false;
+   private manualSyncActive = false;
++  // The child whose own stderr proved bidirectional mode. Proof lives exactly as
++  // long as that child, not as long as the line stays in the bounded log.
++  private verifiedChild: ResultPromise | null = null;
+ 
+   // Parse daemon output lines into a running tally of the current sync burst.
+   private trackActivity(rawLine: string) {
+@@ -195,7 +215,16 @@ export class SyncSupervisor implements SyncBackend {
+     });
+ 
+     child.stdout?.on("data", (d: Buffer) => this.log(d.toString()));
+-    child.stderr?.on("data", (d: Buffer) => this.log(d.toString()));
++    let head: string | null = "";
++    child.stderr?.on("data", (d: Buffer) => {
++      if (head !== null) {
++        head += d.toString();
++        const proof = bidirectionalProofOf(head);
++        if (proof !== undefined) head = null;
++        if (proof && this.child === child && !this.stopping) this.verifiedChild = child;
++      }
++      this.log(d.toString());
++    });
+ 
+     void child.then(async (result) => {
+       this.child = null;
+@@ -284,6 +313,7 @@ export class SyncSupervisor implements SyncBackend {
+ 
+   stop() {
+     this.stopping = true;
++    this.verifiedChild = null;
+     if (this.restartTimer) {
+       clearTimeout(this.restartTimer);
+       this.restartTimer = null;
+@@ -297,6 +327,12 @@ export class SyncSupervisor implements SyncBackend {
+ 
+   private hasChild(): boolean { return this.child !== null; }
+ 
++  /** The running daemon is the same child that proved bidirectional mode. */
++  bidirectionalVerified(): boolean {
++    return this.verifiedChild !== null && this.verifiedChild === this.child
++      && this.state === "running" && !this.stopping && !this.editPaused;
++  }
++
+   /** Await daemon exit before a guarded atomic edit; no polling or forced kill. */
+   async withPausedForEdit<T>(run: () => T): Promise<T> {
+     if (this.editPaused || this.manualSyncActive || !this.child || this.state !== "running") throw Error("Sync cannot be paused safely now");
+@@ -332,6 +368,8 @@ export class SyncSupervisor implements SyncBackend {
+ 
+   // Called after a successful re-login.
+   resetAndStart() {
++    // Re-auth or relink: a daemon that keeps running must prove itself again.
++    this.verifiedChild = null;
+     this.backoffMs = 2_000;
+     this.restartCount = 0;
+     if (this.state === "needs-reauth" || this.state === "needs-setup") this.state = "stopped";
+diff --git a/src/server/safe-edit/sync.test.ts b/src/server/safe-edit/sync.test.ts
+index 7e51d83..bd45e1e 100644
+--- a/src/server/safe-edit/sync.test.ts
++++ b/src/server/safe-edit/sync.test.ts
+@@ -1,9 +1,10 @@
+ import { expect, it, vi, beforeEach } from "vitest";
+-const mock=vi.hoisted(()=>({kind:"obsidian",state:"running",active:false,verified:true,paused:0}));
++const mock=vi.hoisted(()=>({kind:"obsidian",state:"running",active:false,verified:true,pauseFails:false,paused:0}));
+ vi.mock("../sync",()=>({syncKind:()=>mock.kind}));
+-vi.mock("../ob/supervisor",()=>({supervisor:()=>({status:()=>({state:mock.state,activity:{active:mock.active},startedAt:100}),getLogs:()=>mock.verified?[{line:"[sync-policy] Verified bidirectional sync.",ts:101}]:[],withPausedForEdit:async(run:()=>unknown)=>{mock.paused++;return run();}})}));
++vi.mock("../ob/supervisor",()=>({supervisor:()=>({status:()=>({state:mock.state,activity:{active:mock.active},startedAt:100}),bidirectionalVerified:()=>mock.verified,withPausedForEdit:async(run:()=>unknown)=>{if(mock.pauseFails)throw Error("Sync did not stop; no edit applied");mock.paused++;return run();}})}));
+ import { withPausedSync } from "./sync";
+-beforeEach(()=>{process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";process.env.CLOUD_INTAKE="1";Object.assign(mock,{kind:"obsidian",state:"running",active:false,verified:true,paused:0});});
++beforeEach(()=>{process.env.SAFE_EDIT_ENABLED="1";process.env.SAFE_EDIT_SINGLE_WRITER="1";process.env.CLOUD_INTAKE="1";Object.assign(mock,{kind:"obsidian",state:"running",active:false,verified:true,pauseFails:false,paused:0});});
+ it("runs mutation only through the verified daemon pause boundary",async()=>{expect(await withPausedSync(()=>"written")).toBe("written");expect(mock.paused).toBe(1);});
+ it.each([{kind:"git"},{state:"stopped"},{active:true},{verified:false}])("refuses unsafe Sync state %j",async changes=>{Object.assign(mock,changes);const run=vi.fn();await expect(withPausedSync(run)).rejects.toThrow();expect(run).not.toHaveBeenCalled();});
+ it("refuses disabled deployment or missing exclusive-writer acknowledgement",async()=>{process.env.SAFE_EDIT_ENABLED="0";await expect(withPausedSync(()=>0)).rejects.toThrow(/disabled/);process.env.SAFE_EDIT_ENABLED="1";delete process.env.SAFE_EDIT_SINGLE_WRITER;await expect(withPausedSync(()=>0)).rejects.toThrow(/single replica/);});
++it("applies nothing when the daemon cannot be paused",async()=>{mock.pauseFails=true;const run=vi.fn();await expect(withPausedSync(run)).rejects.toThrow(/no edit applied/);expect(run).not.toHaveBeenCalled();});
+diff --git a/src/server/safe-edit/sync.ts b/src/server/safe-edit/sync.ts
+index ef1c91f..36becdc 100644
+--- a/src/server/safe-edit/sync.ts
++++ b/src/server/safe-edit/sync.ts
+@@ -8,6 +8,6 @@ export async function withPausedSync<T>(run:()=>T):Promise<T> {
+   assertEnabled();
+   if(syncKind()!=="obsidian"||process.env.CLOUD_INTAKE!=="1") throw Error("Safe Edit requires the guarded Obsidian cloud deployment");
+   const s=supervisor(),state=s.status();
+-  if(state.state!=="running"||state.activity.active||!s.getLogs().some(l=>l.line==="[sync-policy] Verified bidirectional sync."&&l.ts>=(state.startedAt??Infinity))) throw Error("Wait for verified, idle bidirectional Sync before applying edits");
++  if(state.state!=="running"||state.activity.active||!s.bidirectionalVerified()) throw Error("Wait for verified, idle bidirectional Sync before applying edits");
+   return s.withPausedForEdit(run);
+ }
+-- 
+2.43.0
+
