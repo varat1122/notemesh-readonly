@@ -43,6 +43,23 @@ export function looksLikeAuthFailure(line: string): boolean {
 // Activity counts as "in progress" if an event landed this recently.
 const ACTIVE_WINDOW_MS = 5_000;
 
+// scripts/ob-readonly.mjs prints this on stderr after it has verified the
+// bidirectional mode and before it spawns ob. Everything ob prints, synced
+// filenames included, comes after it on the same stream, so only the head of a
+// child's stderr can prove it. Node may print a warning first.
+const BIDIRECTIONAL_PROOF = "[sync-policy] Verified bidirectional sync.";
+const NODE_WARNING = /^\((node:\d+\) |Use `node --trace-)/;
+
+/** true: the head proves it; false: it never will; undefined: need more output. */
+export function bidirectionalProofOf(head: string): boolean | undefined {
+  const lines = head.split("\n");
+  for (const line of lines.slice(0, -1)) {
+    if (line === BIDIRECTIONAL_PROOF) return true;
+    if (!NODE_WARNING.test(line)) return false;
+  }
+  return head.length > 4096 ? false : undefined;
+}
+
 // Fold one line of daemon output into the running activity tally. Pulled out of
 // the class so it can be tested directly — the parsing is the part that breaks
 // when ob changes its wording, and it is otherwise only reachable by spawning a
@@ -118,6 +135,9 @@ export class SyncSupervisor implements SyncBackend {
   private settingsSyncTried = false;
   private editPaused = false;
   private manualSyncActive = false;
+  // The child whose own stderr proved bidirectional mode. Proof lives exactly as
+  // long as that child, not as long as the line stays in the bounded log.
+  private verifiedChild: ResultPromise | null = null;
 
   // Parse daemon output lines into a running tally of the current sync burst.
   private trackActivity(rawLine: string) {
@@ -195,7 +215,16 @@ export class SyncSupervisor implements SyncBackend {
     });
 
     child.stdout?.on("data", (d: Buffer) => this.log(d.toString()));
-    child.stderr?.on("data", (d: Buffer) => this.log(d.toString()));
+    let head: string | null = "";
+    child.stderr?.on("data", (d: Buffer) => {
+      if (head !== null) {
+        head += d.toString();
+        const proof = bidirectionalProofOf(head);
+        if (proof !== undefined) head = null;
+        if (proof && this.child === child && !this.stopping) this.verifiedChild = child;
+      }
+      this.log(d.toString());
+    });
 
     void child.then(async (result) => {
       this.child = null;
@@ -284,6 +313,7 @@ export class SyncSupervisor implements SyncBackend {
 
   stop() {
     this.stopping = true;
+    this.verifiedChild = null;
     if (this.restartTimer) {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
@@ -296,6 +326,12 @@ export class SyncSupervisor implements SyncBackend {
   }
 
   private hasChild(): boolean { return this.child !== null; }
+
+  /** The running daemon is the same child that proved bidirectional mode. */
+  bidirectionalVerified(): boolean {
+    return this.verifiedChild !== null && this.verifiedChild === this.child
+      && this.state === "running" && !this.stopping && !this.editPaused;
+  }
 
   /** Await daemon exit before a guarded atomic edit; no polling or forced kill. */
   async withPausedForEdit<T>(run: () => T): Promise<T> {
@@ -332,6 +368,8 @@ export class SyncSupervisor implements SyncBackend {
 
   // Called after a successful re-login.
   resetAndStart() {
+    // Re-auth or relink: a daemon that keeps running must prove itself again.
+    this.verifiedChild = null;
     this.backoffMs = 2_000;
     this.restartCount = 0;
     if (this.state === "needs-reauth" || this.state === "needs-setup") this.state = "stopped";
