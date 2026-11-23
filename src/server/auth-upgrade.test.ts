@@ -3,11 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// The 1.6 → 1.7 upgrade, on the database an existing deployment has: one
-// admin row in an account table without the `issuer` column 1.7 requires.
-// Better Auth's migrator refuses to add a required column to a populated
-// table, so without the backfill in runAuthMigrations every upgraded
-// instance threw at boot and could not sign in. Reproduced before the fix.
+// Better Auth >=1.7.3 restored the 1.6 account schema (no issuer).
+// Upgrading from 1.7.2 needs a separately backed-up SQLite cleanup.
+// Test both a safe pre-issuer database and fail-closed legacy issuer detection.
 
 let root: string;
 
@@ -45,32 +43,35 @@ async function reshapeTo16() {
   return d;
 }
 
-describe("upgrading a claimed 1.6 database", () => {
-  it("migrates, backfills the issuer, and the admin can still sign in", async () => {
+describe("Better Auth 1.7.7 account compatibility", () => {
+  it("accepts a claimed 1.6-style database without issuer and preserves admin sign-in", async () => {
     const auth = await boot();
     await auth.api.signUpEmail({
       body: { email: "admin@example.com", password: "the-original-password", name: "Admin" },
     });
     const d = await reshapeTo16();
-
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const upgraded = await boot();
-    expect(log).toHaveBeenCalledWith(expect.stringMatching(/added issuer/));
-    expect(d.prepare("SELECT issuer FROM account").all()).toEqual([{ issuer: "local:credential" }]);
-
+    const cols = (d.prepare("PRAGMA table_info(account)").all() as { name: string }[]).map(c => c.name);
+    expect(cols).not.toContain("issuer");
     const res = await upgraded.api.signInEmail({
       body: { email: "admin@example.com", password: "the-original-password" },
     });
     expect(res.user.email).toBe("admin@example.com");
   });
 
-  it("leaves a database that already has the column alone", async () => {
+  it("fails closed on a 1.7.2-style issuer column until operator-backed cleanup", async () => {
     const auth = await boot();
     await auth.api.signUpEmail({
       body: { email: "admin@example.com", password: "the-original-password", name: "Admin" },
     });
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await boot();
-    expect(log).not.toHaveBeenCalledWith(expect.stringMatching(/added issuer/));
+    const { db } = await import("./db");
+    const d = db();
+    d.exec("ALTER TABLE account ADD COLUMN issuer TEXT NOT NULL DEFAULT 'local:credential'");
+    d.exec("CREATE UNIQUE INDEX account_issuer_accountId_uidx ON account (issuer, accountId)");
+    await expect(boot()).rejects.toThrow("Legacy Better Auth account.issuer detected; deployment held.");
+    const cols = (d.prepare("PRAGMA table_info(account)").all() as { name: string }[]).map(c => c.name);
+    expect(cols).toContain("issuer");
+    const idx = d.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='account_issuer_accountId_uidx'").get();
+    expect(idx).toBeTruthy();
   });
 });

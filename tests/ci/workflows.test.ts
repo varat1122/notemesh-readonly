@@ -28,9 +28,14 @@ describe("the workflows", () => {
     expect(ci).not.toMatch(/pnpm audit[^\n]*\|\| true/);
     // pnpm 11's bulk endpoint reports GHSA IDs; ignoreCves is no longer read.
     const workspace = parse(readFileSync("pnpm-workspace.yaml", "utf8"));
-    expect(workspace.audit.ignore).toEqual([
-      "GHSA-86w9-cpqp-85rv", "GHSA-vfj7-8cjw-p6xm",
-    ]);
+    // node-forge's high advisories are fixed by a pinned patched dependency,
+    // not permanently hidden behind an audit exception.
+    expect(workspace.audit.ignore).toEqual(["GHSA-vfj7-8cjw-p6xm"]);
+    expect(workspace.audit.ignore).not.toContain("GHSA-86w9-cpqp-85rv");
+    expect(workspace.overrides["node-forge"]).toBe("1.4.2");
+    const lock = readFileSync("pnpm-lock.yaml", "utf8");
+    expect(lock).toContain("node-forge@1.4.2:");
+    expect(lock).not.toContain("node-forge@1.4.0:");
     expect(ci).not.toMatch(/--ignore-unfixable|--ignore-registry-errors/);
     const pkg = JSON.parse(readFileSync("package.json", "utf8"));
     expect(pkg.scripts.build).toContain("node scripts/check-runtime-exclusions.mjs");

@@ -255,30 +255,24 @@ export const auth = betterAuth({
 
 let migrated = false;
 
-// Creates/updates Better Auth's own tables (user, session, account,
-// apikey, OAuth client/token tables) inside app.sqlite. Runs once per boot.
-// Better Auth 1.7 added `issuer` to the account table: NOT NULL, no default.
-// Its migrator refuses to add such a column to a populated table rather than
-// invent a value, so a deployment upgraded from 1.6 — one admin row — would
-// throw here on every boot and never sign in again. This server knows the
-// value: every account it creates is an email-and-password one, which 1.7
-// records as "local:credential". Added with that backfill before the
-// migrator runs, so it finds the column present and only adds its index.
-// Reproduced and pinned against a 1.6-shaped populated table in
-// auth-upgrade.test.ts.
-function backfillAccountIssuer(): void {
+// Better Auth >=1.7.3 removed account.issuer. Do not silently alter a live
+// legacy authentication table during the dependency security upgrade.
+function assertLegacyAccountSchemaCleared(): void {
   const d = db();
-  const table = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'account'").get();
-  if (!table) return;
+  const hasAccount = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'account'").get();
+  if (!hasAccount) return;
   const columns = d.prepare("PRAGMA table_info(account)").all() as { name: string }[];
-  if (columns.some((c) => c.name === "issuer")) return;
-  d.exec("ALTER TABLE account ADD COLUMN issuer TEXT NOT NULL DEFAULT 'local:credential'");
-  console.log("[auth] account table: added issuer for the Better Auth 1.7 upgrade");
+  if (columns.some(c => c.name === "issuer")) {
+    throw new Error(
+      "Legacy Better Auth account.issuer detected; deployment held. " +
+      "A verified encrypted off-volume backup, isolated restore and separately reviewed production schema cleanup are required before this build can serve authentication.",
+    );
+  }
 }
 
 export async function runAuthMigrations() {
   if (migrated) return;
-  backfillAccountIssuer();
+  assertLegacyAccountSchemaCleared();
   const { runMigrations } = await getMigrations(auth.options);
   await runMigrations();
   // The guard on the user table can only be created once Better Auth has
