@@ -32,10 +32,10 @@ describe("the workflows", () => {
     // not permanently hidden behind an audit exception.
     expect(workspace.audit.ignore).toEqual(["GHSA-vfj7-8cjw-p6xm"]);
     expect(workspace.audit.ignore).not.toContain("GHSA-86w9-cpqp-85rv");
-    expect(workspace.overrides["node-forge"]).toBe("1.4.2");
+    expect(workspace.overrides["node-forge"]).toBe("1.4.3");
     const lock = readFileSync("pnpm-lock.yaml", "utf8");
-    expect(lock).toContain("node-forge@1.4.2:");
-    expect(lock).not.toContain("node-forge@1.4.0:");
+    expect(lock).toContain("node-forge@1.4.3:");
+    expect(lock).not.toMatch(/node-forge@1\.4\.[0-2]:/);
     expect(ci).not.toMatch(/--ignore-unfixable|--ignore-registry-errors/);
     const pkg = JSON.parse(readFileSync("package.json", "utf8"));
     expect(pkg.scripts.build).toContain("node scripts/check-runtime-exclusions.mjs");
