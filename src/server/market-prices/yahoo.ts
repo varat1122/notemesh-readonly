@@ -13,8 +13,8 @@ const chartSchema = z.object({ chart: z.object({
       adjclose: z.array(z.object({ adjclose: z.array(optionalNumber) })).length(1).optional(),
     }),
     events: z.object({
-      dividends: z.record(z.object({ date: z.number().int(), amount: z.number().finite().positive() })).optional(),
-      splits: z.record(z.object({ date: z.number().int(), numerator: z.number().finite().positive(), denominator: z.number().finite().positive() })).optional(),
+      dividends: z.record(z.string(), z.object({ date: z.number().int(), amount: z.number().finite().positive() })).optional(),
+      splits: z.record(z.string(), z.object({ date: z.number().int(), numerator: z.number().finite().positive(), denominator: z.number().finite().positive() })).optional(),
     }).optional(),
   })).length(1).nullable(),
 }) });

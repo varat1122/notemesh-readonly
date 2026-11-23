@@ -34,6 +34,8 @@ RUN node /app/check-runtime-exclusions.mjs .output /usr/local/lib/node_modules
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 COPY scripts/ob-readonly.mjs /app/ob-readonly.mjs
 COPY scripts/cloud-sync-preflight.mjs /app/cloud-sync-preflight.mjs
+# PR #135 operator procedure; run by hand with the app stopped, never at boot.
+COPY scripts/account-issuer-cleanup.mjs /app/account-issuer-cleanup.mjs
 COPY scripts/intake-importer.cjs /app/scripts/intake-importer.cjs
 RUN chmod 755 /app/ob-readonly.mjs
 ENV OB_BIN=/app/ob-readonly.mjs
