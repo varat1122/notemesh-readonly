@@ -112,16 +112,23 @@ export const m2VaultReadDeps:M2ReadDeps={
 
 type SourceCheck={path:string;status:"source_quote_bound_not_primary"|"unbound";issues:string[];warnings:string[]};
 const unique=<T>(a:T[])=>[...new Set(a)];
-export function preservedSubmittedText(body:string):string|null {
-  const marker="\n## User-supplied original language text\n\n";
-  const at=body.indexOf(marker);
-  if(at<0||body.indexOf(marker,at+1)>=0)return null;
-  const rest=body.slice(at+marker.length);
+/** Source text headings: the legacy user-submitted one and the neutral one for any
+ * other acquisition channel. The earliest heading is structural and must occur
+ * once (the legacy rule); the other may only appear later, inside the text. */
+export const SOURCE_TEXT_HEADINGS=["## User-supplied original language text","## Preserved source text"] as const;
+export function preservedTextSection(body:string):{offset:number;text:string}|null {
+  const first=SOURCE_TEXT_HEADINGS.map(h=>({marker:"\n"+h+"\n\n",at:body.indexOf("\n"+h+"\n\n")}))
+    .filter(x=>x.at>=0).sort((a,b)=>a.at-b.at)[0];
+  if(!first||body.indexOf(first.marker,first.at+1)>=0)return null;
+  const start=first.at+first.marker.length,rest=body.slice(start);
   const open=/^(`{3,})text\n/.exec(rest);
   if(!open)return null;
   const end=rest.indexOf("\n"+open[1]+"\n",open[0].length);
   if(end<0)return null;
-  return rest.slice(open[0].length,end);
+  return {offset:start+open[0].length,text:rest.slice(open[0].length,end)};
+}
+export function preservedSubmittedText(body:string):string|null {
+  return preservedTextSection(body)?.text??null;
 }
 function checkSource(ref:M2SourceQuoteRef,deps:M2ReadDeps):SourceCheck {
   const issues:string[]=[],warnings:string[]=[];

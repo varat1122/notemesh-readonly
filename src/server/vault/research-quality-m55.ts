@@ -37,7 +37,7 @@ export interface ResearchClassification {
   industryHubPaths:string[];
   sourceChannel:string;
   attributedOrigin?:string;
-  originalDocumentAccess?:"full_original"|"excerpt_only"|"not_obtained";
+  originalDocumentAccess?:"full_original"|"excerpt_only"|"text_transcription"|"not_obtained";
   sourceLanguage?:string|null;
   sourceKind?:string;
   entityScope?:string[];

@@ -26,6 +26,9 @@ import {indexedRead,receiptProvenance} from "./investment-research-context";
 import {preservedSubmittedText} from "./research-decision-v2";
 
 export type IntakeFormat = "text"|"screenshot"|"pdf"|"mixed";
+/** How the text reached the analyst; independent of sourceKind (genre). Omitted means
+ * the legacy user-submitted contract. A declared channel is not authenticity evidence. */
+export type AcquisitionChannel = "user_submitted"|"assistant_retrieved"|"connected_provider"|"historical_archive"|"unknown";
 export type IntakeSource = "broker_research"|"issuer_release"|"regulatory_filing"|"news_media"|"user_commentary"|"archived_chat"|"social_repost"|"industry_research"|"official_macro"|"unknown";
 export interface WritebackInput {
   appearance?:AppearanceInput;
@@ -64,7 +67,8 @@ export interface WritebackInput {
   researchReview?:ThaiResearchReview;
   sourceChannel?:string;
   attributedOrigin?:string;
-  originalDocumentAccess?:"full_original"|"excerpt_only"|"not_obtained";
+  originalDocumentAccess?:"full_original"|"excerpt_only"|"text_transcription"|"not_obtained";
+  acquisitionChannel?:AcquisitionChannel;
   /** M5.6: an existing Source receipt must be proven against original bytes and chronology. */
   existingIntakeId?:string;
   existingReview?:ExistingReviewSelection;
