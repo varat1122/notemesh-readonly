@@ -12,6 +12,7 @@ import { splitFrontmatter, extractStructure } from "./markdown";
 import { inspectCanonicalKnowledgeMetadata, type SchemaInspection } from "./investment-knowledge-schema";
 import { hubIdentityKey, indexedHubAliases, indexedTopLevelHubs } from "./investment-routing-v2";
 import { receiptVersionAt, discoverCanonicalResearch, isCanonicalResearchPath, isReceiptedReviewPath, publicationWindow, type ContextBundle, type CanonicalResearchScan } from "./investment-research-context";
+import { canonicalHttpSourceUrl } from "../source-url";
 
 export type Focus = "earnings" | "broker" | "tam" | "macro" | "thesis" | "general";
 export type Role = "rules" | "thesis" | "evidence_register" | "timeline" | "company" | "industry" | "source" | "research" | "archive";
@@ -38,9 +39,10 @@ export interface ResearchChronology {eventDate:DeclaredDate;publicationDate:Decl
 export interface Item { citationSpans:{start:number;end:number;excerptStart:number;excerptEnd:number}[]; pointInTime?:ReturnType<typeof receiptVersionAt>&{cutoff:string}; sourceBinding?:StandaloneSourceBinding; researchTrust:SchemaInspection["researchTrust"]; contentSha256:string; path: string; role: Role; evidenceUse:"historical_context_only"|"unverified_candidate"; declaredVerification: string|null; declaredSourceType:string|null; declaredEventDate: string|null; declaredPublishedAt: string|null; chronology:ResearchChronology;matchedMacroScopes:string[];score: number; excerpt: string; line: number; truncated: boolean; counterEvidenceExcerptIncluded: boolean; schemaCompatibility: SchemaInspection }
 export interface ResearchFallback {
  status:"bounded_discovery_not_selected_evidence";truncated:boolean;
-  candidates:{path:string;intakeId:string|null;kind:"source_intake"|"canonical_review"|"historical_related";sha256:string|null;
+  candidates:{path:string;intakeId:string|null;kind:"source_intake"|"canonical_review"|"historical_related"|"related_context";sha256:string|null;
   receiptId:string|null;bindingStatus:"receipt_bound"|"HOLD";researchTrust:Item["researchTrust"];
-  eventDate:string|null;publicationDate:string|null;reason:"outside_selected_context"|"canonical_read_limit"|"declared_multi_issuer_relation"|"pit_not_selected_or_unverified";issuerAttribution?:"not_established";
+  eventDate:string|null;publicationDate:string|null;reason:"outside_selected_context"|"canonical_read_limit"|"declared_multi_issuer_relation"|"pit_not_selected_or_unverified"|"macro_country_unattributed"|"other_issuer_literal_mention";issuerAttribution?:"not_established";
+  countryAttribution?:"not_established";literalMention?:string;
   accessStatus?:"AVAILABLE_NOT_RETRIEVED";metadataBasis?:"index_only_unverified"}[];
  instructions:string;
 }
@@ -56,7 +58,8 @@ type DiscoveryReason=PitReason|"industry_scope_excluded"|"issuer_scope_excluded"
   "no_candidate_in_completed_scope"|"scope_scan_incomplete"|"not_selected_in_bounded_context"|
   "canonical_read_limit"|"canonical_not_admitted"|"issuer_identity_conflict"|"issuer_lexical_window_not_returned"|
   "declared_multi_issuer_relation"|"historical_primary_subject"|"historical_joint_subject"|
-  "joint_subject_unconfirmed"|"declared_company_identity_unresolved"|"question_term_fts_window_truncated"|"historical_context_slot"|OptionalHistoryFailure;
+  "joint_subject_unconfirmed"|"declared_company_identity_unresolved"|"question_term_fts_window_truncated"|"historical_context_slot"|
+  "macro_country_unattributed"|"historical_context_cap"|"source_family_duplicate"|"other_issuer_literal_mention"|OptionalHistoryFailure;
 type OptionalHistoryFailure="optional_history_metadata_drift"|"optional_history_missing_file"|
   "optional_history_permission_denied"|"optional_history_io_error"|"optional_history_read_error";
 function optionalHistoryReadError(e:unknown):OptionalHistoryFailure{
@@ -111,7 +114,7 @@ class ContextObserver extends RetrievalObserver {
     const paths:ContextDiscovery["paths"]=[];
     for(const [path,reasons] of this.observed){
       const disposition:Terminal=reasons.has("readback_failed")?"READBACK_HOLD":[...reasons].some(r=>r.startsWith("pit_"))?"PIT_HOLD":selected.has(path)?"SELECTED":exposed.has(path)?"FALLBACK_EXPOSED":
-        ["note_budget","excerpt_budget","role_quota"].some(r=>reasons.has(r as DiscoveryReason))?"OMITTED_BUDGET":
+        ["note_budget","excerpt_budget","role_quota","historical_context_cap"].some(r=>reasons.has(r as DiscoveryReason))?"OMITTED_BUDGET":
         ["receipt_binding_unverified","legacy_review_scope_unverified","restricted_low_trust"].some(r=>reasons.has(r as DiscoveryReason))?"RESTRICTED":"OTHER_EXCLUDED";
       if(disposition==="OTHER_EXCLUDED"&&!reasons.size)reasons.add("not_selected_in_bounded_context");
       counts[disposition]++;
@@ -261,17 +264,49 @@ function issuerTokenInTitle(path: string, issuers: string[]) {
 // headline is not sufficient relevance for a country-specific macro brief.
 // Retain topic-named notes and explicit country-tagged metadata; broader
 // regional documents require separate query/review rather than silent mixing.
-function explicitMacroScope(path: string, topic: string, current?:Record<string,unknown>): boolean {
-  const title=(path.split("/").at(-1)||"").normalize("NFC").toUpperCase();
+// DELTA-01 C1: closed, reviewed country identity aliases (canonical key -> forms).
+// Identity spellings only: no agency/institution/person inference (Fed, FOMC,
+// BLS or a governor's name never establishes a country).
+const MACRO_SCOPE_ALIASES:Readonly<Record<string,readonly string[]>>={
+  "UNITED STATES":["US","U.S.","USA","U.S.A.","สหรัฐฯ","สหรัฐอเมริกา"],
+};
+const upperNfc=(s:string)=>s.trim().normalize("NFC").toUpperCase();
+/** Canonical scope key for a closed alias, else null (the label is used as before). */
+function canonicalMacroScope(label:string):string|null{
+  const k=upperNfc(label);
+  for(const [key,forms] of Object.entries(MACRO_SCOPE_ALIASES))if(k===key||forms.some(f=>upperNfc(f)===k))return key;
+  return null;
+}
+const isBoundary=(c:string|undefined)=>!c||!/[\p{L}\p{N}]/u.test(c);
+function boundaryAt(hay:string,needle:string):boolean{
+  for(let at=hay.indexOf(needle);at>=0;at=hay.indexOf(needle,at+1))if(isBoundary(hay[at-1])&&isBoundary(hay[at+needle.length]))return true;
+  return false;
+}
+function aliasInTitle(file:string,form:string):boolean{
+  // Thai has no word spaces. The closed Thai forms carry "ฯ"/"อเมริกา", so the
+  // UAE name ("สหรัฐอาหรับเอมิเรตส์") never matches a bare "สหรัฐ" prefix.
+  if(/\p{Script=Thai}/u.test(form))return file.includes(form);
+  // Latin forms are case-sensitive: "us"/"Us" are words; USD, AUS, USMCA fail the boundary.
+  return boundaryAt(file,form);
+}
+const GEOGRAPHY_FIELDS=["country","geography","region"] as const;
+const declaredValues=(fm:Record<string,unknown>,keys:readonly string[])=>
+  keys.flatMap(k=>Array.isArray(fm[k])?fm[k] as unknown[]:[fm[k]]).filter(x=>x!==undefined&&x!==null);
+function explicitMacroScope(path: string, topic: string, current?:Record<string,unknown>, identityAliases=false): boolean {
+  const file=(path.split("/").at(-1)||"").normalize("NFC"),title=file.toUpperCase();
   const t=topic.normalize("NFC").toUpperCase();
-  const isBoundary=(c:string|undefined)=>!c||!/[\p{L}\p{N}]/u.test(c);
-  for(let at=title.indexOf(t);at>=0;at=title.indexOf(t,at+1)){
-    if(isBoundary(title[at-1])&&isBoundary(title[at+t.length]))return true;
-  }
+  const forms=identityAliases?MACRO_SCOPE_ALIASES[t]??[]:[];
+  const titled=boundaryAt(title,t)||forms.some(f=>aliasInTitle(file,f));
+  // Legacy literal contract (source-bound macroScope history): unchanged.
+  if(titled&&!identityAliases)return true;
   try {
     const fm=current??indexedMetadata(path);
-    const fields=[fm.country,fm.entity,fm.geography,fm.region].flatMap(x=>Array.isArray(x)?x:[x]);
-    return fields.some(x=>typeof x==="string"&&x.trim().normalize("NFC").toUpperCase()===t);
+    const same=(x:unknown)=>typeof x==="string"&&[t,...forms.map(upperNfc)].includes(upperNfc(x));
+    if(declaredValues(fm,["country","entity","geography","region"]).some(same))return true;
+    // C1: a title match yields to explicit declared geography. Any declared
+    // country/geography/region naming something else (or not a plain label)
+    // is a conflict or ambiguity: fail closed instead of admitting by title.
+    return titled&&declaredValues(fm,GEOGRAPHY_FIELDS).length===0;
   }catch{return false;}
 }
 /** Macro subjects named in the question (any 1..3 consecutive topic words) and
@@ -338,6 +373,17 @@ function indexedMetadata(path:string):Record<string,unknown>{
     return fm&&typeof fm==="object"&&!Array.isArray(fm)?fm as Record<string,unknown>:{};
   }catch{return {};}
 }
+/** Declared origin only (exact canonical source URL, else original source path,
+ * else original source label). Never inferred from titles, feeds or dates. */
+function sourceFamilyKey(path:string):string|null{
+  const fm=indexedMetadata(path),text=(v:unknown)=>typeof v==="string"&&v.trim()?v.trim():null;
+  const url=canonicalHttpSourceUrl(text(fm.source_url));
+  if(url)return "url:"+url;
+  const original=text(fm.original_source_path);
+  if(original)return "path:"+original;
+  const label=text(fm.original_source);
+  return label?"source:"+label:null;
+}
 function historicalOnly(path:string,fm:Record<string,unknown>):boolean{
   if(inspectCanonicalKnowledgeMetadata(path,fm).researchTrust?.usage_tier==="historical_analysis_only")return true;
   const schema=inspectCanonicalKnowledgeMetadata(path,fm);
@@ -352,19 +398,27 @@ function folderExists(path:string):boolean{
 }
 // Section hints only, never a factual determination that a claim is adverse.
 const COUNTER_SECTION=/^\s*#{1,6}\s+.*(counter[- ]?evidence|contradict|invalidation|\brisk|\badverse|\bdownside|\bstress|ข้อขัดแย้ง|ข้อโต้แย้ง|ความเสี่ยง)/i;
-function selectedLines(raw: string, search: string[], max: number, role: Role, reserveCounter=false,sourceOffset=0,lineOffset=0) {
+function selectedLines(raw: string, search: string[], max: number, role: Role, reserveCounter=false,sourceOffset=0,lineOffset=0,priority:string[]=[],bodyOnly=false) {
   const lines=raw.split(/\r?\n/),offsets:number[]=[];
   let cursor=0;
   for(const text of lines){offsets.push(cursor+sourceOffset);cursor+=text.length;if(raw[cursor]==="\r")cursor++;if(raw[cursor]==="\n")cursor++;}
-  let index=0,maxHits=0;
-  for(let i=0;i<Math.min(lines.length,1200);i++){
-    const lower=lines[i].toLowerCase(),hits=search.filter(t=>t.length>1&&lower.includes(t.toLowerCase())).length;
-    if(hits>maxHits){index=i;maxHits=hits;}
-  }
-  const start=index>15?Math.max(0,index-2):0,firstEnd=Math.min(lines.length,start+12);
   // Reuse the existing Markdown heading parser (ATX, Setext, code/comment
   // exclusion). Never treat the next Setext title as this section's evidence.
   const parsed=splitFrontmatter(raw);
+  // DELTA-01 C4: YAML metadata is already returned as declared fields; the
+  // excerpt window starts in the note body whenever the body has content.
+  // Offsets/lines still index the exact original bytes (only the start moves).
+  const bodyStart=bodyOnly&&parsed.fmOffset>0&&lines.slice(parsed.fmOffset).some(s=>/[\p{L}\p{N}]/u.test(s))?parsed.fmOffset:0;
+  // Requested issuer labels outrank generic question words (case-sensitive, whole token).
+  const priorityRe=priority.map(label=>new RegExp(`(^|[^\\p{L}\\p{N}])${label.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}(?=$|[^\\p{L}\\p{N}])`,"u"));
+  let index=bodyStart,maxHits=0;
+  for(let i=bodyStart;i<Math.min(lines.length,1200);i++){
+    const lower=lines[i].toLowerCase(),hits=search.filter(t=>t.length>1&&lower.includes(t.toLowerCase())).length+
+      100*priorityRe.filter(r=>r.test(lines[i])).length;
+    if(hits>maxHits){index=i;maxHits=hits;}
+  }
+  // The best line must fall inside the 12-line window (a >15 threshold hid lines 12-15).
+  const start=index-bodyStart>11?Math.max(bodyStart,index-2):bodyStart,firstEnd=Math.min(lines.length,start+12);
   const headings=extractStructure(parsed.body).headings.map(h=>({...h,line:h.line+parsed.fmOffset-1}));
   const headingLines=new Set<number>();
   for(const h of headings){
@@ -560,8 +614,10 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   // Prefer the explicitly supplied scope over incidental query terms.
   // Explicit separators split scopes; preserve multiword names and do not
   // guess country aliases or split "and" inside a country's proper name.
-  const requestedMacroScopes=verifiedMacro?[verifiedMacro.key]:!macroScope?[]:implicitMacro?(inferredMacro?.scopes??[]):
-    [...new Set((req.industry??"").split(/[/;|,]/).map(x=>topicTerms(x).join(" ")).filter(Boolean))];
+  // DELTA-01 C1: closed identity aliases resolve to one canonical scope key
+  // (never for a source-bound macroScope, whose key stays exact).
+  const requestedMacroScopes=verifiedMacro?[verifiedMacro.key]:!macroScope?[]:implicitMacro?[...new Set((inferredMacro?.scopes??[]).map(s=>canonicalMacroScope(s)??s))]:
+    [...new Set((req.industry??"").split(/[/;|,]/).map(x=>canonicalMacroScope(x)??topicTerms(x).join(" ")).filter(Boolean))];
   const macroScopes=requestedMacroScopes.slice(0,4);
   const generatedSource=(p:string)=>p.startsWith("00_Inbox/ChatGPT/Investment Intake - ");
   const matchesMacroScope=(p:string,scope:string,current?:Record<string,unknown>)=>{
@@ -569,7 +625,7 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
       const b=standalone.bindings.get(p);
       return b?.macroScope?.key===scope&&(!current||JSON.stringify(current.macro_subject)===JSON.stringify(b.macroScope));
     }
-    return explicitMacroScope(p,scope,current);
+    return explicitMacroScope(p,scope,current,!verifiedMacro);
   };
   if(requestedMacroScopes.length>4)limits.add("Macro scope limit: only the first four explicit scopes searched; remaining scopes were not assessed.");
   const needed = [
@@ -636,30 +692,47 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   const macroSubjectPaths = new Set<string>();
   let macroSubjectRequested=false;
   const macroSubjectByScope=new Map(macroScopes.map(scope=>[scope,new Set<string>()]));
+  // DELTA-01 C1b: Macro notes that a scoped subject query returned, but whose
+  // title/metadata attribute no country. Pointer candidates only, never items.
+  const unattributedMacro=new Map<string,string>();
   if(macroScope){
-    const scopeWords=new Set(macroScopes.flatMap(x=>x.split(" ")));
+    const scopeWords=new Set(macroScopes.flatMap(x=>[...x.split(" "),...(MACRO_SCOPE_ALIASES[x]??[]).map(upperNfc)]));
     const subject=topicTerms(question).filter(x=>!scopeWords.has(x)&&x.length>=3)
       .filter(x=>!/^\d+$|^(?:THIRD|QUARTER|COMPARISON|COMPARE)$/.test(x)).slice(0,5);
     macroSubjectRequested=subject.length>0;
     for(const scope of macroScopes){
       const folder="10_Knowledge/Macro and Markets";
+      // Closed identity aliases only (never for a source-bound macroScope).
+      const aliases=verifiedMacro?[]:MACRO_SCOPE_ALIASES[scope]??[];
       // Country-only discovery keeps differing risk vocabulary eligible.
       // Subject hits rank higher but never become a blanket admission filter.
       if(folderExists(folder))try{
         for(const h of search(scope,{limit:100,folder}).hits)if(matchesMacroScope(h.path,scope))pool.set(h.path,22);
       }catch{failed.push(scope);}
-      for(const word of subject)try{
-        const hits=[...search(scope+" "+word,{limit:100}).hits,
-          ...(folderExists(folder)?search(scope+" "+word,{limit:100,folder}).hits:[])];
+      // FTS tokenizes "U.S." and Thai forms differently; only plain Latin forms are queried.
+      for(const word of subject)for(const form of [scope,...aliases.filter(f=>/^[A-Z]{2,3}$/.test(f))])try{
+        const hits=[...search(form+" "+word,{limit:100}).hits,
+          ...(folderExists(folder)?search(form+" "+word,{limit:100,folder}).hits:[])];
         for(const h of hits)if(matchesMacroScope(h.path,scope)){
           macroSubjectPaths.add(h.path);macroSubjectByScope.get(scope)!.add(h.path);
           if(h.path.startsWith(folder+"/"))pool.set(h.path,60);
+        }else if(aliases.length&&h.path.startsWith(folder+"/")&&!unattributedMacro.has(h.path)){
+          // Pointers only for scopes with a reviewed identity set (closed aliases).
+          unattributedMacro.set(h.path,scope);
         }
-      }catch{failed.push(scope+" "+word);}
+      }catch{failed.push(form+" "+word);}
       const candidatePaths=db().prepare(`SELECT path FROM notes WHERE instr(upper(path),?)>0${exclusion} ORDER BY path DESC LIMIT 151`)
         .all(scope,...excluded) as {path:string}[];
       if(candidatePaths.length>150)limits.add("Macro filename window truncated: "+scope);
-      for(const r of candidatePaths.slice(0,150))if((r.path.startsWith(folder+"/")||r.path.startsWith("02_Industries_Themes/"))&&
+      const windows=candidatePaths.slice(0,150);
+      // Alias forms: case-sensitive (instr), restricted to the same two folders.
+      for(const form of aliases){
+        const rows=db().prepare(`SELECT path FROM notes WHERE (substr(path,1,?)=? OR substr(path,1,21)='02_Industries_Themes/') AND instr(path,?)>0${exclusion} ORDER BY path DESC LIMIT 151`)
+          .all(folder.length+1,folder+"/",form,...excluded) as {path:string}[];
+        if(rows.length>150)limits.add("Macro filename window truncated: "+form);
+        windows.push(...rows.slice(0,150));
+      }
+      for(const r of windows)if((r.path.startsWith(folder+"/")||r.path.startsWith("02_Industries_Themes/"))&&
         matchesMacroScope(r.path,scope)&&available(r.path))pool.set(r.path,Math.max(pool.get(r.path)||0,macroSubjectPaths.has(r.path)?60:22));
     }
   }
@@ -706,9 +779,17 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
       related:!conflict&&!scopes.length&&declaredScopes.length>0&&(ids.length>1||titleLabels.length>0),declaredScopes};
   };
   const resolvedContexts=new Set(issuerResolution.filter(r=>r.contextKey&&["exact_existing_title","indexed_alias"].includes(r.status)).map(r=>r.contextKey));
+  // DELTA-01 C3: literal FTS hits for a requested label that has NO Company Hub.
+  // Only used to expose other issuers' notes as metadata-only pointers.
+  const unresolvedLabels=new Set(issuerResolution.filter(r=>r.status==="unresolved").flatMap(scopeKeys).map(x=>x.toUpperCase()));
+  const literalHits=new Map<string,Set<string>>();
+  const relatedContext=new Map<string,string>();
   for (const ticker of issuers) {
     try {
-      for (const h of search(ticker,{limit:100}).hits) issuerPaths.add(h.path);
+      for (const h of search(ticker,{limit:100}).hits){
+        issuerPaths.add(h.path);
+        if(unresolvedLabels.has(ticker)){if(!literalHits.has(ticker))literalHits.set(ticker,new Set());literalHits.get(ticker)!.add(h.path);}
+      }
     } catch { failed.push(ticker); }
   }
   for (const term of searchTerms) {
@@ -732,7 +813,18 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
           if(hs.kind==="joint")jointSubjects.set(h.path,hs.joint);
         }
         if(issuers.length && scopedIssuerNames.length &&
-          !scopedIssuerNames.some(t=>issuers.includes(t))&&!historicalSubjects.has(h.path)){observer.observePath(h.path,"issuer_scope_excluded");continue;}
+          !scopedIssuerNames.some(t=>issuers.includes(t))&&!historicalSubjects.has(h.path)){
+          observer.observePath(h.path,"issuer_scope_excluded");
+          // C3: another issuer's note that literally mentions an unresolved label.
+          // Pointer only: no issuer identity, relationship, coverage or primary status.
+          // No pointers under PIT (titles could leak post-cutoff notes) and none
+          // into intake/Thesis/Portfolio paths.
+          const mention=[...literalHits].find(([,paths])=>paths.has(h.path))?.[0];
+          if(mention&&!historyCutoff&&relatedContext.size<4&&!relatedContext.has(h.path)&&!/^(?:00_Inbox|05_Thesis|06_Portfolio)\//.test(h.path)){
+            relatedContext.set(h.path,mention);observer.observePath(h.path,"other_issuer_literal_mention");
+          }
+          continue;
+        }
         if(issuers.length && role==="research" && !pool.has(h.path)){
           if(!h.path.startsWith("10_Knowledge/Company Research/")){observer.observePath(h.path,"explicit_scope_exclusion");continue;}
           if(req.industry && !industryMatches.has(h.path)){
@@ -772,6 +864,30 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
         if (pool.size>200) break;
       }
     } catch { failed.push(term); }
+  }
+  // DELTA-01 C1b: bounded, labelled pointers only (never items, admission,
+  // coverage or evidence weight). A note declaring ANY geography, or whose title
+  // names another declared geography label, stays excluded (wrong-country
+  // protection). No pointers under PIT: titles could leak post-cutoff notes.
+  const macroPointers=new Map<string,string>();
+  if(macroScope&&!historyCutoff&&unattributedMacro.size){
+    const rows=db().prepare(`SELECT frontmatter FROM notes WHERE json_valid(frontmatter)=1 AND (json_type(frontmatter,'$.country') IS NOT NULL OR
+      json_type(frontmatter,'$.geography') IS NOT NULL OR json_type(frontmatter,'$.region') IS NOT NULL)${exclusion} LIMIT 5001`).all(...excluded) as {frontmatter:string}[];
+    if(rows.length>5000)limits.add("Macro geography label index truncated; country-unattributed pointers withheld.");
+    else{
+      const known=new Set<string>();
+      for(const row of rows){try{for(const v of declaredValues(JSON.parse(row.frontmatter) as Record<string,unknown>,GEOGRAPHY_FIELDS))
+        if(typeof v==="string"&&v.trim()&&v.length<=120)known.add(upperNfc(v));}catch{/* invalid metadata names nothing */}}
+      for(const forms of Object.entries(MACRO_SCOPE_ALIASES))for(const f of [forms[0],...forms[1]])known.add(upperNfc(f));
+      for(const [p,scope] of unattributedMacro){
+        if(macroPointers.size>=4)break;
+        if(pool.has(p)||generatedSource(p)||declaredValues(indexedMetadata(p),GEOGRAPHY_FIELDS).length)continue;
+        const own=new Set([scope,...(MACRO_SCOPE_ALIASES[scope]??[])].map(upperNfc));
+        const title=(p.split("/").at(-1)||"").normalize("NFC").toUpperCase();
+        if([...known].some(l=>!own.has(l)&&(/\p{Script=Thai}/u.test(l)?title.includes(l):boundaryAt(title,l))))continue;
+        macroPointers.set(p,scope);observer.observePath(p,"macro_country_unattributed");
+      }
+    }
   }
   const macroRiskPaths=new Set<string>();
   const macroReadReasons=new Map(macroScopes.map(scope=>[scope,[] as string[]]));
@@ -866,13 +982,31 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   let remaining=budget;
   const omitted: string[]=[];
   let historicalCount=0;
+  // DELTA-01 C2: macro historical analysis that is scope-matched AND subject- or
+  // counter-section-matched is relevant context (<=3); other archives/recaps stay
+  // background (<=1). Same note/excerpt budgets; evidenceUse stays
+  // historical_context_only and declared trust is untouched. An explicit archival
+  // request keeps its existing, uncapped behaviour.
+  let relevantHistoricalCount=0;
+  const relevantCapped:string[]=[],familyDuplicates:string[]=[];
+  const selectedFamilies=new Set<string>();
+  const historicalRelevant=(path:string)=>(macroSubjectPaths.has(path)||macroRiskPaths.has(path))&&
+    macroScopes.some(scope=>macroCandidates.get(scope)?.includes(path));
   const macroBackgroundCounts=new Map<string,number>();
   const optionalFailures=new Map<string,OptionalHistoryFailure>();
   for (const row of rank) {
     // Company history and protected drafts must remain discoverable even when
     // derived from AI. Only raw archives / macro recaps share this fallback cap.
     const archivalSelection=row.role==="archive"||macroScope&&row.historical&&row.role==="research";
-    if (archivalSelection && (!allowArchived || !archivalRequested&&historicalCount>=1)) {observer.observePath(row.path,"explicit_scope_exclusion");omitted.push(row.path);continue;}
+    // Only where archives are already admissible (scarce non-archive evidence);
+    // history never displaces substantial non-archive evidence.
+    const relevantHistory=macroScope&&allowArchived&&!archivalRequested&&archivalSelection&&row.role==="research"&&historicalRelevant(row.path);
+    if(relevantHistory){
+      if(relevantHistoricalCount>=3){observer.observePath(row.path,"historical_context_cap");relevantCapped.push(row.path);omitted.push(row.path);continue;}
+    }else if (archivalSelection && (!allowArchived || !archivalRequested&&historicalCount>=1)) {observer.observePath(row.path,"explicit_scope_exclusion");omitted.push(row.path);continue;}
+    // Same-origin history: one selected item per declared source family.
+    const family=macroScope&&archivalSelection&&!generatedSource(row.path)?sourceFamilyKey(row.path):null;
+    if(family&&selectedFamilies.has(family)){observer.observePath(row.path,"source_family_duplicate");familyDuplicates.push(row.path);omitted.push(row.path);continue;}
     if (items.length>=maxNotes||remaining<250) {observer.observePath(row.path,items.length>=maxNotes?"note_budget":"excerpt_budget");omitted.push(row.path);continue;}
     const matchedMacroScopes=macroScopes.filter(scope=>matchesMacroScope(row.path,scope));
     const background=macroScope&&macroSubjectRequested&&row.role!=="rules"&&!macroSubjectPaths.has(row.path)&&!macroRiskPaths.has(row.path);
@@ -947,12 +1081,14 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
           if(raw.slice(sourceOffset,sourceOffset+original.length)!==original)throw Error("source_excerpt_offset_unavailable");
           lineOffset=raw.slice(0,sourceOffset).split("\n").length-1;
         }
-        const {counterEvidenceMissing,...excerpt}=selectedLines(original??raw,searchTerms,Math.min(2000,remaining,macroScope?Math.floor(budget/Math.max(2,macroScopes.length*2)):issuerScoped?Math.max(700,Math.floor(budget/maxNotes)):2000),row.role,issuerScoped,sourceOffset,lineOffset);
+        const {counterEvidenceMissing,...excerpt}=selectedLines(original??raw,searchTerms,Math.min(2000,remaining,macroScope?Math.floor(budget/Math.max(2,macroScopes.length*2)):issuerScoped?Math.max(700,Math.floor(budget/maxNotes)):2000),row.role,issuerScoped,sourceOffset,lineOffset,
+          issuerScoped?issuers:[],original===null);
         if(counterEvidenceMissing)counterExcerptMissing.add(row.path);
         if(!excerpt.excerpt.trim()){observer.observePath(row.path,"excerpt_budget");omitted.push(row.path);return;}
         const historical=titleSubjectPaths.has(row.path)||historicalIssuerPaths.has(row.path)||canonicalReviews.get(row.path)?.legacy||row.historical||historicalOnly(row.path,splitFrontmatter(raw).data);
         items.push({...(historyCutoff?{pointInTime:pitAccepted.get(row.path)}:{}),...(standalone.bindings.has(row.path)?{sourceBinding:standalone.bindings.get(row.path)}:{}),contentSha256:createHash("sha256").update(raw).digest("hex"),path:row.path,role:row.role,matchedMacroScopes:matchedMacroScopes.filter(scope=>matchesMacroScope(row.path,scope,current)),evidenceUse:historical?"historical_context_only":"unverified_candidate",...declared(raw,row.path),score:row.score,...excerpt});
-        if(archivalSelection)historicalCount++;
+        if(archivalSelection){if(relevantHistory)relevantHistoricalCount++;else historicalCount++;}
+        if(family)selectedFamilies.add(family);
         if(background)for(const scope of matchedMacroScopes)macroBackgroundCounts.set(scope,(macroBackgroundCounts.get(scope)||0)+1);
         roleCounts.set(row.role,n+1);remaining-=excerpt.excerpt.length;
       });
@@ -1045,12 +1181,22 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
     if(!roles.has("source"))incomplete.push("No original issuer/filing source selected; primary claim verification required.");
     incomplete.push("Server-verified primary evidence not established by retrieval; source filenames, roles and metadata cannot replace exact-scope PEV validation.");
     if(!roles.has("industry"))incomplete.push("No industry/TAM source selected; supply-chain effects may be incomplete.");
+    for(const label of new Set(relatedContext.values())){
+      const n=[...relatedContext.values()].filter(x=>x===label).length;
+      incomplete.push(`${label}: ${n} related-context pointer(s) to other issuers' notes that literally mention ${label} (no Company Hub). Metadata-only; not ${label} issuer evidence, a supplier/customer relationship, coverage or a primary source. Read the exact note before use.`);
+    }
   }else if(macroScope){
     if(macroSubjectRequested&&!macroSubjectPaths.size)
       incomplete.push("No subject-matched macro evidence found within the retrieval bound; country-only context is not subject coverage.");
     if(!items.some(x=>x.role!=="rules" && x.role!=="timeline"))
       incomplete.push("No country/theme-specific macro evidence selected; research coverage is incomplete.");
     incomplete.push("Server-verified primary macro/statistical evidence not established by retrieval; verify the official data release and exact-scope PEV before analysis.");
+    const scoped=items.filter(x=>x.matchedMacroScopes.length);
+    if(scoped.length&&scoped.every(x=>x.evidenceUse==="historical_context_only"))
+      incomplete.push("Every selected scope-matched macro item is historical_context_only (archived or AI analysis): no current primary or unverified-candidate macro evidence was selected. Treat them as dated viewpoints, not fresh facts or independent origins.");
+    if(relevantCapped.length)incomplete.push(`Relevant historical macro context bounded to 3 items; ${relevantCapped.length} further subject/counter-evidence candidate(s) omitted (discovery reason historical_context_cap).`);
+    if(familyDuplicates.length)incomplete.push(`Same-source-family historical duplicates omitted (${familyDuplicates.length}); one item per declared source URL/original source kept.`);
+    if(macroPointers.size)incomplete.push(`Country-unattributed macro notes returned by scoped subject queries exposed as ${macroPointers.size} metadata-only pointer(s): neither title nor declared metadata attributes them to the requested scope. Not selected evidence, admission or coverage; read the exact note before use.`);
   }
   if(failed.length)incomplete.push("Search failed on terms: "+failed.join(", "));
   // Expose already discovered receipt-bound research omitted by note/excerpt
@@ -1081,6 +1227,11 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   for(const [path,b] of standalone.bindings)remember({path,intakeId:b.intakeId,kind:"source_intake",sha256:b.sourceSha256,
     receiptId:b.sourceReceiptId,bindingStatus:"receipt_bound",researchTrust:inspectCanonicalKnowledgeMetadata(path,indexedMetadata(path)).researchTrust,
     eventDate:b.eventDate,publicationDate:b.publicationDate,reason:"outside_selected_context"});
+  // DELTA-01 C1b/C3 pointers come last so they never displace existing candidates.
+  const pointer={intakeId:null,kind:"related_context" as const,sha256:null,receiptId:null,bindingStatus:"HOLD" as const,researchTrust:null,
+    eventDate:null,publicationDate:null,accessStatus:"AVAILABLE_NOT_RETRIEVED" as const,metadataBasis:"index_only_unverified" as const};
+  for(const path of macroPointers.keys())remember({...pointer,path,reason:"macro_country_unattributed",countryAttribution:"not_established"});
+  for(const [path,label] of relatedContext)remember({...pointer,path,reason:"other_issuer_literal_mention",issuerAttribution:"not_established",literalMention:label});
   const researchFallback:ResearchFallback={status:"bounded_discovery_not_selected_evidence",truncated:fallback.size>12,
     candidates:[...fallback.values()].slice(0,12),instructions:"Read exact paths/intakeId before reasoning; these candidates were NOT selected or semantically assessed. Publication order may be unknown. Receipts prove persistence, not event equivalence, primary truth, independence or comparator eligibility. Any changed assessment requires a fresh packet."};
   const discovery=observer.finish(items,researchFallback);
