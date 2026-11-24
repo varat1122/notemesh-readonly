@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { db } from "../db";
 import { readNote } from "./notes";
 import { searchVault } from "./queries";
-import type { WritebackInput, WritebackPlan } from "./investment-writeback-router";
+import type { WritebackInput, WritebackPlan, AcquisitionChannel } from "./investment-writeback-router";
 import {renderThaiResearchM55,validateResearchM55} from "./research-quality-m55";
 import {sourceArchiveReviewLines} from "./source-archive-provenance-p0";
 import {planClaimNotes,lineageMetadata,readPersistedClaim,claimInterpretationBoundary} from "./canonical-claims";
@@ -119,9 +119,14 @@ export function buildCanonicalSafeEditWorkflow(
   const tag="InvestmentIntake"+plan.planId.slice(3);
   const event=plan.chronology.eventDate,published=plan.chronology.publicationDate;
   const attachment=plan.sourceCapture.attachmentVerified?"hash_readback_verified_user_bytes":"not_verified";
-  const proposedSourceContent=[
-    "---","type: investment_source_intake","source_type: user_supplied",
-    "verification: not_reverified","status: user_input_not_publisher_verified",
+  // RQ-2: acquisition channel (how the text arrived) is separate from sourceKind
+  // (genre) and from coverage. Omitted keeps the legacy user-submitted contract
+  // and its exact bytes; any other declared channel must never be rendered as
+  // user-supplied. A declared channel, URL or primary genre is not verification.
+  const acquisition:AcquisitionChannel=input.acquisitionChannel??"user_submitted";
+  const userSubmitted=acquisition==="user_submitted";
+  const coverage=input.originalDocumentAccess??"not_obtained";
+  const sourceFields=[
     `intake_id: ${yaml(plan.planId)}`,`source_chat: ${yaml(sourceChat)}`,
     `source_kind: ${yaml(plan.sourceKind)}`,`input_format: ${yaml(plan.inputFormat)}`,
     `source_language: ${yaml(plan.sourceLanguage)}`,`attributed_publisher: ${yaml(input.publisher)}`,
@@ -129,24 +134,53 @@ export function buildCanonicalSafeEditWorkflow(
     `published_at: ${yaml(published)}`,`attachment_status: ${yaml(attachment)}`,
     `attachment_path: ${yaml(plan.sourceCapture.rawAttachmentPath)}`,
     `source_text_sha256: ${sha(input.extractedText)}`,
-    ...(plan.macroScope?.binding?[`macro_subject: ${JSON.stringify(plan.macroScope.binding)}`]:[]),"---","",
+    ...(plan.macroScope?.binding?[`macro_subject: ${JSON.stringify(plan.macroScope.binding)}`]:[])];
+  const proposedSourceContent=(userSubmitted?[
+    "---","type: investment_source_intake","source_type: user_supplied",
+    "verification: not_reverified","status: user_input_not_publisher_verified",
+    ...sourceFields,"---","",
     `# Attributed User Source — ${plan.planId}`,"",
     `Source token: ${tag}`,"",
     "## User-supplied original language text","",
     originalFence(input.extractedText),
     "## Evidence boundary","",
     "The submitted text and attribution are preserved, but issuer/broker authenticity and claim truth were not independently verified by this receipt.",""
-  ].join("\n");
+  ]:[
+    "---","type: investment_source_intake","source_type: attributed",
+    `acquisition_channel: ${yaml(acquisition)}`,`document_coverage: ${yaml(coverage)}`,
+    "verification: not_reverified","status: attributed_source_not_publisher_verified",
+    `verified_by_receipt: ${JSON.stringify(["preserved_text_sha256",...(plan.sourceCapture.attachmentVerified?["user_attachment_bytes"]:[])])}`,
+    `not_verified: ${JSON.stringify(["acquisition_channel","publisher_authenticity","original_document_bytes","claim_truth",...(input.sourceUrl?["source_url_authority"]:[])])}`,
+    ...sourceFields,"---","",
+    `# Attributed Source — ${plan.planId}`,"",
+    `Source token: ${tag}`,"",
+    "## Acquisition and coverage","",
+    `- Acquisition channel: ${acquisition} (declared by the caller; not independently verified by this receipt)`,
+    `- Document coverage: ${coverage}`,
+    "- A source URL, publisher label or primary-source genre is attribution only; it does not authenticate the publisher or show that this text is the complete original.","",
+    "## Preserved source text","",
+    originalFence(input.extractedText),
+    "## Evidence boundary","",
+    "Only the SHA-256 of the preserved text is bound by this receipt. Publisher authenticity, original document bytes and claim truth were not independently verified.",""
+  ]).join("\n");
   // M5.6: a proven prior Source receipt is immutable. Do not regenerate it
   // with today's publisher label, sourceChat or classification and then call
   // the changed whole-note hash a conflict; link its exact readback bytes.
   let sourceContent=proposedSourceContent;
+  const provenanceIssues:string[]=[];
   if(plan.sourceIdentity.existingSourcePath){
     if(plan.sourceIdentity.existingSourcePath!==rawPath)throw Error("M56_SOURCE_PATH_MISMATCH");
     sourceContent=readNote(rawPath).content;
     if(sha(sourceContent)!==plan.sourceIdentity.existingSourceSha256)
       throw Error("M56_SOURCE_CHANGED_DURING_PLAN");
+    // The saved bytes stay as they are. If the caller now declares a channel that
+    // the receipt contradicts (e.g. a legacy user_supplied label on an assistant-
+    // fetched page), no new Review may cite it until a governed correction exists.
+    const fm=splitFrontmatter(sourceContent).data;
+    const saved=typeof fm.acquisition_channel==="string"?fm.acquisition_channel:fm.source_type==="user_supplied"?"user_submitted":"unknown";
+    if(input.acquisitionChannel!==undefined&&saved!==acquisition)provenanceIssues.push("existing_source_acquisition_conflict_correction_required");
   }
+  if(acquisition==="unknown")provenanceIssues.push("source_acquisition_unknown");
   const companyLinks=plan.routingV2.companyHubs.map(x=>`- ${wiki(x.path)} — ${x.role??"mentioned"}, caller-declared`);
   const themeLinks=plan.routingV2.industryHubs.map(x=>`- ${wiki(x.path)} — existing industry context`);
   const claimNotes=planClaimNotes(input,plan.planId,rawPath,sourceContent);
@@ -164,7 +198,7 @@ export function buildCanonicalSafeEditWorkflow(
     originalDocumentAccess:input.originalDocumentAccess,sourceLanguage:plan.sourceLanguage,
     sourceKind:plan.sourceKind,entityScope:plan.entityScope
   },input.researchReview,input.extractedText):captureOnly?[]:["typed_research_review_required"];
-  qualityIssues.push(...scopeIssues);
+  qualityIssues.push(...scopeIssues,...provenanceIssues);
   const sourceArchiveLines=sourceArchiveReviewLines(plan.sourceCapture.originalSourceArchive);
   const broker=input.brokerUpdate;
   const brokerLines=broker?[
@@ -187,6 +221,7 @@ export function buildCanonicalSafeEditWorkflow(
       `attributed_origin: ${yaml(input.attributedOrigin??input.publisher)}`,
       `original_document_access: ${yaml(input.originalDocumentAccess??"not_obtained")}`
     ]:[]),
+    ...(userSubmitted?[]:[`acquisition_channel: ${yaml(acquisition)}`,`document_coverage: ${yaml(coverage)}`]),
     `event_date: ${yaml(event)}`,`published_at: ${yaml(published)}`,
     `review_scope: ${yaml(plan.routingV2.reviewScope)}`,
     `content_types: ${JSON.stringify(unique(input.contentTypes??[]))}`,
@@ -200,7 +235,7 @@ export function buildCanonicalSafeEditWorkflow(
     (legacy?`# Investment Review — ${safeSubject(subject)} — ${plan.planId}`:`# บทวิเคราะห์การลงทุน — ${safeSubject(subject)} — ${plan.planId}`),"",
     `Source token: ${tag}`,"",
     (legacy?"## Source provenance":"## ที่มาของต้นฉบับ"),"",
-    `- Exact user-supplied source: ${wiki(rawPath)}`,
+    userSubmitted?`- Exact user-supplied source: ${wiki(rawPath)}`:`- Exact preserved source (acquisition: ${acquisition}; coverage: ${coverage}): ${wiki(rawPath)}`,
     `- Original publication/source authentication: not verified by this workflow`,
     ...sourceArchiveLines,
     `- Event date: ${event??"unknown"}; publication date: ${published??"unknown"}`,
@@ -324,7 +359,7 @@ export function buildCanonicalSafeEditWorkflow(
       (reviewHeld||claimSteps.some(s=>s.state==="hold_event_review"))&&claimHeld?"hold_source_event_review":claimHeld||historyBlocked?"hold_claim_persistence":captureOnly?(saved?"source_saved_analysis_pending":"pending_source_capture"):
       archiveState??(qualityHeld?"hold_research_quality":
       reviewHeld?"hold_source_event_review":saved?"saved_verified":"pending_safe_edit"),
-    sourceChat,steps,readyForNextNews:saved&&!reviewHeld&&!(captureOnly&&claimNotes.length)&&!qualityHeld&&!archiveHold&&!archiveState,analysisComplete:!captureOnly&&saved&&!reviewHeld&&!qualityHeld&&!archiveHold&&!archiveState,writesPerformedByPlanner:false,
+    sourceChat,steps,readyForNextNews:saved&&!reviewHeld&&!(captureOnly&&claimNotes.length)&&!qualityHeld&&!archiveHold&&!archiveState&&!provenanceIssues.length,analysisComplete:!captureOnly&&saved&&!reviewHeld&&!qualityHeld&&!archiveHold&&!archiveState&&!provenanceIssues.length,writesPerformedByPlanner:false,
     lineageIssues,claimInterpretationBoundary,qualityIssues,claimIssues:[...new Set(claimIssues)],archiveProvenanceStatus:plan.sourceCapture.archiveProvenanceStatus,
     archiveProvenanceReason:plan.sourceCapture.archiveProvenanceReason,
     protectedNotesTouched:false,

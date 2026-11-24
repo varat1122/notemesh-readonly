@@ -1,5 +1,5 @@
 import {macroHistoryScopeSchema,type MacroHistoryScope} from "./macro-source-scope";
-import {preservedSubmittedText} from "./research-decision-v2";
+import {preservedSubmittedText,preservedTextSection} from "./research-decision-v2";
 import {discoverStandaloneSources,type StandaloneSourceBinding,type StandaloneSourceScan} from "./standalone-source-context";
 import fs from "node:fs";
 import {createHash} from "node:crypto";
@@ -11,7 +11,7 @@ import { resolveNotePath, resolveFolderPath } from "./paths";
 import { splitFrontmatter, extractStructure } from "./markdown";
 import { inspectCanonicalKnowledgeMetadata, type SchemaInspection } from "./investment-knowledge-schema";
 import { hubIdentityKey, indexedHubAliases, indexedTopLevelHubs } from "./investment-routing-v2";
-import { receiptVersionAt, discoverCanonicalResearch, isCanonicalResearchPath, publicationWindow, type ContextBundle, type CanonicalResearchScan } from "./investment-research-context";
+import { receiptVersionAt, discoverCanonicalResearch, isCanonicalResearchPath, isReceiptedReviewPath, publicationWindow, type ContextBundle, type CanonicalResearchScan } from "./investment-research-context";
 
 export type Focus = "earnings" | "broker" | "tam" | "macro" | "thesis" | "general";
 export type Role = "rules" | "thesis" | "evidence_register" | "timeline" | "company" | "industry" | "source" | "research" | "archive";
@@ -274,6 +274,63 @@ function explicitMacroScope(path: string, topic: string, current?:Record<string,
     return fields.some(x=>typeof x==="string"&&x.trim().normalize("NFC").toUpperCase()===t);
   }catch{return false;}
 }
+/** Macro subjects named in the question (any 1..3 consecutive topic words) and
+ * verifiable in the index. Strong evidence: a declared country/entity/geography/
+ * region or source-bound macro_subject label, the subject of a canonical Macro
+ * Review title, or an existing Theme Hub title/alias (02_Industries_Themes). Title
+ * evidence (only when no strong subject exists): a Macro note title segment that
+ * starts with those words, so "Bureau" inside "China National Bureau of
+ * Statistics" is not a subject. Declaration/title only, never geographic truth. */
+function questionMacroSubjects(question:string,exclusion:string,excluded:readonly string[]):{scopes:string[];basis:"declared"|"title"|null;limited:boolean}{
+  const words=topicTerms(question);
+  if(!words.length)return {scopes:[],basis:null,limited:false};
+  const rows=db().prepare(`SELECT path,frontmatter FROM notes WHERE (path LIKE '10_Knowledge/Macro and Markets/%' OR
+    (json_valid(frontmatter)=1 AND (json_type(frontmatter,'$.country') IS NOT NULL OR json_type(frontmatter,'$.entity') IS NOT NULL OR
+    json_type(frontmatter,'$.geography') IS NOT NULL OR json_type(frontmatter,'$.region') IS NOT NULL OR json_type(frontmatter,'$.macro_subject') IS NOT NULL)))${exclusion} LIMIT 5001`)
+    .all(...excluded) as {path:string;frontmatter:string|null}[];
+  if(rows.length>5000)return {scopes:[],basis:null,limited:true};
+  const strong=new Map<string,string>(),titled=new Map<string,string>();
+  const key=(s:string)=>topicTerms(s).join(" ");
+  const add=(label:unknown)=>{if(typeof label!=="string"||!label.trim()||label.length>120)return;
+    const k=key(label);if(k)strong.set(k,label.trim().normalize("NFC").toUpperCase());};
+  for(const row of rows){
+    const base=row.path.split("/").at(-1)!.replace(/\.md$/,"");
+    add(/^10_Knowledge\/Macro and Markets\/Investment Review - (.+) - IN-[A-F0-9]{16}\.md$/.exec(row.path)?.[1]);
+    if(row.path.startsWith("10_Knowledge/Macro and Markets/"))for(const segment of base.split(" - ")){
+      // Structural labels, dates and receipt IDs name no subject.
+      if(/^(?:Investment Review|Claim Register|Investment Intake|\d{4}-\d{2}-\d{2}|IN-[A-F0-9]{16})$/i.test(segment.trim()))continue;
+      // Every leading 1..3 topic-word prefix of the segment, kept in its original
+      // spelling so the scope still matches the title literally.
+      const raw=segment.trim().split(/\s+/);let terms=0;
+      for(let i=0;i<raw.length&&terms<3;i++){
+        if(!topicTerms(raw[i]).length)continue;terms++;
+        const phrase=raw.slice(0,i+1).join(" "),k=key(phrase);
+        if(k&&!titled.has(k))titled.set(k,phrase.normalize("NFC").toUpperCase());
+      }
+    }
+    let fm:unknown;try{fm=row.frontmatter?JSON.parse(row.frontmatter):null;}catch{continue;}
+    if(!fm||typeof fm!=="object"||Array.isArray(fm))continue;
+    const f=fm as Record<string,unknown>;
+    for(const v of [f.country,f.entity,f.geography,f.region].flatMap(x=>Array.isArray(x)?x:[x]))add(v);
+    if(f.macro_subject&&typeof f.macro_subject==="object")add((f.macro_subject as {label?:unknown}).label);
+  }
+  // Existing Theme Hubs (top-level 02_Industries_Themes notes) and their aliases.
+  for(const hub of indexedTopLevelHubs("02_Industries_Themes/")){add(hub.title);for(const alias of indexedHubAliases(hub.frontmatter))add(alias);}
+  // Longest first, non-overlapping positions in the question.
+  const pick=(index:Map<string,string>)=>{
+    const taken=new Set<number>(),found:string[]=[];
+    for(let n=Math.min(3,words.length);n>=1;n--)for(let i=0;i+n<=words.length;i++){
+      const span=[...Array(n).keys()].map(j=>i+j);if(span.some(j=>taken.has(j)))continue;
+      const hit=index.get(words.slice(i,i+n).join(" "));
+      if(hit&&!found.includes(hit)){found.push(hit);span.forEach(j=>taken.add(j));}
+    }
+    return found;
+  };
+  const declared=pick(strong);
+  if(declared.length)return {scopes:declared,basis:"declared",limited:false};
+  const titles=pick(titled);
+  return {scopes:titles,basis:titles.length?"title":null,limited:false};
+}
 function indexedMetadata(path:string):Record<string,unknown>{
   const row=db().prepare("SELECT frontmatter FROM notes WHERE path = ?").get(path) as {frontmatter:string|null}|undefined;
   try{
@@ -436,6 +493,10 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
   const focus = req.focus||"general";
   const verifiedMacro=req.macroScope===undefined?undefined:macroHistoryScopeSchema.parse(req.macroScope);
   if(verifiedMacro&&(issuerScoped||focus!=="macro"||req.intakeId))throw Error("macro_history_scope_contract_hold");
+  // RQ-2: a country or agency is not a company. Under macro focus an issuer with no
+  // indexed Company Hub would otherwise create phantom Company/Thesis obligations.
+  if(focus==="macro"&&req.issuers?.length&&issuerResolution.some(r=>r.status==="unresolved"))
+    throw Error("macro_issuer_scope_hold: issuers must be indexed Company Hubs; pass a country or topic as industry or macroScope");
   const maxNotes = Math.min(16,Math.max(5,req.maxNotes??11));
   const budget = Math.min(18000,Math.max(4500,req.maxChars??12000));
   const pool = new Map<string,number>();
@@ -486,12 +547,21 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
     return result;
   };
   const macroScope = !issuerScoped && focus==="macro";
+  // RQ-2: with neither industry nor macroScope, the leading question words are a
+  // macro scope only if an indexed note declares that subject. A generic first
+  // word ("Bureau") must not become a title filter that admits another country's
+  // agency and drops the requested one; without a declared subject, HOLD instead.
+  const implicitMacro=macroScope&&!verifiedMacro&&req.industry===undefined;
+  const inferredMacro=implicitMacro?questionMacroSubjects(question,exclusion,excluded):null;
+  if(inferredMacro?.limited)limits.add("Macro subject index truncated; question text was not used as a macro scope.");
+  if(implicitMacro&&!inferredMacro?.scopes.length)limits.add("Macro subject not established from the question text: no declared subject, Theme Hub or Macro note title names it, so no macro evidence was admitted. Supply industry (country/topic) or macroScope for scoped macro retrieval.");
+  if(inferredMacro?.basis==="title")limits.add(`Macro scope ${inferredMacro.scopes.join(" / ")} taken from Macro note titles only (no declared country metadata); verify the subject before analysis.`);
   // Country/topic-only questions do not inherit company-thesis obligations.
   // Prefer the explicitly supplied scope over incidental query terms.
   // Explicit separators split scopes; preserve multiword names and do not
   // guess country aliases or split "and" inside a country's proper name.
-  const requestedMacroScopes=verifiedMacro?[verifiedMacro.key]:macroScope?[...new Set((req.industry??topicTerms(question)[0]??"").split(/[/;|,]/)
-    .map(x=>topicTerms(x).join(" ")).filter(Boolean))]:[];
+  const requestedMacroScopes=verifiedMacro?[verifiedMacro.key]:!macroScope?[]:implicitMacro?(inferredMacro?.scopes??[]):
+    [...new Set((req.industry??"").split(/[/;|,]/).map(x=>topicTerms(x).join(" ")).filter(Boolean))];
   const macroScopes=requestedMacroScopes.slice(0,4);
   const generatedSource=(p:string)=>p.startsWith("00_Inbox/ChatGPT/Investment Intake - ");
   const matchesMacroScope=(p:string,scope:string,current?:Record<string,unknown>)=>{
@@ -814,7 +884,7 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
     // discovery/coverage, not misreported as a required operational failure.
     // Canonical/receipt-bound paths and all existing required reads stay strict.
     if(historyCutoff){
-      if(!isCanonicalResearchPath(row.path)&&!/^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/.test(row.path)){
+      if(!isReceiptedReviewPath(row.path)&&!/^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/.test(row.path)){
         pitHold(row.path,"pit_receipt_unverified");continue;
       }
       if(pitReads>=16){pitHold(row.path,"pit_read_limit");continue;}
@@ -871,10 +941,9 @@ export function buildInvestmentContextPack(req: Input,judgePolicy?:JudgeSelectio
         // unselected discoveries (which must not spuriously change a witness).
         let sourceOffset=0,lineOffset=0;
         if(original!==null){
-          const marker="\n## User-supplied original language text\n\n",at=raw.indexOf(marker)+marker.length;
-          const open=/^(\x60{3,})text\n/.exec(raw.slice(at));
-          if(!open)throw Error("source_excerpt_offset_unavailable");
-          sourceOffset=at+open[0].length;
+          const section=preservedTextSection(raw);
+          if(!section)throw Error("source_excerpt_offset_unavailable");
+          sourceOffset=section.offset;
           if(raw.slice(sourceOffset,sourceOffset+original.length)!==original)throw Error("source_excerpt_offset_unavailable");
           lineOffset=raw.slice(0,sourceOffset).split("\n").length-1;
         }

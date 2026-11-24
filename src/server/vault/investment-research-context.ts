@@ -216,7 +216,7 @@ export function createReceipt(kind:"source_intake"|"canonical_review"|"structure
  * SELECT only, reusing receipt/actor/hash/audit/provenance verification. No old
  * bytes are reconstructed and no mtime or caller-declared known_at is trusted. */
 export function receiptVersionAt(path:string,content:string):{receiptId:string;versionReceiptId:string;knownAt:string;sha256:string}{
-  const kind=isCanonicalResearchPath(path)?"canonical_review":
+  const kind=isReceiptedReviewPath(path)?"canonical_review":
     /^00_Inbox\/ChatGPT\/Investment Intake - IN-[A-F0-9]{16}\.md$/.test(path)?"source_intake":null;
   if(!kind)throw Error("pit_receipt_unverified");
   const receiptId=createReceipt(kind,path,content);
@@ -271,6 +271,13 @@ function assemble(path:string,id:string,note:ReturnType<typeof indexedRead>,obse
   return result;
 }
 export function isCanonicalResearchPath(path:string):boolean{return path.startsWith(folder)&&/ - IN-[A-F0-9]{16}\.md$/.test(path);}
+// RQ-2: canonical Reviews are also written to Macro and Industry folders. Their
+// receipts are verified exactly like Company Reviews for PIT known-at; Company
+// discovery keeps isCanonicalResearchPath. No receipt still means HOLD.
+const RECEIPTED_REVIEW_FOLDERS=["10_Knowledge/Company Research/","10_Knowledge/Macro and Markets/","10_Knowledge/Industry and Concepts/"];
+export function isReceiptedReviewPath(path:string):boolean{
+  return RECEIPTED_REVIEW_FOLDERS.some(f=>path.startsWith(f+"Investment Review - "))&&/ - IN-[A-F0-9]{16}\.md$/.test(path);
+}
 
 /** Pre-cap journal admission, NOT physical readback. Match the indexed version
  * to bounded server after-images, then reuse the full receipt/chain verifier.

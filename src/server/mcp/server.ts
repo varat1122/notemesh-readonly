@@ -495,7 +495,8 @@ export function createMcpServer(access: McpAccess, req: RequestInfo = {}): McpSe
         researchLineage:researchLineageSchema,
         sourceChannel:z.string().max(80).optional().describe("Actual attributed source channel; repost is not an authenticated original"),
         attributedOrigin:z.string().max(160).optional().describe("Attributed origin, not independently verified"),
-        originalDocumentAccess:z.enum(["full_original","excerpt_only","not_obtained"]).optional().describe("Actual reading scope; never claim access to unread original pages"),
+        originalDocumentAccess:z.enum(["full_original","excerpt_only","text_transcription","not_obtained"]).optional().describe("Actual reading scope; never claim access to unread original pages"),
+        acquisitionChannel:z.enum(["user_submitted","assistant_retrieved","connected_provider","historical_archive","unknown"]).optional().describe("How this text reached the analyst, separate from sourceKind genre: user_submitted (pasted/uploaded by the user; also the default when omitted), assistant_retrieved (the assistant read the public page itself), connected_provider, historical_archive or unknown. Not authenticity or primary-source verification; unknown holds the Review"),
         captureOnly:z.boolean().optional().describe("M5.3 Feed Only: with sourceChat, prepare a source-only Safe Edit recipe. The Research Review remains pending. Must not be combined with completedAnalysis or researchReview"),
         focus:z.enum(["earnings","broker","tam","macro","thesis","general"]).optional().describe("Historical context relevance; does not verify issuer claims")
       }
