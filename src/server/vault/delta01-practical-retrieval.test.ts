@@ -89,6 +89,36 @@ describe("C1 closed United States identity aliases",()=>{
     const vnPack=await macro("Vietnam");
     expect(vnPack.items.find(i=>i.path===vn)?.matchedMacroScopes).toEqual(["VIETNAM"]);
   });
+  it("conflicting, multi-country or malformed declarations override a matching US alias, title or entity",T,async()=>{
+    await usCore();
+    const fm=(meta:string)=>`---\nsource_type: primary\nverification: not_reverified\n${meta}---\n`;
+    const conflicted=[
+      await note(`${M}2026-10-11 - US flash PMI note A.md`,fm("country: US\ngeography: China\n")+"# A\nUS flash PMI growth (synthetic)."),
+      await note(`${M}2026-10-12 - Flash PMI note B.md`,fm("country: China\nentity: United States\n")+"# B\nUS flash PMI growth (synthetic)."),
+      await note(`${M}2026-10-13 - US flash PMI note C.md`,fm("country: [US, China]\n")+"# C\nUS flash PMI growth (synthetic)."),
+      await note(`${M}2026-10-14 - US flash PMI note D.md`,fm("country: United States\nregion: Global\n")+"# D\nUS flash PMI growth (synthetic)."),
+      await note(`${M}2026-10-15 - US flash PMI note E.md`,fm('country: ""\n')+"# E\nUS flash PMI growth (synthetic)."),
+      await note(`${M}2026-10-16 - US flash PMI note F.md`,fm("geography:\n  name: United States\n")+"# F\nUS flash PMI growth (synthetic)."),
+    ];
+    const consistent=[
+      await note(`${M}2026-10-17 - Flash PMI consistent G.md`,fm("country: US\ngeography: United States\n")+"# G\nUS flash PMI growth (synthetic)."),
+      await note(`${M}2026-10-18 - Flash PMI consistent H.md`,fm("country: [US, U.S.]\n")+"# H\nUS flash PMI growth (synthetic)."),
+      await note(`${M}2026-10-19 - Flash PMI entity I.md`,fm("entity: United States\n")+"# I\nUS flash PMI growth (synthetic)."),
+    ];
+    const p=await macro("United States");
+    for(const x of conflicted){
+      expect(selected(p)).not.toContain(x);
+      expect(p.macroCoverage[0].subjectEvidence.paths).not.toContain(x);
+      // An attributed conflict is not reclassified as a country-unattributed pointer.
+      expect(p.researchFallback.candidates.map(c=>c.path)).not.toContain(x);
+    }
+    for(const x of consistent)expect(p.items.find(i=>i.path===x)?.matchedMacroScopes).toEqual(["UNITED STATES"]);
+  });
+  it("the conflict precedence is confined to the identity-alias path; a non-US scope keeps its contract",T,async()=>{
+    const multi=await note(`${M}2026-10-20 - Mekong exports note.md`,"---\ncountry: [Vietnam, Thailand]\n---\n# Mekong\nVietnam exports (synthetic).");
+    const p=await pack({question:"Vietnam exports",industry:"Vietnam",focus:"macro"});
+    expect(p.items.find(i=>i.path===multi)?.matchedMacroScopes).toEqual(["VIETNAM"]);
+  });
   it("a source-bound macroScope keeps the exact literal contract (no aliases)",T,async()=>{
     const c=await usCore();
     const p=await pack({question:Q,focus:"macro",macroScope:{version:"RI001-MACRO-HISTORY-1",key:"UNITED STATES",label:"United States"}});

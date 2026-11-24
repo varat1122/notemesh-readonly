@@ -302,6 +302,16 @@ function explicitMacroScope(path: string, topic: string, current?:Record<string,
   try {
     const fm=current??indexedMetadata(path);
     const same=(x:unknown)=>typeof x==="string"&&[t,...forms.map(upperNfc)].includes(upperNfc(x));
+    if(forms.length){
+      // C1 identity-alias path only (closed aliases, e.g. UNITED STATES). Any
+      // declared country/geography/region value that is not one of the scope's
+      // forms (another country, a multi-country list, Global, empty or non-string)
+      // takes precedence over a matching alias, title or entity: fail closed.
+      // Consistent declarations remain eligible.
+      const geography=declaredValues(fm,GEOGRAPHY_FIELDS);
+      if(geography.some(x=>!same(x)))return false;
+      return titled||geography.length>0||declaredValues(fm,["entity"]).some(same);
+    }
     if(declaredValues(fm,["country","entity","geography","region"]).some(same))return true;
     // C1: a title match yields to explicit declared geography. Any declared
     // country/geography/region naming something else (or not a plain label)
