@@ -10,10 +10,10 @@ import {readNote} from "./notes";
 import {resolveNotePath} from "./paths";
 import {canonicalHttpSourceUrl} from "../source-url";
 import {splitFrontmatter} from "./markdown";
-import {indexedRead,createReceipt} from "./investment-research-context";
+import {indexedRead,createReceipt,receiptProvenance} from "./investment-research-context";
 import {claimSourceAnchorIssues} from "./claim-value-anchor";
 import type {WritebackInput} from "./investment-writeback-router";
-import {estimateSchema,accountingBasisSchema,dimensionKey,hasClaimDimensions,estimateIdentityComplete,omitEmptyDimensions} from "./claim-dimensions";
+import {estimateSchema,accountingBasisSchema,observationSchema,dimensionKey,hasClaimDimensions,hasObservation,observationKey,estimateIdentityComplete,omitEmptyDimensions} from "./claim-dimensions";
 
 const text=(max:number)=>z.string().trim().min(1).max(max);
 export const evidenceClassSchema=z.enum(["reported_actual","management_guidance","analyst_estimate","unverified_claim"]);
@@ -22,8 +22,9 @@ export const intakeClaimsSchema=z.array(z.object({
   evidenceClass:evidenceClassSchema,statement:text(2500),
   sourceLocator:text(500),sourceExcerpt:text(3000),qualification:text(200).optional(),
   estimate:estimateSchema.optional(),accountingBasis:accountingBasisSchema.optional(),
+  observation:observationSchema.optional(),
   verification:z.literal("unverified").default("unverified")
-}).strict()).min(1).max(8).optional().describe("Up to 8 source-anchored claim observations, persisted through existing Safe Edit only. Actual and management guidance are different identities. sourceExcerpt must occur verbatim in extractedText; values/qualifications must appear literally. Statements and evidence-class labels are caller-attributed/unverified; literal excerpt anchoring does not validate semantic fidelity, issuer authenticity or investment conclusions. Semantic fidelity requires a reviewer. This does not issue primary receipts or relationship edges. No-URL observations use RI001-3 received-text/receipt bindings, not an invented publisher URL. Source receipt references in preview are requirements, not issued receipts. Do not combine with legacy singular claim.");
+}).strict()).min(1).max(8).optional().describe("Up to 8 source-anchored claim observations, persisted through existing Safe Edit only. Optional observation adds a versioned series/vintage identity and a server-verified same-instance prior-claim lineage (revision_of/confirmation_of); it is caller-attributed, never a verified fact or a Review/event authorization. Actual and management guidance are different identities. sourceExcerpt must occur verbatim in extractedText; values/qualifications must appear literally. Statements and evidence-class labels are caller-attributed/unverified; literal excerpt anchoring does not validate semantic fidelity, issuer authenticity or investment conclusions. Semantic fidelity requires a reviewer. This does not issue primary receipts or relationship edges. No-URL observations use RI001-3 received-text/receipt bindings, not an invented publisher URL. Source receipt references in preview are requirements, not issued receipts. Do not combine with legacy singular claim.");
 const date=z.string().datetime({offset:true}).nullable();
 export const researchLineageSchema=z.object({knowledgeCutoffAsOf:date}).strict().optional()
   .describe("Caller-declared historical knowledge cutoff, nullable when unknown. Review creation time is runtime-generated and retained on an identical prepared retry. Caller timestamps/model-version assertions are not accepted; the originating LLM version is not exposed by this runtime.");
@@ -35,10 +36,17 @@ const domainSchema=z.enum(["company","industry","macro","asset"]);
 type ClaimDomain=z.infer<typeof domainSchema>;
 const claimFolder=(domain:ClaimDomain)=>domain==="company"?"Company Research":domain==="macro"?"Macro and Markets":"Industry and Concepts";
 export const claimPath=(id:string,domain:ClaimDomain="company")=>`10_Knowledge/${claimFolder(domain)}/Investment Claim - ${id}.md`;
-const v2=(c:IntakeClaim,domain:ClaimDomain)=>hasClaimDimensions(c)||domain!=="company";
+// An observation always uses the dimension-bearing persistence (never RI001-1),
+// also for a company claim with no estimate/accounting basis.
+const v2=(c:IntakeClaim,domain:ClaimDomain)=>hasClaimDimensions(c)||domain!=="company"||hasObservation(c);
+/** B1 marker distinguishing observation-backed notes. The claim persistence
+ * version itself (RI001-2 URL-backed / RI001-3 received) keeps its meaning. */
+export const CLAIM_OBSERVATION_VERSION="RI001-OBS-1";
 const idFor=(intakeId:string,c:IntakeClaim,domain:ClaimDomain="company",received=false)=>{
   const legacy=[intakeId,norm(c.entity),norm(c.metric),norm(c.period),norm(c.unit),c.evidenceClass];
-  return "ICL-"+sha(JSON.stringify(received?["RI001-3",domain,...legacy,dimensionKey(c)]:v2(c,domain)?["RI001-2",domain,...legacy,dimensionKey(c)]:legacy)).slice(0,32).toUpperCase();
+  // Observation identity is appended ONLY when present: RI001-1/2/3 IDs without it are unchanged.
+  const observed=c.observation?[CLAIM_OBSERVATION_VERSION,observationKey(c.observation)]:[];
+  return "ICL-"+sha(JSON.stringify(received?["RI001-3",domain,...legacy,dimensionKey(c),...observed]:v2(c,domain)?["RI001-2",domain,...legacy,dimensionKey(c),...observed]:legacy)).slice(0,32).toUpperCase();
 };
 const fence=(value:string)=>{const ticks="`".repeat(Math.max(2,...(value.match(/`+/g)??[]).map(s=>s.length))+1);return `${ticks}text\n${value}\n${ticks}`;};
 /** Public read-time boundary, deliberately not added to immutable claim bytes. */
@@ -113,11 +121,13 @@ export function planClaimNotes(input:WritebackInput,intakeId:string,sourcePath:s
     const c=omitEmptyDimensions(raw);
     if(c.estimate&&c.evidenceClass!=="analyst_estimate")throw Error("estimate_role_requires_analyst_estimate_class");
     if(!input.entities.some(e=>norm(e)===norm(c.entity)))throw Error("claim_entity_outside_source_scope");
+    const lineage=c.observation?verifyObservation(c,intakeId,domain):null;
     const id=idFor(intakeId,c,domain,received),path=claimPath(id,domain),issues:string[]=[];
     // At most three historical all-unknown aliases. Never migrate/rebind an
     // already written RI001-2 identity or create a duplicate beside it.
-    const estimates=c.estimate?[c.estimate]:[undefined,{role:"unspecified" as const,provider:null,forecastVintage:null}];
-    const bases=c.accountingBasis?[c.accountingBasis]:[undefined,{standard:null,shareBasis:null,scope:null,definition:null}];
+    // (Observation-backed identities are new; they have no historical aliases.)
+    const estimates=c.observation?[c.estimate]:c.estimate?[c.estimate]:[undefined,{role:"unspecified" as const,provider:null,forecastVintage:null}];
+    const bases=c.observation?[c.accountingBasis]:c.accountingBasis?[c.accountingBasis]:[undefined,{standard:null,shareBasis:null,scope:null,definition:null}];
     for(const estimate of estimates)for(const accountingBasis of bases){
       const oldPath=claimPath(idFor(intakeId,{...c,estimate,accountingBasis},domain,received),domain);
       if(oldPath===path)continue;
@@ -134,8 +144,10 @@ export function planClaimNotes(input:WritebackInput,intakeId:string,sourcePath:s
       source_path:sourcePath,verification:"unverified",origin_independence_increment:0,
       ...(received?{origin:"received_user_source",original_publisher_url:null,comparator_eligible:false,source_binding:sourceBinding}:{}),
       ...(v2(c,domain)||received?{estimate:c.estimate??null,accounting_basis:c.accountingBasis??null,
-        identity_dimensions_status:c.evidenceClass==="analyst_estimate"&&!estimateIdentityComplete(c)?"unresolved":"caller_declared_not_verified"}: {})};
-    const fm={type:"investment_structured_claim_register",claim_persistence_version:received?"RI001-3":v2(c,domain)?"RI001-2":"RI001-1",domain,entity:c.entity,
+        identity_dimensions_status:c.evidenceClass==="analyst_estimate"&&!estimateIdentityComplete(c)?"unresolved":"caller_declared_not_verified"}: {}),
+      ...(c.observation?{observation:c.observation,observation_lineage:lineage}:{})};
+    const fm={type:"investment_structured_claim_register",claim_persistence_version:received?"RI001-3":v2(c,domain)?"RI001-2":"RI001-1",
+      ...(c.observation?{claim_observation_version:CLAIM_OBSERVATION_VERSION}:{}),domain,entity:c.entity,
       intake_id:intakeId,source_type:"attributed",verification:"unverified",original_source:url,
       original_source_path:sourcePath,source_text_sha256:sha(input.extractedText),
       ...(received?{origin:"received_user_source",original_publisher_url:null}:{}),
@@ -150,6 +162,50 @@ export function planClaimNotes(input:WritebackInput,intakeId:string,sourcePath:s
     records.set(id,{id,path,content,issues});
   }
   return [...records.values()].sort((a,b)=>a.id.localeCompare(b.id));
+}
+
+/** B1: declared observation rules plus SAME-instance prior-claim lineage. SELECT-only;
+ * the prior must already be a receipt-, index- and link-verified observation claim
+ * from a different intake with an identical comparable identity. Fails closed.
+ * Lineage records what the server verified; it is not a verified fact. */
+function verifyObservation(c:IntakeClaim,intakeId:string,domain:ClaimDomain){
+  const o=c.observation!;
+  const hold=(reason:string):never=>{throw Error("observation_"+reason);};
+  if(c.evidenceClass!=="reported_actual")hold("requires_reported_actual");
+  if(o.releaseVintage>new Date().toISOString().slice(0,10))hold("release_vintage_in_future");
+  if(o.vintageStatus==="first_release"&&o.prior)hold("first_release_has_no_prior");
+  // prior is optional: without it no lineage is claimed (observation_lineage null).
+  if(o.vintageStatus==="revised"&&o.prior&&o.prior.relation!=="revision_of")hold("revised_requires_prior_revision_of");
+  if(o.vintageStatus==="unchanged_repeat"&&o.prior&&o.prior.relation!=="confirmation_of")hold("unchanged_repeat_requires_prior_confirmation_of");
+  if(!o.prior)return null;
+  const priorPath=claimPath(o.prior.claimId,domain);
+  let prior:ReturnType<typeof readPersistedClaim>,priorInput:IntakeClaim;
+  try{prior=readPersistedClaim(priorPath);priorInput=claimMetadata(priorPath,splitFrontmatter(prior.readbackText).data).input;}
+  catch{return hold("prior_claim_unverified");}
+  if(prior.intakeId===intakeId)hold("prior_same_intake");
+  const p=priorInput.observation;
+  if(!p)hold("prior_not_observation");
+  if(norm(priorInput.entity)!==norm(c.entity)||norm(priorInput.metric)!==norm(c.metric)||norm(priorInput.period)!==norm(c.period)||
+    norm(priorInput.unit)!==norm(c.unit)||priorInput.evidenceClass!==c.evidenceClass||dimensionKey(priorInput)!==dimensionKey(c)||
+    (p!.seriesId===null?null:norm(p!.seriesId))!==(o.seriesId===null?null:norm(o.seriesId))||p!.seasonalAdjustment!==o.seasonalAdjustment)hold("prior_identity_mismatch");
+  if(!(p!.releaseVintage<o.releaseVintage))hold("prior_vintage_not_earlier");
+  const sameValue=norm(priorInput.value)===norm(c.value);
+  if(o.prior.relation==="revision_of"&&sameValue)hold("revision_value_unchanged");
+  if(o.prior.relation==="confirmation_of"&&!sameValue)hold("confirmation_value_differs");
+  // Same-instance server witness for BOTH the prior claim and its Source.
+  let tiers:string[];
+  try{tiers=[receiptProvenance("structured_claim",priorPath,prior.readbackText).tier,
+    receiptProvenance("source_intake",prior.sourcePath,indexedRead(prior.sourcePath).raw).tier];}
+  catch{return hold("prior_receipt_unverified");}
+  if(tiers.some(t=>t!=="server_witnessed"))hold("prior_receipt_not_server_witnessed");
+  // Known-at comes from this instance's journal only, never from the caller.
+  const event=db().prepare("SELECT at FROM safe_edit_events WHERE operation_id=? AND event='written' LIMIT 1").get(prior.receiptKey) as {at:string}|undefined;
+  const knownAt=event?Date.parse(event.at):NaN;
+  if(!Number.isFinite(knownAt)||knownAt>Date.now())hold("prior_known_at_unverified");
+  return {prior_claim_id:o.prior.claimId,relation:o.prior.relation,prior_intake_id:prior.intakeId,
+    prior_receipt_key:prior.receiptKey,prior_source_receipt_key:prior.sourceReceiptKey,
+    prior_release_vintage:p!.releaseVintage,prior_known_at:new Date(knownAt).toISOString(),
+    status:"server_verified_same_instance_receipt_not_fact"};
 }
 
 /** Reserved generated identity is independent of caller-declared type/version.
@@ -170,10 +226,23 @@ function claimMetadata(path:string,fm:Record<string,unknown>){
   const domain=domainSchema.parse(fm.domain);
   const c=claims[0],intakeId=String(fm.intake_id),sourcePath=`00_Inbox/ChatGPT/Investment Intake - ${intakeId}.md`;
   if(!/^IN-[A-F0-9]{16}$/.test(intakeId)||fm.original_source_path!==sourcePath||c.source_path!==sourcePath||c.verification!=="unverified"||fm.verification!=="unverified")throw Error("claim_source_binding_invalid");
+  // B1: the observation marker and the row's observation must appear together,
+  // only on dimension-bearing versions. Absent marker => legacy read, unchanged.
+  const observed=Object.hasOwn(fm,"claim_observation_version");
+  if(observed&&(fm.claim_observation_version!==CLAIM_OBSERVATION_VERSION||!["RI001-2","RI001-3"].includes(String(fm.claim_persistence_version))||c.observation===undefined)||
+    (!observed&&(c.observation!==undefined||c.observation_lineage!==undefined)))throw Error("claim_observation_version_invalid");
   const input=intakeClaimsSchema.parse([{entity:c.entity,metric:c.metric,value:c.value,unit:c.unit,period:c.period,
     evidenceClass:c.evidence_class,statement:c.statement,sourceLocator:c.source_locator,sourceExcerpt:c.source_excerpt,
     qualification:c.qualification??undefined,verification:c.verification,
-    ...(["RI001-2","RI001-3"].includes(String(fm.claim_persistence_version))?{estimate:c.estimate??undefined,accountingBasis:c.accounting_basis??undefined}:{})}])![0];
+    ...(["RI001-2","RI001-3"].includes(String(fm.claim_persistence_version))?{estimate:c.estimate??undefined,accountingBasis:c.accounting_basis??undefined}:{}),
+    ...(observed?{observation:c.observation}:{})}])![0];
+  if(observed){
+    const o=input.observation!,l=c.observation_lineage as Record<string,unknown>|null|undefined;
+    const lineageOk=o.prior?!!l&&typeof l==="object"&&l.prior_claim_id===o.prior.claimId&&l.relation===o.prior.relation&&
+      typeof l.prior_receipt_key==="string"&&typeof l.prior_source_receipt_key==="string"&&typeof l.prior_known_at==="string"&&
+      typeof l.prior_intake_id==="string"&&l.prior_intake_id!==String(fm.intake_id)&&l.status==="server_verified_same_instance_receipt_not_fact":l===null;
+    if(!lineageOk||input.evidenceClass!=="reported_actual")throw Error("claim_observation_lineage_invalid");
+  }
   const received=fm.claim_persistence_version==="RI001-3";
   if(!received&&(fm.claim_persistence_version==="RI001-2")!==v2(input,domain)||
     (fm.claim_persistence_version==="RI001-1"&&(c.estimate!==undefined||c.accounting_basis!==undefined))||
@@ -196,6 +265,13 @@ export function readPersistedClaim(path:string){
   if(!original||claimSourceAnchorIssues(original,input.sourceExcerpt,input.value,input.qualification).length)throw Error("claim_source_anchor_invalid");
   if(!db().prepare("SELECT 1 FROM notes_fts WHERE path=? AND notes_fts MATCH ?").get(sourcePath,"InvestmentIntake"+intakeId.slice(3)))throw Error("claim_source_index_missing");
   const receiptKey=createReceipt("structured_claim",path,note.raw),sourceReceiptKey=createReceipt("source_intake",sourcePath,source.raw);
+  const lineage=c.observation_lineage as {prior_claim_id:string;prior_receipt_key:string}|null|undefined;
+  if(lineage){
+    // One hop: the recorded prior must still be the exact receipted bytes it was.
+    try{const priorPath=claimPath(lineage.prior_claim_id,domain),prior=indexedRead(priorPath);
+      if(createReceipt("structured_claim",priorPath,prior.raw)!==lineage.prior_receipt_key)throw Error("changed");
+    }catch{throw Error("claim_observation_lineage_invalid");}
+  }
   if(!db().prepare("SELECT 1 FROM notes_fts WHERE path=? AND notes_fts MATCH ?").get(path,`"${c.claim_id}"`)||
     !db().prepare("SELECT 1 FROM links WHERE source_path=? AND resolved_path=?").get(path,sourcePath))throw Error("claim_index_link_missing");
   const inbound=db().prepare(`SELECT DISTINCT source_path FROM links WHERE resolved_path=?

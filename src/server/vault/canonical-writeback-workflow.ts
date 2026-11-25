@@ -14,6 +14,7 @@ import {planClaimNotes,lineageMetadata,readPersistedClaim,claimInterpretationBou
 import {splitFrontmatter} from "./markdown";
 import {draftMetadata,researchTrust,type ResearchTrust} from "./research-state";
 import {revalidateHistoricalArchive} from "./canonical-archive-revalidation";
+import {MACRO_SOURCE_POLICY_V2} from "./macro-source-scope";
 
 const sha=(s:string)=>createHash("sha256").update(s,"utf8").digest("hex");
 const yaml=(s:string|null|undefined)=>s==null?"null":JSON.stringify(s);
@@ -93,6 +94,18 @@ function toStep(kind:CanonicalSafeEditStep["kind"],path:string,content:string,ta
       change:{kind:"create",content}}:null};
 }
 
+/** B1 / MACRO_SOURCE_POLICY_V2 only: the sender's country declaration, rendered
+ * openly in the Source body OUTSIDE the preserved original-text fence so it is
+ * searchable and covered by the whole-note receipt, yet never presented as
+ * publisher-authored text or geographic/primary verification. Non-macro and v1
+ * Source notes get no extra lines and stay byte-identical. */
+function senderDeclarationLines(plan:WritebackPlan):string[]{
+  const b=plan.macroScope?.binding;
+  if(!b||b.version!==MACRO_SOURCE_POLICY_V2)return [];
+  return ["## Sender declaration (not publisher-authored)","",
+    `- Macro subject (sender-declared): ${b.label}`,
+    "- Authority: sender_declared_not_publisher_authored. This declaration is not part of the received text above, was not written by the publisher, and is not geographic or primary verification.",""];
+}
 export function buildCanonicalSafeEditWorkflow(
   input:WritebackInput,plan:WritebackPlan
 ):CanonicalSafeEditWorkflow{
@@ -162,7 +175,7 @@ export function buildCanonicalSafeEditWorkflow(
     originalFence(input.extractedText),
     "## Evidence boundary","",
     "Only the SHA-256 of the preserved text is bound by this receipt. Publisher authenticity, original document bytes and claim truth were not independently verified.",""
-  ]).join("\n");
+  ]).concat(senderDeclarationLines(plan)).join("\n");
   // M5.6: a proven prior Source receipt is immutable. Do not regenerate it
   // with today's publisher label, sourceChat or classification and then call
   // the changed whole-note hash a conflict; link its exact readback bytes.

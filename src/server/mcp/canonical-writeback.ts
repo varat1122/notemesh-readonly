@@ -24,7 +24,12 @@ import {sourceEventSubmissionSchema} from "../vault/source-event-contract";
 import {sourceEventRequired,canonicalEventProposal,evaluateSourceEvent,enrollSourceEvent,assertEnrolledSourceEvent,withdrawSourceEvent,type EventAdmission} from "../safe-edit/source-event-admission";
 import {recordPilotAssessment,pilotRestriction,pilotAdmissionSummary} from "../safe-edit/c1-pilot-review";
 
-import {macroSubjectSchema} from "../vault/macro-source-scope";
+import {macroSubjectInputSchema,type macroSubjectSchema} from "../vault/macro-source-scope";
+// B1: runtime validation is the strict versioned v1|v2 union (advertised to MCP
+// clients as such) and the router re-validates it as unknown. The static type
+// stays the unchanged v1 WritebackInput shape because existing typed callers and
+// tests depend on it; no field is read through this type, so nothing is loosened.
+const macroSubjectWire=macroSubjectInputSchema as unknown as typeof macroSubjectSchema;
 const nonempty = z.string().min(1);
 const canonicalBaseSchema = z.object({
   domain: z.enum(["company", "industry", "macro", "asset"]),
@@ -36,7 +41,7 @@ const canonicalBaseSchema = z.object({
   extractedText: nonempty.max(12000),
   sourceChat: nonempty.max(120),
   appearance:appearanceSchema.optional(),
-  macroSubject:macroSubjectSchema.optional().describe("Opt-in declared Macro subject only. Exact unique first-line Macro subject: LABEL and received-text SHA/span required; not geographic truth or a receipt."),
+  macroSubject:macroSubjectWire.optional().describe("Opt-in declared Macro country subject; never geographic truth, primary verification or a receipt. Preferred: {version:\"RI001-MACRO-SOURCE-SCOPE-2\",kind:\"country\",label} — a separate sender declaration stored outside the received text and shown as not publisher-authored. NEVER insert a \"Macro subject:\" line or any other header into publisher/official text: extractedText must stay the faithful original. Legacy v1 (RI001-MACRO-SOURCE-SCOPE-1, exact first line + SHA/span anchor) applies only when that line genuinely is the first line of the received text."),
   existingIntakeId:z.string().regex(/^IN-[A-F0-9]{16}$/).optional(),
   existingReview:existingReviewSelectionSchema.optional(),
   completedAnalysis: nonempty.max(30000).optional(),
