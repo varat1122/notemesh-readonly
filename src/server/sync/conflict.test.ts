@@ -414,3 +414,90 @@ describe("D1 command-specific merge-tree outcome", () => {
     expect(read(server, "Daily/2026-08-03.md")).toBe(before);
   });
 });
+
+// H1: only a verified outcome drives conflict handling. A refusal before
+// launch, an uncertain result or unusable paths are a HOLD, never a conflict
+// with zero paths, and the resolver refuses to reset without usable paths.
+describe("H1 merge probe outcome classes", () => {
+  async function diverge(rel = "Daily/2026-08-03.md") {
+    write(server, rel, "# Today\n\n- [ ] ASSISTANT\n");
+    commitAll(server, "assistant fixture");
+    devicePushes(rel, "# Today\n\n- [ ] DEVICE\n", "device fixture");
+  }
+  function faultGit(body: string) {
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const bin = path.join(root, "fault-bin"); fs.mkdirSync(bin);
+    const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+    fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh\nif [ "$1" = merge-tree ]; then\n${body.replaceAll("REAL_GIT", quote(realGit))}\nfi\nexec ${quote(realGit)} "$@"\n`, { mode: 0o755 });
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+  }
+  const state = () => ({ head: git(server, "rev-parse", "HEAD").trim(), index: fs.readFileSync(path.join(server, ".git/index")).toString("base64"),
+    note: read(server, "Daily/2026-08-03.md"), files: git(server, "ls-files").trim() });
+
+  it("CLEAN and CONFLICT carry no hold", async () => {
+    devicePushes("Projects/Alpha.md", "# Alpha\n\nline one\nline two\nline three\nDEVICE\n", "device");
+    expect(await probeMerge(server, "HEAD", "origin/main")).toEqual({ clean: true, paths: [] });
+    await diverge();
+    expect(await probeMerge(server, "HEAD", "origin/main")).toEqual({ clean: false, paths: ["Daily/2026-08-03.md"] });
+  });
+
+  it.each([
+    ["a configured external merge driver (not_launched)", () => git(server, "config", "merge.fixture.driver", "touch driver-must-not-run"), "not_launched"],
+    ["the snapshot budget (not_launched)", () => { write(server, "sparse-fixture", ""); fs.truncateSync(path.join(server, "sparse-fixture"), 128 * 1024 * 1024 + 1); }, "not_launched"],
+    // DRAINING: the config read under the fence is refused, so the probe holds before launch.
+    ["the maintenance barrier (not_launched)", async () => (await import("../maintenance")).beginMaintenance(), "git_merge_probe_config_hold"],
+    ["a malformed status1 answer (partial_or_unknown)", () => faultGit("printf 'not-a-tree\\nDaily/2026-08-03.md\\n'; exit 1"), "partial_or_unknown"],
+    ["a non-conflict merge error (partial_or_unknown)", () => faultGit("exit 2"), "partial_or_unknown"],
+  ])("%s is a HOLD with no paths, not a conflict", async (_, setup, outcome) => {
+    await diverge();
+    await setup();
+    const before = state();
+    const probe = await probeMerge(server, "HEAD", "origin/main");
+    expect(probe).toMatchObject({ clean: false, paths: [] });
+    expect(probe.hold).toContain(outcome);
+    expect(state()).toEqual(before);
+    expect(fs.existsSync(path.join(server, "driver-must-not-run"))).toBe(false);
+  });
+
+  it.each([
+    ["a path outside the vault", "../escape.md"],
+    ["a .git path", ".git/config"],
+    ["an absolute path", "/etc/passwd"],
+    ["a quoted path", '"\\340\\270\\232.md"'],
+  ])("a verified conflict that names %s is a HOLD", async (_, bad) => {
+    await diverge();
+    faultGit(`tree=$(REAL_GIT "$@" | head -n 1); printf '%s\\n%s\\n' "$tree" '${bad.replaceAll("'", "'\\''")}'; exit 1`);
+    const probe = await probeMerge(server, "HEAD", "origin/main");
+    expect(probe).toMatchObject({ clean: false, paths: [] });
+    expect(probe.hold).toContain("invalid_paths");
+  });
+
+  it("a real conflict on a quoted (non-ASCII) name is a HOLD, not a conflict without our copy", async () => {
+    await diverge("บันทึก.md");
+    const probe = await probeMerge(server, "HEAD", "origin/main");
+    expect(probe).toMatchObject({ clean: false, paths: [] });
+    expect(probe.hold).toContain("invalid_paths");
+  });
+
+  it.each([
+    ["no paths", [] as string[]],
+    ["an unusable path", ["../escape.md"]],
+  ])("resolveConflict with %s refuses before any reset", async (_, paths) => {
+    await diverge();
+    const before = state();
+    const out = await resolveConflict({ dir: server, remoteRef: "origin/main", paths });
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/refused/);
+    expect(state()).toEqual(before);
+    expect(git(server, "log", "--format=%s", "-1").trim()).toBe("assistant fixture");
+  });
+
+  it("resolveConflict refuses before reset when our side cannot be read", async () => {
+    await diverge();
+    (await import("../maintenance")).beginMaintenance();
+    const before = state();
+    const out = await resolveConflict({ dir: server, remoteRef: "origin/main", paths: ["Daily/2026-08-03.md"] });
+    expect(out.ok).toBe(false);
+    expect(state()).toEqual(before);
+  });
+});
