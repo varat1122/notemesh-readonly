@@ -302,3 +302,123 @@ describe("modification times", () => {
     expect(Date.parse(old.modified)).toBeGreaterThanOrEqual(before - 1000);
   });
 });
+
+// H1: a merge probe that does not prove a clean merge or an observed conflict
+// is a HOLD. The cycle must stop before reset, merge, push, a conflict record
+// or a notice; the fetch and the commit of pending work before the probe are
+// the only expected effects.
+describe("a merge probe HOLD, end to end", () => {
+  const globals = ["notemesh.maintenance.registry.v1", "notemesh.d1.native-interlock.v1"];
+  const clearGlobals = () => { for (const name of globals) delete (globalThis as Record<symbol, unknown>)[Symbol.for(name)]; };
+  beforeEach(clearGlobals);
+  afterEach(() => { vi.unstubAllEnvs(); clearGlobals(); });
+
+  /** Local and remote both moved since the last sync. */
+  async function diverged(rel = "Daily/2026-08-03.md") {
+    const { backend, vault } = await configuredBackend();
+    write(vault, rel, "# Today\n\n- [ ] task one\n- [ ] ASSISTANT\n");
+    commitAll(vault, "assistant: append");
+    write(device, rel, "# Today\n\n- [ ] task one\n- [ ] DEVICE\n");
+    commitAll(device, "device: append");
+    git(device, "push", "-q");
+    return { backend, vault };
+  }
+  function files(dir: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    const walk = (d: string) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        if (e.name === ".git") continue;
+        const abs = path.join(d, e.name);
+        if (e.isDirectory()) walk(abs);
+        else out[path.relative(dir, abs)] = fs.statSync(abs).size > 1024 * 1024
+          ? `size:${fs.statSync(abs).size}` : fs.readFileSync(abs).toString("base64");
+      }
+    };
+    walk(dir);
+    return out;
+  }
+  function snapshot(vault: string) {
+    return {
+      head: git(vault, "rev-parse", "refs/heads/main").trim(),
+      index: fs.readFileSync(path.join(vault, ".git/index")).toString("base64"),
+      files: files(vault),
+      remote: git(remote, "rev-parse", "refs/heads/main").trim(),
+    };
+  }
+  async function expectHeld(backend: Awaited<ReturnType<typeof configuredBackend>>["backend"], vault: string, before: ReturnType<typeof snapshot>) {
+    const { clearNotices, takeNotices } = await import("~/server/notices");
+    clearNotices();
+    const deviceHead = git(device, "rev-parse", "HEAD").trim();
+    const result = await backend.syncNow();
+    expect(result.ok, result.output).toBe(false);
+    expect(result.output).toMatch(/merge probe held/);
+    // Expected pre-probe effect: the fetch updated the remote-tracking ref.
+    expect(git(vault, "rev-parse", "refs/remotes/origin/main").trim()).toBe(deviceHead);
+    // Forbidden post-HOLD effects: none.
+    expect(snapshot(vault)).toEqual(before);
+    expect(git(vault, "status", "--porcelain").trim()).toBe("");
+    expect(Object.keys(files(vault)).some((f) => f.includes("Conflicted copy"))).toBe(false);
+    const status = backend.status();
+    expect(status.state).toBe("backoff");
+    expect(status.conflicts).toBeUndefined();
+    expect(takeNotices("phone")).toEqual([]);
+    return result;
+  }
+
+  it.each([
+    ["a configured external merge driver", (vault: string) => {
+      git(vault, "config", "merge.fixture.driver", `touch ${path.join(root, "driver-ran")}`);
+    }],
+    ["the merge-probe snapshot budget", (vault: string) => {
+      write(vault, "sparse-fixture", "");
+      fs.truncateSync(path.join(vault, "sparse-fixture"), 128 * 1024 * 1024 + 1);
+      fs.appendFileSync(path.join(vault, ".git/info/exclude"), "\nsparse-fixture\n");
+    }],
+  ])("a pre-launch HOLD from %s keeps local commits, index, files and the remote", async (_, hold) => {
+    const { backend, vault } = await diverged();
+    hold(vault);
+    const before = snapshot(vault);
+    await expectHeld(backend, vault, before);
+    expect(fs.existsSync(path.join(root, "driver-ran"))).toBe(false);
+    expect((await import("~/server/maintenance")).maintenanceActive()).toBe(false);
+    expect(read(vault, "Daily/2026-08-03.md")).toContain("ASSISTANT");
+    expect(git(vault, "log", "--format=%s", "-1").trim()).toBe("assistant: append");
+  });
+
+  it("an uncertain post-launch outcome holds and keeps the existing quarantine", async () => {
+    const { backend, vault } = await diverged();
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const bin = path.join(root, "fault-bin"); fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, "git"),
+      `#!/bin/sh\nif [ "$1" = merge-tree ]; then printf 'not-a-tree\\nDaily/2026-08-03.md\\n'; exit 1; fi\nexec '${realGit}' "$@"\n`, { mode: 0o755 });
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+    const before = snapshot(vault);
+    await expectHeld(backend, vault, before);
+    expect((await import("~/server/maintenance")).maintenanceActive()).toBe(true);
+  });
+
+  it("a genuine conflict on a path git reports quoted holds instead of losing our version", async () => {
+    // core.quotePath quotes non-ASCII names; such a path cannot be read back
+    // from the object database, so it is not a usable conflict path.
+    const rel = "บันทึก.md";
+    const { backend, vault } = await diverged(rel);
+    const before = snapshot(vault);
+    await expectHeld(backend, vault, before);
+    expect(read(vault, rel)).toContain("ASSISTANT");
+  });
+
+  it("positive controls: a genuine conflict and a clean merge still reconcile", async () => {
+    const { backend, vault } = await diverged();
+    const conflicted = await backend.syncNow();
+    expect(conflicted.ok, conflicted.output).toBe(true);
+    expect(backend.status().conflicts?.[0].paths).toEqual(["Daily/2026-08-03.md"]);
+    expect(git(vault, "rev-parse", "HEAD").trim()).toBe(git(remote, "rev-parse", "refs/heads/main").trim());
+    write(device, "Notes/Other.md", "# Other\n"); git(device, "pull", "-q"); commitAll(device, "device: other"); git(device, "push", "-q");
+    write(vault, "Notes/Local.md", "# Local\n"); commitAll(vault, "assistant: local");
+    const merged = await backend.syncNow();
+    expect(merged.ok, merged.output).toBe(true);
+    expect(read(vault, "Notes/Other.md")).toBe("# Other\n");
+    expect(read(vault, "Notes/Local.md")).toBe("# Local\n");
+    expect(git(remote, "rev-parse", "refs/heads/main").trim()).toBe(git(vault, "rev-parse", "HEAD").trim());
+  });
+});

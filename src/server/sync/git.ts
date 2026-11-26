@@ -478,6 +478,13 @@ export class GitBackend implements SyncBackend {
     if (!behind.ok || Number(behind.stdout.trim()) === 0) return true;
 
     const probe = await probeMerge(env.vaultDir, "HEAD", remote);
+    // H1: a probe that proved neither a clean merge nor a usable conflict stops
+    // the cycle here: no merge, reset, push, conflict record or notice.
+    if (probe.hold) {
+      this.log(`[git] merge probe held (${probe.hold}); not integrating ${remote}`, "error");
+      this.state = "backoff";
+      return false;
+    }
     if (probe.clean) {
       const merged = await runGit([
         "-c",
