@@ -308,12 +308,14 @@ it("L2-H concurrent matching legacy withdrawals and PASS retries cannot leave PA
 it("L2-H authoritative transactional recheck rejects a withdrawal against superseded legacy snapshot",async()=>{
   const api=await openFixture("PASS-false"),gates=await import("../safe-edit/research-judge-gate"),old=gates.currentJudgeGate(manifest.preview.planId)!;
   const fresh=await freshInput();api.prepareCanonicalWriteback(fresh,actor);const current=gates.currentJudgeGate(manifest.preview.planId),before=await events();
-  const engine=await import("../safe-edit/engine"),sql=(await import("../db")).db(),prepare=sql.prepare.bind(sql),Database=(await import("better-sqlite3")).default;
+  const engine=await import("../safe-edit/engine"),sql=(await import("../db")).db(),prepare=(await import("better-sqlite3")).default.prototype.prepare as (this:unknown,source:string)=>any,Database=(await import("better-sqlite3")).default;
   const other=new Database((await import("../env")).env.dbPath,{timeout:0});let checked=0;
-  const spy=vi.spyOn(sql,"prepare").mockImplementation((query:string)=>{
+  // Delegate to the raw native prepare: the guarded facade already holds the D1
+  // interlock around this call, so delegating back through it would nest it.
+  const spy=vi.spyOn(sql,"prepare").mockImplementation(function(this:unknown,query:string){
     if(query.includes("SELECT detail,at,rowid FROM safe_edit_events WHERE event='research_judge_gate'")){
       checked++;expect(sql.inTransaction).toBe(true);expect(()=>other.exec("BEGIN IMMEDIATE")).toThrow(/locked/);
-    }return prepare(query);
+    }return prepare.call(this,query);
   });
   try{expect(()=>engine.recordResearchJudgeGate(old.targets[0].operationId,actor,{...old,decision:"HOLD",expiresAt:0},{current:old})).toThrow("research_judge_withdrawal_superseded_hold");}
   finally{spy.mockRestore();if(other.inTransaction)other.exec("ROLLBACK");other.close();}

@@ -124,13 +124,32 @@ function mergeState(dir: string): string {
   return hash.digest("hex");
 }
 
+// Exact values written by `git lfs install` (with or without --skip-smudge).
+const STANDARD_LFS_FILTERS: Record<string, readonly string[] | undefined> = {
+  "filter.lfs.clean": ["git-lfs clean -- %f"],
+  "filter.lfs.smudge": ["git-lfs smudge -- %f", "git-lfs smudge --skip -- %f"],
+  "filter.lfs.process": ["git-lfs filter-process", "git-lfs filter-process --skip"],
+};
+
 async function mergeEvidence(dir: string): Promise<(result: ChildOutcome & { stdout?: unknown }) => Promise<boolean>> {
   const config = async () => {
     // Goes through the same admission/interlock as every other Git launch.
     const r = await runGit(["config", "--null", "--list"], { cwd: dir, timeoutMs: 5000 });
     if (!r.ok) throw Error("git_merge_probe_config_hold");
-    const keys = r.stdout.split("\0").map(entry => entry.split("\n", 1)[0].toLowerCase());
-    if (keys.some(key => /^merge\..*\.driver$|^filter\..*\.(clean|smudge|process)$|^remote\..*\.promisor$|^extensions\.partialclone$/.test(key)))
+    // [lowercased key for detection, value, key exactly as listed]. Git already
+    // lowercases section and variable names; the subsection keeps its case, so
+    // the allowlist matches only the exact `filter.lfs.*` driver, never e.g. LFS.
+    const entries = r.stdout.split("\0").filter(Boolean).map(entry => {
+      const split = entry.indexOf("\n"), raw = split < 0 ? entry : entry.slice(0, split);
+      return [raw.toLowerCase(), split < 0 ? "" : entry.slice(split + 1), raw];
+    });
+    // `git lfs install --system` (the runtime image) configures the lfs clean/
+    // smudge/process filters. merge-tree --write-tree runs filters only when it
+    // renormalizes, so exactly those standard values pass while renormalize is
+    // off. Any other filter, a merge driver, renormalize or lazy fetch stays HOLD.
+    if (entries.some(([key]) => /^merge\..*\.driver$|^remote\..*\.promisor$|^extensions\.partialclone$/.test(key)) ||
+        entries.some(([key, value, raw]) => /^filter\..*\.(clean|smudge|process)$/.test(key) && !STANDARD_LFS_FILTERS[raw]?.includes(value)) ||
+        entries.some(([key, value]) => key === "merge.renormalize" && !/^(false|no|off|0)$/i.test(value.trim())))
       throw Error("git_merge_probe_external_driver_hold");
     // Never expose configuration/credential bytes in diagnostics.
     return crypto.createHash("sha256").update(r.stdout).digest("hex");
