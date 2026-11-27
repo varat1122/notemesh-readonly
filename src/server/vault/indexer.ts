@@ -75,7 +75,40 @@ function resolveLink(
   return t.toLowerCase().endsWith(".md") ? null : pick(`${t}.md`);
 }
 
-function indexFile(relPath: string, absPath: string) {
+// P3 S1: explicit, bounded reuse of the nine fixed statements indexFile
+// prepares for every note. Only the rebuild loop passes a scope; it lives for
+// one synchronous batch of at most 50 notes on one connection and is dropped
+// at every yield, error and the end of the loop. Each statement is still
+// compiled through the guarded facade on first use, at its original point,
+// and every run/get still goes through the guarded, witnessed execution path.
+// Statements are used only via run/get with per-call arguments: no bind,
+// pluck/raw/expand mode or iterator, so no per-call state carries between notes.
+const NOTE_INDEX_SQL = {
+  upsertNote: `INSERT INTO notes (path, title, mtime, size, frontmatter, word_count, modified, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(path) DO UPDATE SET title=excluded.title, mtime=excluded.mtime, size=excluded.size,
+           frontmatter=excluded.frontmatter, word_count=excluded.word_count, modified=excluded.modified,
+           created=excluded.created
+         RETURNING rowid`,
+  deleteFts: "DELETE FROM notes_fts WHERE rowid = ?",
+  insertFts: "INSERT INTO notes_fts (rowid, path, title, headings, body) VALUES (?, ?, ?, ?, ?)",
+  deleteLinks: "DELETE FROM links WHERE source_path = ?",
+  insertLink: "INSERT OR IGNORE INTO links (source_path, target, resolved_path) VALUES (?, ?, NULL)",
+  deleteTags: "DELETE FROM tags WHERE path = ?",
+  insertTag: "INSERT OR IGNORE INTO tags (path, tag) VALUES (?, ?)",
+  deleteTasks: "DELETE FROM tasks WHERE path = ?",
+  insertTask: "INSERT OR REPLACE INTO tasks (path, line, text, done) VALUES (?, ?, ?, ?)",
+} as const;
+type NoteIndexStatement = keyof typeof NOTE_INDEX_SQL;
+type Facade = ReturnType<typeof db>;
+interface NoteStatementScope {
+  connection: Facade | null;
+  statements: Map<NoteIndexStatement, ReturnType<Facade["prepare"]>>;
+}
+function noteStatementScope(): NoteStatementScope {
+  return { connection: null, statements: new Map() };
+}
+
+function indexFile(relPath: string, absPath: string, scope?: NoteStatementScope) {
   let content: string;
   let st: fs.Stats;
   try {
@@ -107,6 +140,14 @@ function indexFile(relPath: string, absPath: string) {
   }
   const parsed = parseNote(relPath, content);
   const d = db();
+  // A scope is valid only for the exact connection that prepared it.
+  if (scope && scope.connection !== d) { scope.statements.clear(); scope.connection = d; }
+  const statement = (key: NoteIndexStatement) => {
+    if (!scope) return d.prepare(NOTE_INDEX_SQL[key]);
+    let prepared = scope.statements.get(key);
+    if (!prepared) { prepared = d.prepare(NOTE_INDEX_SQL[key]); scope.statements.set(key, prepared); }
+    return prepared;
+  };
   const tx = d.transaction(() => {
     // The notes row's rowid keys the FTS row. `path` is UNINDEXED in FTS5, and
     // FTS5 accelerates only MATCH — an equality on any column is a scan of the
@@ -115,14 +156,7 @@ function indexFile(relPath: string, absPath: string) {
     // key. This depends on the upsert being ON CONFLICT DO UPDATE, which keeps
     // the rowid; INSERT OR REPLACE would delete and reinsert, and the FTS row
     // would be orphaned. indexer-storage.test.ts pins both.
-    const { rowid } = d
-      .prepare(
-        `INSERT INTO notes (path, title, mtime, size, frontmatter, word_count, modified, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(path) DO UPDATE SET title=excluded.title, mtime=excluded.mtime, size=excluded.size,
-           frontmatter=excluded.frontmatter, word_count=excluded.word_count, modified=excluded.modified,
-           created=excluded.created
-         RETURNING rowid`,
-      )
+    const { rowid } = statement("upsertNote")
       .get(
         relPath,
         parsed.title,
@@ -133,24 +167,22 @@ function indexFile(relPath: string, absPath: string) {
         modifiedFor(relPath, st.mtimeMs),
         createdFor(relPath, st),
       ) as { rowid: number };
-    d.prepare("DELETE FROM notes_fts WHERE rowid = ?").run(rowid);
-    d.prepare("INSERT INTO notes_fts (rowid, path, title, headings, body) VALUES (?, ?, ?, ?, ?)").run(
+    statement("deleteFts").run(rowid);
+    statement("insertFts").run(
       rowid,
       relPath,
       parsed.title,
       parsed.headings.join("\n"),
       parsed.body,
     );
-    d.prepare("DELETE FROM links WHERE source_path = ?").run(relPath);
-    const insLink = d.prepare(
-      "INSERT OR IGNORE INTO links (source_path, target, resolved_path) VALUES (?, ?, NULL)",
-    );
+    statement("deleteLinks").run(relPath);
+    const insLink = statement("insertLink");
     for (const target of parsed.links) insLink.run(relPath, target);
-    d.prepare("DELETE FROM tags WHERE path = ?").run(relPath);
-    const insTag = d.prepare("INSERT OR IGNORE INTO tags (path, tag) VALUES (?, ?)");
+    statement("deleteTags").run(relPath);
+    const insTag = statement("insertTag");
     for (const tag of parsed.tags) insTag.run(relPath, tag);
-    d.prepare("DELETE FROM tasks WHERE path = ?").run(relPath);
-    const insTask = d.prepare("INSERT OR REPLACE INTO tasks (path, line, text, done) VALUES (?, ?, ?, ?)");
+    statement("deleteTasks").run(relPath);
+    const insTask = statement("insertTask");
     for (const t of parsed.tasks) insTask.run(relPath, t.line, t.text, t.done ? 1 : 0);
   });
   tx();
@@ -355,18 +387,24 @@ class VaultIndexer {
       walk(env.vaultDir);
 
       const yieldToLoop = () => new Promise<void>((r) => setImmediate(r));
+      // P3 S1: one statement scope per synchronous batch; never held across
+      // an await, a failed note or the end of the loop.
+      let scope = noteStatementScope();
       for (let i = 0; i < notes.length; i++) {
         // One note that cannot be indexed — vanished between the walk and the
         // read, or unreadable — must not stop the other two thousand. It is
         // logged and skipped; the rebuild still finishes and reports ready.
         try {
-          indexFile(toVaultRelative(notes[i]), notes[i]);
+          indexFile(toVaultRelative(notes[i]), notes[i], scope);
         } catch (e) {
+          scope = noteStatementScope();
           console.error(`[indexer] skipped ${toVaultRelative(notes[i])}:`, e);
           if (incomplete.length < 64) incomplete.push(toVaultRelative(notes[i]));
         }
-        if (i % 50 === 49) await yieldToLoop();
+        if (i % 50 === 49) { scope = noteStatementScope(); await yieldToLoop(); }
       }
+      scope.statements.clear();
+      scope.connection = null;
       for (let i = 0; i < attachments.length; i++) {
         indexAttachment(toVaultRelative(attachments[i]), attachments[i]);
         if (i % 200 === 199) await yieldToLoop();
